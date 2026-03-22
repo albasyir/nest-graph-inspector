@@ -1,0 +1,17 @@
+{
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "moduleNameMapper": {
+    "nestjs-devtool/nestjs-devtool": "<rootDir>/../libs/nestjs-devtool/src",
+    "nestjs-devtool/nestjs-devtool/(.*)": "<rootDir>/../libs/nestjs-devtool/src/$1"
+  }
+}
