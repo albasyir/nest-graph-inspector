@@ -167,19 +167,63 @@ let ModuleGraphService = class ModuleGraphService {
                     .map((exportedItem) => this.wrapperName(exportedItem) || this.tokenName(exportedItem?.token || exportedItem))
                     .filter((exportName) => !!exportName && !this.ignoreProvider.includes(exportName)),
                 providers: [...moduleRef.providers.values()]
-                    .map((wrapper) => this.wrapperName(wrapper))
-                    .filter((providerName) => !!providerName &&
-                    !this.ignoreProvider.includes(providerName) &&
-                    providerName !== moduleName),
+                    .map((wrapper) => this.extractProvider(wrapper, moduleName))
+                    .filter((provider) => !!provider),
                 controllers: [...moduleRef.controllers.values()]
-                    .map((w) => this.wrapperName(w))
-                    .filter((controllerName) => !!controllerName),
+                    .map((wrapper) => this.extractController(wrapper))
+                    .filter((controller) => !!controller),
             };
         }
         return {
             root: this.moduleName(root),
             modules,
         };
+    }
+    extractProvider(wrapper, moduleName) {
+        const name = this.wrapperName(wrapper);
+        if (!name ||
+            this.ignoreProvider.includes(name) ||
+            name === moduleName) {
+            return null;
+        }
+        return {
+            name,
+            dependencies: this.extractDependencies(wrapper),
+        };
+    }
+    extractController(wrapper) {
+        const name = this.wrapperName(wrapper);
+        if (!name) {
+            return null;
+        }
+        return {
+            name,
+            dependencies: this.extractDependencies(wrapper),
+        };
+    }
+    extractDependencies(wrapper) {
+        const dependencies = new Set();
+        if (Array.isArray(wrapper?.inject)) {
+            for (const token of wrapper.inject) {
+                const dependencyName = this.tokenName(token);
+                if (dependencyName && !this.ignoreProvider.includes(dependencyName)) {
+                    dependencies.add(dependencyName);
+                }
+            }
+        }
+        const metatype = wrapper?.metatype;
+        if (metatype && typeof metatype === 'function') {
+            const paramTypes = Reflect.getMetadata('design:paramtypes', metatype) ?? [];
+            for (const paramType of paramTypes) {
+                const dependencyName = this.tokenName(paramType);
+                if (dependencyName &&
+                    dependencyName !== 'Object' &&
+                    !this.ignoreProvider.includes(dependencyName)) {
+                    dependencies.add(dependencyName);
+                }
+            }
+        }
+        return [...dependencies];
     }
     collectReachableModules(root, visited) {
         const id = this.moduleId(root);

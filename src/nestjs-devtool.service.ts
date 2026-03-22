@@ -3,9 +3,19 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { AppModule } from './app.module';
 
+type ModuleController = {
+  name: string;
+  dependencies: string[];
+};
+
+type ModuleProvider = {
+  name: string;
+  dependencies: string[];
+};
+
 type Modules = {
-  providers: string[];
-  controllers: string[];
+  providers: ModuleProvider[];
+  controllers: ModuleController[];
   imports: string[];
   exports: string[];
 };
@@ -13,8 +23,8 @@ type Modules = {
 type ModuleMapNode = {
   id: string;
   name: string;
-  providers: string[];
-  controllers: string[];
+  providers: ModuleProvider[];
+  controllers: ModuleController[];
   imports: string[];
   exports: string[];
 };
@@ -68,16 +78,15 @@ export class ModuleGraphService implements OnModuleInit {
               !!exportName && !this.ignoreProvider.includes(exportName),
           ),
         providers: [...moduleRef.providers.values()]
-          .map((wrapper: any) => this.wrapperName(wrapper))
+          .map((wrapper: any) => this.extractProvider(wrapper, moduleName))
           .filter(
-            (providerName): providerName is string =>
-              !!providerName &&
-              !this.ignoreProvider.includes(providerName) &&
-              providerName !== moduleName,
+            (provider): provider is ModuleProvider => !!provider,
           ),
         controllers: [...moduleRef.controllers.values()]
-          .map((w: any) => this.wrapperName(w))
-          .filter((controllerName): controllerName is string => !!controllerName),
+          .map((wrapper: any) => this.extractController(wrapper))
+          .filter(
+            (controller): controller is ModuleController => !!controller,
+          ),
       };
     }
 
@@ -85,6 +94,68 @@ export class ModuleGraphService implements OnModuleInit {
       root: this.moduleName(root),
       modules,
     };
+  }
+
+  private extractProvider(
+    wrapper: any,
+    moduleName: string,
+  ): ModuleProvider | null {
+    const name = this.wrapperName(wrapper);
+    if (
+      !name ||
+      this.ignoreProvider.includes(name) ||
+      name === moduleName
+    ) {
+      return null;
+    }
+
+    return {
+      name,
+      dependencies: this.extractDependencies(wrapper),
+    };
+  }
+
+  private extractController(wrapper: any): ModuleController | null {
+    const name = this.wrapperName(wrapper);
+    if (!name) {
+      return null;
+    }
+
+    return {
+      name,
+      dependencies: this.extractDependencies(wrapper),
+    };
+  }
+
+  private extractDependencies(wrapper: any): string[] {
+    const dependencies = new Set<string>();
+
+    if (Array.isArray(wrapper?.inject)) {
+      for (const token of wrapper.inject) {
+        const dependencyName = this.tokenName(token);
+        if (dependencyName && !this.ignoreProvider.includes(dependencyName)) {
+          dependencies.add(dependencyName);
+        }
+      }
+    }
+
+    const metatype = wrapper?.metatype;
+    if (metatype && typeof metatype === 'function') {
+      const paramTypes = Reflect.getMetadata('design:paramtypes', metatype) ?? [];
+
+      for (const paramType of paramTypes) {
+        const dependencyName = this.tokenName(paramType);
+        if (
+          dependencyName &&
+          dependencyName !== 'Object' &&
+          !this.ignoreProvider.includes(dependencyName)
+        ) {
+          dependencies.add(dependencyName);
+        }
+      }
+    }
+
+    return [...dependencies];
   }
 
   private collectReachableModules(root: any, visited: Set<string>): any[] {
