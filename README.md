@@ -2,13 +2,33 @@
 
 Nest Graph Inspector is a NestJS module to generate a **runtime dependency graph** in **Markdown + Mermaid** format from the Nest application container.
 
-It helps you inspect:
+The generated graph shows:
 
 - loaded modules from the root module
 - import relationships between modules
 - providers and controllers in each module
 - dependencies between providers/controllers
 - internal dependencies, external module dependencies, and selected NestJS core dependencies
+
+## Use Cases
+
+### Impact Analysis
+
+- narrowing regression test scope to the most relevant modules/providers
+- reducing unnecessary testing for unrelated areas
+- understanding the likely blast radius before making a change
+
+### Test Prioritization
+
+- selecting critical providers/use cases for fast validation
+- understanding dependency chains between providers/controllers
+- prioritizing which flows should be checked first after a change
+
+### Architecture Visibility
+
+- onboarding engineers faster
+- spotting highly coupled modules/providers
+- making refactors safer by visualizing relationships before changes
 
 ## Installation
 
@@ -20,7 +40,7 @@ npm install nest-graph-inspector
 
 ### `forRoot`
 
-Use `forRoot` when the config is static.
+Static config.
 
 ```ts
 import { Module } from '@nestjs/common';
@@ -42,7 +62,7 @@ export class RootModule {}
 
 ### `forRootAsync`
 
-Use `forRootAsync` when the config should be created from a factory.
+Factory-based config.
 
 ```ts
 NestjsDevtoolModule.forRootAsync({
@@ -61,7 +81,7 @@ NestjsDevtoolModule.forRootAsync({
 
 ### `rootModule`
 
-Root module used as the graph entry point.
+Graph entry point.
 
 ```ts
 rootModule: AppModule
@@ -69,7 +89,7 @@ rootModule: AppModule
 
 ### `output.file`
 
-Markdown output file name.
+Output markdown file name.
 
 ```ts
 output: {
@@ -79,56 +99,28 @@ output: {
 
 ## Output
 
-The module generates a markdown file that contains:
+all output will contains
 
-- Mermaid dependency graph
 - module list
-- imports
-- exports
-- providers
-- controllers
-- provider/controller dependencies
+- imports module
+- exports provider
+- providers with dependencies
+- controllers with dependencies
 
-## Example
+when markdown file as output, it will show depedencies graph as
 
-### Basic
+> this using mermaid, plugin on text editor might needed
 
-```ts
-NestjsDevtoolModule.forRoot({
-  rootModule: AppModule,
-  output: {
-    file: 'nestjs-dependency-graph.md',
-  },
-});
-```
+## Flow
 
-### Async
-
-```ts
-NestjsDevtoolModule.forRootAsync({
-  useFactory() {
-    return {
-      rootModule: AppModule,
-      output: {
-        file: 'test.md',
-      },
-    };
-  },
-});
-```
-
-## How it works
-
-Nest Graph Inspector will:
-
-1. start from the configured root module
-2. inspect the Nest runtime container
-3. collect modules, imports, exports, providers, and controllers
-4. resolve provider/controller dependencies
-5. generate markdown and Mermaid graph output
+1. start from the configured root module  
+2. inspect the Nest runtime container  
+3. collect module and provider metadata  
+4. resolve dependencies  
+5. generate output
 
 ## Notes
 
 - the graph is generated from the **runtime Nest container**, not from static source parsing
 - selected NestJS core dependencies can be grouped under **NestJS Core**
-- if duplicate class names exist across multiple modules, dependency resolution should follow module/token ownership instead of only class name matching
+- the graph helps with impact analysis and test planning, but it does not guarantee the full real-world impact of a change because some effects may come from databases, events, config, external services, or other side effects outside the runtime dependency graph
