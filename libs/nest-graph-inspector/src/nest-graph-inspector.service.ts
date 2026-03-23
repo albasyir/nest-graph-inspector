@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.config';
+import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 import { join } from 'node:path';
 import { NestGraphInspectorModule } from './nest-graph-inspector.module';
 

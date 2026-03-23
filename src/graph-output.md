@@ -1,6 +1,6 @@
 # NestJS Dependency Graph
 
-Root Module: `AppModule`
+Root Module: `AppModule `
 
 ```mermaid
 graph TD
@@ -23,14 +23,11 @@ graph TD
   end
   module_group_UserModule --> module_group_AppModule
   module_group_UserDeprecatedModule --> module_group_AppModule
-  dependency_AppModule_AppService_InternalCoreModule_useFactory["InternalCoreModule:useFactory"]
-  dependency_AppModule_AppService_InternalCoreModule_useFactory --> provider_AppModule_AppService
+  provider_NestJSCoreModule_ModuleRef --> provider_AppModule_AppService
   provider_UserDeprecatedModule_CreateUserUsecase --> provider_AppModule_AppService
   provider_AppModule_AppService --> controller_AppModule_AppController
   provider_NestJSCoreModule_ModuleRef --> controller_AppModule_AppController
   provider_UserModule_CreateUserUsecase --> controller_AppModule_AppController
-  dependency_AppModule_AppController_InternalCoreModule_useFactory["InternalCoreModule:useFactory"]
-  dependency_AppModule_AppController_InternalCoreModule_useFactory --> controller_AppModule_AppController
   module_group_UserDeprecatedModule --> module_group_UserModule
   provider_UserModule_CreateUserUsecase --> controller_UserModule_UserController
   provider_UserDeprecatedModule_UserDeprecatedService --> controller_UserDeprecatedModule_UserDeprecatedController
@@ -57,7 +54,7 @@ graph TD
 
 ### Providers
 - AppService
-  - depends on: InternalCoreModule:useFactory
+  - depends on: NestJSCoreModule:ModuleRef
   - depends on: UserDeprecatedModule:CreateUserUsecase
 
 ### Controllers
@@ -65,7 +62,6 @@ graph TD
   - depends on: AppService
   - depends on: NestJSCoreModule:ModuleRef
   - depends on: UserModule:CreateUserUsecase
-  - depends on: InternalCoreModule:useFactory
 
 ## UserModule
 

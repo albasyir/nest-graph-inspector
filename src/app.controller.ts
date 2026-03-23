@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 import { CreateUserUsecase } from './user/usecases/create-user.usecase';
-import { ModuleRef, ModulesContainer } from '@nestjs/core';
+import { ModuleRef } from '@nestjs/core';
 
 @Controller()
 export class AppController {
@@ -9,7 +9,6 @@ export class AppController {
     private readonly appService: AppService,
     private readonly moduleRef: ModuleRef,
     private readonly createTest1Usecase: CreateUserUsecase,
-    private readonly modulesContainer: ModulesContainer,
   ) {}
 
   @Get()

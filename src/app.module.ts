@@ -7,17 +7,18 @@ import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
 
 @Module({
   imports: [
-    UserModule,
-    NestGraphInspectorModule.forRootAsync({
-      useFactory() {
-        return {
-          rootModule: AppModule,
-          output: {
-            file: 'src/graph-output.md',
-          },
-        };
+    /**
+     * Nest Graph Inspector
+     *
+     */
+    NestGraphInspectorModule.forRoot({
+      rootModule: AppModule,
+      output: {
+        file: 'src/graph-output.md',
       },
     }),
+
+    UserModule,
     UserDeprecatedModule,
   ],
   controllers: [AppController],

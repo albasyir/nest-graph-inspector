@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ModulesContainer } from '@nestjs/core';
 import { CreateUserUsecase } from './user-deprecated/usecases/create-user.usecase';
+import { ModuleRef } from '@nestjs/core';
 
 @Injectable()
 export class AppService {
   constructor(
-    private readonly modulesContainer: ModulesContainer,
+    private readonly moduleRef: ModuleRef,
     private readonly createUserUsecase: CreateUserUsecase,
   ) {}
 
