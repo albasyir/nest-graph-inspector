@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
-import { NestjsDevtoolService } from './nestjs-devtool.service';
+import { ConfigurableModuleClass } from './nestjs-devtool.config';
+import { NestJSDevtoolService } from './nestjs-devtool.service';
 
 @Module({
-  providers: [NestjsDevtoolService],
-  exports: [NestjsDevtoolService],
+  providers: [NestJSDevtoolService],
+  exports: [NestJSDevtoolService],
 })
-export class NestjsDevtoolModule {}
+export class NestjsDevtoolModule extends ConfigurableModuleClass {}

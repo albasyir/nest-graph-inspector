@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NestjsDevtoolService } from './nestjs-devtool.service';
+import { NestJSDevtoolService } from './nestjs-devtool.service';
 
-describe('NestjsDevtoolService', () => {
-  let service: NestjsDevtoolService;
+describe(NestJSDevtoolService.name, () => {
+  let service: NestJSDevtoolService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [NestjsDevtoolService],
+      providers: [NestJSDevtoolService],
     }).compile();
 
-    service = module.get<NestjsDevtoolService>(NestjsDevtoolService);
+    service = module.get<NestJSDevtoolService>(NestJSDevtoolService);
   });
 
   it('should be defined', () => {
