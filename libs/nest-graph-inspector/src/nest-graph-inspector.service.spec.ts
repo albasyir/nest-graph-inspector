@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NestJSDevtoolService } from './nest-graph-inspector.service';
+import { NestGraphInspectorService } from './nest-graph-inspector.service';
 
-describe(NestJSDevtoolService.name, () => {
-  let service: NestJSDevtoolService;
+describe(NestGraphInspectorService.name, () => {
+  let service: NestGraphInspectorService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [NestJSDevtoolService],
+      providers: [NestGraphInspectorService],
     }).compile();
 
-    service = module.get<NestJSDevtoolService>(NestJSDevtoolService);
+    service = module.get<NestGraphInspectorService>(NestGraphInspectorService);
   });
 
   it('should be defined', () => {

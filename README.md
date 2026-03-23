@@ -48,11 +48,11 @@ Static config.
 ```ts
 import { Module } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { NestjsDevtoolModule } from 'nest-graph-inspector';
+import { NestGraphInspector } from 'nest-graph-inspector';
 
 @Module({
   imports: [
-    NestjsDevtoolModule.forRoot({
+    NestGraphInspector.forRoot({
       rootModule: AppModule,
       output: {
         file: 'test.md',
@@ -68,7 +68,7 @@ export class RootModule {}
 Factory-based config.
 
 ```ts
-NestjsDevtoolModule.forRootAsync({
+NestGraphInspector.forRootAsync({
   useFactory() {
     return {
       rootModule: AppModule,

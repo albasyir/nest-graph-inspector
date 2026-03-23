@@ -1,9 +1,9 @@
-import { ConfigurableModuleBuilder } from '@nestjs/common';
+import { ConfigurableModuleBuilder, Type } from '@nestjs/common';
 
-export type MdFile = `${string}.md`;
-export type JsonFile = `${string}.json`;
+type MdFile = `${string}.md`;
+type JsonFile = `${string}.json`;
 
-export interface NestjsDevtoolOutput {
+export interface NestGraphInspectorOutput {
   /**
    * Absolute path to the output file.
    * Use `.md` extension to render markdown, or `.json` to render the module map as JSON.
@@ -11,19 +11,19 @@ export interface NestjsDevtoolOutput {
   file: MdFile | JsonFile;
 }
 
-export interface NestjsDevtoolModuleOptions {
+export interface NestGraphInspectorModuleOptions {
   /**
    * Which "Root" of module that need to be inspect
    */
-  rootModule: Function;
+  rootModule: Type;
 
   /**
    * Output configuration. If omitted, no file is written.
    */
-  output?: NestjsDevtoolOutput;
+  output?: NestGraphInspectorOutput;
 }
 
 export const { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } =
-  new ConfigurableModuleBuilder<NestjsDevtoolModuleOptions>()
+  new ConfigurableModuleBuilder<NestGraphInspectorModuleOptions>()
     .setClassMethodName('forRoot')
     .build();

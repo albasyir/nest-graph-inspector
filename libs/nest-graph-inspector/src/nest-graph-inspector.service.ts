@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import type { NestjsDevtoolModuleOptions } from './nest-graph-inspector.config';
+import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.config';
 import { join } from 'node:path';
 
 type ModuleController = {
@@ -34,15 +34,18 @@ type DependencyTarget = {
 };
 
 @Injectable()
-export class NestJSDevtoolService implements OnModuleInit {
+export class NestGraphInspectorService implements OnModuleInit {
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
-    private readonly options: NestjsDevtoolModuleOptions,
+    private readonly options: NestGraphInspectorModuleOptions,
     private readonly modulesContainer: ModulesContainer,
-  ) { }
+  ) {}
 
   private readonly ignoreProvider = ['ModuleRef', 'ApplicationConfig'];
-  private readonly ignoreImport = ['InternalCoreModule', 'NestjsDevtoolModule'];
+  private readonly ignoreImport = [
+    'InternalCoreModule',
+    'NestGraphInspectorModule',
+  ];
   private readonly nestCoreModuleName = 'NestJSCoreModule';
   private readonly nestCoreProviders = [
     'ModuleRef',
@@ -133,9 +136,8 @@ export class NestJSDevtoolService implements OnModuleInit {
     for (const moduleData of Object.values(modules)) {
       for (const provider of moduleData.providers) {
         for (const dependencyName of provider.dependencies) {
-          const nestCoreProviderName = this.extractNestCoreProviderName(
-            dependencyName,
-          );
+          const nestCoreProviderName =
+            this.extractNestCoreProviderName(dependencyName);
 
           if (nestCoreProviderName) {
             usedProviders.add(nestCoreProviderName);
@@ -145,9 +147,8 @@ export class NestJSDevtoolService implements OnModuleInit {
 
       for (const controller of moduleData.controllers) {
         for (const dependencyName of controller.dependencies) {
-          const nestCoreProviderName = this.extractNestCoreProviderName(
-            dependencyName,
-          );
+          const nestCoreProviderName =
+            this.extractNestCoreProviderName(dependencyName);
 
           if (nestCoreProviderName) {
             usedProviders.add(nestCoreProviderName);
@@ -235,9 +236,24 @@ export class NestJSDevtoolService implements OnModuleInit {
     moduleMap: ModuleMap,
   ): void {
     for (const [moduleName, moduleData] of moduleEntries) {
-      this.appendMermaidImportRelations(lines, moduleName, moduleData, moduleMap);
-      this.appendMermaidProviderRelations(lines, moduleName, moduleData, moduleMap);
-      this.appendMermaidControllerRelations(lines, moduleName, moduleData, moduleMap);
+      this.appendMermaidImportRelations(
+        lines,
+        moduleName,
+        moduleData,
+        moduleMap,
+      );
+      this.appendMermaidProviderRelations(
+        lines,
+        moduleName,
+        moduleData,
+        moduleMap,
+      );
+      this.appendMermaidControllerRelations(
+        lines,
+        moduleName,
+        moduleData,
+        moduleMap,
+      );
     }
   }
 
@@ -289,7 +305,10 @@ export class NestJSDevtoolService implements OnModuleInit {
     moduleMap: ModuleMap,
   ): void {
     for (const controller of moduleData.controllers) {
-      const controllerNodeId = this.controllerNodeId(moduleName, controller.name);
+      const controllerNodeId = this.controllerNodeId(
+        moduleName,
+        controller.name,
+      );
       this.appendDependencyRelations(
         lines,
         controllerNodeId,
@@ -349,7 +368,9 @@ export class NestJSDevtoolService implements OnModuleInit {
     lines.push(
       '- Arrows point from dependency/owned node to the dependent/owner node',
     );
-    lines.push('- Providers and controllers are grouped inside their owning module without extra ownership arrows');
+    lines.push(
+      '- Providers and controllers are grouped inside their owning module without extra ownership arrows',
+    );
     lines.push(
       '- Internal and external runtime dependencies point to the provider/controller that uses them',
     );
@@ -370,7 +391,11 @@ export class NestJSDevtoolService implements OnModuleInit {
       this.appendStringSection(lines, 'Imports', moduleData.imports);
       this.appendStringSection(lines, 'Exports', moduleData.exports);
       this.appendProviderSection(lines, 'Providers', moduleData.providers);
-      this.appendControllerSection(lines, 'Controllers', moduleData.controllers);
+      this.appendControllerSection(
+        lines,
+        'Controllers',
+        moduleData.controllers,
+      );
     }
   }
 
@@ -408,7 +433,11 @@ export class NestJSDevtoolService implements OnModuleInit {
     }
 
     for (const provider of providers) {
-      this.appendNamedDependencyItem(lines, provider.name, provider.dependencies);
+      this.appendNamedDependencyItem(
+        lines,
+        provider.name,
+        provider.dependencies,
+      );
     }
 
     lines.push('');
@@ -639,11 +668,8 @@ export class NestJSDevtoolService implements OnModuleInit {
     }
 
     for (const importedModuleRef of moduleRef.imports.values()) {
-      const importedProviderDependencyName = this.findProviderDependencyNameByToken(
-        importedModuleRef,
-        token,
-        true,
-      );
+      const importedProviderDependencyName =
+        this.findProviderDependencyNameByToken(importedModuleRef, token, true);
 
       if (importedProviderDependencyName) {
         return importedProviderDependencyName;
@@ -764,7 +790,6 @@ export class NestJSDevtoolService implements OnModuleInit {
     if (typeof token === 'function') return token.name;
     return String(token);
   }
-
 
   private moduleGroupId(moduleName: string): string {
     return this.toMermaidNodeId(`module-group:${moduleName}`);

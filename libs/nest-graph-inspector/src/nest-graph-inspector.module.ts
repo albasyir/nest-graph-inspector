@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigurableModuleClass } from './nest-graph-inspector.config';
-import { NestJSDevtoolService } from './nest-graph-inspector.service';
+import { NestGraphInspectorService } from './nest-graph-inspector.service';
 
 @Module({
-  providers: [NestJSDevtoolService],
-  exports: [NestJSDevtoolService],
+  providers: [NestGraphInspectorService],
+  exports: [NestGraphInspectorService],
 })
-export class NestjsDevtoolModule extends ConfigurableModuleClass {}
+export class NestGraphInspectorModule extends ConfigurableModuleClass {}
