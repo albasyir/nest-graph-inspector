@@ -13,7 +13,7 @@ export interface NestGraphInspectorModuleOptions {
 
   /**
    * type definition of output
-   * 
+   *
    * - `type: 'markdown'` writes a markdown (.md) dependency graph
    * - `type: 'json'` writes the raw module map as JSON
    * - `type: 'http'` serves the module map as JSON on the given route path
