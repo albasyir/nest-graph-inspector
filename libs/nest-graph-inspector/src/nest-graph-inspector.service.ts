@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import { writeFileSync } from 'node:fs';
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.config';
 import { join } from 'node:path';
+import { NestGraphInspectorModule } from './nest-graph-inspector.module';
 
 type ModuleController = {
   name: string;
@@ -44,7 +45,7 @@ export class NestGraphInspectorService implements OnModuleInit {
   private readonly ignoreProvider = ['ModuleRef', 'ApplicationConfig'];
   private readonly ignoreImport = [
     'InternalCoreModule',
-    'NestGraphInspectorModule',
+    NestGraphInspectorModule.name,
   ];
   private readonly nestCoreModuleName = 'NestJSCoreModule';
   private readonly nestCoreProviders = [
@@ -76,7 +77,7 @@ export class NestGraphInspectorService implements OnModuleInit {
     }
   }
 
-  buildModuleMap(rootModuleClass: Function): ModuleMap {
+  buildModuleMap(rootModuleClass: Type): ModuleMap {
     const root = [...this.modulesContainer.values()].find(
       (m) => m.metatype === rootModuleClass,
     );
