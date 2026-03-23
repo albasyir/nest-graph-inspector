@@ -22,11 +22,11 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "nestjs-devtool/nestjs-devtool": [
-        "libs/nestjs-devtool/src"
+      "nest-graph-inspector/nest-graph-inspector": [
+        "libs/nest-graph-inspector/src"
       ],
-      "nestjs-devtool/nestjs-devtool/*": [
-        "libs/nestjs-devtool/src/*"
+      "nest-graph-inspector/nest-graph-inspector/*": [
+        "libs/nest-graph-inspector/src/*"
       ]
     }
   }

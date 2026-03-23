@@ -11,7 +11,7 @@
     "^.+\\.(t|j)s$": "ts-jest"
   },
   "moduleNameMapper": {
-    "nestjs-devtool/nestjs-devtool": "<rootDir>/../libs/nestjs-devtool/src",
-    "nestjs-devtool/nestjs-devtool/(.*)": "<rootDir>/../libs/nestjs-devtool/src/$1"
+    "nest-graph-inspector/nest-graph-inspector": "<rootDir>/../libs/nest-graph-inspector/src",
+    "nest-graph-inspector/nest-graph-inspector/(.*)": "<rootDir>/../libs/nest-graph-inspector/src/$1"
   }
 }

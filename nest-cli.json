@@ -7,13 +7,13 @@
     "webpack": false
   },
   "projects": {
-    "nestjs-devtool": {
+    "nest-graph-inspector": {
       "type": "library",
-      "root": "libs/nestjs-devtool",
+      "root": "libs/nest-graph-inspector",
       "entryFile": "index",
-      "sourceRoot": "libs/nestjs-devtool/src",
+      "sourceRoot": "libs/nest-graph-inspector/src",
       "compilerOptions": {
-        "tsConfigPath": "libs/nestjs-devtool/tsconfig.lib.json"
+        "tsConfigPath": "libs/nest-graph-inspector/tsconfig.lib.json"
       }
     }
   }

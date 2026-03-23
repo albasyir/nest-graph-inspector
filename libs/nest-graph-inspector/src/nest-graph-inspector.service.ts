@@ -2,8 +2,8 @@ import 'reflect-metadata';
 import { writeFileSync } from 'node:fs';
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
-import { MODULE_OPTIONS_TOKEN } from './nestjs-devtool.config';
-import type { NestjsDevtoolModuleOptions } from './nestjs-devtool.config';
+import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
+import type { NestjsDevtoolModuleOptions } from './nest-graph-inspector.config';
 import { join } from 'node:path';
 
 type ModuleController = {

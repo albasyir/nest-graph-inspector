@@ -72,7 +72,7 @@
       "<rootDir>/libs/"
     ],
     "moduleNameMapper": {
-      "^nestjs-devtool/nestjs-devtool(|/.*)$": "<rootDir>/libs/nestjs-devtool/src/$1"
+      "^nest-graph-inspector/nest-graph-inspector(|/.*)$": "<rootDir>/libs/nest-graph-inspector/src/$1"
     }
   }
 }

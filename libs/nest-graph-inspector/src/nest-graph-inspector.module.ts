@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ConfigurableModuleClass } from './nestjs-devtool.config';
-import { NestJSDevtoolService } from './nestjs-devtool.service';
+import { ConfigurableModuleClass } from './nest-graph-inspector.config';
+import { NestJSDevtoolService } from './nest-graph-inspector.service';
 
 @Module({
   providers: [NestJSDevtoolService],

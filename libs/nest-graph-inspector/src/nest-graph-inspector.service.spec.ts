@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NestJSDevtoolService } from './nestjs-devtool.service';
+import { NestJSDevtoolService } from './nest-graph-inspector.service';
 
 describe(NestJSDevtoolService.name, () => {
   let service: NestJSDevtoolService;
