@@ -10,6 +10,9 @@ The generated graph shows:
 - dependencies between providers/controllers
 - internal dependencies, external module dependencies, and selected NestJS core dependencies
 
+> [!WARNING]
+> This package is still in v0, so some API changes may be breaking between releases while the package is being stabilized. Current features are expected to stay, but their API or configuration may still change.
+
 ## Use Cases
 
 ### Impact Analysis
