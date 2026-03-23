@@ -10,9 +10,6 @@ The generated graph shows:
 - dependencies between providers/controllers
 - internal dependencies, external module dependencies, and selected NestJS core dependencies
 
-> [!WARNING]
-> This package is still in v0, so some API changes may be breaking between releases while the package is being stabilized. Current features are expected to stay, but their API or configuration may still change.
-
 ## Use Cases
 
 ### Impact Analysis
@@ -38,6 +35,20 @@ The generated graph shows:
 ```bash
 npm install nest-graph-inspector
 ```
+
+## Version Supports
+
+Official support: NestJS 10-11.
+
+> [!NOTE]
+> Earlier versions may still work, but are not officially supported. 
+> If you still want to install it with an unsupported NestJS version, you can force install it with:
+>
+> ```bash
+> npm install nest-graph-inspector --force
+> ```
+>
+> When you test it and work prefectly, raise on issue so i will update support coverage too
 
 ## Usage
 
@@ -125,5 +136,4 @@ when markdown file as output, it will show depedencies graph as
 ## Notes
 
 - the graph is generated from the **runtime Nest container**, not from static source parsing
-- selected NestJS core dependencies can be grouped under **NestJS Core**
-- the graph helps with impact analysis and test planning, but it does not guarantee the full real-world impact of a change because some effects may come from databases, events, config, external services, or other side effects outside the runtime dependency graph
+- selected NestJS core dependencies can be grouped under **NestJS Core** Module as Global Module
