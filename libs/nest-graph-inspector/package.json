@@ -3,8 +3,8 @@
   "version": "0.2.0",
   "description": "NestJS module graph inspector for discovery and dependency analysis",
   "license": "MIT", 
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
   "keywords": [
     "nestjs",
     "nest",
