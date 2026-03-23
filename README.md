@@ -11,7 +11,7 @@ The generated graph shows:
 - internal dependencies, external module dependencies, and selected NestJS core dependencies
 
 > [!NOTE]
-> Result of markdown can be seen on https://github.com/albasyir/nest-graph-inspector/tree/main/src/graph-output.md
+> Result of markdown can be seen on https://github.com/albasyir/nest-graph-inspector/blob/main/src/graph-output.md
 
 ## Use Cases
 
