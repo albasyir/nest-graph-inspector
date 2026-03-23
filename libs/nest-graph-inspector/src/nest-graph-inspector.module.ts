@@ -1,9 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigurableModuleClass } from './nest-graph-inspector.config';
-import { NestGraphInspectorService } from './nest-graph-inspector.service';
+import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
+import { JsonOutputDriver } from './drivers/json-output.driver';
+import { FileOutputDriver } from './drivers/file-output.driver';
+import { HttpOutputDriver } from './drivers/http-output.driver';
 
 @Module({
-  providers: [NestGraphInspectorService],
-  exports: [NestGraphInspectorService],
+  providers: [
+    NestGraphInspectorSetup,
+    JsonOutputDriver,
+    FileOutputDriver,
+    HttpOutputDriver,
+  ],
 })
-export class NestGraphInspectorModule extends ConfigurableModuleClass {}
+export class NestGraphInspectorModule extends ConfigurableModuleClass { }

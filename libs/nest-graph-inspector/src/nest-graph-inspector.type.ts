@@ -1,15 +1,9 @@
 import { Type } from '@nestjs/common';
 
-type MdFile = `${string}.md`;
-type JsonFile = `${string}.json`;
-
-export interface NestGraphInspectorOutput {
-  /**
-   * Absolute path to the output file.
-   * Use `.md` extension to render markdown, or `.json` to render the module map as JSON.
-   */
-  file: MdFile | JsonFile;
-}
+export type NestGraphInspectorOutput =
+  | { type: 'markdown'; path: string }
+  | { type: 'json'; path: string }
+  | { type: 'http'; path?: string };
 
 export interface NestGraphInspectorModuleOptions {
   /**
@@ -18,7 +12,11 @@ export interface NestGraphInspectorModuleOptions {
   rootModule: Type;
 
   /**
-   * Output configuration. If omitted, no file is written.
+   * type definition of output
+   * 
+   * - `type: 'markdown'` writes a markdown (.md) dependency graph
+   * - `type: 'json'` writes the raw module map as JSON
+   * - `type: 'http'` serves the module map as JSON on the given route path
    */
-  output?: NestGraphInspectorOutput;
+  outputs?: NestGraphInspectorOutput[];
 }

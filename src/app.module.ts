@@ -13,9 +13,11 @@ import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
      */
     NestGraphInspectorModule.forRoot({
       rootModule: AppModule,
-      output: {
-        file: 'src/graph-output.md',
-      },
+      outputs: [
+        { type: 'markdown', path: 'src/graph-output.md' },
+        { type: 'json', path: 'src/graph-output.json' },
+        { type: 'http', path: '/__graph-inspector' }
+      ],
     }),
 
     UserModule,
@@ -24,4 +26,4 @@ import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

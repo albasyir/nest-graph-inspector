@@ -1,0 +1,91 @@
+{
+  "version": "1",
+  "root": "AppModule",
+  "modules": {
+    "AppModule": {
+      "imports": [
+        "UserModule",
+        "UserDeprecatedModule"
+      ],
+      "exports": [],
+      "providers": [
+        {
+          "name": "AppService",
+          "dependencies": [
+            "NestJSCoreModule:ModuleRef",
+            "UserDeprecatedModule:CreateUserUsecase"
+          ]
+        }
+      ],
+      "controllers": [
+        {
+          "name": "AppController",
+          "dependencies": [
+            "AppService",
+            "NestJSCoreModule:ModuleRef",
+            "UserModule:CreateUserUsecase"
+          ]
+        }
+      ]
+    },
+    "UserModule": {
+      "imports": [
+        "UserDeprecatedModule"
+      ],
+      "exports": [
+        "CreateUserUsecase"
+      ],
+      "providers": [
+        {
+          "name": "CreateUserUsecase",
+          "dependencies": []
+        }
+      ],
+      "controllers": [
+        {
+          "name": "UserController",
+          "dependencies": [
+            "CreateUserUsecase"
+          ]
+        }
+      ]
+    },
+    "UserDeprecatedModule": {
+      "imports": [],
+      "exports": [
+        "CreateUserUsecase"
+      ],
+      "providers": [
+        {
+          "name": "UserDeprecatedService",
+          "dependencies": []
+        },
+        {
+          "name": "CreateUserUsecase",
+          "dependencies": []
+        }
+      ],
+      "controllers": [
+        {
+          "name": "UserDeprecatedController",
+          "dependencies": [
+            "UserDeprecatedService"
+          ]
+        }
+      ]
+    },
+    "NestJSCoreModule": {
+      "imports": [],
+      "exports": [
+        "ModuleRef"
+      ],
+      "providers": [
+        {
+          "name": "ModuleRef",
+          "dependencies": []
+        }
+      ],
+      "controllers": []
+    }
+  }
+}

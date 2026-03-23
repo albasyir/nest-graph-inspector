@@ -1,6 +1,7 @@
 # NestJS Dependency Graph
 
-Root Module: `AppModule `
+Root Module: `AppModule`
+Version: `1`
 
 ```mermaid
 graph TD
