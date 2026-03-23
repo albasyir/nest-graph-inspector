@@ -535,7 +535,7 @@ export class NestGraphInspectorService implements OnModuleInit {
   }
 
   private escapeMermaidLabel(value: string): string {
-    return value.replace(/"/g, '\\"');
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   private collectReachableModules(root: any, visited: Set<string>): any[] {
