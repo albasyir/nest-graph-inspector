@@ -13,7 +13,7 @@ import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
         return {
           rootModule: AppModule,
           output: {
-            file: 'tmp/graph-output.md',
+            file: 'src/graph-output.md',
           },
         };
       },

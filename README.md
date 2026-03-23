@@ -1,6 +1,6 @@
 # Nest Graph Inspector
 
-Nest Graph Inspector is a NestJS module to generate a **runtime dependency graph** in **Markdown + Mermaid** format from the Nest application container.
+Nest Graph Inspector is a NestJS module to generate a **runtime dependency graph** in **Markdown + Mermaid** or **JSON** format from the Nest application container.
 
 The generated graph shows:
 
@@ -10,7 +10,12 @@ The generated graph shows:
 - dependencies between providers/controllers
 - internal dependencies, external module dependencies, and selected NestJS core dependencies
 
+> [!NOTE]
+> Result of markdown can be seen on https://github.com/albasyir/nest-graph-inspector/tree/main/src/graph-output.md
+
 ## Use Cases
+
+important to see what's actual problem that can be solved with this, we think you have them too!
 
 ### Impact Analysis
 
@@ -121,9 +126,10 @@ all output will contains
 - providers with dependencies
 - controllers with dependencies
 
-when markdown file as output, it will show depedencies graph as
+when markdown file as output, it will show depedencies graph
 
-> this using mermaid, plugin on text editor might needed
+> markdown use mermaid, open markdown in place that support mermaid, 
+> in VSC you can install plugin
 
 ## Flow
 
