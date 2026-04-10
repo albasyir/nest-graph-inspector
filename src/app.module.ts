@@ -1,28 +1,28 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { UserModule } from './user/user.module';
+import { ProductModule } from './product/product.module';
+import { OrderModule } from './order/order.module';
 import { NestGraphInspectorModule } from 'nest-graph-inspector/nest-graph-inspector';
-import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
     /**
      * Nest Graph Inspector
-     *
      */
     NestGraphInspectorModule.forRoot({
       outputs: [
         { type: 'markdown', path: 'src/graph-output.md' },
         { type: 'json', path: 'src/graph-output.json' },
-        { type: 'http', path: '/__graph-inspector' }
+        { type: 'http', path: '/__graph-inspector' },
       ],
     }),
 
+    /**
+     * Feature Modules
+     */
     UserModule,
-    UserDeprecatedModule,
+    ProductModule,
+    OrderModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule { }

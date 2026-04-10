@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
 import { UserController } from './user.controller';
-import { CreateUserUsecase } from './usecases/create-user.usecase';
-import { UserDeprecatedModule } from 'src/user-deprecated/user-deprecated.module';
+import { UserService } from './user.service';
+import { UserRepository } from './user.repository';
 
 @Module({
-  imports: [UserDeprecatedModule],
-  providers: [CreateUserUsecase],
   controllers: [UserController],
-  exports: [CreateUserUsecase],
+  providers: [UserService, UserRepository],
+  exports: [UserService],
 })
 export class UserModule {}

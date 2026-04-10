@@ -7,31 +7,44 @@ Version: `1`
 graph TD
 
   subgraph module_group_AppModule["AppModule"]
-    provider_AppModule_AppService["AppService"]
-    controller_AppModule_AppController["AppController"]
   end
   subgraph module_group_UserModule["UserModule"]
-    provider_UserModule_CreateUserUsecase["CreateUserUsecase"]
+    provider_UserModule_UserService["UserService"]
+    provider_UserModule_UserRepository["UserRepository"]
     controller_UserModule_UserController["UserController"]
   end
-  subgraph module_group_UserDeprecatedModule["UserDeprecatedModule"]
-    provider_UserDeprecatedModule_UserDeprecatedService["UserDeprecatedService"]
-    provider_UserDeprecatedModule_CreateUserUsecase["CreateUserUsecase"]
-    controller_UserDeprecatedModule_UserDeprecatedController["UserDeprecatedController"]
+  subgraph module_group_ProductModule["ProductModule"]
+    provider_ProductModule_ProductService["ProductService"]
+    provider_ProductModule_ProductRepository["ProductRepository"]
+    controller_ProductModule_ProductController["ProductController"]
+  end
+  subgraph module_group_OrderModule["OrderModule"]
+    provider_OrderModule_OrderRepository["OrderRepository"]
+    provider_OrderModule_OrderService["OrderService"]
+    provider_OrderModule_OrderNotificationService["OrderNotificationService"]
+    controller_OrderModule_OrderController["OrderController"]
   end
   subgraph module_group_NestJSCoreModule["NestJSCoreModule"]
     provider_NestJSCoreModule_ModuleRef["ModuleRef"]
   end
   module_group_UserModule --> module_group_AppModule
-  module_group_UserDeprecatedModule --> module_group_AppModule
-  provider_UserDeprecatedModule_CreateUserUsecase --> provider_AppModule_AppService
-  provider_NestJSCoreModule_ModuleRef --> provider_AppModule_AppService
-  provider_AppModule_AppService --> controller_AppModule_AppController
-  provider_NestJSCoreModule_ModuleRef --> controller_AppModule_AppController
-  provider_UserModule_CreateUserUsecase --> controller_AppModule_AppController
-  module_group_UserDeprecatedModule --> module_group_UserModule
-  provider_UserModule_CreateUserUsecase --> controller_UserModule_UserController
-  provider_UserDeprecatedModule_UserDeprecatedService --> controller_UserDeprecatedModule_UserDeprecatedController
+  module_group_ProductModule --> module_group_AppModule
+  module_group_OrderModule --> module_group_AppModule
+  provider_UserModule_UserRepository --> provider_UserModule_UserService
+  provider_UserModule_UserService --> controller_UserModule_UserController
+  module_group_UserModule --> module_group_ProductModule
+  provider_ProductModule_ProductRepository --> provider_ProductModule_ProductService
+  provider_ProductModule_ProductService --> controller_ProductModule_ProductController
+  module_group_UserModule --> module_group_OrderModule
+  module_group_ProductModule --> module_group_OrderModule
+  provider_OrderModule_OrderRepository --> provider_OrderModule_OrderService
+  provider_UserModule_UserService --> provider_OrderModule_OrderService
+  provider_ProductModule_ProductService --> provider_OrderModule_OrderService
+  provider_OrderModule_OrderNotificationService --> provider_OrderModule_OrderService
+  provider_OrderModule_OrderService --> provider_OrderModule_OrderNotificationService
+  provider_OrderModule_OrderService --> controller_OrderModule_OrderController
+  provider_NestJSCoreModule_ModuleRef --> controller_OrderModule_OrderController
+  provider_OrderModule_OrderNotificationService --> controller_OrderModule_OrderController
 ```
 
 ## Legend
@@ -48,52 +61,76 @@ graph TD
 
 ### Imports
 - UserModule
-- UserDeprecatedModule
+- ProductModule
+- OrderModule
 
 ### Exports
 - None
 
 ### Providers
-- AppService
-  - depends on: UserDeprecatedModule:CreateUserUsecase
-  - depends on: NestJSCoreModule:ModuleRef
+- None
 
 ### Controllers
-- AppController
-  - depends on: AppService
-  - depends on: NestJSCoreModule:ModuleRef
-  - depends on: UserModule:CreateUserUsecase
+- None
 
 ## UserModule
 
 ### Imports
-- UserDeprecatedModule
-
-### Exports
-- CreateUserUsecase
-
-### Providers
-- CreateUserUsecase
-
-### Controllers
-- UserController
-  - depends on: CreateUserUsecase
-
-## UserDeprecatedModule
-
-### Imports
 - None
 
 ### Exports
-- CreateUserUsecase
+- UserService
 
 ### Providers
-- UserDeprecatedService
-- CreateUserUsecase
+- UserService
+  - depends on: UserRepository
+- UserRepository
 
 ### Controllers
-- UserDeprecatedController
-  - depends on: UserDeprecatedService
+- UserController
+  - depends on: UserService
+
+## ProductModule
+
+### Imports
+- UserModule
+
+### Exports
+- ProductService
+
+### Providers
+- ProductService
+  - depends on: ProductRepository
+- ProductRepository
+
+### Controllers
+- ProductController
+  - depends on: ProductService
+
+## OrderModule
+
+### Imports
+- UserModule
+- ProductModule
+
+### Exports
+- OrderService
+
+### Providers
+- OrderRepository
+- OrderService
+  - depends on: OrderRepository
+  - depends on: UserModule:UserService
+  - depends on: ProductModule:ProductService
+  - depends on: OrderNotificationService
+- OrderNotificationService
+  - depends on: OrderService
+
+### Controllers
+- OrderController
+  - depends on: OrderService
+  - depends on: NestJSCoreModule:ModuleRef
+  - depends on: OrderNotificationService
 
 ## NestJSCoreModule
 

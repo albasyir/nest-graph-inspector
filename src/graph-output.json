@@ -5,39 +5,27 @@
     "AppModule": {
       "imports": [
         "UserModule",
-        "UserDeprecatedModule"
+        "ProductModule",
+        "OrderModule"
       ],
       "exports": [],
-      "providers": [
-        {
-          "name": "AppService",
-          "dependencies": [
-            "UserDeprecatedModule:CreateUserUsecase",
-            "NestJSCoreModule:ModuleRef"
-          ]
-        }
-      ],
-      "controllers": [
-        {
-          "name": "AppController",
-          "dependencies": [
-            "AppService",
-            "NestJSCoreModule:ModuleRef",
-            "UserModule:CreateUserUsecase"
-          ]
-        }
-      ]
+      "providers": [],
+      "controllers": []
     },
     "UserModule": {
-      "imports": [
-        "UserDeprecatedModule"
-      ],
+      "imports": [],
       "exports": [
-        "CreateUserUsecase"
+        "UserService"
       ],
       "providers": [
         {
-          "name": "CreateUserUsecase",
+          "name": "UserService",
+          "dependencies": [
+            "UserRepository"
+          ]
+        },
+        {
+          "name": "UserRepository",
           "dependencies": []
         }
       ],
@@ -45,31 +33,75 @@
         {
           "name": "UserController",
           "dependencies": [
-            "CreateUserUsecase"
+            "UserService"
           ]
         }
       ]
     },
-    "UserDeprecatedModule": {
-      "imports": [],
+    "ProductModule": {
+      "imports": [
+        "UserModule"
+      ],
       "exports": [
-        "CreateUserUsecase"
+        "ProductService"
       ],
       "providers": [
         {
-          "name": "UserDeprecatedService",
-          "dependencies": []
+          "name": "ProductService",
+          "dependencies": [
+            "ProductRepository"
+          ]
         },
         {
-          "name": "CreateUserUsecase",
+          "name": "ProductRepository",
           "dependencies": []
         }
       ],
       "controllers": [
         {
-          "name": "UserDeprecatedController",
+          "name": "ProductController",
           "dependencies": [
-            "UserDeprecatedService"
+            "ProductService"
+          ]
+        }
+      ]
+    },
+    "OrderModule": {
+      "imports": [
+        "UserModule",
+        "ProductModule"
+      ],
+      "exports": [
+        "OrderService"
+      ],
+      "providers": [
+        {
+          "name": "OrderRepository",
+          "dependencies": []
+        },
+        {
+          "name": "OrderService",
+          "dependencies": [
+            "OrderRepository",
+            "UserModule:UserService",
+            "ProductModule:ProductService",
+            "OrderNotificationService"
+          ]
+        },
+        {
+          "name": "OrderNotificationService",
+          "dependencies": [
+            "OrderService"
+          ]
+        }
+      ],
+      "controllers": [
+        {
+          "name": "OrderController",
+          "dependencies": [
+            "OrderService",
+            "NestJSCoreModule:ModuleRef",
+            "OrderNotificationService"
           ]
         }
       ]
