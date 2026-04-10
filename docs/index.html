@@ -1,0 +1,1944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nest Graph Inspector — Runtime Dependency Graph for NestJS</title>
+  <meta name="description" content="Generate runtime dependency graphs in Markdown + Mermaid or JSON from your NestJS application container. Visualize modules, providers, controllers and their relationships instantly." />
+  <meta name="keywords" content="nestjs, nest, graph, inspector, dependency-graph, module-graph, testing, developer-tools, devtool" />
+  <meta name="author" content="Abdul Aziz Al Basyir" />
+  <meta property="og:title" content="Nest Graph Inspector" />
+  <meta property="og:description" content="Runtime dependency graph generator for NestJS applications" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ================================================================
+       DESIGN TOKENS
+       ================================================================ */
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-card: #16161f;
+      --bg-card-hover: #1c1c28;
+      --bg-code: #0d0d14;
+
+      --text-primary: #f0f0f5;
+      --text-secondary: #9090a8;
+      --text-muted: #606078;
+
+      --accent-coral: #e8415c;
+      --accent-orange: #ff8c42;
+      --accent-pink: #ff4f8b;
+      --accent-purple: #8b5cf6;
+      --accent-blue: #3b82f6;
+      --accent-teal: #06b6d4;
+
+      --gradient-primary: linear-gradient(135deg, #e8415c 0%, #ff8c42 100%);
+      --gradient-hero: linear-gradient(135deg, #e8415c 0%, #ff8c42 50%, #ff4f8b 100%);
+      --gradient-card: linear-gradient(135deg, rgba(232, 65, 92, 0.08), rgba(255, 140, 66, 0.04));
+
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-accent: rgba(232, 65, 92, 0.3);
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+
+      --shadow-glow: 0 0 60px rgba(232, 65, 92, 0.15);
+      --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+      --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-smooth: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-spring: 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* ================================================================
+       RESET & GLOBALS
+       ================================================================ */
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.7;
+      overflow-x: hidden;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      max-width: 100%;
+      display: block;
+    }
+
+    /* ================================================================
+       BACKGROUND PATTERN
+       ================================================================ */
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+    }
+
+    .bg-glow {
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse at center, rgba(232, 65, 92, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ================================================================
+       NAVIGATION
+       ================================================================ */
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      padding: 0 2rem;
+      transition: var(--transition-fast);
+    }
+
+    .navbar.scrolled {
+      background: rgba(10, 10, 15, 0.85);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .navbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .navbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .navbar-brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+
+    .navbar-brand span {
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .navbar-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .navbar-links a {
+      font-size: 0.88rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: color var(--transition-fast);
+      position: relative;
+    }
+
+    .navbar-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .navbar-links a::after {
+      content: '';
+      position: absolute;
+      bottom: -4px;
+      left: 0;
+      width: 0;
+      height: 2px;
+      background: var(--gradient-primary);
+      border-radius: 1px;
+      transition: width var(--transition-smooth);
+    }
+
+    .navbar-links a:hover::after {
+      width: 100%;
+    }
+
+    .navbar-cta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .btn-github {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      cursor: pointer;
+    }
+
+    .btn-github:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .btn-github svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .mobile-toggle {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      cursor: pointer;
+      padding: 8px;
+    }
+
+    .mobile-toggle svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    /* ================================================================
+       HERO SECTION
+       ================================================================ */
+    .hero {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8rem 2rem 6rem;
+    }
+
+    .hero-content {
+      max-width: 900px;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px 6px 8px;
+      background: rgba(232, 65, 92, 0.1);
+      border: 1px solid rgba(232, 65, 92, 0.2);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--accent-coral);
+      margin-bottom: 2rem;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    .hero-badge-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--accent-coral);
+      border-radius: 50%;
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.3); }
+    }
+
+    .hero h1 {
+      font-size: clamp(3rem, 7vw, 5rem);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      margin-bottom: 1.5rem;
+      animation: fadeInUp 0.6s ease-out 0.1s both;
+    }
+
+    .hero h1 .gradient-text {
+      background: var(--gradient-hero);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-description {
+      font-size: 1.2rem;
+      color: var(--text-secondary);
+      max-width: 620px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+      animation: fadeInUp 0.6s ease-out 0.2s both;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeInUp 0.6s ease-out 0.3s both;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: var(--gradient-primary);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-primary::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+
+    .btn-primary:hover::before {
+      opacity: 1;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(232, 65, 92, 0.3);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.12);
+      transform: translateY(-2px);
+    }
+
+    /* Install command */
+    .hero-install {
+      margin-top: 3rem;
+      animation: fadeInUp 0.6s ease-out 0.4s both;
+    }
+
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      position: relative;
+    }
+
+    .install-box:hover {
+      border-color: var(--border-accent);
+      background: rgba(13, 13, 20, 0.9);
+    }
+
+    .install-box .dollar {
+      color: var(--accent-coral);
+    }
+
+    .install-box .cmd {
+      color: var(--text-primary);
+    }
+
+    .install-box .copy-icon {
+      color: var(--text-muted);
+      transition: color var(--transition-fast);
+      flex-shrink: 0;
+    }
+
+    .install-box:hover .copy-icon {
+      color: var(--text-secondary);
+    }
+
+    .install-box .copy-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .copy-tooltip {
+      position: absolute;
+      top: -36px;
+      left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      padding: 4px 12px;
+      background: var(--accent-coral);
+      color: #fff;
+      font-size: 0.75rem;
+      font-family: var(--font-sans);
+      border-radius: 6px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all var(--transition-fast);
+      white-space: nowrap;
+    }
+
+    .copy-tooltip.show {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+    }
+
+    /* ================================================================
+       HERO GRAPH ANIMATION
+       ================================================================ */
+    .hero-visual {
+      margin-top: 5rem;
+      animation: fadeInUp 0.8s ease-out 0.5s both;
+    }
+
+    .graph-canvas {
+      position: relative;
+      width: 100%;
+      max-width: 700px;
+      height: 320px;
+      margin: 0 auto;
+    }
+
+    .graph-node {
+      position: absolute;
+      padding: 10px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      transition: all var(--transition-smooth);
+      cursor: default;
+      z-index: 2;
+    }
+
+    .graph-node::before {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: var(--radius-sm);
+      padding: 1px;
+      background: var(--gradient-primary);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+
+    .graph-node:hover::before {
+      opacity: 1;
+    }
+
+    .graph-node:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .graph-node .node-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .graph-node .node-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .node-module .node-dot { background: var(--accent-coral); }
+    .node-provider .node-dot { background: var(--accent-purple); }
+    .node-controller .node-dot { background: var(--accent-teal); }
+
+    .graph-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .graph-svg line {
+      stroke: rgba(232, 65, 92, 0.2);
+      stroke-width: 1.5;
+      stroke-dasharray: 6 4;
+      animation: dashFlow 1.5s linear infinite;
+    }
+
+    @keyframes dashFlow {
+      to { stroke-dashoffset: -20; }
+    }
+
+    /* ================================================================
+       SECTION COMMON
+       ================================================================ */
+    .section {
+      position: relative;
+      z-index: 1;
+      padding: 7rem 2rem;
+    }
+
+    .section-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 1rem;
+    }
+
+    .section-title {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 1rem;
+    }
+
+    .section-subtitle {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    /* ================================================================
+       FEATURES
+       ================================================================ */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      position: relative;
+      padding: 2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      transition: all var(--transition-smooth);
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--gradient-primary);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform var(--transition-smooth);
+    }
+
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255, 255, 255, 0.08);
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-card);
+    }
+
+    .feature-card:hover::before {
+      transform: scaleX(1);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-md);
+      margin-bottom: 1.2rem;
+      font-size: 1.4rem;
+    }
+
+    .feature-icon-impact { background: rgba(232, 65, 92, 0.1); color: var(--accent-coral); }
+    .feature-icon-test { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); }
+    .feature-icon-arch { background: rgba(6, 182, 212, 0.1); color: var(--accent-teal); }
+    .feature-icon-module { background: rgba(255, 140, 66, 0.1); color: var(--accent-orange); }
+    .feature-icon-dep { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
+    .feature-icon-output { background: rgba(255, 79, 139, 0.1); color: var(--accent-pink); }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+
+    /* ================================================================
+       HOW IT WORKS
+       ================================================================ */
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1rem;
+      position: relative;
+    }
+
+    .flow-steps::before {
+      content: '';
+      position: absolute;
+      top: 36px;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-coral), var(--accent-orange), var(--accent-pink), transparent);
+      opacity: 0.3;
+      z-index: 0;
+    }
+
+    .flow-step {
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .flow-step-number {
+      width: 72px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 50%;
+      font-size: 1.6rem;
+      font-weight: 800;
+      background-image: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      transition: all var(--transition-smooth);
+    }
+
+    .flow-step:hover .flow-step-number {
+      box-shadow: var(--shadow-glow);
+      border-color: var(--border-accent);
+    }
+
+    .flow-step h4 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+
+    .flow-step p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ================================================================
+       CODE EXAMPLES
+       ================================================================ */
+    .code-section {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .code-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .code-tab {
+      padding: 12px 24px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      position: relative;
+      transition: color var(--transition-fast);
+    }
+
+    .code-tab::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--gradient-primary);
+      transform: scaleX(0);
+      transition: transform var(--transition-fast);
+    }
+
+    .code-tab.active {
+      color: var(--text-primary);
+    }
+
+    .code-tab.active::after {
+      transform: scaleX(1);
+    }
+
+    .code-tab:hover {
+      color: var(--text-secondary);
+    }
+
+    .code-panels {
+      position: relative;
+    }
+
+    .code-panel {
+      display: none;
+    }
+
+    .code-panel.active {
+      display: block;
+    }
+
+    .code-block {
+      position: relative;
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .code-block-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .code-block-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .code-block-dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .code-block-dots span:nth-child(1) { background: #ff5f57; }
+    .code-block-dots span:nth-child(2) { background: #febc2e; }
+    .code-block-dots span:nth-child(3) { background: #28c840; }
+
+    .code-copy-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .code-copy-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+    }
+
+    .code-copy-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .code-content {
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .code-content pre {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.8;
+      tab-size: 2;
+    }
+
+    /* Syntax highlighting */
+    .token-keyword { color: #c678dd; }
+    .token-string { color: #98c379; }
+    .token-decorator { color: #e8415c; }
+    .token-class { color: #e5c07b; }
+    .token-method { color: #61afef; }
+    .token-comment { color: var(--text-muted); font-style: italic; }
+    .token-property { color: #56b6c2; }
+    .token-bracket { color: #abb2bf; }
+    .token-punctuation { color: #abb2bf; }
+
+    /* ================================================================
+       OUTPUT PREVIEW
+       ================================================================ */
+    .output-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      margin-top: 2rem;
+    }
+
+    .output-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      transition: all var(--transition-smooth);
+    }
+
+    .output-card:hover {
+      border-color: rgba(255, 255, 255, 0.08);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-card);
+    }
+
+    .output-card-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .output-card-header h4 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .output-card-header .format-badge {
+      padding: 3px 10px;
+      background: rgba(232, 65, 92, 0.1);
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--accent-coral);
+      text-transform: uppercase;
+    }
+
+    .output-card-body {
+      padding: 1.5rem;
+    }
+
+    .output-card-body pre {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      white-space: pre;
+      overflow-x: auto;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .output-card-body pre::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+
+    .output-card-body pre::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+    }
+
+    /* ================================================================
+       CONFIG TABLE
+       ================================================================ */
+    .config-table-wrapper {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .config-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .config-table thead {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .config-table th {
+      padding: 14px 20px;
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .config-table td {
+      padding: 14px 20px;
+      font-size: 0.88rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .config-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .config-table tr:hover td {
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .config-table code {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      padding: 2px 8px;
+      background: rgba(232, 65, 92, 0.08);
+      border-radius: 4px;
+      color: var(--accent-coral);
+    }
+
+    .config-table .type-badge {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--accent-purple);
+    }
+
+    .config-table .desc {
+      color: var(--text-secondary);
+    }
+
+    /* ================================================================
+       COMPATIBILITY
+       ================================================================ */
+    .compat-badges {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 2rem;
+    }
+
+    .compat-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      transition: all var(--transition-fast);
+    }
+
+    .compat-badge:hover {
+      border-color: rgba(255, 255, 255, 0.08);
+      transform: translateY(-2px);
+    }
+
+    .compat-badge svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    .compat-badge-info {
+      text-align: left;
+    }
+
+    .compat-badge-info .name {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .compat-badge-info .version {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* ================================================================
+       NOTE CALLOUT
+       ================================================================ */
+    .callout {
+      display: flex;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      background: rgba(139, 92, 246, 0.06);
+      border: 1px solid rgba(139, 92, 246, 0.15);
+      border-radius: var(--radius-md);
+      margin-top: 1.5rem;
+    }
+
+    .callout-icon {
+      flex-shrink: 0;
+      font-size: 1.2rem;
+      margin-top: 2px;
+    }
+
+    .callout p {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+
+    .callout code {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      padding: 2px 6px;
+      background: rgba(139, 92, 246, 0.12);
+      border-radius: 4px;
+      color: var(--accent-purple);
+    }
+
+    /* ================================================================
+       FOOTER
+       ================================================================ */
+    .footer {
+      position: relative;
+      z-index: 1;
+      padding: 4rem 2rem 2rem;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .footer-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .footer-brand img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
+
+    .footer-brand span {
+      font-weight: 600;
+      font-size: 0.95rem;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .footer-meta {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .footer-links a {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      transition: color var(--transition-fast);
+    }
+
+    .footer-links a:hover {
+      color: var(--text-primary);
+    }
+
+    /* ================================================================
+       ANIMATIONS
+       ================================================================ */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(24px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .animate-on-scroll {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .animate-on-scroll.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ================================================================
+       RESPONSIVE
+       ================================================================ */
+    @media (max-width: 1024px) {
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .flow-steps {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .flow-steps::before {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .navbar-links {
+        display: none;
+      }
+
+      .mobile-toggle {
+        display: flex;
+      }
+
+      .hero {
+        padding: 7rem 1.5rem 4rem;
+      }
+
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-steps {
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+      }
+
+      .output-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+        gap: 1.5rem;
+        text-align: center;
+      }
+
+      .graph-canvas {
+        height: 240px;
+      }
+
+      .graph-node {
+        font-size: 0.68rem;
+        padding: 8px 14px;
+      }
+
+      .section {
+        padding: 4rem 1.5rem;
+      }
+
+      .code-content pre {
+        font-size: 0.78rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .flow-steps {
+        grid-template-columns: 1fr;
+      }
+
+      .hero h1 {
+        font-size: 2.4rem;
+      }
+
+      .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn-primary, .btn-secondary {
+        justify-content: center;
+      }
+
+      .compat-badges {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Background effects -->
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+
+  <!-- ============================================================
+       NAVIGATION
+       ============================================================ -->
+  <nav class="navbar" id="navbar">
+    <div class="navbar-inner">
+      <a href="#" class="navbar-brand">
+        <img src="logo.png" alt="Nest Graph Inspector Logo" />
+        <span>Nest Graph Inspector</span>
+      </a>
+
+      <ul class="navbar-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#usage">Usage</a></li>
+        <li><a href="#config">Config</a></li>
+        <li><a href="#output">Output</a></li>
+      </ul>
+
+      <div class="navbar-cta">
+        <a href="https://github.com/albasyir/nest-graph-inspector" target="_blank" rel="noopener" class="btn-github">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="https://www.npmjs.com/package/nest-graph-inspector" target="_blank" rel="noopener" class="btn-github" style="color: var(--accent-coral);">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M0 7.334v8h6.666v1.332H12v-1.332h12v-8H0zm6.666 6.664H5.334V9.998h-1.332v4h-2.668V8.666h5.332v5.332zm4 0h-2.668V9.998H6.666V8.666h5.334v6.664h-1.334v-1.332zm12 0H21.334V9.998h-1.334v4h-1.332v-4h-1.334v4h-1.332V8.666h7.998v5.332z"/></svg>
+          npm
+        </a>
+      </div>
+
+      <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ============================================================
+       HERO
+       ============================================================ -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="hero-badge-dot"></span>
+        v0.2.0 · MIT License
+      </div>
+
+      <h1>
+        Runtime<br />
+        <span class="gradient-text">Dependency Graph</span><br />
+        for NestJS
+      </h1>
+
+      <p class="hero-description">
+        Generate beautiful dependency graphs in <strong>Markdown + Mermaid</strong> or <strong>JSON</strong>
+        directly from the Nest runtime container. Visualize modules, providers, controllers, and their relationships instantly.
+      </p>
+
+      <div class="hero-actions">
+        <a href="#usage" class="btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+          Get Started
+        </a>
+        <a href="https://github.com/albasyir/nest-graph-inspector" target="_blank" rel="noopener" class="btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <div class="hero-install">
+        <div class="install-box" id="installBox" onclick="copyInstall()">
+          <span class="dollar">$</span>
+          <span class="cmd">npm install nest-graph-inspector</span>
+          <span class="copy-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </span>
+          <span class="copy-tooltip" id="copyTooltip">Copied!</span>
+        </div>
+      </div>
+
+      <!-- Animated Graph Visualization -->
+      <div class="hero-visual">
+        <div class="graph-canvas" id="graphCanvas">
+          <svg class="graph-svg" id="graphSvg"></svg>
+          <div class="graph-node node-module" style="left: 38%; top: 0;" id="node-app">
+            <span class="node-label"><span class="node-dot"></span> AppModule</span>
+          </div>
+          <div class="graph-node node-module" style="left: 10%; top: 40%;" id="node-user">
+            <span class="node-label"><span class="node-dot"></span> UserModule</span>
+          </div>
+          <div class="graph-node node-module" style="left: 62%; top: 40%;" id="node-auth">
+            <span class="node-label"><span class="node-dot"></span> AuthModule</span>
+          </div>
+          <div class="graph-node node-provider" style="left: 4%; top: 78%;" id="node-service">
+            <span class="node-label"><span class="node-dot"></span> UserService</span>
+          </div>
+          <div class="graph-node node-controller" style="left: 32%; top: 78%;" id="node-ctrl">
+            <span class="node-label"><span class="node-dot"></span> UserController</span>
+          </div>
+          <div class="graph-node node-provider" style="left: 62%; top: 78%;" id="node-guard">
+            <span class="node-label"><span class="node-dot"></span> AuthGuard</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FEATURES
+       ============================================================ -->
+  <section class="section" id="features">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">Use Cases</span>
+        <h2 class="section-title">Why Nest Graph Inspector?</h2>
+        <p class="section-subtitle">
+          Understand your NestJS architecture at a glance. Designed for teams who need clarity in complex systems.
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-impact">🎯</div>
+          <h3>Impact Analysis</h3>
+          <p>Narrow regression test scope to the most relevant modules. Understand the blast radius before making changes.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-test">⚡</div>
+          <h3>Test Prioritization</h3>
+          <p>Select critical providers for fast validation. Understand dependency chains and prioritize which flows to check first.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-arch">🏗️</div>
+          <h3>Architecture Visibility</h3>
+          <p>Onboard engineers faster, spot highly coupled modules, and make refactors safer by visualizing relationships.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-module">📦</div>
+          <h3>Module Discovery</h3>
+          <p>Automatically discover all loaded modules from the root, including import relationships and provider dependencies.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-dep">🔗</div>
+          <h3>Dependency Resolution</h3>
+          <p>Trace internal dependencies, external module dependencies, and NestJS core dependencies grouped under one view.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon feature-icon-output">📄</div>
+          <h3>Multi-Format Output</h3>
+          <p>Export as Markdown with Mermaid graph diagrams or structured JSON — ready for docs, CI pipelines, or custom tools.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       HOW IT WORKS
+       ============================================================ -->
+  <section class="section" id="how-it-works">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">Under The Hood</span>
+        <h2 class="section-title">How It Works</h2>
+        <p class="section-subtitle">
+          The graph is generated from the <strong>runtime Nest container</strong>, not from static source parsing.
+        </p>
+      </div>
+
+      <div class="flow-steps animate-on-scroll">
+        <div class="flow-step">
+          <div class="flow-step-number">1</div>
+          <h4>Configure</h4>
+          <p>Set root module &amp; output format</p>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-number">2</div>
+          <h4>Inspect</h4>
+          <p>Analyze runtime Nest container</p>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-number">3</div>
+          <h4>Collect</h4>
+          <p>Gather module &amp; provider metadata</p>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-number">4</div>
+          <h4>Resolve</h4>
+          <p>Map all dependency relationships</p>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-number">5</div>
+          <h4>Generate</h4>
+          <p>Output Markdown or JSON</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       USAGE / CODE EXAMPLES
+       ============================================================ -->
+  <section class="section code-section" id="usage">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">Getting Started</span>
+        <h2 class="section-title">Simple Setup</h2>
+        <p class="section-subtitle">
+          Import the module, set your root module, and you're done. Supports both static and async configuration.
+        </p>
+      </div>
+
+      <div class="animate-on-scroll">
+        <div class="code-tabs">
+          <button class="code-tab active" data-tab="forRoot" onclick="switchTab('forRoot')">forRoot</button>
+          <button class="code-tab" data-tab="forRootAsync" onclick="switchTab('forRootAsync')">forRootAsync</button>
+        </div>
+
+        <div class="code-panels">
+          <!-- forRoot -->
+          <div class="code-panel active" id="panel-forRoot">
+            <div class="code-block">
+              <div class="code-block-header">
+                <div class="code-block-dots"><span></span><span></span><span></span></div>
+                <span class="code-block-title">root.module.ts</span>
+                <button class="code-copy-btn" onclick="copyCode('code-forRoot')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  Copy
+                </button>
+              </div>
+              <div class="code-content">
+<pre id="code-forRoot"><span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">Module</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'@nestjs/common'</span><span class="token-punctuation">;</span>
+<span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">AppModule</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'./app.module'</span><span class="token-punctuation">;</span>
+<span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">NestGraphInspector</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'nest-graph-inspector'</span><span class="token-punctuation">;</span>
+
+<span class="token-decorator">@Module</span><span class="token-bracket">({</span>
+  <span class="token-property">imports</span><span class="token-punctuation">:</span> <span class="token-bracket">[</span>
+    <span class="token-class">NestGraphInspector</span><span class="token-punctuation">.</span><span class="token-method">forRoot</span><span class="token-bracket">({</span>
+      <span class="token-property">rootModule</span><span class="token-punctuation">:</span> <span class="token-class">AppModule</span><span class="token-punctuation">,</span>
+      <span class="token-property">output</span><span class="token-punctuation">:</span> <span class="token-bracket">{</span>
+        <span class="token-property">file</span><span class="token-punctuation">:</span> <span class="token-string">'graph-output.md'</span><span class="token-punctuation">,</span>
+      <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+    <span class="token-bracket">})</span><span class="token-punctuation">,</span>
+  <span class="token-bracket">]</span><span class="token-punctuation">,</span>
+<span class="token-bracket">})</span>
+<span class="token-keyword">export class</span> <span class="token-class">RootModule</span> <span class="token-bracket">{}</span></pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- forRootAsync -->
+          <div class="code-panel" id="panel-forRootAsync">
+            <div class="code-block">
+              <div class="code-block-header">
+                <div class="code-block-dots"><span></span><span></span><span></span></div>
+                <span class="code-block-title">root.module.ts</span>
+                <button class="code-copy-btn" onclick="copyCode('code-forRootAsync')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  Copy
+                </button>
+              </div>
+              <div class="code-content">
+<pre id="code-forRootAsync"><span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">Module</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'@nestjs/common'</span><span class="token-punctuation">;</span>
+<span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">AppModule</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'./app.module'</span><span class="token-punctuation">;</span>
+<span class="token-keyword">import</span> <span class="token-bracket">{</span> <span class="token-class">NestGraphInspector</span> <span class="token-bracket">}</span> <span class="token-keyword">from</span> <span class="token-string">'nest-graph-inspector'</span><span class="token-punctuation">;</span>
+
+<span class="token-decorator">@Module</span><span class="token-bracket">({</span>
+  <span class="token-property">imports</span><span class="token-punctuation">:</span> <span class="token-bracket">[</span>
+    <span class="token-class">NestGraphInspector</span><span class="token-punctuation">.</span><span class="token-method">forRootAsync</span><span class="token-bracket">({</span>
+      <span class="token-method">useFactory</span><span class="token-bracket">()</span> <span class="token-bracket">{</span>
+        <span class="token-keyword">return</span> <span class="token-bracket">{</span>
+          <span class="token-property">rootModule</span><span class="token-punctuation">:</span> <span class="token-class">AppModule</span><span class="token-punctuation">,</span>
+          <span class="token-property">output</span><span class="token-punctuation">:</span> <span class="token-bracket">{</span>
+            <span class="token-property">file</span><span class="token-punctuation">:</span> <span class="token-string">'graph-output.md'</span><span class="token-punctuation">,</span>
+          <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+        <span class="token-bracket">}</span><span class="token-punctuation">;</span>
+      <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+    <span class="token-bracket">})</span><span class="token-punctuation">,</span>
+  <span class="token-bracket">]</span><span class="token-punctuation">,</span>
+<span class="token-bracket">})</span>
+<span class="token-keyword">export class</span> <span class="token-class">RootModule</span> <span class="token-bracket">{}</span></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       CONFIG
+       ============================================================ -->
+  <section class="section" id="config">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">Reference</span>
+        <h2 class="section-title">Configuration</h2>
+        <p class="section-subtitle">All available configuration options for NestGraphInspector.</p>
+      </div>
+
+      <div class="config-table-wrapper animate-on-scroll">
+        <table class="config-table">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Type</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>rootModule</code></td>
+              <td class="type-badge">Type&lt;any&gt;</td>
+              <td class="desc">The root module class to start graph traversal from. This is the entry point of your dependency graph.</td>
+            </tr>
+            <tr>
+              <td><code>output.file</code></td>
+              <td class="type-badge">string</td>
+              <td class="desc">Output file name for the generated Markdown report. The file will include a Mermaid diagram and module details.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout animate-on-scroll">
+        <span class="callout-icon">💡</span>
+        <p>
+          The output Markdown file uses <strong>Mermaid</strong> syntax for graph visualization.
+          Open it in any Mermaid-compatible viewer — GitHub renders it natively, or use the
+          <code>Markdown Preview Mermaid Support</code> extension in VS Code.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       OUTPUT PREVIEW
+       ============================================================ -->
+  <section class="section code-section" id="output">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">What You Get</span>
+        <h2 class="section-title">Output Preview</h2>
+        <p class="section-subtitle">
+          The generated output contains module lists, imports, exports, providers with dependencies,
+          controllers with dependencies, and a visual Mermaid graph.
+        </p>
+      </div>
+
+      <div class="output-grid animate-on-scroll">
+        <div class="output-card">
+          <div class="output-card-header">
+            <h4>📝 Markdown + Mermaid</h4>
+            <span class="format-badge">MD</span>
+          </div>
+          <div class="output-card-body">
+<pre># NestJS Dependency Graph
+
+Root Module: `AppModule`
+
+```mermaid
+graph TD
+  subgraph AppModule
+    AppService
+    AppController
+  end
+  subgraph UserModule
+    CreateUserUsecase
+    UserController
+  end
+  UserModule --> AppModule
+  CreateUserUsecase --> UserController
+  AppService --> AppController
+```
+
+## AppModule
+### Imports
+- UserModule
+
+### Providers
+- AppService
+
+### Controllers
+- AppController
+  - depends on: AppService</pre>
+          </div>
+        </div>
+
+        <div class="output-card">
+          <div class="output-card-header">
+            <h4>📊 JSON</h4>
+            <span class="format-badge">JSON</span>
+          </div>
+          <div class="output-card-body">
+<pre>{
+  "version": "1",
+  "root": "AppModule",
+  "modules": {
+    "AppModule": {
+      "imports": ["UserModule"],
+      "exports": [],
+      "providers": [
+        {
+          "name": "AppService",
+          "dependencies": [
+            "UserModule:CreateUserUsecase"
+          ]
+        }
+      ],
+      "controllers": [
+        {
+          "name": "AppController",
+          "dependencies": [
+            "AppService"
+          ]
+        }
+      ]
+    }
+  }
+}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       COMPATIBILITY
+       ============================================================ -->
+  <section class="section" id="compatibility">
+    <div class="section-inner">
+      <div class="section-header animate-on-scroll">
+        <span class="section-label">Compatibility</span>
+        <h2 class="section-title">Version Support</h2>
+        <p class="section-subtitle">
+          Officially supports NestJS 10 and 11. Earlier versions may work — install with <code>--force</code> to try.
+        </p>
+      </div>
+
+      <div class="compat-badges animate-on-scroll">
+        <div class="compat-badge">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="4" fill="#E0234E" opacity="0.15"/>
+            <text x="12" y="16" text-anchor="middle" fill="#E0234E" font-size="10" font-weight="700" font-family="Inter, sans-serif">N</text>
+          </svg>
+          <div class="compat-badge-info">
+            <div class="name">NestJS 10</div>
+            <div class="version">✅ Supported</div>
+          </div>
+        </div>
+        <div class="compat-badge">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="4" fill="#E0234E" opacity="0.15"/>
+            <text x="12" y="16" text-anchor="middle" fill="#E0234E" font-size="10" font-weight="700" font-family="Inter, sans-serif">N</text>
+          </svg>
+          <div class="compat-badge-info">
+            <div class="name">NestJS 11</div>
+            <div class="version">✅ Supported</div>
+          </div>
+        </div>
+        <div class="compat-badge">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="4" fill="#3178C6" opacity="0.15"/>
+            <text x="12" y="16" text-anchor="middle" fill="#3178C6" font-size="10" font-weight="700" font-family="Inter, sans-serif">TS</text>
+          </svg>
+          <div class="compat-badge-info">
+            <div class="name">TypeScript</div>
+            <div class="version">^5.x</div>
+          </div>
+        </div>
+        <div class="compat-badge">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="4" fill="#339933" opacity="0.15"/>
+            <text x="12" y="16" text-anchor="middle" fill="#339933" font-size="10" font-weight="700" font-family="Inter, sans-serif">N</text>
+          </svg>
+          <div class="compat-badge-info">
+            <div class="name">Node.js</div>
+            <div class="version">18+</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout animate-on-scroll">
+        <span class="callout-icon">📝</span>
+        <p>
+          If you test with an unsupported NestJS version and everything works, please
+          <a href="https://github.com/albasyir/nest-graph-inspector/issues" target="_blank" rel="noopener" style="color: var(--accent-coral); text-decoration: underline;">raise an issue</a>
+          so the support coverage can be updated.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       FOOTER
+       ============================================================ -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="logo.png" alt="Logo" />
+        <span>Nest Graph Inspector</span>
+      </div>
+
+      <p class="footer-meta">MIT License · © 2026 Abdul Aziz Al Basyir</p>
+
+      <ul class="footer-links">
+        <li><a href="https://github.com/albasyir/nest-graph-inspector" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/nest-graph-inspector" target="_blank" rel="noopener">npm</a></li>
+        <li><a href="https://github.com/albasyir/nest-graph-inspector/issues" target="_blank" rel="noopener">Issues</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <!-- ============================================================
+       SCRIPTS
+       ============================================================ -->
+  <script>
+    //
+    // Navbar scroll effect
+    //
+    const navbar = document.getElementById('navbar');
+    window.addEventListener('scroll', () => {
+      navbar.classList.toggle('scrolled', window.scrollY > 40);
+    });
+
+    //
+    // Copy install command
+    //
+    function copyInstall() {
+      navigator.clipboard.writeText('npm install nest-graph-inspector');
+      const tooltip = document.getElementById('copyTooltip');
+      tooltip.classList.add('show');
+      setTimeout(() => tooltip.classList.remove('show'), 1600);
+    }
+
+    //
+    // Copy code blocks
+    //
+    function copyCode(id) {
+      const el = document.getElementById(id);
+      navigator.clipboard.writeText(el.textContent);
+      const btn = el.closest('.code-block').querySelector('.code-copy-btn');
+      const origText = btn.innerHTML;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="M20 6L9 17l-5-5"/></svg> Copied!`;
+      btn.style.color = 'var(--accent-coral)';
+      setTimeout(() => {
+        btn.innerHTML = origText;
+        btn.style.color = '';
+      }, 2000);
+    }
+
+    //
+    // Tab switching
+    //
+    function switchTab(tabName) {
+      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
+      document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+      document.getElementById(`panel-${tabName}`).classList.add('active');
+    }
+
+    //
+    // Scroll animations (Intersection Observer)
+    //
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
+
+    //
+    // Draw graph lines (SVG)
+    //
+    function drawGraphLines() {
+      const canvas = document.getElementById('graphCanvas');
+      const svg = document.getElementById('graphSvg');
+      if (!canvas || !svg) return;
+
+      svg.innerHTML = '';
+      const rect = canvas.getBoundingClientRect();
+
+      const connections = [
+        ['node-app', 'node-user'],
+        ['node-app', 'node-auth'],
+        ['node-user', 'node-service'],
+        ['node-user', 'node-ctrl'],
+        ['node-auth', 'node-guard'],
+        ['node-service', 'node-ctrl'],
+      ];
+
+      connections.forEach(([fromId, toId]) => {
+        const fromEl = document.getElementById(fromId);
+        const toEl = document.getElementById(toId);
+        if (!fromEl || !toEl) return;
+
+        const fromRect = fromEl.getBoundingClientRect();
+        const toRect = toEl.getBoundingClientRect();
+
+        const x1 = fromRect.left - rect.left + fromRect.width / 2;
+        const y1 = fromRect.top - rect.top + fromRect.height / 2;
+        const x2 = toRect.left - rect.left + toRect.width / 2;
+        const y2 = toRect.top - rect.top + toRect.height / 2;
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        svg.appendChild(line);
+      });
+    }
+
+    window.addEventListener('load', drawGraphLines);
+    window.addEventListener('resize', drawGraphLines);
+
+    //
+    // Mobile toggle (simple toggle for nav display)
+    //
+    const mobileToggle = document.getElementById('mobileToggle');
+    if (mobileToggle) {
+      mobileToggle.addEventListener('click', () => {
+        const links = document.querySelector('.navbar-links');
+        if (links.style.display === 'flex') {
+          links.style.display = '';
+        } else {
+          links.style.display = 'flex';
+          links.style.flexDirection = 'column';
+          links.style.position = 'absolute';
+          links.style.top = '72px';
+          links.style.right = '2rem';
+          links.style.background = 'rgba(10,10,15,0.95)';
+          links.style.backdropFilter = 'blur(20px)';
+          links.style.padding = '1rem';
+          links.style.borderRadius = 'var(--radius-md)';
+          links.style.border = '1px solid var(--border-subtle)';
+          links.style.gap = '1rem';
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>

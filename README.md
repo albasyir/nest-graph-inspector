@@ -1,4 +1,6 @@
-# Nest Graph Inspector
+<p align="center">
+  <a href="https://github.com/albasyir/nest-graph-inspector" target="_blank"><img src="docs/logo.png" width="120" alt="Nest Logo" /></a>
+</p>
 
 Nest Graph Inspector is a NestJS module to generate a **runtime dependency graph** in **Markdown + Mermaid** or **JSON** format from the Nest application container.
 
