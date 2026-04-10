@@ -1,0 +1,13 @@
+packages:
+  - library
+  - site
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - '@tailwindcss/oxide'
+  - esbuild
+  - unrs-resolver
+  - vue-demi
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - better-sqlite3
+  - sharp

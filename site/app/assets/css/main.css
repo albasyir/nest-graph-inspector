@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@source "../../../content/**/*";
+
+@theme static {
+  --container-8xl: 90rem;
+  --font-sans: 'Public Sans', sans-serif;
+
+  --color-red-50: #FFF1F2;
+  --color-red-100: #FFE4E6;
+  --color-red-200: #FECDD3;
+  --color-red-300: #FDA4AF;
+  --color-red-400: #FB7185;
+  --color-red-500: #EA3F49;
+  --color-red-600: #E11D48;
+  --color-red-700: #BE123C;
+  --color-red-800: #9F1239;
+  --color-red-900: #881337;
+  --color-red-950: #4C0519;
+}
+
+:root {
+  --ui-container: var(--container-8xl);
+}
