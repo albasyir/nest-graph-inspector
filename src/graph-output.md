@@ -24,8 +24,8 @@ graph TD
   end
   module_group_UserModule --> module_group_AppModule
   module_group_UserDeprecatedModule --> module_group_AppModule
-  provider_NestJSCoreModule_ModuleRef --> provider_AppModule_AppService
   provider_UserDeprecatedModule_CreateUserUsecase --> provider_AppModule_AppService
+  provider_NestJSCoreModule_ModuleRef --> provider_AppModule_AppService
   provider_AppModule_AppService --> controller_AppModule_AppController
   provider_NestJSCoreModule_ModuleRef --> controller_AppModule_AppController
   provider_UserModule_CreateUserUsecase --> controller_AppModule_AppController
@@ -55,8 +55,8 @@ graph TD
 
 ### Providers
 - AppService
-  - depends on: NestJSCoreModule:ModuleRef
   - depends on: UserDeprecatedModule:CreateUserUsecase
+  - depends on: NestJSCoreModule:ModuleRef
 
 ### Controllers
 - AppController

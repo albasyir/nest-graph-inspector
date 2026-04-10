@@ -4,9 +4,10 @@ import { ModuleRef } from '@nestjs/core';
 
 @Injectable()
 export class AppService {
-  constructor(
-    private readonly moduleRef: ModuleRef,
+  @Inject(forwardRef(() => ModuleRef))
+  private readonly moduleRef: any;
 
+  constructor(
     @Inject(CreateUserUsecase)
     private readonly createUserUsecase: any,
   ) { }

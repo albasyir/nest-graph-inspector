@@ -12,8 +12,8 @@
         {
           "name": "AppService",
           "dependencies": [
-            "NestJSCoreModule:ModuleRef",
-            "UserDeprecatedModule:CreateUserUsecase"
+            "UserDeprecatedModule:CreateUserUsecase",
+            "NestJSCoreModule:ModuleRef"
           ]
         }
       ],
