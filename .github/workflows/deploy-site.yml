@@ -35,6 +35,7 @@ jobs:
         working-directory: site
         env:
           NITRO_PRESET: github-pages
+          NUXT_APP_BASE_URL: /nest-graph-inspector/
 
       - uses: actions/configure-pages@v5
 
