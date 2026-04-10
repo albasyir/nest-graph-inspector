@@ -12,7 +12,6 @@ import { UserDeprecatedModule } from './user-deprecated/user-deprecated.module';
      *
      */
     NestGraphInspectorModule.forRoot({
-      rootModule: AppModule,
       outputs: [
         { type: 'markdown', path: 'src/graph-output.md' },
         { type: 'json', path: 'src/graph-output.json' },

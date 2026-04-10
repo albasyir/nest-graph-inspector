@@ -37,7 +37,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   ];
 
   onModuleInit() {
-    const moduleMap = this.buildModuleMap(this.options.rootModule);
+    const rootModuleClass = this.options.rootModule;
+    const moduleMap = rootModuleClass
+      ? this.buildModuleMap(rootModuleClass)
+      : this.buildModuleMapFromAutoDetect();
 
     if (!this.options.outputs?.length) {
       return;
@@ -54,6 +57,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
   }
 
+  buildModuleMapFromAutoDetect(): ModuleMap {
+    const root = this.findRootModule();
+    return this.buildModuleMapFromRef(root);
+  }
+
   buildModuleMap(rootModuleClass: Type): ModuleMap {
     const root = [...this.modulesContainer.values()].find(
       (m) => m.metatype === rootModuleClass,
@@ -63,6 +71,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       throw new Error(`Root module not found: ${rootModuleClass.name}`);
     }
 
+    return this.buildModuleMapFromRef(root);
+  }
+
+  private buildModuleMapFromRef(root: any): ModuleMap {
     const reachable = this.collectReachableModules(root, new Set<string>());
     const modules: Record<string, Modules> = {};
 
@@ -93,6 +105,32 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       root: this.moduleName(root),
       modules,
     };
+  }
+
+  /**
+   * Auto-detect the root module by finding which module imports NestGraphInspectorModule.
+   */
+  private findRootModule(): any {
+    for (const moduleRef of this.modulesContainer.values()) {
+      const moduleName = this.moduleName(moduleRef);
+
+      if (
+        this.ignoreImport.includes(moduleName) ||
+        moduleName === 'InternalCoreModule'
+      ) {
+        continue;
+      }
+
+      for (const importedModule of moduleRef.imports.values()) {
+        if (importedModule.metatype === NestGraphInspectorModule) {
+          return moduleRef;
+        }
+      }
+    }
+
+    throw new Error(
+      'Could not auto-detect root module. No module imports NestGraphInspectorModule.',
+    );
   }
 
   private buildNestCoreModule(usedProviders: string[]): Modules {

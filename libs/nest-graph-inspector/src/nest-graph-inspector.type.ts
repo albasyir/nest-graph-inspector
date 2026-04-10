@@ -9,7 +9,7 @@ export interface NestGraphInspectorModuleOptions {
   /**
    * Which "Root" of module that need to be inspect
    */
-  rootModule: Type;
+  rootModule?: Type;
 
   /**
    * type definition of output
