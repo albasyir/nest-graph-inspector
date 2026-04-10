@@ -257,6 +257,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     const metatype = wrapper?.metatype;
     if (metatype && typeof metatype === 'function') {
+      // Constructor-injected dependencies (design:paramtypes)
       const paramTypes =
         Reflect.getMetadata('design:paramtypes', metatype) ?? [];
 
@@ -264,6 +265,20 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         const dependencyName = this.resolveDependencyName(paramType, moduleRef);
         if (dependencyName && dependencyName !== 'Object') {
           dependencies.add(dependencyName);
+        }
+      }
+
+      // Property-injected dependencies (@Inject() on class properties)
+      const propertyDeps: any[] =
+        Reflect.getMetadata('self:properties_metadata', metatype) ?? [];
+
+      for (const propertyDep of propertyDeps) {
+        const token = propertyDep?.type;
+        if (token) {
+          const dependencyName = this.resolveDependencyName(token, moduleRef);
+          if (dependencyName && dependencyName !== 'Object') {
+            dependencies.add(dependencyName);
+          }
         }
       }
     }
