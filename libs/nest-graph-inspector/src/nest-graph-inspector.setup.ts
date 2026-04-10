@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
+import { PARAMTYPES_METADATA, PROPERTY_DEPS_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
@@ -259,7 +260,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     if (metatype && typeof metatype === 'function') {
       // Constructor-injected dependencies (design:paramtypes)
       const paramTypes =
-        Reflect.getMetadata('design:paramtypes', metatype) ?? [];
+        Reflect.getMetadata(PARAMTYPES_METADATA, metatype) ?? [];
 
       for (const paramType of paramTypes) {
         const dependencyName = this.resolveDependencyName(paramType, moduleRef);
@@ -270,7 +271,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
       // Property-injected dependencies (@Inject() on class properties)
       const propertyDeps: any[] =
-        Reflect.getMetadata('self:properties_metadata', metatype) ?? [];
+        Reflect.getMetadata(PROPERTY_DEPS_METADATA, metatype) ?? [];
 
       for (const propertyDep of propertyDeps) {
         const token = propertyDep?.type;
