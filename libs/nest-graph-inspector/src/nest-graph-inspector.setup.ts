@@ -1,6 +1,4 @@
-import 'reflect-metadata';
 import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
-import { PARAMTYPES_METADATA, PROPERTY_DEPS_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
@@ -247,6 +245,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private extractDependencies(wrapper: any, moduleRef: any): string[] {
     const dependencies = new Set<string>();
 
+    // Factory providers (useFactory with inject array)
     if (Array.isArray(wrapper?.inject)) {
       for (const token of wrapper.inject) {
         const dependencyName = this.resolveDependencyName(token, moduleRef);
@@ -256,30 +255,31 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       }
     }
 
-    const metatype = wrapper?.metatype;
-    if (metatype && typeof metatype === 'function') {
-      // Constructor-injected dependencies (design:paramtypes)
-      const paramTypes =
-        Reflect.getMetadata(PARAMTYPES_METADATA, metatype) ?? [];
-
-      for (const paramType of paramTypes) {
-        const dependencyName = this.resolveDependencyName(paramType, moduleRef);
+    // Constructor-injected dependencies (resolved by NestJS with @Inject() overrides)
+    const ctorDeps: any[] = wrapper?.getCtorMetadata?.() ?? [];
+    for (const depWrapper of ctorDeps) {
+      if (depWrapper) {
+        const dependencyName = this.resolveDependencyName(
+          depWrapper.token ?? depWrapper.name,
+          moduleRef,
+        );
         if (dependencyName && dependencyName !== 'Object') {
           dependencies.add(dependencyName);
         }
       }
+    }
 
-      // Property-injected dependencies (@Inject() on class properties)
-      const propertyDeps: any[] =
-        Reflect.getMetadata(PROPERTY_DEPS_METADATA, metatype) ?? [];
-
-      for (const propertyDep of propertyDeps) {
-        const token = propertyDep?.type;
-        if (token) {
-          const dependencyName = this.resolveDependencyName(token, moduleRef);
-          if (dependencyName && dependencyName !== 'Object') {
-            dependencies.add(dependencyName);
-          }
+    // Property-injected dependencies (@Inject() on class properties)
+    const propertyDeps: any[] = wrapper?.getPropertiesMetadata?.() ?? [];
+    for (const propertyDep of propertyDeps) {
+      const depWrapper = propertyDep?.wrapper;
+      if (depWrapper) {
+        const dependencyName = this.resolveDependencyName(
+          depWrapper.token ?? depWrapper.name,
+          moduleRef,
+        );
+        if (dependencyName && dependencyName !== 'Object') {
+          dependencies.add(dependencyName);
         }
       }
     }

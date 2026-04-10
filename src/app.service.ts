@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { CreateUserUsecase } from './user-deprecated/usecases/create-user.usecase';
 import { ModuleRef } from '@nestjs/core';
 
@@ -6,8 +6,10 @@ import { ModuleRef } from '@nestjs/core';
 export class AppService {
   constructor(
     private readonly moduleRef: ModuleRef,
-    private readonly createUserUsecase: CreateUserUsecase,
-  ) {}
+
+    @Inject(CreateUserUsecase)
+    private readonly createUserUsecase: any,
+  ) { }
 
   getHello(): string {
     return 'Hello World!';
