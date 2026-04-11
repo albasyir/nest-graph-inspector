@@ -20,7 +20,7 @@ The generated graph shows:
 - Dependencies between providers/controllers
 - Internal dependencies, external module dependencies, and selected NestJS core dependencies
 
-> **Note:** The graph is generated from the **runtime Nest container**, not from static source parsing. What you see is what's actually running! You can try the interactive viewer directly at our [Example Preview](http://localhost:3000/view?preview=true).
+> **Note:** The graph is generated from the **runtime Nest container**, not from static source parsing. What you see is what's actually running! You can try the interactive viewer directly at our [Example Preview](https://albasyir.github.io/nest-graph-inspector/view?preview=true).
 
 ## Why Nest Graph Inspector?
 
