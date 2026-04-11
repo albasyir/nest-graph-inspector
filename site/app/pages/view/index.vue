@@ -27,7 +27,6 @@ const isValidUrl = computed(() => {
 })
 
 function loadExample() {
-  console.log('load example');
   const config = useRuntimeConfig()
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
@@ -65,19 +64,10 @@ function onSubmit() {
   navigateTo(`/view/${encoded}`)
 }
 
-onMounted(() => {
-  console.log('Nuxt router query:', route.query);
-  
-  // Use native browser URL parsing because Nuxt's route.query is delayed on Static sites (SSG)
-  const urlParams = new URLSearchParams(window.location.search)
-  if (urlParams.get('preview') === 'true' || route.query.preview === 'true') {
-    
-    
-    // Slight delay is crucial on SSG before programmatic navigation
-    setTimeout(() => {
-      loadExample()
-      onSubmit()
-    }, 1000)
+onMounted(async () => {
+  if (route.query.preview == 'true') {
+    loadExample()
+    onSubmit()
   }
 })
 </script>
