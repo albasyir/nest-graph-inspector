@@ -11,11 +11,23 @@ const { header } = useAppConfig()
     :ui="{ center: 'flex-1' }"
     :to="header?.to || '/'"
   >
-    <UContentSearchButton
-      v-if="header?.search"
-      :collapsed="false"
-      class="w-full"
-    />
+    <div class="flex items-center gap-3 w-full max-w-sm lg:max-w-md">
+      <UButton
+        to="/view"
+        icon="i-lucide-network"
+        label="View Graph"
+        color="neutral"
+        variant="subtle"
+        size="md"
+        class="flex-1 justify-center"
+      />
+      
+      <UContentSearchButton
+        v-if="header?.search"
+        :collapsed="false"
+        class="flex-1"
+      />
+    </div>
 
     <template
       v-if="header?.logo?.dark || header?.logo?.light || header?.title"

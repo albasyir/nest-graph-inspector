@@ -5,6 +5,7 @@ useSeoMeta({
   description: 'View your NestJS dependency graph in real-time by providing the inspector endpoint URL.'
 })
 
+const posthog = usePostHog()
 const urlInput = ref('')
 const errorMessage = ref('')
 
@@ -22,6 +23,9 @@ function onSubmit() {
   }
 
   errorMessage.value = ''
+  posthog?.capture('graph_url_submitted', {
+    url: urlInput.value.trim()
+  })
   const encoded = btoa(urlInput.value.trim())
   navigateTo(`/view/${encoded}`)
 }

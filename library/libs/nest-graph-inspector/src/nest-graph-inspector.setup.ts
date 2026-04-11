@@ -10,6 +10,7 @@ import { ModuleMap } from './types/module-map.type';
 import { HttpOutputDriver } from './drivers/http-output.driver';
 import { FileOutputDriver } from './drivers/file-output.driver';
 import { JsonOutputDriver } from './drivers/json-output.driver';
+import { ViewerOutputDriver } from './drivers/viewer-output.driver';
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
@@ -20,6 +21,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     private readonly httpOutputAdapter: HttpOutputDriver,
     private readonly fileOutputAdapter: FileOutputDriver,
     private readonly jsonOutputAdapter: JsonOutputDriver,
+    private readonly viewerOutputAdapter: ViewerOutputDriver,
   ) { }
 
   private readonly ignoreProvider = ['ModuleRef', 'ApplicationConfig'];
@@ -53,6 +55,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         this.jsonOutputAdapter.execute(moduleMap, output);
       } else if (output.type === 'http') {
         this.httpOutputAdapter.execute(moduleMap, output);
+      } else if (output.type === 'viewer') {
+        this.viewerOutputAdapter.execute(moduleMap, output);
       }
     }
   }

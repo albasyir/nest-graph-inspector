@@ -10,6 +10,8 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
+    "@posthog/nuxt": "^1.6.3",
+    "posthog-node": "^5.29.2",
     "@iconify-json/lucide": "^1.2.101",
     "@iconify-json/simple-icons": "^1.2.77",
     "@iconify-json/vscode-icons": "^1.2.45",

@@ -13,7 +13,8 @@ import { UserModule } from './user/user.module';
       outputs: [
         { type: 'markdown', path: 'src/graph-output.md' },
         { type: 'json', path: 'src/graph-output.json' },
-        { type: 'http', path: '/__graph-inspector' },
+        { type: 'http', path: '/test' },
+        { type: 'viewer', origin: 'http://localhost:9999' }
       ],
     }),
 

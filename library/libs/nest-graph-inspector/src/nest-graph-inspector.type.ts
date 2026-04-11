@@ -3,7 +3,8 @@ import { Type } from '@nestjs/common';
 export type NestGraphInspectorOutput =
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
-  | { type: 'http'; path?: string };
+  | { type: 'http'; path?: string }
+  | { type: 'viewer'; origin: string; path?: string };
 
 export interface NestGraphInspectorModuleOptions {
   /**

@@ -35,6 +35,10 @@ export default defineAppConfig({
     credits: `Nest Graph Inspector \u00B7 MIT License \u00B7 \u00A9 ${new Date().getFullYear()}`,
     colorMode: false,
     links: [{
+      'icon': 'i-lucide-network',
+      'to': '/view',
+      'aria-label': 'View Graph'
+    }, {
       'icon': 'i-simple-icons-github',
       'to': 'https://github.com/albasyir/nest-graph-inspector',
       'target': '_blank',

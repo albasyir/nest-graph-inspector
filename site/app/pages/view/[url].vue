@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const route = useRoute()
+const posthog = usePostHog()
 
 const urlBase64 = computed(() => {
   const param = route.params.url
@@ -28,10 +29,33 @@ if (!decodedUrl.value) {
 
 const { data: graphData, status, error, refresh } = await useFetch<Record<string, unknown>>(() => decodedUrl.value, {
   key: `graph-${urlBase64.value}`,
-  server: false
+  server: false,
+  onResponse({ response }) {
+    if (response.ok) {
+      posthog?.capture('graph_loaded', {
+        url: decodedUrl.value
+      })
+    }
+  },
+  onResponseError({ error: fetchError }) {
+    posthog?.capture('graph_load_failed', {
+      url: decodedUrl.value,
+      error_message: fetchError?.message || 'Unknown error'
+    })
+  }
 })
 
+function handleRefresh() {
+  posthog?.capture('graph_refreshed', {
+    url: decodedUrl.value
+  })
+  refresh()
+}
+
 function openNewUrl() {
+  posthog?.capture('graph_new_url_requested', {
+    url: decodedUrl.value
+  })
   navigateTo('/view')
 }
 </script>
@@ -56,7 +80,7 @@ function openNewUrl() {
           variant="outline"
           size="sm"
           :loading="status === 'pending'"
-          @click="refresh()"
+          @click="handleRefresh()"
         />
         <UButton
           icon="i-lucide-link"
@@ -112,7 +136,7 @@ function openNewUrl() {
             icon="i-lucide-refresh-cw"
             label="Retry"
             variant="outline"
-            @click="refresh()"
+            @click="handleRefresh()"
           />
           <UButton
             icon="i-lucide-link"
@@ -152,7 +176,7 @@ function openNewUrl() {
           label="Retry"
           variant="outline"
           class="mt-2"
-          @click="refresh()"
+          @click="handleRefresh()"
         />
       </div>
     </div>

@@ -29,6 +29,17 @@ Generate **runtime dependency graphs** in Markdown + Mermaid or JSON format dire
 
   :::u-button
   ---
+  to: /view
+  color: neutral
+  variant: outline
+  size: xl
+  icon: i-lucide-network
+  ---
+  View Graph
+  :::
+
+  :::u-button
+  ---
   icon: i-simple-icons-github
   color: neutral
   variant: outline
@@ -201,7 +212,11 @@ Real problems this solves for your team.
     - label: Get Started
       to: '/getting-started'
       trailingIcon: i-lucide-arrow-right
-    - label: View on GitHub
+    - label: View Graph
+      to: '/view'
+      icon: i-lucide-network
+      variant: subtle
+    - label: GitHub
       to: 'https://github.com/albasyir/nest-graph-inspector'
       target: _blank
       variant: subtle
