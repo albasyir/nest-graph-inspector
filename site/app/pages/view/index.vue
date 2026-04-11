@@ -66,9 +66,18 @@ function onSubmit() {
 }
 
 onMounted(() => {
-  console.log(route.query)
-  if (route.query.preview) {
-    loadExample()
+  console.log('Nuxt router query:', route.query);
+  
+  // Use native browser URL parsing because Nuxt's route.query is delayed on Static sites (SSG)
+  const urlParams = new URLSearchParams(window.location.search)
+  if (urlParams.get('preview') === 'true' || route.query.preview === 'true') {
+    
+    
+    // Slight delay is crucial on SSG before programmatic navigation
+    setTimeout(() => {
+      loadExample()
+      onSubmit()
+    }, 1000)
   }
 })
 </script>
