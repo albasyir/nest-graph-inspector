@@ -27,12 +27,11 @@ const isValidUrl = computed(() => {
 })
 
 function loadExample() {
-  if (typeof window !== 'undefined') {
-    const config = useRuntimeConfig()
-    let base = config.app.baseURL || '/'
-    if (!base.endsWith('/')) base += '/'
-    urlInput.value = `${window.location.origin}${base}graph-output.json`
-  }
+  console.log('load example');
+  const config = useRuntimeConfig()
+  let base = config.app.baseURL || '/'
+  if (!base.endsWith('/')) base += '/'
+  urlInput.value = `${window.location.origin}${base}graph-output.json`
 }
 
 function onSubmit() {
