@@ -62,14 +62,13 @@ function onSubmit() {
   posthog?.capture('graph_url_submitted', {
     url: finalUrl
   })
-  const encoded = btoa(finalUrl)
+  const encoded = encodeURIComponent(btoa(finalUrl))
   navigateTo(`/view/${encoded}`)
 }
 
 onMounted(() => {
   if (route.query.preview === 'true') {
     loadExample()
-    onSubmit()
   }
 })
 </script>
