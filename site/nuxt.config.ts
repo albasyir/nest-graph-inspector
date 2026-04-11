@@ -90,7 +90,7 @@ export default defineNuxtConfig({
   llms: {
     domain: 'https://nest-graph-inspector.dev/',
     title: 'Nest Graph Inspector',
-    description: 'A NestJS module to generate runtime dependency graphs in Markdown + Mermaid or JSON format.',
+    description: 'A NestJS module to generate runtime dependency graphs to view dynamically in an Interactive Web Viewer or via JSON format.',
     full: {
       title: 'Nest Graph Inspector - Full Documentation',
       description: 'Complete documentation for Nest Graph Inspector, a NestJS module for runtime dependency graph generation.'

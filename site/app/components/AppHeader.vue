@@ -15,7 +15,7 @@ const { header } = useAppConfig()
       <UButton
         to="/view"
         icon="i-lucide-network"
-        label="View Graph"
+        label="View Graph and Inspect"
         color="neutral"
         variant="subtle"
         size="md"
@@ -33,17 +33,31 @@ const { header } = useAppConfig()
       v-if="header?.logo?.dark || header?.logo?.light || header?.title"
       #title
     >
-      <UColorModeImage
-        v-if="header?.logo?.dark || header?.logo?.light"
-        :light="header?.logo?.light!"
-        :dark="header?.logo?.dark!"
-        :alt="header?.logo?.alt"
-        class="h-6 w-auto shrink-0"
-      />
+      <div class="flex items-center gap-2">
+        <template v-if="header?.logo?.light && header?.logo?.dark">
+          <img
+            :src="header.logo.light"
+            :alt="header?.logo?.alt"
+            class="h-6 w-auto shrink-0 dark:hidden"
+          >
+          <img
+            :src="header.logo.dark"
+            :alt="header?.logo?.alt"
+            class="h-6 w-auto shrink-0 hidden dark:block"
+          >
+        </template>
+        <template v-else-if="header?.logo?.light || header?.logo?.dark">
+          <img
+            :src="header?.logo?.light || header?.logo?.dark"
+            :alt="header?.logo?.alt"
+            class="h-6 w-auto shrink-0"
+          >
+        </template>
 
-      <span v-else-if="header?.title">
-        {{ header.title }}
-      </span>
+        <span v-if="header?.title">
+          {{ header.title }}
+        </span>
+      </div>
     </template>
 
     <template

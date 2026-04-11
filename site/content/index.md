@@ -1,7 +1,7 @@
 ---
 seo:
   title: Nest Graph Inspector - Runtime Dependency Graph for NestJS
-  description: Generate runtime dependency graphs in Markdown + Mermaid or JSON format from your NestJS application container.
+  description: Generate runtime dependency graphs and explore them via an Interactive Web Viewer or JSON format from your NestJS application container.
 ---
 
 ::u-page-hero{class="dark:bg-gradient-to-b from-neutral-900 to-neutral-950"}
@@ -15,7 +15,7 @@ orientation: horizontal
 Visualize Your [NestJS]{.text-primary} Architecture.
 
 #description
-Generate **runtime dependency graphs** in Markdown + Mermaid or JSON format directly from the Nest application container. See modules, providers, controllers, and every dependency at a glance.
+Generate **runtime dependency graphs** directly from the Nest application container. Explore them dynamically in an **Interactive Web Viewer** or export to JSON format. See modules, providers, controllers, and every dependency at a glance.
 
 #links
   :::u-button
@@ -35,7 +35,7 @@ Generate **runtime dependency graphs** in Markdown + Mermaid or JSON format dire
   size: xl
   icon: i-lucide-network
   ---
-  View Graph
+  View Graph and Inspect
   :::
 
   :::u-button
@@ -56,13 +56,13 @@ Generate **runtime dependency graphs** in Markdown + Mermaid or JSON format dire
   code: |
     import { Module } from '@nestjs/common';
     import { NestGraphInspector } from 'nest-graph-inspector';
-    import { AppModule } from './app.module';
 
     @Module({
       imports: [
         NestGraphInspector.forRoot({
-          rootModule: AppModule,
-          output: { file: 'graph.md' },
+          outputs: [
+            { type: 'viewer', origin: 'http://localhost:9999' }
+          ],
         }),
       ],
     })
@@ -73,13 +73,13 @@ Generate **runtime dependency graphs** in Markdown + Mermaid or JSON format dire
   ```ts [root.module.ts]
   import { Module } from '@nestjs/common';
   import { NestGraphInspector } from 'nest-graph-inspector';
-  import { AppModule } from './app.module';
 
   @Module({
     imports: [
       NestGraphInspector.forRoot({
-        rootModule: AppModule,
-        output: { file: 'graph.md' },
+        outputs: [
+          { type: 'viewer', origin: 'http://localhost:9999' }
+        ],
       }),
     ],
   })
@@ -120,13 +120,13 @@ Understand your NestJS architecture without digging through code. The graph is g
 
   :::u-page-feature
   ---
-  icon: i-lucide-file-code
+  icon: i-lucide-layout-dashboard
   ---
   #title
-  Markdown + Mermaid Output
+  Interactive Web Viewer
 
   #description
-  Generates beautiful Mermaid diagrams embedded in Markdown files. View them directly on GitHub, VSCode, or any Mermaid-compatible viewer.
+  Explore your dependency graph dynamically in the browser. Zoom, pan, and inspect nodes to understand your architecture with ease.
   :::
 
   :::u-page-feature
@@ -212,7 +212,7 @@ Real problems this solves for your team.
     - label: Get Started
       to: '/getting-started'
       trailingIcon: i-lucide-arrow-right
-    - label: View Graph
+    - label: View Graph and Inspect
       to: '/view'
       icon: i-lucide-network
       variant: subtle

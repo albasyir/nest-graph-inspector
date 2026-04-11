@@ -1,147 +1,97 @@
 <p align="center">
-  <a href="https://github.com/albasyir/nest-graph-inspector" target="_blank"><img src="docs/logo.png" width="120" alt="Nest Logo" /></a>
+  <a href="https://albasyir.github.io/nest-graph-inspector/" target="_blank"><img src="https://albasyir.github.io/nest-graph-inspector/logo.png" width="120" alt="Nest Graph Inspector Logo" /></a>
 </p>
 
-Nest Graph Inspector is a NestJS module to generate a **runtime dependency graph** in **Markdown + Mermaid** or **JSON** format from the Nest application container.
+  <p align="center">A <a href="https://nestjs.com" target="_blank">NestJS</a> module to generate a <strong>runtime dependency graph</strong> from the Nest application container.</p>
+    <p align="center">
+<a href="https://www.npmjs.com/package/nest-graph-inspector" target="_blank"><img src="https://img.shields.io/npm/v/nest-graph-inspector.svg" alt="NPM Version" /></a>
+<a href="https://github.com/albasyir/nest-graph-inspector/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/npm/l/nest-graph-inspector.svg" alt="Package License" /></a>
+<a href="https://github.com/albasyir/nest-graph-inspector" target="_blank"><img src="https://img.shields.io/github/stars/albasyir/nest-graph-inspector?style=social" alt="Github Stars" /></a>
+</p>
+
+## Description
+
+**Nest Graph Inspector** is a NestJS module that generates a **runtime dependency graph** directly from the Nest application container. Explore them dynamically in our **Interactive Web Viewer** or export to **JSON** format. See modules, providers, controllers, and every dependency at a glance.
 
 The generated graph shows:
+- Loaded modules from the root module
+- Import relationships between modules
+- Providers and controllers in each module
+- Dependencies between providers/controllers
+- Internal dependencies, external module dependencies, and selected NestJS core dependencies
 
-- loaded modules from the root module
-- import relationships between modules
-- providers and controllers in each module
-- dependencies between providers/controllers
-- internal dependencies, external module dependencies, and selected NestJS core dependencies
+> **Note:** The graph is generated from the **runtime Nest container**, not from static source parsing. What you see is what's actually running! You can try the interactive viewer directly at our [Example Preview](http://localhost:3000/view?preview=true).
 
-> [!NOTE]
-> Result of markdown can be seen on https://github.com/albasyir/nest-graph-inspector/blob/main/src/graph-output.md
+## Why Nest Graph Inspector?
+
+Understand your NestJS architecture without digging through code. 
+
+- **Module Dependency Graph**: Automatically maps import relationships between all loaded modules from your root module.
+- **Provider & Controller Mapping**: Lists every provider and controller in each module alongside their dependency chains.
+- **Interactive Web Viewer**: Explore your dependency graph dynamically in the browser. Zoom, pan, and inspect nodes.
+- **JSON Output**: Get structured JSON output for programmatic analysis or integration tightly with tooling.
+- **Runtime Introspection**: Built on the actual Nest runtime container — what you see is what's really running.
+- **Drop-in Module**: Just import the module with `forRoot` or `forRootAsync` and you're done. No decorators to add, no code to change.
 
 ## Use Cases
 
-important to see what's actual problem that can be solved with this, we think you have them too!
+Important to see what's actual problem that can be solved with this, we think you have them too!
 
-### Impact Analysis
-
-- narrowing regression test scope to the most relevant modules/providers
-- reducing unnecessary testing for unrelated areas
-- understanding the likely blast radius before making a change
-
-### Test Prioritization
-
-- selecting critical providers/use cases for fast validation
-- understanding dependency chains between providers/controllers
-- prioritizing which flows should be checked first after a change
-
-### Architecture Visibility
-
-- onboarding engineers faster
-- spotting highly coupled modules/providers
-- making refactors safer by visualizing relationships before changes
+- **Impact Analysis**: Narrow regression test scope to relevant modules, understand blast radius before making a change, and reduce unnecessary testing for unrelated areas.
+- **Test Prioritization**: Select critical providers for fast validation, understand dependency chains between providers/controllers, and prioritize which flows to check first.
+- **Architecture Visibility**: Onboard engineers faster, spot highly coupled modules/providers, and make refactors safer by visualizing relationships before changes.
 
 ## Installation
 
 ```bash
-npm install nest-graph-inspector
+$ npm install nest-graph-inspector
 ```
 
-## Version Supports
+> **Version Support:** Official support for Node.js >= 18 and **NestJS 10-11**.
+> 
+> Earlier versions may still work but are not officially supported. You can force install with `npm install nest-graph-inspector --force`. 
 
-Official support: NestJS 10-11.
+## Getting started
 
-> [!NOTE]
-> Earlier versions may still work, but are not officially supported. 
-> If you still want to install it with an unsupported NestJS version, you can force install it with:
->
-> ```bash
-> npm install nest-graph-inspector --force
-> ```
->
-> When you test it and work prefectly, raise on issue so i will update support coverage too
-
-## Usage
-
-### `forRoot`
-
-Static config.
+Enable the inspector in your main `AppModule`. We recommend the `viewer` output so you can interactively explore your graph directly from your browser.
 
 ```ts
 import { Module } from '@nestjs/common';
-import { AppModule } from './app.module';
 import { NestGraphInspector } from 'nest-graph-inspector';
 
 @Module({
   imports: [
     NestGraphInspector.forRoot({
-      rootModule: AppModule,
-      output: {
-        file: 'test.md',
-      },
+      outputs: [
+        { 
+          type: 'viewer', 
+          origin: 'http://localhost:9999' 
+        }
+      ]
     }),
   ],
 })
 export class RootModule {}
 ```
 
-### `forRootAsync`
-
-Factory-based config.
+If your configuration depends on external services or variables, you can use `forRootAsync` instead.
 
 ```ts
 NestGraphInspector.forRootAsync({
   useFactory() {
     return {
-      rootModule: AppModule,
-      output: {
-        file: 'test.md',
-      },
+      outputs: [
+        { type: 'viewer', origin: 'http://localhost:9999' }
+      ]
     };
   },
-}),
+})
 ```
 
-## Config
+Once configured, simply start your NestJS application as usual (`npm run start`). **The inspector will automatically print an accessible link in your application's console.** You can click that link directly, or manually head over to the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page and paste your NestJS application's origin URL to see your graph.
 
-### `rootModule`
+## Stay in touch
 
-Graph entry point.
-
-```ts
-rootModule: AppModule
-```
-
-### `output.file`
-
-Output markdown file name.
-
-```ts
-output: {
-  file: 'test.md'
-}
-```
-
-## Output
-
-all output will contains
-
-- module list
-- imports module
-- exports provider
-- providers with dependencies
-- controllers with dependencies
-
-when markdown file as output, it will show depedencies graph
-
-> markdown use mermaid, open markdown in place that support mermaid, 
-> in VSC you can install plugin
-
-## Flow
-
-1. start from the configured root module  
-2. inspect the Nest runtime container  
-3. collect module and provider metadata  
-4. resolve dependencies  
-5. generate output
-
-## Notes
-
-- the graph is generated from the **runtime Nest container**, not from static source parsing
-- selected NestJS core dependencies can be grouped under **NestJS Core** Module as Global Module
+- Abdul Aziz Al Basyir - [https://github.com/albasyir](https://github.com/albasyir)
+- Library Homepage - [https://albasyir.github.io/nest-graph-inspector/](https://albasyir.github.io/nest-graph-inspector/)
+- GitHub - [nest-graph-inspector](https://github.com/albasyir/nest-graph-inspector)

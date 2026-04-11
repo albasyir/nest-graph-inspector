@@ -32,13 +32,13 @@ const { data: graphData, status, error, refresh } = await useFetch<Record<string
   server: false,
   onResponse({ response }) {
     if (response.ok) {
-      posthog?.capture('graph_loaded', {
+      posthog?.capture('Graph Loaded', {
         url: decodedUrl.value
       })
     }
   },
   onResponseError({ error: fetchError }) {
-    posthog?.capture('graph_load_failed', {
+    posthog?.capture('Graph Load Failed', {
       url: decodedUrl.value,
       error_message: fetchError?.message || 'Unknown error'
     })
@@ -46,14 +46,14 @@ const { data: graphData, status, error, refresh } = await useFetch<Record<string
 })
 
 function handleRefresh() {
-  posthog?.capture('graph_refreshed', {
+  posthog?.capture('Graph Refreshed', {
     url: decodedUrl.value
   })
   refresh()
 }
 
 function openNewUrl() {
-  posthog?.capture('graph_new_url_requested', {
+  posthog?.capture('Graph New URL Requested', {
     url: decodedUrl.value
   })
   navigateTo('/view')
@@ -66,7 +66,7 @@ function openNewUrl() {
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
       <div class="space-y-1 min-w-0">
         <h1 class="text-2xl font-bold tracking-tight">
-          Graph Viewer
+          Nest Graph Inspector
         </h1>
         <p class="text-sm text-muted font-mono truncate max-w-lg">
           {{ decodedUrl }}

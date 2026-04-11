@@ -6,90 +6,156 @@ useSeoMeta({
 })
 
 const posthog = usePostHog()
+const route = useRoute()
 const urlInput = ref('')
 const errorMessage = ref('')
 
+const isValidUrl = computed(() => {
+  let input = urlInput.value.trim()
+  if (!input) return false
+  
+  if (!input.startsWith('http://') && !input.startsWith('https://')) {
+    input = 'http://' + input
+  }
+
+  try {
+    new URL(input)
+    return true
+  } catch {
+    return false
+  }
+})
+
+function loadExample() {
+  if (typeof window !== 'undefined') {
+    urlInput.value = `${window.location.origin}/graph-output.json`
+  }
+}
+
 function onSubmit() {
-  if (!urlInput.value.trim()) {
+  let input = urlInput.value.trim()
+  if (!input) {
     errorMessage.value = 'Please enter a valid URL'
     return
   }
 
+  if (!input.startsWith('http://') && !input.startsWith('https://')) {
+    input = 'http://' + input
+  }
+
+  let finalUrl = input
   try {
-    new URL(urlInput.value.trim())
+    const url = new URL(input)
+    if (url.pathname === '/' || !url.pathname) {
+      url.pathname = '/__graph-inspector'
+    }
+    finalUrl = url.toString()
   } catch {
-    errorMessage.value = 'Please enter a valid URL (e.g. http://localhost:3000/__graph-inspector)'
+    errorMessage.value = 'Please enter a valid URL (e.g. localhost:3000)'
     return
   }
 
   errorMessage.value = ''
   posthog?.capture('graph_url_submitted', {
-    url: urlInput.value.trim()
+    url: finalUrl
   })
-  const encoded = btoa(urlInput.value.trim())
+  const encoded = btoa(finalUrl)
   navigateTo(`/view/${encoded}`)
 }
+
+onMounted(() => {
+  if (route.query.preview === 'true') {
+    loadExample()
+    onSubmit()
+  }
+})
 </script>
 
 <template>
-  <UContainer class="py-12">
-    <div class="flex flex-col items-center justify-center min-h-[60vh] gap-8">
+  <UContainer class="py-4 flex items-center justify-center min-h-[calc(100vh-140px)]">
+    <div class="w-full max-w-2xl space-y-6">
+      
       <!-- Hero Section -->
-      <div class="text-center space-y-4">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-2">
-          <UIcon
-            name="i-lucide-scan-search"
-            class="w-8 h-8 text-primary"
-          />
-        </div>
+      <div class="text-center space-y-2">
+        <UIcon name="i-lucide-network" class="w-10 h-10 text-primary mx-auto opacity-80" />
         <h1 class="text-3xl font-bold tracking-tight">
           Graph Viewer
         </h1>
-        <p class="text-muted text-lg max-w-md">
+        <p class="text-muted text-base max-w-md mx-auto">
           Visualize your NestJS dependency graph by providing the inspector endpoint URL.
         </p>
       </div>
 
-      <!-- URL Input Card -->
-      <div class="w-full max-w-lg">
-        <UCard>
-          <form
-            class="space-y-4"
-            @submit.prevent="onSubmit"
-          >
-            <UFormField
-              label="Inspector Endpoint URL"
-              :error="errorMessage || undefined"
+      <!-- Main Card -->
+      <form class="w-full" @submit.prevent="onSubmit">
+        <UCard class="w-full" :ui="{ body: { padding: 'p-4 sm:p-5' }, footer: { padding: 'p-4 sm:p-5' } }">
+          <div class="space-y-5">
+            <!-- Instructions Alert -->
+            <UAlert
+              icon="i-lucide-info"
+              title="Prerequisite"
+              color="neutral"
+              variant="subtle"
             >
+               <template #description>
+                 Configure the <code class="text-xs bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded font-mono mx-1">http</code> output in your NestJS app to expose the graph endpoint.
+               </template>
+            </UAlert>
+
+            <!-- URL Input Form Field -->
+            <UFormField
+              label="NestJS Origin"
+              :error="errorMessage || undefined"
+              class="w-full"
+            >
+              <template #hint>
+                <UButton
+                  variant="link"
+                  color="primary"
+                  class="p-0 h-auto font-medium"
+                  @click="loadExample"
+                >
+                  Load Example
+                </UButton>
+              </template>
+              <template #description>
+                Your running application URL (e.g., localhost:3000)
+              </template>
               <UInput
                 v-model="urlInput"
-                placeholder="http://localhost:3000/__graph-inspector"
+                placeholder="http://localhost:3000"
                 icon="i-lucide-link"
-                size="lg"
-                class="w-full"
+                size="xl"
+                class="w-full font-mono text-lg"
                 autofocus
               />
             </UFormField>
+          </div>
 
-            <UButton
-              type="submit"
-              label="View Graph"
-              icon="i-lucide-arrow-right"
-              trailing
-              block
-              size="lg"
-            />
-          </form>
+          <!-- Card Footer for Call to Actions -->
+          <template #footer>
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <UButton
+                to="/getting-started/installation"
+                label="Installation Guidelines"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-book-open"
+                class="w-full sm:w-auto justify-center"
+              />
+              <UButton
+                type="submit"
+                label="Inspect Graph"
+                icon="i-lucide-search"
+                trailing
+                size="lg"
+                class="w-full sm:w-auto justify-center"
+                :disabled="!isValidUrl"
+              />
+            </div>
+          </template>
         </UCard>
-
-        <p class="text-sm text-muted text-center mt-4">
-          Configure the
-          <code class="text-xs bg-elevated px-1.5 py-0.5 rounded">http</code>
-          output in your NestJS app to expose the endpoint.
-        </p>
-      </div>
+      </form>
     </div>
-
-
   </UContainer>
 </template>

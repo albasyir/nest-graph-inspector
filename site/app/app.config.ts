@@ -16,6 +16,11 @@ export default defineAppConfig({
   },
   header: {
     title: 'Nest Graph Inspector',
+    logo: {
+      light: '/logo.png',
+      dark: '/logo.png',
+      alt: 'Nest Graph Inspector Logo'
+    },
     to: '/',
     search: true,
     colorMode: true,
@@ -37,7 +42,7 @@ export default defineAppConfig({
     links: [{
       'icon': 'i-lucide-network',
       'to': '/view',
-      'aria-label': 'View Graph'
+      'aria-label': 'View Graph and Inspect'
     }, {
       'icon': 'i-simple-icons-github',
       'to': 'https://github.com/albasyir/nest-graph-inspector',

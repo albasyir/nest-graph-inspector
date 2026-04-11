@@ -22,7 +22,7 @@ export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
 
     await this.httpOutputDriver.execute(moduleMap, { type: 'http', path });
 
-    const base64Origin = Buffer.from(config.origin + path).toString('base64');
+    const base64Origin = Buffer.from(config.origin + path).toString('base64url');
 
     const viewerLink = `${this.viewerBaseUrl}/view/${base64Origin}`;
 
