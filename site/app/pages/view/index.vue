@@ -66,7 +66,8 @@ function onSubmit() {
 }
 
 onMounted(() => {
-  if (route.query.preview === 'true') {
+  console.log(route.query)
+  if (route.query.preview) {
     loadExample()
   }
 })
