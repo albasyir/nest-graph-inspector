@@ -17,6 +17,7 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
     const path = config.path.startsWith('/') ? config.path : `/${config.path}`;
 
     httpAdapter.get(path, (_req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
       httpAdapter.reply(res, moduleMap, 200);
     });
 
