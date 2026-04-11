@@ -28,7 +28,10 @@ const isValidUrl = computed(() => {
 
 function loadExample() {
   if (typeof window !== 'undefined') {
-    urlInput.value = `${window.location.origin}/graph-output.json`
+    const config = useRuntimeConfig()
+    let base = config.app.baseURL || '/'
+    if (!base.endsWith('/')) base += '/'
+    urlInput.value = `${window.location.origin}${base}graph-output.json`
   }
 }
 

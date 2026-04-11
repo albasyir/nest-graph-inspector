@@ -4,6 +4,16 @@ import type { ContentNavigationItem } from '@nuxt/content'
 const navigation = inject<Ref<ContentNavigationItem[]>>('navigation')
 
 const { header } = useAppConfig()
+const config = useRuntimeConfig()
+
+function resolveAsset(path: string | undefined) {
+  if (!path) return ''
+  if (path.startsWith('http') || path.startsWith('//')) return path
+  let base = config.app.baseURL || '/'
+  if (base.endsWith('/')) base = base.slice(0, -1)
+  if (!path.startsWith('/')) path = '/' + path
+  return base + path
+}
 </script>
 
 <template>
@@ -36,19 +46,19 @@ const { header } = useAppConfig()
       <div class="flex items-center gap-2">
         <template v-if="header?.logo?.light && header?.logo?.dark">
           <img
-            :src="header.logo.light"
+            :src="resolveAsset(header.logo.light)"
             :alt="header?.logo?.alt"
             class="h-6 w-auto shrink-0 dark:hidden"
           >
           <img
-            :src="header.logo.dark"
+            :src="resolveAsset(header.logo.dark)"
             :alt="header?.logo?.alt"
             class="h-6 w-auto shrink-0 hidden dark:block"
           >
         </template>
         <template v-else-if="header?.logo?.light || header?.logo?.dark">
           <img
-            :src="header?.logo?.light || header?.logo?.dark"
+            :src="resolveAsset(header?.logo?.light || header?.logo?.dark)"
             :alt="header?.logo?.alt"
             class="h-6 w-auto shrink-0"
           >
