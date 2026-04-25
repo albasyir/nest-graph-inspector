@@ -12,7 +12,7 @@
 
 Nest Graph Inspector reads your NestJS runtime container and generates a dependency graph of modules, providers, controllers, and their relationships.
 
-### Preview
+### Result Preview
 
 [**Try the interactive viewer →**](https://albasyir.github.io/nest-graph-inspector/view/aHR0cHM6Ly9hbGJhc3lpci5naXRodWIuaW8vbmVzdC1ncmFwaC1pbnNwZWN0b3IvZ3JhcGgtb3V0cHV0Lmpzb24=)
 
