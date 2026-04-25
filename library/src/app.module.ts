@@ -11,12 +11,12 @@ import { UserModule } from './user/user.module';
      */
     NestGraphInspectorModule.forRoot({
       outputs: [
-          { type: 'viewer', origin: 'http://localhost:9999' },
-          { type: 'markdown', path: 'graph.md' },
-          { type: 'json', path: 'graph.json' },
-          { type: 'http', path: 'graph' },
-        ]
-      }),
+        { type: 'viewer', origin: `http://localhost:8889` },
+        { type: 'markdown', path: 'tmp/graph.md' },
+        { type: 'json', path: 'tmp/graph.json' },
+        { type: 'http', path: 'graph' },
+      ]
+    }),
 
     /**
      * Feature Modules

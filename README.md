@@ -2,94 +2,105 @@
   <a href="https://albasyir.github.io/nest-graph-inspector/" target="_blank"><img src="https://albasyir.github.io/nest-graph-inspector/logo.png" width="120" alt="Nest Graph Inspector Logo" /></a>
 </p>
 
-  <p align="center">A <a href="https://nestjs.com" target="_blank">NestJS</a> module to generate a <strong>runtime dependency graph</strong> from the Nest application container.</p>
-    <p align="center">
+<h1 align="center">Nest Graph Inspector</h1>
+
+<p align="center">
 <a href="https://www.npmjs.com/package/nest-graph-inspector" target="_blank"><img src="https://img.shields.io/npm/v/nest-graph-inspector.svg" alt="NPM Version" /></a>
 <a href="https://github.com/albasyir/nest-graph-inspector/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/npm/l/nest-graph-inspector.svg" alt="Package License" /></a>
 <a href="https://github.com/albasyir/nest-graph-inspector" target="_blank"><img src="https://img.shields.io/github/stars/albasyir/nest-graph-inspector?style=social" alt="Github Stars" /></a>
 </p>
 
-## Description
+Nest Graph Inspector reads your NestJS runtime container and generates a dependency graph of modules, providers, controllers, and their relationships.
 
-**Nest Graph Inspector** is a NestJS module that generates a **runtime dependency graph** directly from the Nest application container. Explore them dynamically in our **Interactive Web Viewer** or export to **JSON** format. See modules, providers, controllers, and every dependency at a glance.
+### Preview
 
-The generated graph shows:
-- Loaded modules from the root module
-- Import relationships between modules
-- Providers and controllers in each module
-- Dependencies between providers/controllers
-- Internal dependencies, external module dependencies, and selected NestJS core dependencies
+> This is a static preview. [**Try the interactive viewer →**](https://albasyir.github.io/nest-graph-inspector/view/aHR0cHM6Ly9hbGJhc3lpci5naXRodWIuaW8vbmVzdC1ncmFwaC1pbnNwZWN0b3IvZ3JhcGgtb3V0cHV0Lmpzb24=)
 
-> **Note:** The graph is generated from the **runtime Nest container**, not from static source parsing. What you see is what's actually running! You can try the interactive viewer directly at our [Example Preview](https://albasyir.github.io/nest-graph-inspector/view/aHR0cHM6Ly9hbGJhc3lpci5naXRodWIuaW8vbmVzdC1ncmFwaC1pbnNwZWN0b3IvZ3JhcGgtb3V0cHV0Lmpzb24=).
+```mermaid
+graph TD
+  subgraph module_group_AppModule["AppModule"]
+  end
+  subgraph module_group_UserModule["UserModule"]
+    provider_UserModule_UserService["UserService"]
+    provider_UserModule_UserRepository["UserRepository"]
+    controller_UserModule_UserController["UserController"]
+  end
+  subgraph module_group_ProductModule["ProductModule"]
+    provider_ProductModule_ProductService["ProductService"]
+    provider_ProductModule_ProductRepository["ProductRepository"]
+    controller_ProductModule_ProductController["ProductController"]
+  end
+  subgraph module_group_OrderModule["OrderModule"]
+    provider_OrderModule_OrderRepository["OrderRepository"]
+    provider_OrderModule_OrderService["OrderService"]
+    provider_OrderModule_OrderNotificationService["OrderNotificationService"]
+    controller_OrderModule_OrderController["OrderController"]
+  end
+  subgraph module_group_NestJSCoreModule["NestJSCoreModule"]
+    provider_NestJSCoreModule_ModuleRef["ModuleRef"]
+  end
+  module_group_UserModule --> module_group_AppModule
+  module_group_ProductModule --> module_group_AppModule
+  module_group_OrderModule --> module_group_AppModule
+  provider_UserModule_UserRepository --> provider_UserModule_UserService
+  provider_UserModule_UserService --> controller_UserModule_UserController
+  module_group_UserModule --> module_group_ProductModule
+  provider_ProductModule_ProductRepository --> provider_ProductModule_ProductService
+  provider_ProductModule_ProductService --> controller_ProductModule_ProductController
+  module_group_UserModule --> module_group_OrderModule
+  module_group_ProductModule --> module_group_OrderModule
+  provider_OrderModule_OrderRepository --> provider_OrderModule_OrderService
+  provider_UserModule_UserService --> provider_OrderModule_OrderService
+  provider_ProductModule_ProductService --> provider_OrderModule_OrderService
+  provider_OrderModule_OrderNotificationService --> provider_OrderModule_OrderService
+  provider_OrderModule_OrderService --> provider_OrderModule_OrderNotificationService
+  provider_OrderModule_OrderService --> controller_OrderModule_OrderController
+  provider_NestJSCoreModule_ModuleRef --> controller_OrderModule_OrderController
+  provider_OrderModule_OrderNotificationService --> controller_OrderModule_OrderController
+```
 
-## Why Nest Graph Inspector?
+## Features
 
-Understand your NestJS architecture without digging through code. 
+- **Runtime introspection** — graphs are built from the actual Nest container, not static source parsing
+- **Minimal setup** — import the module and you're done
+- **Interactive web viewer** — zoom, pan, and inspect nodes in the browser
+- **JSON output** — structured data for programmatic use or CI integration
+- **Markdown output** — AI-friendly graph representation
 
-- **Module Dependency Graph**: Automatically maps import relationships between all loaded modules from your root module.
-- **Provider & Controller Mapping**: Lists every provider and controller in each module alongside their dependency chains.
-- **Interactive Web Viewer**: Explore your dependency graph dynamically in the browser. Zoom, pan, and inspect nodes.
-- **JSON Output**: Get structured JSON output for programmatic analysis or integration tightly with tooling.
-- **Runtime Introspection**: Built on the actual Nest runtime container — what you see is what's really running.
-- **Drop-in Module**: Just import the module with `forRoot` or `forRootAsync` and you're done. No decorators to add, no code to change.
 
-## Use Cases
+## Quick Start
 
-Important to see what's actual problem that can be solved with this, we think you have them too!
+```bash
+npm install nest-graph-inspector 
+```
 
-- **Impact Analysis**: Narrow regression test scope to relevant modules, understand blast radius before making a change, and reduce unnecessary testing for unrelated areas.
-- **Test Prioritization**: Select critical providers for fast validation, understand dependency chains between providers/controllers, and prioritize which flows to check first.
-- **Architecture Visibility**: Onboard engineers faster, spot highly coupled modules/providers, and make refactors safer by visualizing relationships before changes.
-
-## Installation
-
-Choose the command for your runtime and package manager.
-
-| Runtime | Package manager | Command |
-| ------- | --------------- | ------- |
-| Node.js >= 18 | npm | `npm install nest-graph-inspector` |
-| Node.js >= 18 | yarn | `yarn add nest-graph-inspector` |
-| Node.js >= 18 | pnpm | `pnpm add nest-graph-inspector` |
-| Bun >= 1.1 | bun | `bun add nest-graph-inspector` |
-
-> **Version Support:** Official support for **Node.js >= 18**, **Bun >= 1.1**, and **NestJS 10-11**.
-> 
-> Earlier NestJS versions may still work but are not officially supported. You can force install with `npm install nest-graph-inspector --force`, `yarn add nest-graph-inspector --ignore-engines`, or `pnpm add nest-graph-inspector --force`.
-
-## Getting started
-
-Enable the inspector in your main `AppModule`. We recommend the `viewer` output so you can interactively explore your graph directly from your browser.
+> it's not only NPM, see [installation](https://albasyir.github.io/nest-graph-inspector/getting-started) for other package manager
 
 ```ts
 import { Module } from '@nestjs/common';
 import { NestGraphInspector } from 'nest-graph-inspector';
 
 @Module({
-  imports: [
-    NestGraphInspector
-  ],
+  imports: [NestGraphInspector],
 })
 export class RootModule {}
 ```
 
-If your configuration depends on external services or variables, you can use `forRootAsync` instead.
+Start your app — the viewer URL will be printed in your console.
 
-```ts
-NestGraphInspector.forRootAsync({
-  useFactory() {
-    return {
-      outputs: [
-        { type: 'viewer' }
-      ]
-    };
-  },
-})
-```
+> For full configuration options and output types, see the **[documentation →](https://albasyir.github.io/nest-graph-inspector/getting-started)**
 
-Once configured, simply start your NestJS application as usual (`npm run start`, `yarn start`, `pnpm start`, or `bun run start`). **The inspector will automatically print the Viewer URL and graph endpoint path in your application's console.** Open the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page, then enter your NestJS application's origin URL to see your graph. If you configure `origin`, the inspector prints a direct Viewer link instead.
+## Documentation
+
+Full setup guide, configuration options, and use cases are available on the documentation site.
+
+<p align="center">
+  <a href="https://albasyir.github.io/nest-graph-inspector/"><strong>📖 View Documentation →</strong></a>
+</p>
 
 ## Stay in touch
 
-- Abdul Aziz Al Basyir - [https://github.com/albasyir](https://github.com/albasyir)
-- Library Homepage - [https://albasyir.github.io/nest-graph-inspector/](https://albasyir.github.io/nest-graph-inspector/)
-- GitHub - [nest-graph-inspector](https://github.com/albasyir/nest-graph-inspector)
+- [Documentation](https://albasyir.github.io/nest-graph-inspector/)
+- [NPM Package](https://www.npmjs.com/package/nest-graph-inspector)
+- [GitHub Repository](https://github.com/albasyir/nest-graph-inspector)
+- [Maintainer, Abdul Aziz Al Basyir](https://github.com/albasyir)
