@@ -22,6 +22,13 @@ export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
 
     await this.httpOutputDriver.execute(moduleMap, { type: 'http', path });
 
+    if (!config.origin) {
+      this.logger.debug(
+        `Graph Viewer is available at ${this.viewerBaseUrl}/view, see ${this.viewerBaseUrl}/configuration/outputs#web-viewer-output-type-viewer for detail`,
+      );
+      return;
+    }
+
     const base64Origin = Buffer.from(config.origin + path).toString('base64url');
 
     const viewerLink = `${this.viewerBaseUrl}/view/${base64Origin}`;

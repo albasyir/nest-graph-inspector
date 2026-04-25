@@ -61,7 +61,7 @@ Generate **runtime dependency graphs** directly from the Nest application contai
       imports: [
         NestGraphInspector.forRoot({
           outputs: [
-            { type: 'viewer', origin: 'http://localhost:9999' }
+            { type: 'viewer' }
           ],
         }),
       ],
@@ -78,7 +78,7 @@ Generate **runtime dependency graphs** directly from the Nest application contai
     imports: [
       NestGraphInspector.forRoot({
         outputs: [
-          { type: 'viewer', origin: 'http://localhost:9999' }
+          { type: 'viewer' }
         ],
       }),
     ],

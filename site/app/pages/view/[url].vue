@@ -65,9 +65,6 @@ function openNewUrl() {
     <!-- Header -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
       <div class="space-y-1 min-w-0">
-        <h1 class="text-2xl font-bold tracking-tight">
-          Nest Graph Inspector
-        </h1>
         <p class="text-sm text-muted font-mono truncate max-w-lg">
           {{ decodedUrl }}
         </p>

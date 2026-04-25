@@ -63,10 +63,7 @@ import { NestGraphInspector } from 'nest-graph-inspector';
   imports: [
     NestGraphInspector.forRoot({
       outputs: [
-        { 
-          type: 'viewer', 
-          origin: 'http://localhost:9999' 
-        }
+        { type: 'viewer' }
       ]
     }),
   ],
@@ -81,14 +78,14 @@ NestGraphInspector.forRootAsync({
   useFactory() {
     return {
       outputs: [
-        { type: 'viewer', origin: 'http://localhost:9999' }
+        { type: 'viewer' }
       ]
     };
   },
 })
 ```
 
-Once configured, simply start your NestJS application as usual (`npm run start`). **The inspector will automatically print an accessible link in your application's console.** You can click that link directly, or manually head over to the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page and paste your NestJS application's origin URL to see your graph.
+Once configured, simply start your NestJS application as usual (`npm run start`). **The inspector will automatically print the Viewer URL and graph endpoint path in your application's console.** Open the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page, then enter your NestJS application's origin URL to see your graph. If you configure `origin`, the inspector prints a direct Viewer link instead.
 
 ## Stay in touch
 
