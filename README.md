@@ -43,13 +43,18 @@ Important to see what's actual problem that can be solved with this, we think yo
 
 ## Installation
 
-```bash
-$ npm install nest-graph-inspector
-```
+Choose the command for your runtime and package manager.
 
-> **Version Support:** Official support for Node.js >= 18 and **NestJS 10-11**.
+| Runtime | Package manager | Command |
+| ------- | --------------- | ------- |
+| Node.js >= 18 | npm | `npm install nest-graph-inspector` |
+| Node.js >= 18 | yarn | `yarn add nest-graph-inspector` |
+| Node.js >= 18 | pnpm | `pnpm add nest-graph-inspector` |
+| Bun >= 1.1 | bun | `bun add nest-graph-inspector` |
+
+> **Version Support:** Official support for **Node.js >= 18**, **Bun >= 1.1**, and **NestJS 10-11**.
 > 
-> Earlier versions may still work but are not officially supported. You can force install with `npm install nest-graph-inspector --force`. 
+> Earlier NestJS versions may still work but are not officially supported. You can force install with `npm install nest-graph-inspector --force`, `yarn add nest-graph-inspector --ignore-engines`, or `pnpm add nest-graph-inspector --force`.
 
 ## Getting started
 
@@ -61,11 +66,7 @@ import { NestGraphInspector } from 'nest-graph-inspector';
 
 @Module({
   imports: [
-    NestGraphInspector.forRoot({
-      outputs: [
-        { type: 'viewer' }
-      ]
-    }),
+    NestGraphInspector
   ],
 })
 export class RootModule {}
@@ -85,7 +86,7 @@ NestGraphInspector.forRootAsync({
 })
 ```
 
-Once configured, simply start your NestJS application as usual (`npm run start`). **The inspector will automatically print the Viewer URL and graph endpoint path in your application's console.** Open the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page, then enter your NestJS application's origin URL to see your graph. If you configure `origin`, the inspector prints a direct Viewer link instead.
+Once configured, simply start your NestJS application as usual (`npm run start`, `yarn start`, `pnpm start`, or `bun run start`). **The inspector will automatically print the Viewer URL and graph endpoint path in your application's console.** Open the [Viewer](https://albasyir.github.io/nest-graph-inspector/view) page, then enter your NestJS application's origin URL to see your graph. If you configure `origin`, the inspector prints a direct Viewer link instead.
 
 ## Stay in touch
 

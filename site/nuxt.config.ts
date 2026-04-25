@@ -9,6 +9,7 @@ export default defineNuxtConfig({
     '@nuxt/image',
     '@nuxt/ui',
     '@nuxt/content',
+    '@pinia/nuxt',
     'nuxt-og-image',
     'nuxt-llms',
     '@nuxtjs/mcp-toolkit',
