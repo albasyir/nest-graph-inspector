@@ -19,10 +19,17 @@ type DependencyTarget = {
 export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private readonly nestCoreModuleName = 'NestJSCoreModule';
 
-  async execute(moduleMap: ModuleMap, config: FileOutputConfig): Promise<void> {
+  async execute(
+    moduleMap: ModuleMap,
+    config: FileOutputConfig,
+  ): Promise<{ message: string }> {
     const filePath = join(process.cwd(), config.path);
     const markdownText = this.buildMarkdownText(moduleMap);
     await writeFile(filePath, markdownText, 'utf8');
+
+    return {
+      message: `Graph inspector markdown output was written to ${filePath}`,
+    };
   }
 
   buildMarkdownText(moduleMap: ModuleMap): string {

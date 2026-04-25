@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions, NestGraphInspectorOutput } from './nest-graph-inspector.type';
@@ -15,6 +15,7 @@ import { OutputAdapter } from './ports/output.adapter';
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
+  private readonly logger = new Logger(NestGraphInspectorSetup.name);
   private readonly outputAdapters: Record<NestGraphInspectorOutput['type'], OutputAdapter>;
 
   constructor(
@@ -61,13 +62,19 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     for (const output of this.options.outputs) {
       const adapter = this.outputAdapters[output.type];
       if (!adapter) {
-        console.warn(`Unsupported output type: ${output.type}`);
+        this.logger.warn(`Unsupported output type: ${output.type}`);
         continue;
       }
 
-      adapter.execute(moduleMap, output).catch((err) => {
-        console.error(`Failed to execute output adapter for type ${output.type}:`, err);
-      });
+      adapter
+        .execute(moduleMap, output)
+        .then(({ message }) => this.logger.debug(message))
+        .catch((err) => {
+          this.logger.error(
+            `Failed to execute output adapter for type ${output.type}`,
+            err,
+          );
+        });
     }
   }
 
@@ -483,4 +490,3 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return String(token);
   }
 }
-

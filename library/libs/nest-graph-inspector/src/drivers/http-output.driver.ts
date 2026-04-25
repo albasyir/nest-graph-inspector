@@ -10,7 +10,10 @@ type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
   constructor(private readonly adapterHost: HttpAdapterHost) { }
 
-  execute(moduleMap: ModuleMap, config: HttpOutputConfig): Promise<void> {
+  execute(
+    moduleMap: ModuleMap,
+    config: HttpOutputConfig,
+  ): Promise<{ message: string }> {
     config.path = config.path || '/__nest-graph-inspector';
 
     const httpAdapter = this.adapterHost.httpAdapter;
@@ -21,6 +24,8 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
       httpAdapter.reply(res, moduleMap, 200);
     });
 
-    return Promise.resolve();
+    return Promise.resolve({
+      message: `Graph inspector HTTP endpoint is installed at ${path}`,
+    });
   }
 }

@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { Test, TestingModule } from '@nestjs/testing';
 
@@ -43,13 +44,17 @@ describe(JsonOutputDriver.name, () => {
       path: 'artifacts/module-map.json',
     };
 
-    await driver.execute(moduleMap as never, config as never);
+    const result = await driver.execute(moduleMap as never, config as never);
 
     expect(mockedWriteFile).toHaveBeenCalledTimes(1);
     expect(mockedWriteFile).toHaveBeenCalledWith(
-      'artifacts/module-map.json',
+      join(process.cwd(), 'artifacts/module-map.json'),
       JSON.stringify(moduleMap, null, 2),
     );
+    expect(result).toEqual({
+      message:
+        `Graph inspector JSON output was written to ${join(process.cwd(), 'artifacts/module-map.json')}`,
+    });
   });
 
   it('should pass the exact config path to writeFile', async () => {
@@ -59,12 +64,16 @@ describe(JsonOutputDriver.name, () => {
       path: './relative/path/output.json',
     };
 
-    await driver.execute({} as never, config as never);
+    const result = await driver.execute({} as never, config as never);
 
     expect(mockedWriteFile).toHaveBeenCalledTimes(1);
     expect(mockedWriteFile).toHaveBeenCalledWith(
-      './relative/path/output.json',
+      join(process.cwd(), './relative/path/output.json'),
       '{}',
     );
+    expect(result).toEqual({
+      message:
+        `Graph inspector JSON output was written to ${join(process.cwd(), './relative/path/output.json')}`,
+    });
   });
 });

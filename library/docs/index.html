@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Graph Inspector — Runtime Dependency Graph for NestJS</title>
-  <meta name="description" content="Generate runtime dependency graphs in Markdown + Mermaid or JSON from your NestJS application container. Visualize modules, providers, controllers and their relationships instantly." />
+  <meta name="description" content="Generate runtime dependency graphs from your NestJS application container. Visualize modules, providers, controllers and their relationships instantly." />
   <meta name="keywords" content="nestjs, nest, graph, inspector, dependency-graph, module-graph, testing, developer-tools, devtool" />
   <meta name="author" content="Abdul Aziz Al Basyir" />
   <meta property="og:title" content="Nest Graph Inspector" />
@@ -1308,7 +1308,6 @@
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#usage">Usage</a></li>
         <li><a href="#config">Config</a></li>
-        <li><a href="#output">Output</a></li>
       </ul>
 
       <div class="navbar-cta">
@@ -1345,8 +1344,8 @@
       </h1>
 
       <p class="hero-description">
-        Generate beautiful dependency graphs in <strong>Markdown + Mermaid</strong> or <strong>JSON</strong>
-        directly from the Nest runtime container. Visualize modules, providers, controllers, and their relationships instantly.
+        Generate dependency graphs directly from the Nest runtime container.
+        Visualize modules, providers, controllers, and their relationships instantly.
       </p>
 
       <div class="hero-actions">
@@ -1444,8 +1443,8 @@
 
         <div class="feature-card animate-on-scroll">
           <div class="feature-icon feature-icon-output">📄</div>
-          <h3>Multi-Format Output</h3>
-          <p>Export as Markdown with Mermaid graph diagrams or structured JSON — ready for docs, CI pipelines, or custom tools.</p>
+          <h3>Runtime Graph Data</h3>
+          <p>Expose the live graph for visual inspection, internal dashboards, CI checks, or custom architecture tooling.</p>
         </div>
       </div>
     </div>
@@ -1468,7 +1467,7 @@
         <div class="flow-step">
           <div class="flow-step-number">1</div>
           <h4>Configure</h4>
-          <p>Set root module &amp; output format</p>
+          <p>Set root module &amp; viewer endpoint</p>
         </div>
         <div class="flow-step">
           <div class="flow-step-number">2</div>
@@ -1488,7 +1487,7 @@
         <div class="flow-step">
           <div class="flow-step-number">5</div>
           <h4>Generate</h4>
-          <p>Output Markdown or JSON</p>
+          <p>Publish graph data</p>
         </div>
       </div>
     </div>
@@ -1534,9 +1533,9 @@
   <span class="token-property">imports</span><span class="token-punctuation">:</span> <span class="token-bracket">[</span>
     <span class="token-class">NestGraphInspector</span><span class="token-punctuation">.</span><span class="token-method">forRoot</span><span class="token-bracket">({</span>
       <span class="token-property">rootModule</span><span class="token-punctuation">:</span> <span class="token-class">AppModule</span><span class="token-punctuation">,</span>
-      <span class="token-property">output</span><span class="token-punctuation">:</span> <span class="token-bracket">{</span>
-        <span class="token-property">file</span><span class="token-punctuation">:</span> <span class="token-string">'graph-output.md'</span><span class="token-punctuation">,</span>
-      <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+      <span class="token-property">outputs</span><span class="token-punctuation">:</span> <span class="token-bracket">[</span>
+        <span class="token-bracket">{</span> <span class="token-property">type</span><span class="token-punctuation">:</span> <span class="token-string">'viewer'</span> <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+      <span class="token-bracket">]</span><span class="token-punctuation">,</span>
     <span class="token-bracket">})</span><span class="token-punctuation">,</span>
   <span class="token-bracket">]</span><span class="token-punctuation">,</span>
 <span class="token-bracket">})</span>
@@ -1567,9 +1566,9 @@
       <span class="token-method">useFactory</span><span class="token-bracket">()</span> <span class="token-bracket">{</span>
         <span class="token-keyword">return</span> <span class="token-bracket">{</span>
           <span class="token-property">rootModule</span><span class="token-punctuation">:</span> <span class="token-class">AppModule</span><span class="token-punctuation">,</span>
-          <span class="token-property">output</span><span class="token-punctuation">:</span> <span class="token-bracket">{</span>
-            <span class="token-property">file</span><span class="token-punctuation">:</span> <span class="token-string">'graph-output.md'</span><span class="token-punctuation">,</span>
-          <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+          <span class="token-property">outputs</span><span class="token-punctuation">:</span> <span class="token-bracket">[</span>
+            <span class="token-bracket">{</span> <span class="token-property">type</span><span class="token-punctuation">:</span> <span class="token-string">'viewer'</span> <span class="token-bracket">}</span><span class="token-punctuation">,</span>
+          <span class="token-bracket">]</span><span class="token-punctuation">,</span>
         <span class="token-bracket">}</span><span class="token-punctuation">;</span>
       <span class="token-bracket">}</span><span class="token-punctuation">,</span>
     <span class="token-bracket">})</span><span class="token-punctuation">,</span>
@@ -1611,112 +1610,12 @@
               <td class="desc">The root module class to start graph traversal from. This is the entry point of your dependency graph.</td>
             </tr>
             <tr>
-              <td><code>output.file</code></td>
-              <td class="type-badge">string</td>
-              <td class="desc">Output file name for the generated Markdown report. The file will include a Mermaid diagram and module details.</td>
+              <td><code>outputs</code></td>
+              <td class="type-badge">NestGraphInspectorOutput[]</td>
+              <td class="desc">List of places where the dependency graph should be published, such as the interactive viewer or an HTTP endpoint.</td>
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <div class="callout animate-on-scroll">
-        <span class="callout-icon">💡</span>
-        <p>
-          The output Markdown file uses <strong>Mermaid</strong> syntax for graph visualization.
-          Open it in any Mermaid-compatible viewer — GitHub renders it natively, or use the
-          <code>Markdown Preview Mermaid Support</code> extension in VS Code.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       OUTPUT PREVIEW
-       ============================================================ -->
-  <section class="section code-section" id="output">
-    <div class="section-inner">
-      <div class="section-header animate-on-scroll">
-        <span class="section-label">What You Get</span>
-        <h2 class="section-title">Output Preview</h2>
-        <p class="section-subtitle">
-          The generated output contains module lists, imports, exports, providers with dependencies,
-          controllers with dependencies, and a visual Mermaid graph.
-        </p>
-      </div>
-
-      <div class="output-grid animate-on-scroll">
-        <div class="output-card">
-          <div class="output-card-header">
-            <h4>📝 Markdown + Mermaid</h4>
-            <span class="format-badge">MD</span>
-          </div>
-          <div class="output-card-body">
-<pre># NestJS Dependency Graph
-
-Root Module: `AppModule`
-
-```mermaid
-graph TD
-  subgraph AppModule
-    AppService
-    AppController
-  end
-  subgraph UserModule
-    CreateUserUsecase
-    UserController
-  end
-  UserModule --> AppModule
-  CreateUserUsecase --> UserController
-  AppService --> AppController
-```
-
-## AppModule
-### Imports
-- UserModule
-
-### Providers
-- AppService
-
-### Controllers
-- AppController
-  - depends on: AppService</pre>
-          </div>
-        </div>
-
-        <div class="output-card">
-          <div class="output-card-header">
-            <h4>📊 JSON</h4>
-            <span class="format-badge">JSON</span>
-          </div>
-          <div class="output-card-body">
-<pre>{
-  "version": "1",
-  "root": "AppModule",
-  "modules": {
-    "AppModule": {
-      "imports": ["UserModule"],
-      "exports": [],
-      "providers": [
-        {
-          "name": "AppService",
-          "dependencies": [
-            "UserModule:CreateUserUsecase"
-          ]
-        }
-      ],
-      "controllers": [
-        {
-          "name": "AppController",
-          "dependencies": [
-            "AppService"
-          ]
-        }
-      ]
-    }
-  }
-}</pre>
-          </div>
-        </div>
       </div>
     </div>
   </section>
