@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
+import type { NestGraphInspectorModuleOptions, NestGraphInspectorOutput } from './nest-graph-inspector.type';
 import { NestGraphInspectorModule } from './nest-graph-inspector.module';
 import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
@@ -11,9 +11,12 @@ import { HttpOutputDriver } from './drivers/http-output.driver';
 import { FileOutputDriver } from './drivers/file-output.driver';
 import { JsonOutputDriver } from './drivers/json-output.driver';
 import { ViewerOutputDriver } from './drivers/viewer-output.driver';
+import { OutputAdapter } from './ports/output.adapter';
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
+  private readonly outputAdapters: Record<NestGraphInspectorOutput['type'], OutputAdapter>;
+
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
     private readonly options: NestGraphInspectorModuleOptions,
@@ -22,7 +25,14 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     private readonly fileOutputAdapter: FileOutputDriver,
     private readonly jsonOutputAdapter: JsonOutputDriver,
     private readonly viewerOutputAdapter: ViewerOutputDriver,
-  ) { }
+  ) {
+    this.outputAdapters = {
+      http: this.httpOutputAdapter,
+      markdown: this.fileOutputAdapter,
+      json: this.jsonOutputAdapter,
+      viewer: this.viewerOutputAdapter,
+    };
+  }
 
   private readonly ignoreProvider = ['ModuleRef', 'ApplicationConfig'];
   private readonly ignoreImport = [
@@ -49,15 +59,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     for (const output of this.options.outputs) {
-      if (output.type === 'markdown') {
-        this.fileOutputAdapter.execute(moduleMap, output);
-      } else if (output.type === 'json') {
-        this.jsonOutputAdapter.execute(moduleMap, output);
-      } else if (output.type === 'http') {
-        this.httpOutputAdapter.execute(moduleMap, output);
-      } else if (output.type === 'viewer') {
-        this.viewerOutputAdapter.execute(moduleMap, output);
+      const adapter = this.outputAdapters[output.type];
+      if (!adapter) {
+        console.warn(`Unsupported output type: ${output.type}`);
+        continue;
       }
+
+      adapter.execute(moduleMap, output).catch((err) => {
+        console.error(`Failed to execute output adapter for type ${output.type}:`, err);
+      });
     }
   }
 
