@@ -31,7 +31,7 @@ function resolveAsset(path: string | undefined) {
         size="md"
         class="flex-1 justify-center"
       />
-      
+
       <UContentSearchButton
         v-if="header?.search"
         :collapsed="false"

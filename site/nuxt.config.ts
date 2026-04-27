@@ -1,9 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  app: {
-    baseURL: process.env.NUXT_APP_BASE_URL || '/'
-  },
-
   modules: [
     '@nuxt/eslint',
     '@nuxt/image',
@@ -16,30 +12,12 @@ export default defineNuxtConfig({
     '@posthog/nuxt'
   ],
 
-  runtimeConfig: {
-    public: {
-      posthog: {
-        publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'phc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
-        host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
-      }
-    }
-  },
-
-  posthogConfig: {
-    publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'phc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
-    host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
-    clientConfig: {
-      api_host: 'https://integrity.nest-graph-inspector.albasyir.net',
-      ui_host: 'https://us.posthog.com',
-      capture_exceptions: true
-    },
-    serverConfig: {
-      enableExceptionAutocapture: true
-    }
-  },
-
   devtools: {
     enabled: true
+  },
+
+  app: {
+    baseURL: process.env.NUXT_APP_BASE_URL || '/'
   },
 
   css: ['~/assets/css/main.css'],
@@ -50,6 +28,15 @@ export default defineNuxtConfig({
         toc: {
           searchDepth: 1
         }
+      }
+    }
+  },
+
+  runtimeConfig: {
+    public: {
+      posthog: {
+        publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'phc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
+        host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com'
       }
     }
   },
@@ -123,5 +110,18 @@ export default defineNuxtConfig({
 
   mcp: {
     name: 'Nest Graph Inspector'
+  },
+
+  posthogConfig: {
+    publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'phc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
+    host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
+    clientConfig: {
+      api_host: 'https://integrity.nest-graph-inspector.albasyir.net',
+      ui_host: 'https://us.posthog.com',
+      capture_exceptions: true
+    },
+    serverConfig: {
+      enableExceptionAutocapture: true
+    }
   }
 })

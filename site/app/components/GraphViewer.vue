@@ -151,7 +151,6 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
 
   const modulePositions = new Map<string, { x: number, y: number }>()
-  const nodeToModule = new Map<string, string>()
   const nodeAbsPositions = new Map<string, { x: number, y: number }>()
   let currentY = 0
 
@@ -195,7 +194,6 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
     for (const ctrl of mod.controllers) {
       const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + itemIndex * (NODE_HEIGHT + NODE_GAP)
       const nodeId = `controller-${moduleName}-${ctrl.name}`
-      nodeToModule.set(nodeId, moduleName)
       nodeAbsPositions.set(nodeId, {
         x: modPos.x + MODULE_PADDING + NODE_WIDTH / 2,
         y: modPos.y + childY + NODE_HEIGHT / 2
@@ -216,7 +214,6 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
     for (const prov of mod.providers) {
       const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + itemIndex * (NODE_HEIGHT + NODE_GAP)
       const nodeId = `provider-${moduleName}-${prov.name}`
-      nodeToModule.set(nodeId, moduleName)
       nodeAbsPositions.set(nodeId, {
         x: modPos.x + MODULE_PADDING + NODE_WIDTH / 2,
         y: modPos.y + childY + NODE_HEIGHT / 2
@@ -309,8 +306,8 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
 
 const { nodes, edges } = buildGraph(props.data)
 
-const flowNodes = ref(nodes)
-const flowEdges = ref(edges)
+const flowNodes = shallowRef<Node[]>(nodes)
+const flowEdges = shallowRef<Edge[]>(edges)
 
 onMounted(() => {
   setTimeout(() => fitView({ padding: 0.3 }), 200)

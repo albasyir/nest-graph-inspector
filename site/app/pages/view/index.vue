@@ -10,16 +10,16 @@ const route = useRoute()
 const urlInput = ref('')
 const errorMessage = ref('')
 
+function withDefaultProtocol(input: string) {
+  return input.startsWith('http://') || input.startsWith('https://') ? input : `http://${input}`
+}
+
 const isValidUrl = computed(() => {
-  let input = urlInput.value.trim()
+  const input = urlInput.value.trim()
   if (!input) return false
-  
-  if (!input.startsWith('http://') && !input.startsWith('https://')) {
-    input = 'http://' + input
-  }
 
   try {
-    new URL(input)
+    new URL(withDefaultProtocol(input))
     return true
   } catch {
     return false
@@ -34,19 +34,15 @@ function loadExample() {
 }
 
 function onSubmit() {
-  let input = urlInput.value.trim()
+  const input = urlInput.value.trim()
   if (!input) {
     errorMessage.value = 'Please enter a valid URL'
     return
   }
 
-  if (!input.startsWith('http://') && !input.startsWith('https://')) {
-    input = 'http://' + input
-  }
-
-  let finalUrl = input
+  let finalUrl = withDefaultProtocol(input)
   try {
-    const url = new URL(input)
+    const url = new URL(finalUrl)
     if (url.pathname === '/' || !url.pathname) {
       url.pathname = '/__graph-inspector'
     }
@@ -64,7 +60,7 @@ function onSubmit() {
   navigateTo(`/view/${encoded}`)
 }
 
-onMounted(async () => {
+onMounted(() => {
   if (route.query.preview == 'true') {
     loadExample()
     onSubmit()
@@ -75,10 +71,12 @@ onMounted(async () => {
 <template>
   <UContainer class="py-4 flex items-center justify-center min-h-[calc(100vh-140px)]">
     <div class="w-full max-w-2xl space-y-6">
-      
       <!-- Hero Section -->
       <div class="text-center space-y-2">
-        <UIcon name="i-lucide-network" class="w-10 h-10 text-primary mx-auto opacity-80" />
+        <UIcon
+          name="i-lucide-network"
+          class="w-10 h-10 text-primary mx-auto opacity-80"
+        />
         <h1 class="text-3xl font-bold tracking-tight">
           Graph Viewer
         </h1>
@@ -88,8 +86,14 @@ onMounted(async () => {
       </div>
 
       <!-- Main Card -->
-      <form class="w-full" @submit.prevent="onSubmit">
-        <UCard class="w-full" :ui="{ body: { padding: 'p-4 sm:p-5' }, footer: { padding: 'p-4 sm:p-5' } }">
+      <form
+        class="w-full"
+        @submit.prevent="onSubmit"
+      >
+        <UCard
+          class="w-full"
+          :ui="{ body: 'p-4 sm:p-5', footer: 'p-4 sm:p-5' }"
+        >
           <div class="space-y-5">
             <!-- Instructions Alert -->
             <UAlert
@@ -98,9 +102,9 @@ onMounted(async () => {
               color="neutral"
               variant="subtle"
             >
-               <template #description>
-                 Configure the <code class="text-xs bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded font-mono mx-1">http</code> output in your NestJS app to expose the graph endpoint.
-               </template>
+              <template #description>
+                Configure the <code class="text-xs bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded font-mono mx-1">http</code> output in your NestJS app to expose the graph endpoint.
+              </template>
             </UAlert>
 
             <!-- URL Input Form Field -->
