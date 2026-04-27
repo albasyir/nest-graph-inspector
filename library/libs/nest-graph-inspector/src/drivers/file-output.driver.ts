@@ -1,6 +1,6 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { Injectable } from '@nestjs/common';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ModuleMap } from '../types/module-map.type';
 import { ModuleProvider } from '../types/module-provider.type';
 import { ModuleController } from '../types/module-controller.type';
@@ -25,6 +25,8 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   ): Promise<{ message: string }> {
     const filePath = join(process.cwd(), config.path);
     const markdownText = this.buildMarkdownText(moduleMap);
+
+    await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, markdownText, 'utf8');
 
     return {
@@ -32,7 +34,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     };
   }
 
-  buildMarkdownText(moduleMap: ModuleMap): string {
+  private buildMarkdownText(moduleMap: ModuleMap): string {
     const lines: string[] = [];
     const moduleEntries = Object.entries(moduleMap.modules);
 
@@ -397,10 +399,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     return this.toMermaidNodeId(`provider:${moduleName}:${providerName}`);
   }
 
-  private controllerNodeId(
-    moduleName: string,
-    controllerName: string,
-  ): string {
+  private controllerNodeId(moduleName: string, controllerName: string): string {
     return this.toMermaidNodeId(`controller:${moduleName}:${controllerName}`);
   }
 

@@ -13,13 +13,44 @@ describe(NestGraphInspectorSetup.name, () => {
 
   let moduleRef: TestingModule;
   let service: NestGraphInspectorSetup;
+  let options: {
+    rootModule: typeof AppModule;
+    outputs: Array<
+      | { type: 'json'; path: string }
+      | { type: 'markdown'; path: string }
+      | { type: 'http'; path: string }
+      | { type: 'viewer'; path: string }
+    >;
+  };
+  let fileOutputDriver: { execute: jest.Mock };
+  let httpOutputDriver: { execute: jest.Mock };
   let jsonOutputDriver: { execute: jest.Mock };
+  let viewerOutputDriver: { execute: jest.Mock };
 
   beforeEach(async () => {
+    options = {
+      rootModule: AppModule,
+      outputs: [{ type: 'json', path: 'graph.json' }],
+    };
+    fileOutputDriver = {
+      execute: jest.fn().mockResolvedValue({
+        message: 'Graph inspector markdown output installed',
+      }),
+    };
+    httpOutputDriver = {
+      execute: jest.fn().mockResolvedValue({
+        message: 'Graph inspector HTTP output installed',
+      }),
+    };
     jsonOutputDriver = {
-      execute: jest
-        .fn()
-        .mockResolvedValue({ message: 'Graph inspector JSON output installed' }),
+      execute: jest.fn().mockResolvedValue({
+        message: 'Graph inspector JSON output installed',
+      }),
+    };
+    viewerOutputDriver = {
+      execute: jest.fn().mockResolvedValue({
+        message: 'Graph inspector viewer output installed',
+      }),
     };
 
     const appModuleRef = {
@@ -35,10 +66,7 @@ describe(NestGraphInspectorSetup.name, () => {
         NestGraphInspectorSetup,
         {
           provide: MODULE_OPTIONS_TOKEN,
-          useValue: {
-            rootModule: AppModule,
-            outputs: [{ type: 'json', path: 'graph.json' }],
-          },
+          useValue: options,
         },
         {
           provide: ModulesContainer,
@@ -46,11 +74,11 @@ describe(NestGraphInspectorSetup.name, () => {
         },
         {
           provide: HttpOutputDriver,
-          useValue: { execute: jest.fn() },
+          useValue: httpOutputDriver,
         },
         {
           provide: FileOutputDriver,
-          useValue: { execute: jest.fn() },
+          useValue: fileOutputDriver,
         },
         {
           provide: JsonOutputDriver,
@@ -58,7 +86,7 @@ describe(NestGraphInspectorSetup.name, () => {
         },
         {
           provide: ViewerOutputDriver,
-          useValue: { execute: jest.fn() },
+          useValue: viewerOutputDriver,
         },
       ],
     }).compile();
@@ -79,8 +107,7 @@ describe(NestGraphInspectorSetup.name, () => {
   it('should log the message returned by the output adapter', async () => {
     const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation();
 
-    service.onModuleInit();
-    await Promise.resolve();
+    await service.onModuleInit();
 
     expect(jsonOutputDriver.execute).toHaveBeenCalledWith(
       {
@@ -100,5 +127,45 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(debugSpy).toHaveBeenCalledWith(
       'Graph inspector JSON output installed',
     );
+  });
+
+  it('should wait until every configured output adapter has completed', async () => {
+    let resolveJsonOutput: (value: { message: string }) => void;
+    let resolveMarkdownOutput: (value: { message: string }) => void;
+    const jsonOutputCompleted = new Promise<{ message: string }>((resolve) => {
+      resolveJsonOutput = resolve;
+    });
+    const markdownOutputCompleted = new Promise<{ message: string }>(
+      (resolve) => {
+        resolveMarkdownOutput = resolve;
+      },
+    );
+    let onModuleInitCompleted = false;
+
+    options.outputs = [
+      { type: 'json', path: 'graph.json' },
+      { type: 'markdown', path: 'graph.md' },
+    ];
+    jsonOutputDriver.execute.mockReturnValue(jsonOutputCompleted);
+    fileOutputDriver.execute.mockReturnValue(markdownOutputCompleted);
+
+    const onModuleInitPromise = service.onModuleInit().then(() => {
+      onModuleInitCompleted = true;
+    });
+    await Promise.resolve();
+
+    expect(jsonOutputDriver.execute).toHaveBeenCalled();
+    expect(fileOutputDriver.execute).toHaveBeenCalled();
+    expect(onModuleInitCompleted).toBe(false);
+
+    resolveJsonOutput!({ message: 'JSON done' });
+    await Promise.resolve();
+
+    expect(onModuleInitCompleted).toBe(false);
+
+    resolveMarkdownOutput!({ message: 'Markdown done' });
+    await onModuleInitPromise;
+
+    expect(onModuleInitCompleted).toBe(true);
   });
 });

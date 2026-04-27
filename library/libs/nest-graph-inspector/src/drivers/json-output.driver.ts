@@ -1,6 +1,6 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { Injectable } from '@nestjs/common';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ModuleMap } from '../types/module-map.type';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
@@ -15,6 +15,8 @@ export class JsonOutputDriver implements OutputAdapter<JsonOutputConfig> {
   ): Promise<{ message: string }> {
     const filePath = join(process.cwd(), config.path);
     const json = JSON.stringify(moduleMap, null, 2);
+
+    await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, json);
 
     return {

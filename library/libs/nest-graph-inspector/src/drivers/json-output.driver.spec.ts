@@ -1,17 +1,19 @@
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { JsonOutputDriver } from './json-output.driver';
 
 jest.mock('node:fs/promises', () => ({
+  mkdir: jest.fn(),
   writeFile: jest.fn(),
 }));
 
 describe(JsonOutputDriver.name, () => {
   let moduleRef: TestingModule;
   let driver: JsonOutputDriver;
+  const mockedMkdir = jest.mocked(mkdir);
   const mockedWriteFile = jest.mocked(writeFile);
 
   beforeEach(async () => {
@@ -23,11 +25,13 @@ describe(JsonOutputDriver.name, () => {
   });
 
   afterEach(() => {
+    mockedMkdir.mockReset();
     mockedWriteFile.mockReset();
     return moduleRef?.close();
   });
 
   it('should write moduleMap as pretty JSON to the configured path', async () => {
+    mockedMkdir.mockResolvedValue(undefined);
     mockedWriteFile.mockResolvedValue(undefined);
 
     const moduleMap = {
@@ -46,18 +50,22 @@ describe(JsonOutputDriver.name, () => {
 
     const result = await driver.execute(moduleMap as never, config as never);
 
+    expect(mockedMkdir).toHaveBeenCalledWith(
+      dirname(join(process.cwd(), 'artifacts/module-map.json')),
+      { recursive: true },
+    );
     expect(mockedWriteFile).toHaveBeenCalledTimes(1);
     expect(mockedWriteFile).toHaveBeenCalledWith(
       join(process.cwd(), 'artifacts/module-map.json'),
       JSON.stringify(moduleMap, null, 2),
     );
     expect(result).toEqual({
-      message:
-        `Graph inspector JSON output was written to ${join(process.cwd(), 'artifacts/module-map.json')}`,
+      message: `Graph inspector JSON output was written to ${join(process.cwd(), 'artifacts/module-map.json')}`,
     });
   });
 
   it('should pass the exact config path to writeFile', async () => {
+    mockedMkdir.mockResolvedValue(undefined);
     mockedWriteFile.mockResolvedValue(undefined);
 
     const config = {
@@ -72,8 +80,7 @@ describe(JsonOutputDriver.name, () => {
       '{}',
     );
     expect(result).toEqual({
-      message:
-        `Graph inspector JSON output was written to ${join(process.cwd(), './relative/path/output.json')}`,
+      message: `Graph inspector JSON output was written to ${join(process.cwd(), './relative/path/output.json')}`,
     });
   });
 });

@@ -2,9 +2,20 @@
   "name": "nest-graph-inspector",
   "version": "0.2.0",
   "description": "NestJS module graph inspector for discovery and dependency analysis",
-  "license": "MIT", 
-  "main": "src/index.js",
-  "types": "src/index.d.ts",
+  "license": "MIT",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
   "keywords": [
     "nestjs",
     "nest",

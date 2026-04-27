@@ -27,4 +27,4 @@ const defaultOptions: NestGraphInspectorModuleOptions = {
     ViewerOutputDriver,
   ],
 })
-export class NestGraphInspectorModule extends ConfigurableModuleClass { }
+export class NestGraphInspectorModule extends ConfigurableModuleClass {}

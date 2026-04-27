@@ -1,7 +1,11 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import type { NestGraphInspectorModuleOptions, NestGraphInspectorOutput } from './nest-graph-inspector.type';
+import type {
+  NestGraphInspectorModuleOptions,
+  NestGraphInspectorOutput,
+} from './nest-graph-inspector.type';
 import { NestGraphInspectorModule } from './nest-graph-inspector.module';
 import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
@@ -16,7 +20,10 @@ import { OutputAdapter } from './ports/output.adapter';
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
   private readonly logger = new Logger(NestGraphInspectorSetup.name);
-  private readonly outputAdapters: Record<NestGraphInspectorOutput['type'], OutputAdapter>;
+  private readonly outputAdapters: Record<
+    NestGraphInspectorOutput['type'],
+    OutputAdapter
+  >;
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -49,7 +56,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     'INQUIRER',
   ];
 
-  onModuleInit() {
+  async onModuleInit(): Promise<void> {
     const rootModuleClass = this.options.rootModule;
     const moduleMap = rootModuleClass
       ? this.buildModuleMap(rootModuleClass)
@@ -59,23 +66,25 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return;
     }
 
-    for (const output of this.options.outputs) {
-      const adapter = this.outputAdapters[output.type];
-      if (!adapter) {
-        this.logger.warn(`Unsupported output type: ${output.type}`);
-        continue;
-      }
+    await Promise.all(
+      this.options.outputs.map(async (output) => {
+        const adapter = this.outputAdapters[output.type];
+        if (!adapter) {
+          this.logger.warn(`Unsupported output type: ${output.type}`);
+          return;
+        }
 
-      adapter
-        .execute(moduleMap, output)
-        .then(({ message }) => this.logger.debug(message))
-        .catch((err) => {
+        try {
+          const { message } = await adapter.execute(moduleMap, output);
+          this.logger.debug(message);
+        } catch (err) {
           this.logger.error(
             `Failed to execute output adapter for type ${output.type}`,
             err,
           );
-        });
-    }
+        }
+      }),
+    );
   }
 
   buildModuleMapFromAutoDetect(): ModuleMap {
@@ -96,7 +105,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private buildModuleMapFromRef(root: any): ModuleMap {
-    const reachable = this.collectReachableModules(root, new Set<string>());
+    const reachable = this.collectReachableModules(root, new Set<unknown>());
     const modules: Record<string, Modules> = {};
 
     for (const moduleRef of reachable) {
@@ -219,11 +228,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return providerName;
   }
 
-  private collectReachableModules(root: any, visited: Set<string>): any[] {
-    const id = this.moduleId(root);
-    if (visited.has(id)) return [];
+  private collectReachableModules(root: any, visited: Set<unknown>): any[] {
+    if (visited.has(root)) return [];
 
-    visited.add(id);
+    visited.add(root);
 
     const result = [root];
     for (const imported of root.imports.values()) {
@@ -367,6 +375,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     for (const importedModuleRef of moduleRef.imports.values()) {
+      if (!this.isExportedProviderToken(importedModuleRef, token)) {
+        continue;
+      }
+
       const importedProviderDependencyName =
         this.findProviderDependencyNameByToken(importedModuleRef, token, true);
 
@@ -421,14 +433,6 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return false;
   }
 
-  private ownProviderNames(moduleRef: any): Set<string> {
-    return new Set(
-      [...moduleRef.providers.values()]
-        .map((wrapper: any) => this.wrapperName(wrapper))
-        .filter((providerName): providerName is string => !!providerName),
-    );
-  }
-
   private exportedNames(moduleRef: any): Set<string> {
     return new Set(
       [...moduleRef.exports.values()]
@@ -442,6 +446,26 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       this.wrapperName(exportedItem) ||
       this.tokenName(exportedItem?.token || exportedItem)
     );
+  }
+
+  private isExportedProviderToken(moduleRef: any, token: any): boolean {
+    const tokenName = this.tokenName(token);
+
+    for (const exportedItem of moduleRef.exports.values()) {
+      if (
+        exportedItem === token ||
+        exportedItem?.token === token ||
+        exportedItem?.metatype === token
+      ) {
+        return true;
+      }
+
+      if (tokenName && this.exportName(exportedItem) === tokenName) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private formatDependencyName(dependencyName: string, moduleRef: any): string {
@@ -467,10 +491,6 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       this.tokenName(moduleRef.token) ||
       'AnonymousModule'
     );
-  }
-
-  private moduleId(moduleRef: any): string {
-    return this.moduleName(moduleRef).replace(/[^a-zA-Z0-9_]/g, '_');
   }
 
   private wrapperName(wrapper: any): string | null {
