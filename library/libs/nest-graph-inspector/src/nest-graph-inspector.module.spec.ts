@@ -13,6 +13,16 @@ describe(NestGraphInspectorModule.name, () => {
       moduleRef.get<NestGraphInspectorModuleOptions>(MODULE_OPTIONS_TOKEN),
     ).toEqual({
       outputs: [{ type: 'viewer' }],
+      ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
+      ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
+      nestCoreModuleName: 'NestJSCoreModule',
+      nestCoreProviders: [
+        'ModuleRef',
+        'ApplicationConfig',
+        'Reflector',
+        'REQUEST',
+        'INQUIRER',
+      ],
     });
   });
 

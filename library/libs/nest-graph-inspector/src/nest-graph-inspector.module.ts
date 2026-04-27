@@ -10,8 +10,18 @@ import { HttpOutputDriver } from './drivers/http-output.driver';
 import { ViewerOutputDriver } from './drivers/viewer-output.driver';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 
-const defaultOptions: NestGraphInspectorModuleOptions = {
+export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [{ type: 'viewer' }],
+  ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
+  ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
+  nestCoreModuleName: 'NestJSCoreModule',
+  nestCoreProviders: [
+    'ModuleRef',
+    'ApplicationConfig',
+    'Reflector',
+    'REQUEST',
+    'INQUIRER',
+  ],
 };
 
 @Module({

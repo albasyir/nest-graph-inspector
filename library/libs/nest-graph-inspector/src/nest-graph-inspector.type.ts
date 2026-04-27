@@ -23,4 +23,33 @@ export interface NestGraphInspectorModuleOptions {
    *   endpoint path to enter in the viewer.
    */
   outputs?: NestGraphInspectorOutput[];
+
+  /**
+   * Provider names that should be hidden from module exports, provider lists,
+   * and dependency resolution.
+   *
+   * Defaults to `['ModuleRef', 'ApplicationConfig']`.
+   */
+  ignoreProvider?: string[];
+
+  /**
+   * Module names that should be hidden from imports and graph output.
+   *
+   * Defaults to `['InternalCoreModule', 'NestGraphInspectorModule']`.
+   */
+  ignoreImport?: string[];
+
+  /**
+   * Virtual module name used when NestJS core providers are referenced.
+   *
+   * Defaults to `'NestJSCoreModule'`.
+   */
+  nestCoreModuleName?: string;
+
+  /**
+   * Provider names that should be grouped under the virtual NestJS core module.
+   *
+   * Defaults to `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']`.
+   */
+  nestCoreProviders?: string[];
 }

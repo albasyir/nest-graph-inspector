@@ -6,7 +6,10 @@ import type {
   NestGraphInspectorModuleOptions,
   NestGraphInspectorOutput,
 } from './nest-graph-inspector.type';
-import { NestGraphInspectorModule } from './nest-graph-inspector.module';
+import {
+  defaultOptions,
+  NestGraphInspectorModule,
+} from './nest-graph-inspector.module';
 import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
 import { Modules } from './types/module.type';
@@ -24,6 +27,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     NestGraphInspectorOutput['type'],
     OutputAdapter
   >;
+  private readonly ignoreProvider: string[];
+  private readonly ignoreImport: string[];
+  private readonly nestCoreModuleName: string;
+  private readonly nestCoreProviders: string[];
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -40,21 +47,22 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       json: this.jsonOutputAdapter,
       viewer: this.viewerOutputAdapter,
     };
+    this.ignoreProvider = [
+      ...(this.options.ignoreProvider ?? defaultOptions.ignoreProvider ?? []),
+    ];
+    this.ignoreImport = [
+      ...(this.options.ignoreImport ?? defaultOptions.ignoreImport ?? []),
+    ];
+    this.nestCoreModuleName =
+      this.options.nestCoreModuleName ??
+      defaultOptions.nestCoreModuleName ??
+      'NestJSCoreModule';
+    this.nestCoreProviders = [
+      ...(this.options.nestCoreProviders ??
+        defaultOptions.nestCoreProviders ??
+        []),
+    ];
   }
-
-  private readonly ignoreProvider = ['ModuleRef', 'ApplicationConfig'];
-  private readonly ignoreImport = [
-    'InternalCoreModule',
-    NestGraphInspectorModule.name,
-  ];
-  private readonly nestCoreModuleName = 'NestJSCoreModule';
-  private readonly nestCoreProviders = [
-    'ModuleRef',
-    'ApplicationConfig',
-    'Reflector',
-    'REQUEST',
-    'INQUIRER',
-  ];
 
   async onModuleInit(): Promise<void> {
     const rootModuleClass = this.options.rootModule;
