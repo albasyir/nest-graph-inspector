@@ -12,8 +12,8 @@ export { isSupportedPackageManager as isPackageManager }
 const selectedPackageManagerStorageKey = 'nest-graph-inspector-package-manager'
 
 export const usePackageManagerStore = defineStore('package-manager', {
-  state: () => ({
-    selectedPackageManager: defaultPackageManager as PackageManager
+  state: (): { selectedPackageManager: PackageManager } => ({
+    selectedPackageManager: defaultPackageManager
   }),
 
   actions: {

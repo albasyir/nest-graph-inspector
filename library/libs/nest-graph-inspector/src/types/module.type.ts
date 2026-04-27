@@ -1,5 +1,5 @@
-import { ModuleController } from './module-controller.type';
-import { ModuleProvider } from './module-provider.type';
+import type { ModuleController } from './module-controller.type';
+import type { ModuleProvider } from './module-provider.type';
 
 export type Modules = {
   providers: ModuleProvider[];

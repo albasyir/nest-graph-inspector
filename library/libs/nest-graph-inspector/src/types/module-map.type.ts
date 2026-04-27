@@ -1,4 +1,4 @@
-import { Modules } from './module.type';
+import type { Modules } from './module.type';
 
 export type ModuleMap = {
   version: string;

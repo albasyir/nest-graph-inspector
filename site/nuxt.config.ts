@@ -1,4 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { fileURLToPath } from 'node:url'
+
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
@@ -39,6 +41,10 @@ export default defineNuxtConfig({
         host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com'
       }
     }
+  },
+
+  alias: {
+    '@library': fileURLToPath(new URL('../library', import.meta.url))
   },
 
   experimental: {

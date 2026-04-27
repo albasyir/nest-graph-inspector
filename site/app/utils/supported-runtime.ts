@@ -74,7 +74,7 @@ export const packageManagerCommandSets = {
 export type PackageManagerCommandSet = keyof typeof packageManagerCommandSets
 
 export function isSupportedPackageManager(value: string): value is PackageManager {
-  return supportedPackageManagers.includes(value as PackageManager)
+  return supportedPackageManagers.some(packageManager => packageManager === value)
 }
 
 export function isPackageManagerCommandSet(value: string): value is PackageManagerCommandSet {

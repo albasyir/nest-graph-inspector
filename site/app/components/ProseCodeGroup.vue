@@ -4,7 +4,7 @@ import theme from '#build/ui/prose/code-group'
 
 <script setup lang="ts">
 import type { VNode } from 'vue'
-import { computed, onBeforeUpdate, onMounted, ref, watch } from 'vue'
+import { computed, isVNode, onBeforeUpdate, onMounted, ref, watch } from 'vue'
 import { TabsContent, TabsIndicator, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import { useAppConfig, useState } from '#imports'
 import ProseCodeIcon from '@nuxt/ui/components/prose/CodeIcon.vue'
@@ -20,7 +20,8 @@ type CodeGroupItem = {
   component: VNode
 }
 
-type CodeGroupUi = Record<'root' | 'list' | 'indicator' | 'trigger' | 'triggerIcon' | 'triggerLabel', (options?: { class?: unknown }) => string>
+const codeGroupTheme = tv(theme)
+type CodeGroupUi = ReturnType<typeof codeGroupTheme>
 
 const props = withDefaults(defineProps<{
   defaultValue?: string
@@ -31,27 +32,21 @@ const props = withDefaults(defineProps<{
   defaultValue: '0'
 })
 
-const slots = defineSlots()
+const slots = defineSlots<{
+  default?: () => VNode[]
+}>()
 const model = defineModel<string>()
-const appConfig = useAppConfig() as ReturnType<typeof useAppConfig> & {
-  ui?: {
-    prose?: {
-      codeGroup?: Record<string, unknown>
-    }
-  }
-}
+const appConfig = useAppConfig()
 const packageManagerStore = usePackageManagerStore()
 const uiProp = useComponentUI('prose.codeGroup', props)
 const codeGroupUi = computed<CodeGroupUi>(() => {
-  return tv({ extend: tv(theme), ...appConfig.ui?.prose?.codeGroup || {} })() as unknown as CodeGroupUi
+  return tv({ extend: codeGroupTheme, ...getCodeGroupConfig(appConfig) })()
 })
 const rerenderCount = ref(1)
 
-const items = computed(() => {
+const items = computed<CodeGroupItem[]>(() => {
   void rerenderCount.value
-  return slots.default?.()
-    ?.flatMap(transformSlot)
-    .filter(Boolean) as CodeGroupItem[] || []
+  return slots.default?.().flatMap(transformSlot) || []
 })
 
 const packageManagerLabels = computed(() => {
@@ -62,18 +57,33 @@ const isPackageManagerGroup = computed(() => {
   return packageManagerLabels.value.length > 0 && packageManagerLabels.value.every(Boolean)
 })
 
-function transformSlot(slot: VNode, index: number): CodeGroupItem | CodeGroupItem[] | undefined {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getRecordValue(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined
+}
+
+function getCodeGroupConfig(config: ReturnType<typeof useAppConfig>): Record<string, unknown> {
+  const ui = getRecordValue(config, 'ui')
+  const prose = getRecordValue(ui, 'prose')
+  const codeGroup = getRecordValue(prose, 'codeGroup')
+  return isRecord(codeGroup) ? codeGroup : {}
+}
+
+function transformSlot(slot: VNode, index: number): CodeGroupItem[] {
   if (typeof slot.type === 'symbol') {
     return slot.children instanceof Array
-      ? slot.children.map((child, childIndex) => transformSlot(child as VNode, childIndex)).flat().filter(Boolean) as CodeGroupItem[]
-      : undefined
+      ? slot.children.flatMap((child, childIndex) => isVNode(child) ? transformSlot(child, childIndex) : [])
+      : []
   }
 
-  return {
+  return [{
     label: getSlotLabel(slot, index),
     icon: typeof slot.props?.icon === 'string' ? slot.props.icon : undefined,
     component: slot
-  }
+  }]
 }
 
 function getSlotLabel(slot: VNode, index: number) {

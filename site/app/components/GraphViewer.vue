@@ -4,29 +4,21 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import type { Node, Edge } from '@vue-flow/core'
+import type { ModuleMap } from '@library/libs/nest-graph-inspector/src/types/module-map.type'
+import type { Modules } from '@library/libs/nest-graph-inspector/src/types/module.type'
 
-interface ModuleProvider {
-  name: string
-  dependencies: string[]
-}
-
-interface ModuleController {
-  name: string
-  dependencies: string[]
-}
-
-interface ModuleData {
-  providers: ModuleProvider[]
-  controllers: ModuleController[]
-  imports: string[]
+type ModuleNodeData = {
+  label: string
+  isRoot: boolean
   exports: string[]
 }
 
-interface ModuleMap {
-  version: string
-  root: string
-  modules: Record<string, ModuleData>
+type ItemNodeData = {
+  label: string
 }
+
+type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<ItemNodeData, Record<string, never>, 'item'>
+type FlowEdge = Edge<Record<string, never>, Record<string, never>, 'smoothstep'>
 
 const props = defineProps<{
   data: ModuleMap
@@ -51,9 +43,18 @@ function assignLayers(moduleMap: ModuleMap): Map<number, string[]> {
   visited.add(moduleMap.root)
 
   while (queue.length > 0) {
-    const { name, depth } = queue.shift()!
-    if (!layers.has(depth)) layers.set(depth, [])
-    layers.get(depth)!.push(name)
+    const next = queue.shift()
+    if (!next) {
+      continue
+    }
+
+    const { name, depth } = next
+    let layer = layers.get(depth)
+    if (!layer) {
+      layer = []
+      layers.set(depth, layer)
+    }
+    layer.push(name)
 
     const mod = moduleMap.modules[name]
     if (mod) {
@@ -69,15 +70,19 @@ function assignLayers(moduleMap: ModuleMap): Map<number, string[]> {
   for (const name of Object.keys(moduleMap.modules)) {
     if (!visited.has(name)) {
       const maxDepth = Math.max(...Array.from(layers.keys()), 0) + 1
-      if (!layers.has(maxDepth)) layers.set(maxDepth, [])
-      layers.get(maxDepth)!.push(name)
+      let layer = layers.get(maxDepth)
+      if (!layer) {
+        layer = []
+        layers.set(maxDepth, layer)
+      }
+      layer.push(name)
     }
   }
 
   return layers
 }
 
-function calcModuleHeight(mod: ModuleData): number {
+function calcModuleHeight(mod: Modules): number {
   const itemCount = mod.providers.length + mod.controllers.length
   if (itemCount === 0 && mod.exports.length === 0) {
     return MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
@@ -100,21 +105,21 @@ function resolveDepNodeId(dep: string, currentModule: string, moduleMap: ModuleM
     if (!modName || !provName) return null
     const mod = moduleMap.modules[modName]
     if (mod) {
-      if (mod.providers.some((p: ModuleProvider) => p.name === provName)) return `provider-${modName}-${provName}`
-      if (mod.controllers.some((c: ModuleController) => c.name === provName)) return `controller-${modName}-${provName}`
+      if (mod.providers.some(provider => provider.name === provName)) return `provider-${modName}-${provName}`
+      if (mod.controllers.some(controller => controller.name === provName)) return `controller-${modName}-${provName}`
     }
     return null
   }
 
   const mod = moduleMap.modules[currentModule]
   if (mod) {
-    if (mod.providers.some((p: ModuleProvider) => p.name === dep)) return `provider-${currentModule}-${dep}`
-    if (mod.controllers.some((c: ModuleController) => c.name === dep)) return `controller-${currentModule}-${dep}`
+    if (mod.providers.some(provider => provider.name === dep)) return `provider-${currentModule}-${dep}`
+    if (mod.controllers.some(controller => controller.name === dep)) return `controller-${currentModule}-${dep}`
   }
 
   for (const [modName, modData] of Object.entries(moduleMap.modules)) {
-    if (modData.providers.some((p: ModuleProvider) => p.name === dep)) return `provider-${modName}-${dep}`
-    if (modData.controllers.some((c: ModuleController) => c.name === dep)) return `controller-${modName}-${dep}`
+    if (modData.providers.some(provider => provider.name === dep)) return `provider-${modName}-${dep}`
+    if (modData.controllers.some(controller => controller.name === dep)) return `controller-${modName}-${dep}`
   }
 
   return null
@@ -144,9 +149,9 @@ function pickHandles(
   return { sourceHandle: 'source-left', targetHandle: 'target-right' }
 }
 
-function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
-  const nodes: Node[] = []
-  const edges: Edge[] = []
+function buildGraph(moduleMap: ModuleMap): { nodes: FlowNode[], edges: FlowEdge[] } {
+  const nodes: FlowNode[] = []
+  const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
 
@@ -159,10 +164,9 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
     const startX = -(layerWidth / 2) + MODULE_GAP_X / 2
 
     let maxHeight = 0
-    for (let i = 0; i < moduleNames.length; i++) {
-      const name = moduleNames[i]!
+    for (const [index, name] of moduleNames.entries()) {
       const mod = moduleMap.modules[name]
-      modulePositions.set(name, { x: startX + i * MODULE_GAP_X, y: currentY })
+      modulePositions.set(name, { x: startX + index * MODULE_GAP_X, y: currentY })
       if (mod) {
         maxHeight = Math.max(maxHeight, calcModuleHeight(mod))
       }
@@ -184,7 +188,7 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
         exports: mod.exports
       },
       style: { width: `${MODULE_WIDTH}px`, height: `${height}px` }
-    } as Node)
+    })
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
@@ -203,11 +207,11 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
         type: 'item',
         position: { x: MODULE_PADDING, y: childY },
         parentNode: `module-${moduleName}`,
-        extent: 'parent' as const,
+        extent: 'parent',
         draggable: false,
         data: { label: ctrl.name },
         style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
-      } as Node)
+      })
       itemIndex++
     }
 
@@ -223,11 +227,11 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
         type: 'item',
         position: { x: MODULE_PADDING, y: childY },
         parentNode: `module-${moduleName}`,
-        extent: 'parent' as const,
+        extent: 'parent',
         draggable: false,
         data: { label: prov.name },
         style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
-      } as Node)
+      })
       itemIndex++
     }
   }
@@ -235,8 +239,12 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     for (const imp of mod.imports) {
       if (moduleMap.modules[imp]) {
-        const sourcePos = modulePositions.get(imp)!
-        const targetPos = modulePositions.get(moduleName)!
+        const sourcePos = modulePositions.get(imp)
+        const targetPos = modulePositions.get(moduleName)
+        if (!sourcePos || !targetPos) {
+          continue
+        }
+
         const { sourceHandle, targetHandle } = pickHandles(sourcePos, targetPos)
 
         edges.push({
@@ -258,9 +266,13 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
       for (const dep of provider.dependencies) {
         const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
         const targetId = `provider-${moduleName}-${provider.name}`
-        if (sourceId && nodeAbsPositions.has(sourceId)) {
-          const sPos = nodeAbsPositions.get(sourceId)!
-          const tPos = nodeAbsPositions.get(targetId)!
+        if (sourceId) {
+          const sPos = nodeAbsPositions.get(sourceId)
+          const tPos = nodeAbsPositions.get(targetId)
+          if (!sPos || !tPos) {
+            continue
+          }
+
           const { sourceHandle, targetHandle } = pickHandles(sPos, tPos)
 
           edges.push({
@@ -281,9 +293,13 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
       for (const dep of controller.dependencies) {
         const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
         const targetId = `controller-${moduleName}-${controller.name}`
-        if (sourceId && nodeAbsPositions.has(sourceId)) {
-          const sPos = nodeAbsPositions.get(sourceId)!
-          const tPos = nodeAbsPositions.get(targetId)!
+        if (sourceId) {
+          const sPos = nodeAbsPositions.get(sourceId)
+          const tPos = nodeAbsPositions.get(targetId)
+          if (!sPos || !tPos) {
+            continue
+          }
+
           const { sourceHandle, targetHandle } = pickHandles(sPos, tPos)
 
           edges.push({
@@ -306,8 +322,8 @@ function buildGraph(moduleMap: ModuleMap): { nodes: Node[], edges: Edge[] } {
 
 const { nodes, edges } = buildGraph(props.data)
 
-const flowNodes = shallowRef<Node[]>(nodes)
-const flowEdges = shallowRef<Edge[]>(edges)
+const flowNodes = shallowRef<FlowNode[]>(nodes)
+const flowEdges = shallowRef<FlowEdge[]>(edges)
 
 onMounted(() => {
   setTimeout(() => fitView({ padding: 0.3 }), 200)
