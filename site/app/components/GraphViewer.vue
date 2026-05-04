@@ -7,6 +7,23 @@ import type { Node, Edge } from '@vue-flow/core'
 import type { ModuleMap } from '@library/libs/nest-graph-inspector/src/types/module-map.type'
 import type { Modules } from '@library/libs/nest-graph-inspector/src/types/module.type'
 
+type DependencyRef = {
+  providedBy: { type: string; name: string }
+  token: string
+}
+
+function normalizeDep(dep: string | DependencyRef, currentModule: string): { moduleName: string, token: string } {
+  if (typeof dep === 'object' && dep !== null && 'token' in dep) {
+    return { moduleName: dep.providedBy.name, token: dep.token }
+  }
+  const str = dep as string
+  if (str.includes(':')) {
+    const [moduleName, token] = str.split(':')
+    return { moduleName: moduleName!, token: token! }
+  }
+  return { moduleName: currentModule, token: str }
+}
+
 type ModuleNodeData = {
   label: string
   isRoot: boolean
@@ -97,29 +114,22 @@ function calcModuleHeight(mod: Modules): number {
   return h + MODULE_PADDING
 }
 
-function resolveDepNodeId(dep: string, currentModule: string, moduleMap: ModuleMap): string | null {
-  if (dep.includes(':')) {
-    const parts = dep.split(':')
-    const modName = parts[0]
-    const provName = parts[1]
-    if (!modName || !provName) return null
-    const mod = moduleMap.modules[modName]
-    if (mod) {
-      if (mod.providers.some(provider => provider.name === provName)) return `provider-${modName}-${provName}`
-      if (mod.controllers.some(controller => controller.name === provName)) return `controller-${modName}-${provName}`
-    }
+function resolveDepNodeId(dep: string | DependencyRef, currentModule: string, moduleMap: ModuleMap): string | null {
+  const { moduleName, token } = normalizeDep(dep, currentModule)
+
+  const targetMod = moduleMap.modules[moduleName]
+  if (targetMod) {
+    if (targetMod.providers.some(provider => provider.name === token)) return `provider-${moduleName}-${token}`
+    if (targetMod.controllers.some(controller => controller.name === token)) return `controller-${moduleName}-${token}`
+  }
+
+  if (moduleName !== currentModule) {
     return null
   }
 
-  const mod = moduleMap.modules[currentModule]
-  if (mod) {
-    if (mod.providers.some(provider => provider.name === dep)) return `provider-${currentModule}-${dep}`
-    if (mod.controllers.some(controller => controller.name === dep)) return `controller-${currentModule}-${dep}`
-  }
-
   for (const [modName, modData] of Object.entries(moduleMap.modules)) {
-    if (modData.providers.some(provider => provider.name === dep)) return `provider-${modName}-${dep}`
-    if (modData.controllers.some(controller => controller.name === dep)) return `controller-${modName}-${dep}`
+    if (modData.providers.some(provider => provider.name === token)) return `provider-${modName}-${token}`
+    if (modData.controllers.some(controller => controller.name === token)) return `controller-${modName}-${token}`
   }
 
   return null
