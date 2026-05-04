@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ModuleMap } from '../types/module-map.type';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
+import type { GraphOutput } from '../types/graph-output.type';
 import { HttpOutputDriver } from './http-output.driver';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
@@ -14,14 +14,14 @@ export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
   constructor(private readonly httpOutputDriver: HttpOutputDriver) {}
 
   async execute(
-    moduleMap: ModuleMap,
+    graphOutput: GraphOutput,
     config: ViewerOutputConfig,
   ): Promise<{ message: string }> {
     const path = this.httpOutputDriver.normalizePath(
       config.path ?? '/__graph-inspector',
     );
 
-    await this.httpOutputDriver.execute(moduleMap, { type: 'http', path });
+    await this.httpOutputDriver.execute(graphOutput, { type: 'http', path });
 
     if (!config.origin) {
       return {

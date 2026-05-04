@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { OutputAdapter } from '../ports/output.adapter';
-import { ModuleMap } from '../types/module-map.type';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
+import type { GraphOutput } from '../types/graph-output.type';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 type HeaderResponse = {
@@ -14,7 +14,7 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
   constructor(private readonly adapterHost: HttpAdapterHost) {}
 
   execute(
-    moduleMap: ModuleMap,
+    graphOutput: GraphOutput,
     config: HttpOutputConfig,
   ): Promise<{ message: string }> {
     const httpAdapter = this.adapterHost.httpAdapter;
@@ -22,7 +22,7 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
 
     httpAdapter.get(path, (_req: unknown, res: HeaderResponse) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      httpAdapter.reply(res, moduleMap, 200);
+      httpAdapter.reply(res, graphOutput, 200);
     });
 
     return Promise.resolve({

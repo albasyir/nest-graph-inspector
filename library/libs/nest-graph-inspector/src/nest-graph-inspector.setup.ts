@@ -14,6 +14,11 @@ import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
 import { Modules } from './types/module.type';
 import { ModuleMap } from './types/module-map.type';
+import type {
+  GraphOutput,
+  GraphOutputDependencyRef,
+  GraphOutputModule,
+} from './types/graph-output.type';
 import { HttpOutputDriver } from './drivers/http-output.driver';
 import { FileOutputDriver } from './drivers/file-output.driver';
 import { JsonOutputDriver } from './drivers/json-output.driver';
@@ -74,6 +79,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return;
     }
 
+    const graphOutput = this.enrichModuleMap(moduleMap);
+
     await Promise.all(
       this.options.outputs.map(async (output) => {
         const adapter = this.outputAdapters[output.type];
@@ -83,7 +90,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         }
 
         try {
-          const { message } = await adapter.execute(moduleMap, output);
+          const { message } = await adapter.execute(graphOutput, output);
           this.logger.debug(message);
         } catch (err) {
           this.logger.error(
@@ -516,5 +523,58 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     if (typeof token === 'symbol') return token.toString();
     if (typeof token === 'function') return token.name;
     return String(token);
+  }
+
+  private enrichModuleMap(moduleMap: ModuleMap): GraphOutput {
+    if (!moduleMap.modules) {
+      return moduleMap as unknown as GraphOutput;
+    }
+
+    const enrichedModules: Record<string, GraphOutputModule> = {};
+
+    for (const [moduleName, moduleData] of Object.entries(moduleMap.modules)) {
+      enrichedModules[moduleName] = {
+        ...moduleData,
+        providers: moduleData.providers.map((provider) => ({
+          ...provider,
+          dependencies: provider.dependencies.map((dep) =>
+            this.enrichDependency(dep, moduleName),
+          ),
+        })),
+        controllers: moduleData.controllers.map((controller) => ({
+          ...controller,
+          dependencies: controller.dependencies.map((dep) =>
+            this.enrichDependency(dep, moduleName),
+          ),
+        })),
+      };
+    }
+
+    return {
+      ...moduleMap,
+      modules: enrichedModules,
+    };
+  }
+
+  private enrichDependency(
+    dependency: string,
+    currentModule: string,
+  ): GraphOutputDependencyRef {
+    const colonIndex = dependency.indexOf(':');
+
+    if (colonIndex !== -1) {
+      return {
+        providedBy: {
+          type: 'module',
+          name: dependency.substring(0, colonIndex),
+        },
+        token: dependency.substring(colonIndex + 1),
+      };
+    }
+
+    return {
+      providedBy: { type: 'module', name: currentModule },
+      token: dependency,
+    };
   }
 }

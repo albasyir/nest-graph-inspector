@@ -4,24 +4,10 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import type { Node, Edge } from '@vue-flow/core'
-import type { ModuleMap } from '@library/libs/nest-graph-inspector/src/types/module-map.type'
-import type { Modules } from '@library/libs/nest-graph-inspector/src/types/module.type'
+import type { GraphOutput, GraphOutputModule, GraphOutputDependencyRef } from '@library/libs/nest-graph-inspector/src'
 
-type DependencyRef = {
-  providedBy: { type: string; name: string }
-  token: string
-}
-
-function normalizeDep(dep: string | DependencyRef, currentModule: string): { moduleName: string, token: string } {
-  if (typeof dep === 'object' && dep !== null && 'token' in dep) {
-    return { moduleName: dep.providedBy.name, token: dep.token }
-  }
-  const str = dep as string
-  if (str.includes(':')) {
-    const [moduleName, token] = str.split(':')
-    return { moduleName: moduleName!, token: token! }
-  }
-  return { moduleName: currentModule, token: str }
+function normalizeDep(dep: GraphOutputDependencyRef): { moduleName: string, token: string } {
+  return { moduleName: dep.providedBy.name, token: dep.token }
 }
 
 type ModuleNodeData = {
@@ -38,7 +24,7 @@ type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<Ite
 type FlowEdge = Edge<Record<string, never>, Record<string, never>, 'smoothstep'>
 
 const props = defineProps<{
-  data: ModuleMap
+  data: GraphOutput
 }>()
 
 const { fitView } = useVueFlow()
@@ -53,7 +39,7 @@ const EXPORTS_HEIGHT = 24
 const MODULE_GAP_X = 320
 const MODULE_GAP_Y = 100
 
-function assignLayers(moduleMap: ModuleMap): Map<number, string[]> {
+function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
   const layers = new Map<number, string[]>()
   const visited = new Set<string>()
   const queue: { name: string, depth: number }[] = [{ name: moduleMap.root, depth: 0 }]
@@ -99,7 +85,7 @@ function assignLayers(moduleMap: ModuleMap): Map<number, string[]> {
   return layers
 }
 
-function calcModuleHeight(mod: Modules): number {
+function calcModuleHeight(mod: GraphOutputModule): number {
   const itemCount = mod.providers.length + mod.controllers.length
   if (itemCount === 0 && mod.exports.length === 0) {
     return MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
@@ -114,8 +100,8 @@ function calcModuleHeight(mod: Modules): number {
   return h + MODULE_PADDING
 }
 
-function resolveDepNodeId(dep: string | DependencyRef, currentModule: string, moduleMap: ModuleMap): string | null {
-  const { moduleName, token } = normalizeDep(dep, currentModule)
+function resolveDepNodeId(dep: GraphOutputDependencyRef, currentModule: string, moduleMap: GraphOutput): string | null {
+  const { moduleName, token } = normalizeDep(dep)
 
   const targetMod = moduleMap.modules[moduleName]
   if (targetMod) {
@@ -159,7 +145,7 @@ function pickHandles(
   return { sourceHandle: 'source-left', targetHandle: 'target-right' }
 }
 
-function buildGraph(moduleMap: ModuleMap): { nodes: FlowNode[], edges: FlowEdge[] } {
+function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)

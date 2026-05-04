@@ -1,8 +1,8 @@
-import { ModuleMap } from '../types/module-map.type';
+import { GraphOutput } from '../types/graph-output.type';
 
 export interface OutputAdapter<Config = unknown> {
   execute(
-    moduleMap: ModuleMap,
+    graphOutput: GraphOutput,
     config: Config,
   ): Promise<{
     message: string;

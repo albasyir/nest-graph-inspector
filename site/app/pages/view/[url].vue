@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ModuleMap } from '@library/libs/nest-graph-inspector/src/types/module-map.type'
+import type { GraphOutput } from '@library/libs/nest-graph-inspector/src'
 
 const route = useRoute()
 const posthog = usePostHog()
@@ -29,7 +29,7 @@ if (!decodedUrl.value) {
   navigateTo('/view')
 }
 
-const { data: graphData, status, error, refresh } = await useFetch<ModuleMap>(() => decodedUrl.value, {
+const { data: graphData, status, error, refresh } = await useFetch<GraphOutput>(() => decodedUrl.value, {
   key: `graph-${urlBase64.value}`,
   server: false,
   onResponse({ response }) {

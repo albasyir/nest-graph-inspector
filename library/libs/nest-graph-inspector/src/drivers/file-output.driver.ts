@@ -1,30 +1,28 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { Injectable } from '@nestjs/common';
 import { dirname, join } from 'node:path';
-import { ModuleMap } from '../types/module-map.type';
-import { ModuleProvider } from '../types/module-provider.type';
-import { ModuleController } from '../types/module-controller.type';
-import { Modules } from '../types/module.type';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
+import type {
+  GraphOutput,
+  GraphOutputModule,
+  GraphOutputProvider,
+  GraphOutputController,
+  GraphOutputDependencyRef,
+} from '../types/graph-output.type';
 
 type FileOutputConfig = Extract<NestGraphInspectorOutput, { type: 'markdown' }>;
-
-type DependencyTarget = {
-  moduleName: string;
-  providerName: string;
-};
 
 @Injectable()
 export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private readonly nestCoreModuleName = 'NestJSCoreModule';
 
   async execute(
-    moduleMap: ModuleMap,
+    graphOutput: GraphOutput,
     config: FileOutputConfig,
   ): Promise<{ message: string }> {
     const filePath = join(process.cwd(), config.path);
-    const markdownText = this.buildMarkdownText(moduleMap);
+    const markdownText = this.buildMarkdownText(graphOutput);
 
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, markdownText, 'utf8');
@@ -34,21 +32,21 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     };
   }
 
-  private buildMarkdownText(moduleMap: ModuleMap): string {
+  private buildMarkdownText(graphOutput: GraphOutput): string {
     const lines: string[] = [];
-    const moduleEntries = Object.entries(moduleMap.modules);
+    const moduleEntries = Object.entries(graphOutput.modules);
 
     lines.push('# NestJS Dependency Graph');
     lines.push('');
-    lines.push(`Root Module: \`${moduleMap.root}\``);
-    lines.push(`Version: \`${moduleMap.version}\``);
+    lines.push(`Root Module: \`${graphOutput.root}\``);
+    lines.push(`Version: \`${graphOutput.version}\``);
     lines.push('');
     lines.push('```mermaid');
     lines.push('graph TD');
     lines.push('');
 
     this.appendMermaidModuleGroups(lines, moduleEntries);
-    this.appendMermaidModuleRelations(lines, moduleEntries, moduleMap);
+    this.appendMermaidModuleRelations(lines, moduleEntries, graphOutput);
 
     lines.push('```');
     lines.push('');
@@ -61,7 +59,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
 
   private appendMermaidModuleGroups(
     lines: string[],
-    moduleEntries: [string, Modules][],
+    moduleEntries: [string, GraphOutputModule][],
   ): void {
     for (const [moduleName, moduleData] of moduleEntries) {
       lines.push(
@@ -86,27 +84,27 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
 
   private appendMermaidModuleRelations(
     lines: string[],
-    moduleEntries: [string, Modules][],
-    moduleMap: ModuleMap,
+    moduleEntries: [string, GraphOutputModule][],
+    graphOutput: GraphOutput,
   ): void {
     for (const [moduleName, moduleData] of moduleEntries) {
       this.appendMermaidImportRelations(
         lines,
         moduleName,
         moduleData,
-        moduleMap,
+        graphOutput,
       );
       this.appendMermaidProviderRelations(
         lines,
         moduleName,
         moduleData,
-        moduleMap,
+        graphOutput,
       );
       this.appendMermaidControllerRelations(
         lines,
         moduleName,
         moduleData,
-        moduleMap,
+        graphOutput,
       );
     }
   }
@@ -114,8 +112,8 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendMermaidImportRelations(
     lines: string[],
     moduleName: string,
-    moduleData: Modules,
-    moduleMap: ModuleMap,
+    moduleData: GraphOutputModule,
+    graphOutput: GraphOutput,
   ): void {
     const moduleGroupId = this.moduleGroupId(moduleName);
     if (moduleName === this.nestCoreModuleName) {
@@ -123,7 +121,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     }
 
     for (const importedModuleName of moduleData.imports) {
-      if (!moduleMap.modules[importedModuleName]) {
+      if (!graphOutput.modules[importedModuleName]) {
         continue;
       }
 
@@ -136,8 +134,8 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendMermaidProviderRelations(
     lines: string[],
     moduleName: string,
-    moduleData: Modules,
-    moduleMap: ModuleMap,
+    moduleData: GraphOutputModule,
+    graphOutput: GraphOutput,
   ): void {
     for (const provider of moduleData.providers) {
       const providerNodeId = this.providerNodeId(moduleName, provider.name);
@@ -147,7 +145,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
         moduleName,
         provider.name,
         provider.dependencies,
-        moduleMap,
+        graphOutput,
       );
     }
   }
@@ -155,8 +153,8 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendMermaidControllerRelations(
     lines: string[],
     moduleName: string,
-    moduleData: Modules,
-    moduleMap: ModuleMap,
+    moduleData: GraphOutputModule,
+    graphOutput: GraphOutput,
   ): void {
     for (const controller of moduleData.controllers) {
       const controllerNodeId = this.controllerNodeId(
@@ -169,7 +167,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
         moduleName,
         controller.name,
         controller.dependencies,
-        moduleMap,
+        graphOutput,
       );
     }
   }
@@ -179,31 +177,31 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     ownerNodeId: string,
     moduleName: string,
     ownerName: string,
-    dependencies: string[],
-    moduleMap: ModuleMap,
+    dependencies: GraphOutputDependencyRef[],
+    graphOutput: GraphOutput,
   ): void {
-    for (const dependencyName of dependencies) {
-      const dependencyTarget = this.findDependencyTarget(
-        dependencyName,
-        moduleName,
-        moduleMap,
+    for (const dep of dependencies) {
+      const targetModule = graphOutput.modules[dep.providedBy.name];
+      const hasProvider = targetModule?.providers.some(
+        (p) => p.name === dep.token,
       );
 
-      if (dependencyTarget) {
+      if (hasProvider) {
         lines.push(
-          `  ${this.providerNodeId(dependencyTarget.moduleName, dependencyTarget.providerName)} --> ${ownerNodeId}`,
+          `  ${this.providerNodeId(dep.providedBy.name, dep.token)} --> ${ownerNodeId}`,
         );
         continue;
       }
 
+      const depLabel = `${dep.providedBy.name}:${dep.token}`;
       const dependencyNodeId = this.dependencyNodeId(
         moduleName,
         ownerName,
-        dependencyName,
+        depLabel,
       );
 
       lines.push(
-        `  ${dependencyNodeId}["${this.escapeMermaidLabel(dependencyName)}"]`,
+        `  ${dependencyNodeId}["${this.escapeMermaidLabel(depLabel)}"]`,
       );
       lines.push(`  ${dependencyNodeId} --> ${ownerNodeId}`);
     }
@@ -236,7 +234,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
 
   private appendModuleSections(
     lines: string[],
-    moduleEntries: [string, Modules][],
+    moduleEntries: [string, GraphOutputModule][],
   ): void {
     for (const [moduleName, moduleData] of moduleEntries) {
       lines.push(`## ${moduleName}`);
@@ -276,7 +274,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendProviderSection(
     lines: string[],
     title: string,
-    providers: ModuleProvider[],
+    providers: GraphOutputProvider[],
   ): void {
     lines.push(`### ${title}`);
 
@@ -300,7 +298,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendControllerSection(
     lines: string[],
     title: string,
-    controllers: ModuleController[],
+    controllers: GraphOutputController[],
   ): void {
     lines.push(`### ${title}`);
 
@@ -324,63 +322,13 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
   private appendNamedDependencyItem(
     lines: string[],
     name: string,
-    dependencies: string[],
+    dependencies: GraphOutputDependencyRef[],
   ): void {
     lines.push(`- ${name}`);
 
-    for (const dependencyName of dependencies) {
-      lines.push(`  - depends on: ${dependencyName}`);
+    for (const dep of dependencies) {
+      lines.push(`  - depends on: ${dep.providedBy.name}:${dep.token}`);
     }
-  }
-
-  private findDependencyTarget(
-    dependencyName: string,
-    currentModuleName: string,
-    moduleMap: ModuleMap,
-  ): DependencyTarget | null {
-    const currentModule = moduleMap.modules[currentModuleName];
-    if (currentModule) {
-      const hasInternalProvider = currentModule.providers.some(
-        (provider) => provider.name === dependencyName,
-      );
-
-      if (hasInternalProvider) {
-        return {
-          moduleName: currentModuleName,
-          providerName: dependencyName,
-        };
-      }
-    }
-
-    const separatorIndex = dependencyName.indexOf(':');
-    if (separatorIndex === -1) {
-      return null;
-    }
-
-    const moduleName = dependencyName.slice(0, separatorIndex);
-    const providerName = dependencyName.slice(separatorIndex + 1);
-
-    if (!moduleName || !providerName) {
-      return null;
-    }
-
-    const moduleData = moduleMap.modules[moduleName];
-    if (!moduleData) {
-      return null;
-    }
-
-    const hasProvider = moduleData.providers.some(
-      (provider) => provider.name === providerName,
-    );
-
-    if (!hasProvider) {
-      return null;
-    }
-
-    return {
-      moduleName,
-      providerName,
-    };
   }
 
   private toMermaidNodeId(value: string): string {
