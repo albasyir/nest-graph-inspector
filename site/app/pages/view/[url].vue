@@ -81,6 +81,10 @@ function openNewUrl() {
           :loading="status === 'pending'"
           @click="handleRefresh()"
         />
+        <AiChatDrawer
+          :source-url="decodedUrl"
+          :graph-data="graphData"
+        />
         <UButton
           icon="i-lucide-link"
           label="New URL"
