@@ -9,7 +9,7 @@ type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 @Injectable()
 export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
   private readonly viewerBaseUrl =
-    'https://albasyir.github.io/nest-graph-inspector';
+    process.env.____DEV_VIEWER_BASE_URL || 'https://albasyir.github.io/nest-graph-inspector';
 
   constructor(private readonly httpOutputDriver: HttpOutputDriver) {}
 
