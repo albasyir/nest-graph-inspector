@@ -34,7 +34,7 @@
   "bugs": {
     "url": "https://github.com/albasyir/nest-graph-inspector/issues"
   },
-  "homepage": "https://github.com/albasyir/nest-graph-inspector#readme",
+  "homepage": "https://albasyir.github.io/nest-graph-inspector",
   "peerDependencies": {
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0"
