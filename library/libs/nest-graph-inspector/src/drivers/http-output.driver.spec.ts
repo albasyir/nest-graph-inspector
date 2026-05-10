@@ -44,8 +44,12 @@ describe(HttpOutputDriver.name, () => {
 
     const result = await driver.execute({} as never, config);
 
-    expect(httpAdapter.get).toHaveBeenCalledWith(
+    expect(httpAdapter.get).not.toHaveBeenCalledWith(
       '/graph',
+      expect.any(Function),
+    );
+    expect(httpAdapter.get).toHaveBeenCalledWith(
+      '/graph/information.json',
       expect.any(Function),
     );
     expect(httpAdapter.get).toHaveBeenCalledWith(
@@ -59,7 +63,7 @@ describe(HttpOutputDriver.name, () => {
     expect(config.path).toBe('graph');
     expect(result).toEqual({
       message:
-        'Graph inspector HTTP endpoints are installed at /graph, /graph/output.json, and /graph/output.md',
+        'Graph inspector HTTP endpoints are installed at /graph/information.json, /graph/output.json, and /graph/output.md',
     });
   });
 
@@ -67,7 +71,7 @@ describe(HttpOutputDriver.name, () => {
     expect(driver.normalizePath()).toBe('/__nest-graph-inspector');
   });
 
-  it('serves raw JSON and markdown output under the configured path', async () => {
+  it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
     const graphOutput: GraphOutput = {
       version: '1',
       root: 'AppModule',
@@ -92,6 +96,29 @@ describe(HttpOutputDriver.name, () => {
     const markdownHandler = httpAdapter.get.mock.calls.find(
       ([route]) => route === '/graph/output.md',
     )?.[1] as ((req: unknown, res: typeof res) => void) | undefined;
+    const informationHandler = httpAdapter.get.mock.calls.find(
+      ([route]) => route === '/graph/information.json',
+    )?.[1] as ((req: unknown, res: typeof res) => void) | undefined;
+
+    if (!informationHandler) {
+      throw new Error(
+        'Expected /graph/information.json handler to be registered',
+      );
+    }
+    informationHandler(undefined, res);
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Access-Control-Allow-Origin',
+      '*',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/json; charset=utf-8',
+    );
+    expect(httpAdapter.reply).toHaveBeenCalledWith(
+      res,
+      { for: 'nest-graph-inspector' },
+      200,
+    );
 
     if (!jsonHandler) {
       throw new Error('Expected /graph/output.json handler to be registered');

@@ -79,6 +79,8 @@ function openNewUrl() {
 
 <template>
   <UContainer class="py-6">
+    <GraphInspectorUpdateModal />
+
     <!-- Header -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
       <div class="space-y-1 min-w-0">

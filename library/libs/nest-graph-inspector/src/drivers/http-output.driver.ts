@@ -10,6 +10,8 @@ type HeaderResponse = {
   setHeader(name: string, value: string): void;
 };
 
+const INSPECTOR_ENDPOINT_INFO = { for: 'nest-graph-inspector' };
+
 @Injectable()
 export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
   constructor(
@@ -23,12 +25,14 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
   ): Promise<{ message: string }> {
     const httpAdapter = this.adapterHost.httpAdapter;
     const path = this.normalizePath(config.path);
+    const informationOutputPath = this.joinPath(path, 'information.json');
     const jsonOutputPath = this.joinPath(path, 'output.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
 
-    httpAdapter.get(path, (_req: unknown, res: HeaderResponse) => {
+    httpAdapter.get(informationOutputPath, (_req: unknown, res: HeaderResponse) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      httpAdapter.reply(res, graphOutput, 200);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      httpAdapter.reply(res, INSPECTOR_ENDPOINT_INFO, 200);
     });
 
     httpAdapter.get(jsonOutputPath, (_req: unknown, res: HeaderResponse) => {
@@ -51,7 +55,7 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
     );
 
     return Promise.resolve({
-      message: `Graph inspector HTTP endpoints are installed at ${path}, ${jsonOutputPath}, and ${markdownOutputPath}`,
+      message: `Graph inspector HTTP endpoints are installed at ${informationOutputPath}, ${jsonOutputPath}, and ${markdownOutputPath}`,
     });
   }
 

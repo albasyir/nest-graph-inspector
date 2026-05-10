@@ -16,7 +16,7 @@ function loadExample() {
   const config = useRuntimeConfig()
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
-  urlInput.value = `${window.location.origin}${base}graph-output.json`
+  urlInput.value = `${window.location.origin}${base}mock-graph`
 }
 
 async function onSubmit() {
@@ -31,7 +31,9 @@ async function onSubmit() {
   try {
     const isLoaded = await graphStore.setInputUrl(input)
     if (!isLoaded) {
-      errorMessage.value = graphStore.errorMessage || 'Could not fetch graph JSON from the provided URL.'
+      errorMessage.value = graphStore.shouldShowUpdateModal
+        ? ''
+        : graphStore.errorMessage || 'Could not fetch graph JSON from the provided URL.'
       return
     }
   } catch {
@@ -58,6 +60,8 @@ onMounted(() => {
 
 <template>
   <UContainer class="py-4 flex items-center justify-center min-h-[calc(100vh-140px)]">
+    <GraphInspectorUpdateModal />
+
     <div class="w-full max-w-2xl space-y-6">
       <!-- Hero Section -->
       <div class="text-center space-y-2">

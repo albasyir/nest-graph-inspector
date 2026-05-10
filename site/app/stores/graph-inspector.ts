@@ -1,6 +1,12 @@
 import type { GraphOutput } from '@library/libs/nest-graph-inspector/src'
 import { defineStore } from 'pinia'
 
+type InspectorEndpointInfo = {
+  for?: string
+}
+
+type LegacyGraphOutput = Partial<GraphOutput>
+
 function withDefaultProtocol(input: string) {
   return input.startsWith('http://') || input.startsWith('https://') ? input : `http://${input}`
 }
@@ -15,8 +21,35 @@ function normalizeSourceUrl(input: string) {
   return url.toString()
 }
 
+function appendOutputPath(value: string, fileName: string) {
+  if (!value) {
+    return ''
+  }
+
+  try {
+    const url = new URL(value)
+    const path = url.pathname.replace(/\/+$/, '')
+
+    url.pathname = `${path}/${fileName}`
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && 'version' in value
+    && 'root' in value
+    && 'modules' in value
+  )
+}
+
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const encodedUrl = ref('')
+  const shouldShowUpdateModal = ref(false)
 
   const decodedUrl = computed(() => {
     if (!encodedUrl.value) {
@@ -30,20 +63,30 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
   })
 
-  const markdownUrl = computed(() => {
-    if (!decodedUrl.value) {
-      return ''
-    }
+  const informationUrl = computed(() => appendOutputPath(decodedUrl.value, 'information.json'))
+  const jsonUrl = computed(() => appendOutputPath(decodedUrl.value, 'output.json'))
+  const markdownUrl = computed(() => appendOutputPath(decodedUrl.value, 'output.md'))
 
-    try {
-      const url = new URL(decodedUrl.value)
-      const path = url.pathname.replace(/\/+$/, '')
+  const {
+    data: endpointInfo,
+    execute: executeEndpointInfo,
+    clear: clearEndpointInfo
+  } = useFetch<InspectorEndpointInfo>(() => informationUrl.value, {
+    key: 'graph-inspector-endpoint-info',
+    immediate: false,
+    server: false,
+    watch: false
+  })
 
-      url.pathname = `${path}/output.md`
-      return url.toString()
-    } catch {
-      return ''
-    }
+  const {
+    data: legacyGraphData,
+    execute: executeLegacyGraph,
+    clear: clearLegacyGraph
+  } = useFetch<LegacyGraphOutput>(() => decodedUrl.value, {
+    key: 'graph-inspector-legacy-graph',
+    immediate: false,
+    server: false,
+    watch: false
   })
 
   const {
@@ -52,7 +95,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     error,
     execute: executeJson,
     clear: clearJson
-  } = useFetch<GraphOutput>(() => decodedUrl.value, {
+  } = useFetch<GraphOutput>(() => jsonUrl.value, {
     key: 'graph-inspector-json',
     immediate: false,
     server: false,
@@ -73,8 +116,36 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
   const errorMessage = computed(() => error.value?.message || '')
 
+  function clearGraph() {
+    clearEndpointInfo()
+    clearLegacyGraph()
+    clearJson()
+    clearMarkdown()
+    shouldShowUpdateModal.value = false
+  }
+
+  async function validateEndpoint() {
+    if (!informationUrl.value) {
+      clearEndpointInfo()
+      return false
+    }
+
+    await executeEndpointInfo()
+
+    const isValidEndpoint = endpointInfo.value?.for === 'nest-graph-inspector'
+    if (isValidEndpoint) {
+      shouldShowUpdateModal.value = false
+      return true
+    }
+
+    await executeLegacyGraph()
+    shouldShowUpdateModal.value = isLegacyGraphOutput(legacyGraphData.value)
+
+    return false
+  }
+
   async function fetchJson() {
-    if (!decodedUrl.value) {
+    if (!jsonUrl.value) {
       clearJson()
       return false
     }
@@ -96,8 +167,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   async function setEncodedUrl(value: string) {
     if (encodedUrl.value !== value) {
       encodedUrl.value = value
-      clearJson()
-      clearMarkdown()
+      clearGraph()
+    }
+
+    const isValidEndpoint = await validateEndpoint()
+    if (!isValidEndpoint) {
+      return false
     }
 
     return await fetchJson()
@@ -109,6 +184,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   async function fetchGraph() {
+    const isValidEndpoint = await validateEndpoint()
+    if (!isValidEndpoint) {
+      return false
+    }
+
     const jsonLoaded = await fetchJson()
     if (jsonLoaded) {
       await fetchMarkdown()
@@ -120,12 +200,16 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   return {
     encodedUrl,
     decodedUrl,
+    informationUrl,
+    jsonUrl,
     markdownUrl,
     graphData,
     graphMarkdown,
     status,
     error,
     errorMessage,
+    shouldShowUpdateModal,
+    validateEndpoint,
     setEncodedUrl,
     setInputUrl,
     fetchJson,

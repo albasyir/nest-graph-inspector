@@ -25,7 +25,7 @@ export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
 
     if (!config.origin) {
       return {
-        message: `Graph Viewer is available at ${this.viewerBaseUrl}/view. Graph endpoint is installed at ${path}. See ${this.viewerBaseUrl}/configuration/outputs#web-viewer-output-type-viewer for detail`,
+        message: `Graph Viewer is available at ${this.viewerBaseUrl}/view and follow the configuration instructions.`,
       };
     }
 

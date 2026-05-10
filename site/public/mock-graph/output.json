@@ -1,0 +1,195 @@
+{
+  "version": "1",
+  "root": "AppModule",
+  "modules": {
+    "AppModule": {
+      "imports": [
+        "UserModule",
+        "ProductModule",
+        "OrderModule"
+      ],
+      "exports": [],
+      "providers": [],
+      "controllers": []
+    },
+    "UserModule": {
+      "imports": [],
+      "exports": [
+        "UserService"
+      ],
+      "providers": [
+        {
+          "name": "UserService",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "UserModule"
+              },
+              "token": "UserRepository"
+            }
+          ]
+        },
+        {
+          "name": "UserRepository",
+          "dependencies": []
+        }
+      ],
+      "controllers": [
+        {
+          "name": "UserController",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "UserModule"
+              },
+              "token": "UserService"
+            }
+          ]
+        }
+      ]
+    },
+    "ProductModule": {
+      "imports": [
+        "UserModule"
+      ],
+      "exports": [
+        "ProductService"
+      ],
+      "providers": [
+        {
+          "name": "ProductService",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ProductModule"
+              },
+              "token": "ProductRepository"
+            }
+          ]
+        },
+        {
+          "name": "ProductRepository",
+          "dependencies": []
+        }
+      ],
+      "controllers": [
+        {
+          "name": "ProductController",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ProductModule"
+              },
+              "token": "ProductService"
+            }
+          ]
+        }
+      ]
+    },
+    "OrderModule": {
+      "imports": [
+        "UserModule",
+        "ProductModule"
+      ],
+      "exports": [
+        "OrderService"
+      ],
+      "providers": [
+        {
+          "name": "OrderRepository",
+          "dependencies": []
+        },
+        {
+          "name": "OrderService",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "OrderModule"
+              },
+              "token": "OrderRepository"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "UserModule"
+              },
+              "token": "UserService"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ProductModule"
+              },
+              "token": "ProductService"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "OrderModule"
+              },
+              "token": "OrderNotificationService"
+            }
+          ]
+        },
+        {
+          "name": "OrderNotificationService",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "OrderModule"
+              },
+              "token": "OrderService"
+            }
+          ]
+        }
+      ],
+      "controllers": [
+        {
+          "name": "OrderController",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "OrderModule"
+              },
+              "token": "OrderService"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "NestJSCoreModule"
+              },
+              "token": "ModuleRef"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "OrderModule"
+              },
+              "token": "OrderNotificationService"
+            }
+          ]
+        }
+      ]
+    },
+    "NestJSCoreModule": {
+      "imports": [],
+      "exports": [
+        "ModuleRef"
+      ],
+      "providers": [
+        {
+          "name": "ModuleRef",
+          "dependencies": []
+        }
+      ],
+      "controllers": []
+    }
+  }
+}
