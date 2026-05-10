@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import type { GraphOutput } from '@library/libs/nest-graph-inspector/src'
+import { storeToRefs } from 'pinia'
 
 const route = useRoute()
 const posthog = usePostHog()
+const graphStore = useGraphInspectorStore()
+const { decodedUrl, graphData, status, errorMessage } = storeToRefs(graphStore)
 
 const urlBase64 = computed(() => {
   const param = route.params.url
   return Array.isArray(param) ? param[0] : param
 })
 
-const decodedUrl = computed(() => {
+const encodedUrl = computed(() => {
   if (!urlBase64.value) return ''
   try {
-    return atob(urlBase64.value)
+    return decodeURIComponent(urlBase64.value)
   } catch {
     return ''
   }
@@ -25,33 +27,46 @@ useSeoMeta({
 })
 
 // Redirect to /view if no valid URL
-if (!decodedUrl.value) {
-  navigateTo('/view')
-}
+async function loadGraphResources(value: string) {
+  if (!value) {
+    navigateTo('/view')
+    return
+  }
 
-const { data: graphData, status, error, refresh } = await useFetch<GraphOutput>(() => decodedUrl.value, {
-  key: `graph-${urlBase64.value}`,
-  server: false,
-  onResponse({ response }) {
-    if (response.ok) {
-      posthog?.capture('Graph Loaded', {
-        url: decodedUrl.value
-      })
-    }
-  },
-  onResponseError({ error: fetchError }) {
+  const graphLoaded = await graphStore.setEncodedUrl(value)
+  if (graphLoaded) {
+    await graphStore.fetchMarkdown()
+  }
+
+  if (graphLoaded) {
+    posthog?.capture('Graph Loaded', {
+      url: decodedUrl.value
+    })
+  } else {
     posthog?.capture('Graph Load Failed', {
       url: decodedUrl.value,
-      error_message: fetchError?.message || 'Unknown error'
+      error_message: errorMessage.value || 'Unknown error'
     })
   }
+
+  if (!graphStore.decodedUrl) {
+    navigateTo('/view')
+  }
+}
+
+onMounted(() => {
+  loadGraphResources(encodedUrl.value)
+})
+
+watch(encodedUrl, (value) => {
+  loadGraphResources(value)
 })
 
 function handleRefresh() {
   posthog?.capture('Graph Refreshed', {
     url: decodedUrl.value
   })
-  refresh()
+  graphStore.fetchGraph()
 }
 
 function openNewUrl() {
@@ -81,10 +96,7 @@ function openNewUrl() {
           :loading="status === 'pending'"
           @click="handleRefresh()"
         />
-        <AiChatDrawer
-          :source-url="decodedUrl"
-          :graph-data="graphData"
-        />
+        <AiChatDrawer />
         <UButton
           icon="i-lucide-link"
           label="New URL"
@@ -118,7 +130,7 @@ function openNewUrl() {
 
     <!-- Error State -->
     <div
-      v-else-if="error"
+      v-else-if="status === 'error'"
       class="flex flex-col items-center justify-center min-h-[60vh] gap-4"
     >
       <div class="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center">
@@ -132,7 +144,7 @@ function openNewUrl() {
           Failed to fetch graph data
         </p>
         <p class="text-sm text-muted max-w-md">
-          {{ error.message || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.' }}
+          {{ errorMessage || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.' }}
         </p>
         <div class="flex items-center justify-center gap-2 mt-4">
           <UButton

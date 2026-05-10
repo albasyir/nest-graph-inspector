@@ -32,7 +32,7 @@ export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
     };
   }
 
-  private buildMarkdownText(graphOutput: GraphOutput): string {
+  buildMarkdownText(graphOutput: GraphOutput): string {
     const lines: string[] = [];
     const moduleEntries = Object.entries(graphOutput.modules);
 

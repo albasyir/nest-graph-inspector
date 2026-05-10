@@ -1,11 +1,4 @@
 <script setup lang="ts">
-import type { GraphOutput, GraphOutputDependencyRef } from '@library/libs/nest-graph-inspector/src'
-
-const props = defineProps<{
-  sourceUrl: string
-  graphData?: GraphOutput | null
-}>()
-
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -48,6 +41,7 @@ const messages = ref<ChatMessage[]>([
 ])
 
 const posthog = usePostHog()
+const graphStore = useGraphInspectorStore()
 
 const providerItems = [
   {
@@ -161,8 +155,10 @@ function handleOpenChange(value: boolean) {
   open.value = value
 
   if (value) {
+    graphStore.fetchMarkdown()
+
     posthog?.capture('Graph AI Chat Opened', {
-      url: props.sourceUrl
+      url: graphStore.decodedUrl
     })
   }
 }
@@ -214,56 +210,25 @@ async function downloadRecommendedModel() {
   }
 }
 
-function formatDependency(dep: GraphOutputDependencyRef) {
-  return `${dep.token} from ${dep.providedBy.type} ${dep.providedBy.name}`
-}
-
-function buildDiagramPrompt(data?: GraphOutput | null) {
-  if (!data) {
-    return 'No graph diagram data is available yet.'
-  }
-
-  const lines = [
-    `Graph version: ${data.version}`,
-    `Root module: ${data.root}`,
-    ''
-  ]
-
-  for (const [moduleName, mod] of Object.entries(data.modules)) {
-    lines.push(`Module: ${moduleName}`)
-    lines.push(`  imports: ${mod.imports.length ? mod.imports.join(', ') : 'none'}`)
-    lines.push(`  exports: ${mod.exports.length ? mod.exports.join(', ') : 'none'}`)
-    lines.push(`  controllers: ${mod.controllers.length ? mod.controllers.map(controller => controller.name).join(', ') : 'none'}`)
-
-    for (const controller of mod.controllers) {
-      lines.push(`    controller ${controller.name} dependencies: ${controller.dependencies.length ? controller.dependencies.map(formatDependency).join('; ') : 'none'}`)
-    }
-
-    lines.push(`  providers: ${mod.providers.length ? mod.providers.map(provider => provider.name).join(', ') : 'none'}`)
-
-    for (const provider of mod.providers) {
-      lines.push(`    provider ${provider.name} dependencies: ${provider.dependencies.length ? provider.dependencies.map(formatDependency).join('; ') : 'none'}`)
-    }
-
-    lines.push('')
-  }
-
-  return lines.join('\n')
-}
-
 const systemPrompt = computed(() => {
   return [
-    'You are the AI assistant for Nest Graph Inspector.',
-    'Use only the dependency graph diagram below as your source of truth.',
-    'Help users understand NestJS modules, imports, exports, controllers, providers, and dependency paths.',
-    'When the graph does not contain enough information, say what is missing instead of guessing.',
-    'Keep answers concise and mention exact module/provider/controller names from the graph.',
-    'Before the final answer, include a short visible reasoning summary inside <reasoning>...</reasoning>.',
-    'The reasoning summary should explain what graph facts you checked, not private chain-of-thought.',
-    'Put the user-facing answer inside <answer>...</answer>.',
+    '# Nest Graph Inspector AI Assistant',
     '',
-    'Dependency graph diagram:',
-    buildDiagramPrompt(props.graphData)
+    '## Instructions',
+    '',
+    '- Use only the dependency graph markdown below as your source of truth.',
+    '- Help users understand NestJS modules, imports, exports, controllers, providers, and dependency paths.',
+    '- When the graph does not contain enough information, say what is missing instead of guessing.',
+    '- Keep answers concise and mention exact module/provider/controller names from the graph.',
+    '- Format user-facing answers with GitHub-flavored Markdown.',
+    '- Do not return JSON.',
+    '- Before the final answer, include a short visible reasoning summary inside `<reasoning>...</reasoning>`.',
+    '- The reasoning summary should explain what graph facts you checked, not private chain-of-thought.',
+    '- Put the user-facing Markdown answer inside `<answer>...</answer>`.',
+    '',
+    '## Dependency Graph Markdown',
+    '',
+    graphStore.graphMarkdown || '_No graph markdown is available yet._'
   ].join('\n')
 })
 
@@ -425,6 +390,8 @@ async function handleSubmit(event: Event) {
   messages.value.push(assistantMessage)
 
   try {
+    await graphStore.fetchMarkdown()
+
     const [{ ChatOllama }, { SystemMessage, HumanMessage, AIMessage }] = await Promise.all([
       import('@langchain/ollama'),
       import('@langchain/core/messages')
@@ -518,7 +485,7 @@ async function handleSubmit(event: Event) {
             :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
           >
             <div
-              class="max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm"
+              class="max-w-[85%] rounded-lg px-3 py-2 text-sm"
               :class="message.role === 'user'
                 ? 'bg-primary text-inverted'
                 : 'bg-muted text-highlighted'"
@@ -536,9 +503,13 @@ async function handleSubmit(event: Event) {
                 }"
               />
 
-              <span v-if="message.content">
-                {{ message.content }}
-              </span>
+              <MDC
+                v-if="message.content"
+                :value="message.content"
+                tag="div"
+                class="chat-markdown"
+                :class="message.role === 'user' ? 'chat-markdown-inverted' : undefined"
+              />
             </div>
           </div>
         </div>
@@ -642,3 +613,68 @@ async function handleSubmit(event: Event) {
     </template>
   </UDrawer>
 </template>
+
+<style scoped>
+.chat-markdown {
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown :deep(:first-child) {
+  margin-top: 0;
+}
+
+.chat-markdown :deep(:last-child) {
+  margin-bottom: 0;
+}
+
+.chat-markdown :deep(p),
+.chat-markdown :deep(ul),
+.chat-markdown :deep(ol),
+.chat-markdown :deep(pre),
+.chat-markdown :deep(blockquote),
+.chat-markdown :deep(table) {
+  margin: 0.5rem 0;
+}
+
+.chat-markdown :deep(ul),
+.chat-markdown :deep(ol) {
+  padding-left: 1rem;
+}
+
+.chat-markdown :deep(ul) {
+  list-style: disc;
+}
+
+.chat-markdown :deep(ol) {
+  list-style: decimal;
+}
+
+.chat-markdown :deep(code) {
+  border-radius: 0.25rem;
+  background: color-mix(in oklab, var(--ui-bg-inverted) 8%, transparent);
+  padding: 0.0625rem 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.chat-markdown :deep(pre) {
+  overflow-x: auto;
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--ui-bg-inverted) 8%, transparent);
+  padding: 0.625rem;
+}
+
+.chat-markdown :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.chat-markdown :deep(a) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-markdown-inverted :deep(code),
+.chat-markdown-inverted :deep(pre) {
+  background: rgb(255 255 255 / 0.16);
+}
+</style>

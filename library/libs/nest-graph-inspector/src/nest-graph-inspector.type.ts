@@ -17,7 +17,8 @@ export interface NestGraphInspectorModuleOptions {
    *
    * - `type: 'markdown'` writes a markdown (.md) dependency graph
    * - `type: 'json'` writes the raw module map as JSON
-   * - `type: 'http'` serves the module map as JSON on the given route path
+   * - `type: 'http'` serves the module map on the given route path, plus raw
+   *   JSON and markdown at `/output.json` and `/output.md` under that path
    * - `type: 'viewer'` serves the graph for the visualizer. If origin is provided,
    *   it prints a direct viewer URL. Otherwise, it prints the viewer URL and the
    *   endpoint path to enter in the viewer.

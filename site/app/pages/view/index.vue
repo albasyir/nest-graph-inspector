@@ -7,24 +7,10 @@ useSeoMeta({
 
 const posthog = usePostHog()
 const route = useRoute()
+const graphStore = useGraphInspectorStore()
 const urlInput = ref('')
 const errorMessage = ref('')
-
-function withDefaultProtocol(input: string) {
-  return input.startsWith('http://') || input.startsWith('https://') ? input : `http://${input}`
-}
-
-const isValidUrl = computed(() => {
-  const input = urlInput.value.trim()
-  if (!input) return false
-
-  try {
-    new URL(withDefaultProtocol(input))
-    return true
-  } catch {
-    return false
-  }
-})
+const isSubmitting = ref(false)
 
 function loadExample() {
   const config = useRuntimeConfig()
@@ -33,31 +19,33 @@ function loadExample() {
   urlInput.value = `${window.location.origin}${base}graph-output.json`
 }
 
-function onSubmit() {
+async function onSubmit() {
   const input = urlInput.value.trim()
   if (!input) {
     errorMessage.value = 'Please enter a valid URL'
     return
   }
 
-  let finalUrl = withDefaultProtocol(input)
+  isSubmitting.value = true
+
   try {
-    const url = new URL(finalUrl)
-    if (url.pathname === '/' || !url.pathname) {
-      url.pathname = '/__graph-inspector'
+    const isLoaded = await graphStore.setInputUrl(input)
+    if (!isLoaded) {
+      errorMessage.value = graphStore.errorMessage || 'Could not fetch graph JSON from the provided URL.'
+      return
     }
-    finalUrl = url.toString()
   } catch {
     errorMessage.value = 'Please enter a valid URL (e.g. localhost:3000)'
     return
+  } finally {
+    isSubmitting.value = false
   }
 
   errorMessage.value = ''
   posthog?.capture('graph_url_submitted', {
-    url: finalUrl
+    url: graphStore.decodedUrl
   })
-  const encoded = encodeURIComponent(btoa(finalUrl))
-  navigateTo(`/view/${encoded}`)
+  navigateTo(`/view/${graphStore.encodedUrl}`)
 }
 
 onMounted(() => {
@@ -155,7 +143,8 @@ onMounted(() => {
                 trailing
                 size="lg"
                 class="w-full sm:w-auto justify-center"
-                :disabled="!isValidUrl"
+                :loading="isSubmitting"
+                :disabled="!urlInput.trim() || isSubmitting"
               />
             </div>
           </template>
