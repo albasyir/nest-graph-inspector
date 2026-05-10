@@ -14,7 +14,9 @@ Nest Graph Inspector reads your NestJS runtime container and generates a depende
 
 ### Preview
 
-> This is a static preview. [**Try the interactive viewer with AI Chat →**](https://albasyir.github.io/nest-graph-inspector/view/aHR0cDovL2xvY2FsaG9zdDozMDAwL21vY2stZ3JhcGg=)
+> This is a static preview. [**Try the interactive viewer with AI Chat →**](https://albasyir.github.io/nest-graph-inspector/view/) 
+
+> "Load Example" to see result without installing it
 
 ```mermaid
 graph TD
