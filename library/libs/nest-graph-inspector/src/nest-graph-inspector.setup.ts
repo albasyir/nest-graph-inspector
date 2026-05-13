@@ -19,10 +19,10 @@ import type {
   GraphOutputDependencyRef,
   GraphOutputModule,
 } from './types/graph-output.type';
-import { HttpOutputDriver } from './drivers/http-output.driver';
-import { FileOutputDriver } from './drivers/file-output.driver';
-import { JsonOutputDriver } from './drivers/json-output.driver';
-import { ViewerOutputDriver } from './drivers/viewer-output.driver';
+import { HttpOutputAdapter } from './adapters/http-output.adapter';
+import { FileOutputAdapter } from './adapters/file-output.adapter';
+import { JsonOutputAdapter } from './adapters/json-output.adapter';
+import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
 
 @Injectable()
@@ -41,10 +41,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     @Inject(MODULE_OPTIONS_TOKEN)
     private readonly options: NestGraphInspectorModuleOptions,
     private readonly modulesContainer: ModulesContainer,
-    private readonly httpOutputAdapter: HttpOutputDriver,
-    private readonly fileOutputAdapter: FileOutputDriver,
-    private readonly jsonOutputAdapter: JsonOutputDriver,
-    private readonly viewerOutputAdapter: ViewerOutputDriver,
+    private readonly httpOutputAdapter: HttpOutputAdapter,
+    private readonly fileOutputAdapter: FileOutputAdapter,
+    private readonly jsonOutputAdapter: JsonOutputAdapter,
+    private readonly viewerOutputAdapter: ViewerOutputAdapter,
   ) {
     this.outputAdapters = {
       http: this.httpOutputAdapter,

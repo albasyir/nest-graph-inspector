@@ -4,10 +4,10 @@ import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
-import { FileOutputDriver } from './drivers/file-output.driver';
-import { HttpOutputDriver } from './drivers/http-output.driver';
-import { JsonOutputDriver } from './drivers/json-output.driver';
-import { ViewerOutputDriver } from './drivers/viewer-output.driver';
+import { FileOutputAdapter } from './adapters/file-output.adapter';
+import { HttpOutputAdapter } from './adapters/http-output.adapter';
+import { JsonOutputAdapter } from './adapters/json-output.adapter';
+import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 
 describe(NestGraphInspectorSetup.name, () => {
   class AppModule {}
@@ -25,32 +25,32 @@ describe(NestGraphInspectorSetup.name, () => {
     providers: Map<string, unknown>;
     controllers: Map<string, unknown>;
   };
-  let fileOutputDriver: { execute: jest.Mock };
-  let httpOutputDriver: { execute: jest.Mock };
-  let jsonOutputDriver: { execute: jest.Mock };
-  let viewerOutputDriver: { execute: jest.Mock };
+  let fileOutputAdapter: { execute: jest.Mock };
+  let httpOutputAdapter: { execute: jest.Mock };
+  let jsonOutputAdapter: { execute: jest.Mock };
+  let viewerOutputAdapter: { execute: jest.Mock };
 
   beforeEach(async () => {
     options = {
       rootModule: AppModule,
       outputs: [{ type: 'json', path: 'graph.json' }],
     };
-    fileOutputDriver = {
+    fileOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
         message: 'Graph inspector markdown output installed',
       }),
     };
-    httpOutputDriver = {
+    httpOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
         message: 'Graph inspector HTTP output installed',
       }),
     };
-    jsonOutputDriver = {
+    jsonOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
         message: 'Graph inspector JSON output installed',
       }),
     };
-    viewerOutputDriver = {
+    viewerOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
         message: 'Graph inspector viewer output installed',
       }),
@@ -76,20 +76,20 @@ describe(NestGraphInspectorSetup.name, () => {
           useValue: new Map([[AppModule.name, appModuleRef]]),
         },
         {
-          provide: HttpOutputDriver,
-          useValue: httpOutputDriver,
+          provide: HttpOutputAdapter,
+          useValue: httpOutputAdapter,
         },
         {
-          provide: FileOutputDriver,
-          useValue: fileOutputDriver,
+          provide: FileOutputAdapter,
+          useValue: fileOutputAdapter,
         },
         {
-          provide: JsonOutputDriver,
-          useValue: jsonOutputDriver,
+          provide: JsonOutputAdapter,
+          useValue: jsonOutputAdapter,
         },
         {
-          provide: ViewerOutputDriver,
-          useValue: viewerOutputDriver,
+          provide: ViewerOutputAdapter,
+          useValue: viewerOutputAdapter,
         },
       ],
     }).compile();
@@ -112,7 +112,7 @@ describe(NestGraphInspectorSetup.name, () => {
 
     await service.onModuleInit();
 
-    expect(jsonOutputDriver.execute).toHaveBeenCalledWith(
+    expect(jsonOutputAdapter.execute).toHaveBeenCalledWith(
       {
         version: '1',
         root: AppModule.name,
@@ -149,16 +149,16 @@ describe(NestGraphInspectorSetup.name, () => {
       { type: 'json', path: 'graph.json' },
       { type: 'markdown', path: 'graph.md' },
     ];
-    jsonOutputDriver.execute.mockReturnValue(jsonOutputCompleted);
-    fileOutputDriver.execute.mockReturnValue(markdownOutputCompleted);
+    jsonOutputAdapter.execute.mockReturnValue(jsonOutputCompleted);
+    fileOutputAdapter.execute.mockReturnValue(markdownOutputCompleted);
 
     const onModuleInitPromise = service.onModuleInit().then(() => {
       onModuleInitCompleted = true;
     });
     await Promise.resolve();
 
-    expect(jsonOutputDriver.execute).toHaveBeenCalled();
-    expect(fileOutputDriver.execute).toHaveBeenCalled();
+    expect(jsonOutputAdapter.execute).toHaveBeenCalled();
+    expect(fileOutputAdapter.execute).toHaveBeenCalled();
     expect(onModuleInitCompleted).toBe(false);
 
     resolveJsonOutput!({ message: 'JSON done' });
@@ -229,10 +229,10 @@ describe(NestGraphInspectorSetup.name, () => {
     const customService = new NestGraphInspectorSetup(
       customOptions,
       new Map([[AppModule.name, appModuleRef]]) as never,
-      httpOutputDriver as never,
-      fileOutputDriver as never,
-      jsonOutputDriver as never,
-      viewerOutputDriver as never,
+      httpOutputAdapter as never,
+      fileOutputAdapter as never,
+      jsonOutputAdapter as never,
+      viewerOutputAdapter as never,
     );
 
     const moduleMap = customService.buildModuleMap(AppModule);

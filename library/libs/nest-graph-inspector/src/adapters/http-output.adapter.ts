@@ -3,7 +3,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
-import { FileOutputDriver } from './file-output.driver';
+import { FileOutputAdapter } from './file-output.adapter';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 type HeaderResponse = {
@@ -13,10 +13,10 @@ type HeaderResponse = {
 const INSPECTOR_ENDPOINT_INFO = { for: 'nest-graph-inspector' };
 
 @Injectable()
-export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
+export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
   constructor(
     private readonly adapterHost: HttpAdapterHost,
-    private readonly fileOutputDriver: FileOutputDriver,
+    private readonly fileOutputAdapter: FileOutputAdapter,
   ) {}
 
   execute(
@@ -29,11 +29,14 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
     const jsonOutputPath = this.joinPath(path, 'output.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
 
-    httpAdapter.get(informationOutputPath, (_req: unknown, res: HeaderResponse) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      httpAdapter.reply(res, INSPECTOR_ENDPOINT_INFO, 200);
-    });
+    httpAdapter.get(
+      informationOutputPath,
+      (_req: unknown, res: HeaderResponse) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        httpAdapter.reply(res, INSPECTOR_ENDPOINT_INFO, 200);
+      },
+    );
 
     httpAdapter.get(jsonOutputPath, (_req: unknown, res: HeaderResponse) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -48,7 +51,7 @@ export class HttpOutputDriver implements OutputAdapter<HttpOutputConfig> {
         res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
         httpAdapter.reply(
           res,
-          this.fileOutputDriver.buildMarkdownText(graphOutput),
+          this.fileOutputAdapter.buildMarkdownText(graphOutput),
           200,
         );
       },

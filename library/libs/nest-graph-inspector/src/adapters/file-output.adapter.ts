@@ -14,7 +14,7 @@ import type {
 type FileOutputConfig = Extract<NestGraphInspectorOutput, { type: 'markdown' }>;
 
 @Injectable()
-export class FileOutputDriver implements OutputAdapter<FileOutputConfig> {
+export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
   private readonly nestCoreModuleName = 'NestJSCoreModule';
 
   async execute(

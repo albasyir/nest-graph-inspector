@@ -1,16 +1,16 @@
 import { Buffer } from 'node:buffer';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { HttpOutputDriver } from './http-output.driver';
-import { ViewerOutputDriver } from './viewer-output.driver';
+import { HttpOutputAdapter } from './http-output.adapter';
+import { ViewerOutputAdapter } from './viewer-output.adapter';
 
-describe(ViewerOutputDriver.name, () => {
+describe(ViewerOutputAdapter.name, () => {
   let moduleRef: TestingModule;
-  let driver: ViewerOutputDriver;
-  let httpOutputDriver: { execute: jest.Mock; normalizePath: jest.Mock };
+  let adapter: ViewerOutputAdapter;
+  let httpOutputAdapter: { execute: jest.Mock; normalizePath: jest.Mock };
 
   beforeEach(async () => {
-    httpOutputDriver = {
+    httpOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
         message: 'Graph inspector HTTP endpoint is installed',
       }),
@@ -21,21 +21,21 @@ describe(ViewerOutputDriver.name, () => {
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        ViewerOutputDriver,
+        ViewerOutputAdapter,
         {
-          provide: HttpOutputDriver,
-          useValue: httpOutputDriver,
+          provide: HttpOutputAdapter,
+          useValue: httpOutputAdapter,
         },
       ],
     }).compile();
 
-    driver = moduleRef.get(ViewerOutputDriver);
+    adapter = moduleRef.get(ViewerOutputAdapter);
   });
 
   afterEach(() => moduleRef.close());
 
   it('normalizes the graph endpoint before installing and encoding it', async () => {
-    const result = await driver.execute({} as never, {
+    const result = await adapter.execute({} as never, {
       type: 'viewer',
       origin: 'http://localhost:8889',
       path: 'graph',
@@ -44,7 +44,7 @@ describe(ViewerOutputDriver.name, () => {
       'base64url',
     );
 
-    expect(httpOutputDriver.execute).toHaveBeenCalledWith(
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
       {},
       { type: 'http', path: '/graph' },
     );

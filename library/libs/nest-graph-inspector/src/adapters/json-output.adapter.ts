@@ -8,7 +8,7 @@ import type { GraphOutput } from '../types/graph-output.type';
 type JsonOutputConfig = Extract<NestGraphInspectorOutput, { type: 'json' }>;
 
 @Injectable()
-export class JsonOutputDriver implements OutputAdapter<JsonOutputConfig> {
+export class JsonOutputAdapter implements OutputAdapter<JsonOutputConfig> {
   async execute(
     graphOutput: GraphOutput,
     config: JsonOutputConfig,

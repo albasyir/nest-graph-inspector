@@ -2,26 +2,27 @@ import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
-import { HttpOutputDriver } from './http-output.driver';
+import { HttpOutputAdapter } from './http-output.adapter';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 
 @Injectable()
-export class ViewerOutputDriver implements OutputAdapter<ViewerOutputConfig> {
+export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
   private readonly viewerBaseUrl =
-    process.env.____DEV_VIEWER_BASE_URL || 'https://albasyir.github.io/nest-graph-inspector';
+    process.env.____DEV_VIEWER_BASE_URL ||
+    'https://albasyir.github.io/nest-graph-inspector';
 
-  constructor(private readonly httpOutputDriver: HttpOutputDriver) {}
+  constructor(private readonly httpOutputAdapter: HttpOutputAdapter) {}
 
   async execute(
     graphOutput: GraphOutput,
     config: ViewerOutputConfig,
   ): Promise<{ message: string }> {
-    const path = this.httpOutputDriver.normalizePath(
+    const path = this.httpOutputAdapter.normalizePath(
       config.path ?? '/__graph-inspector',
     );
 
-    await this.httpOutputDriver.execute(graphOutput, { type: 'http', path });
+    await this.httpOutputAdapter.execute(graphOutput, { type: 'http', path });
 
     if (!config.origin) {
       return {

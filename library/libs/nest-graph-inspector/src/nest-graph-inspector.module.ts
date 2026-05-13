@@ -4,10 +4,10 @@ import {
   MODULE_OPTIONS_TOKEN,
 } from './nest-graph-inspector.config';
 import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
-import { JsonOutputDriver } from './drivers/json-output.driver';
-import { FileOutputDriver } from './drivers/file-output.driver';
-import { HttpOutputDriver } from './drivers/http-output.driver';
-import { ViewerOutputDriver } from './drivers/viewer-output.driver';
+import { JsonOutputAdapter } from './adapters/json-output.adapter';
+import { FileOutputAdapter } from './adapters/file-output.adapter';
+import { HttpOutputAdapter } from './adapters/http-output.adapter';
+import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
@@ -31,10 +31,10 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
       useValue: defaultOptions,
     },
     NestGraphInspectorSetup,
-    JsonOutputDriver,
-    FileOutputDriver,
-    HttpOutputDriver,
-    ViewerOutputDriver,
+    JsonOutputAdapter,
+    FileOutputAdapter,
+    HttpOutputAdapter,
+    ViewerOutputAdapter,
   ],
 })
 export class NestGraphInspectorModule extends ConfigurableModuleClass {}

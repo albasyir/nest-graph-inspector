@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { FileOutputDriver } from './file-output.driver';
+import { FileOutputAdapter } from './file-output.adapter';
 import { ModuleMap } from '../types/module-map.type';
 
 jest.mock('node:fs/promises', () => ({
@@ -10,9 +10,9 @@ jest.mock('node:fs/promises', () => ({
   writeFile: jest.fn(),
 }));
 
-describe(FileOutputDriver.name, () => {
+describe(FileOutputAdapter.name, () => {
   let moduleRef: TestingModule;
-  let driver: FileOutputDriver;
+  let adapter: FileOutputAdapter;
   const mockedMkdir = jest.mocked(mkdir);
   const mockedWriteFile = jest.mocked(writeFile);
 
@@ -21,10 +21,10 @@ describe(FileOutputDriver.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     moduleRef = await Test.createTestingModule({
-      providers: [FileOutputDriver],
+      providers: [FileOutputAdapter],
     }).compile();
 
-    driver = moduleRef.get(FileOutputDriver);
+    adapter = moduleRef.get(FileOutputAdapter);
   });
 
   afterEach(() => {
@@ -48,7 +48,7 @@ describe(FileOutputDriver.name, () => {
     };
     const filePath = join(process.cwd(), 'tmp/graph.md');
 
-    const result = await driver.execute(moduleMap, {
+    const result = await adapter.execute(moduleMap, {
       type: 'markdown',
       path: 'tmp/graph.md',
     });

@@ -1,40 +1,40 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpAdapterHost } from '@nestjs/core';
 
-import { HttpOutputDriver } from './http-output.driver';
+import { HttpOutputAdapter } from './http-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
-import { FileOutputDriver } from './file-output.driver';
+import { FileOutputAdapter } from './file-output.adapter';
 
-describe(HttpOutputDriver.name, () => {
+describe(HttpOutputAdapter.name, () => {
   let moduleRef: TestingModule;
-  let driver: HttpOutputDriver;
+  let adapter: HttpOutputAdapter;
   let httpAdapter: { get: jest.Mock; reply: jest.Mock };
-  let fileOutputDriver: { buildMarkdownText: jest.Mock };
+  let fileOutputAdapter: { buildMarkdownText: jest.Mock };
 
   beforeEach(async () => {
     httpAdapter = {
       get: jest.fn(),
       reply: jest.fn(),
     };
-    fileOutputDriver = {
+    fileOutputAdapter = {
       buildMarkdownText: jest.fn().mockReturnValue('# NestJS Dependency Graph'),
     };
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        HttpOutputDriver,
+        HttpOutputAdapter,
         {
           provide: HttpAdapterHost,
           useValue: { httpAdapter },
         },
         {
-          provide: FileOutputDriver,
-          useValue: fileOutputDriver,
+          provide: FileOutputAdapter,
+          useValue: fileOutputAdapter,
         },
       ],
     }).compile();
 
-    driver = moduleRef.get(HttpOutputDriver);
+    adapter = moduleRef.get(HttpOutputAdapter);
   });
 
   afterEach(() => moduleRef.close());
@@ -42,7 +42,7 @@ describe(HttpOutputDriver.name, () => {
   it('normalizes configured paths without mutating config', async () => {
     const config = { type: 'http' as const, path: 'graph' };
 
-    const result = await driver.execute({} as never, config);
+    const result = await adapter.execute({} as never, config);
 
     expect(httpAdapter.get).not.toHaveBeenCalledWith(
       '/graph',
@@ -68,7 +68,7 @@ describe(HttpOutputDriver.name, () => {
   });
 
   it('uses the default endpoint when no path is configured', () => {
-    expect(driver.normalizePath()).toBe('/__nest-graph-inspector');
+    expect(adapter.normalizePath()).toBe('/__nest-graph-inspector');
   });
 
   it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
@@ -88,7 +88,7 @@ describe(HttpOutputDriver.name, () => {
       setHeader: jest.fn(),
     };
 
-    await driver.execute(graphOutput, { type: 'http', path: '/graph' });
+    await adapter.execute(graphOutput, { type: 'http', path: '/graph' });
 
     const jsonHandler = httpAdapter.get.mock.calls.find(
       ([route]) => route === '/graph/output.json',
@@ -142,7 +142,7 @@ describe(HttpOutputDriver.name, () => {
       'Content-Type',
       'text/markdown; charset=utf-8',
     );
-    expect(fileOutputDriver.buildMarkdownText).toHaveBeenCalledWith(
+    expect(fileOutputAdapter.buildMarkdownText).toHaveBeenCalledWith(
       graphOutput,
     );
     expect(httpAdapter.reply).toHaveBeenCalledWith(

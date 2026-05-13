@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { JsonOutputDriver } from './json-output.driver';
+import { JsonOutputAdapter } from './json-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
 
 jest.mock('node:fs/promises', () => ({
@@ -11,18 +11,18 @@ jest.mock('node:fs/promises', () => ({
   writeFile: jest.fn(),
 }));
 
-describe(JsonOutputDriver.name, () => {
+describe(JsonOutputAdapter.name, () => {
   let moduleRef: TestingModule;
-  let driver: JsonOutputDriver;
+  let adapter: JsonOutputAdapter;
   const mockedMkdir = jest.mocked(mkdir);
   const mockedWriteFile = jest.mocked(writeFile);
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
-      providers: [JsonOutputDriver],
+      providers: [JsonOutputAdapter],
     }).compile();
 
-    driver = moduleRef.get(JsonOutputDriver);
+    adapter = moduleRef.get(JsonOutputAdapter);
   });
 
   afterEach(() => {
@@ -79,7 +79,7 @@ describe(JsonOutputDriver.name, () => {
 
     const config = { type: 'json' as const, path: 'artifacts/module-map.json' };
 
-    const result = await driver.execute(graphOutput, config);
+    const result = await adapter.execute(graphOutput, config);
 
     expect(mockedMkdir).toHaveBeenCalledWith(
       dirname(join(process.cwd(), 'artifacts/module-map.json')),
@@ -109,7 +109,7 @@ describe(JsonOutputDriver.name, () => {
       path: './relative/path/output.json',
     };
 
-    const result = await driver.execute(graphOutput, config);
+    const result = await adapter.execute(graphOutput, config);
 
     expect(mockedWriteFile).toHaveBeenCalledTimes(1);
     expect(mockedWriteFile).toHaveBeenCalledWith(
