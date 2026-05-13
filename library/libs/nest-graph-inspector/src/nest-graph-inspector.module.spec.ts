@@ -1,6 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import { NestGraphInspectorModule } from './nest-graph-inspector.module';
+import {
+  defaultHttpOutputHost,
+  defaultHttpOutputPort,
+} from './adapters/http-output.adapter';
+import {
+  defaultProxyGatewayOptions,
+  NestGraphInspectorModule,
+} from './nest-graph-inspector.module';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 
 describe(NestGraphInspectorModule.name, () => {
@@ -12,7 +19,14 @@ describe(NestGraphInspectorModule.name, () => {
     expect(
       moduleRef.get<NestGraphInspectorModuleOptions>(MODULE_OPTIONS_TOKEN),
     ).toEqual({
-      outputs: [{ type: 'viewer' }],
+      outputs: [
+        {
+          type: 'viewer',
+          host: defaultHttpOutputHost,
+          port: defaultHttpOutputPort,
+          proxy: defaultProxyGatewayOptions,
+        },
+      ],
       ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
       ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
       nestCoreModuleName: 'NestJSCoreModule',

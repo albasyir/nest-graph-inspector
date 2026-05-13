@@ -1,65 +1,96 @@
-import { Injectable } from '@nestjs/common';
-import { HttpAdapterHost } from '@nestjs/core';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
 import { FileOutputAdapter } from './file-output.adapter';
+import { HttpServeAdapter } from './http-serve.adapter';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
-type HeaderResponse = {
-  setHeader(name: string, value: string): void;
-};
 
 const INSPECTOR_ENDPOINT_INFO = { for: 'nest-graph-inspector' };
+export const defaultHttpOutputHost = 'localhost';
+export const defaultHttpOutputPort = 3998;
+export const defaultHttpOutputOrigin = `http://${defaultHttpOutputHost}:${defaultHttpOutputPort}`;
 
 @Injectable()
-export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
-  constructor(
-    private readonly adapterHost: HttpAdapterHost,
-    private readonly fileOutputAdapter: FileOutputAdapter,
-  ) {}
+export class HttpOutputAdapter
+  implements OutputAdapter<HttpOutputConfig>, OnModuleDestroy
+{
+  private readonly httpServeAdapters: HttpServeAdapter[] = [];
 
-  execute(
+  constructor(private readonly fileOutputAdapter: FileOutputAdapter) {}
+
+  onModuleDestroy(): void {
+    for (const httpServeAdapter of this.httpServeAdapters) {
+      httpServeAdapter.close();
+    }
+    this.httpServeAdapters.length = 0;
+  }
+
+  async execute(
     graphOutput: GraphOutput,
     config: HttpOutputConfig,
   ): Promise<{ message: string }> {
-    const httpAdapter = this.adapterHost.httpAdapter;
+    const origin = config.origin ?? defaultHttpOutputOrigin;
     const path = this.normalizePath(config.path);
     const informationOutputPath = this.joinPath(path, 'information.json');
     const jsonOutputPath = this.joinPath(path, 'output.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
+    const httpServeAdapter = new HttpServeAdapter();
 
-    httpAdapter.get(
+    const registration = httpServeAdapter.register(
+      {
+        origin,
+        host: config.host,
+        port: config.port,
+      },
+      [
+        {
+          type: 'GET',
+          path: informationOutputPath,
+          responseHeaders: {
+            'content-type': 'application/json; charset=utf-8',
+          },
+          callback: () => INSPECTOR_ENDPOINT_INFO,
+        },
+        {
+          type: 'GET',
+          path: jsonOutputPath,
+          responseHeaders: {
+            'content-type': 'application/json; charset=utf-8',
+          },
+          callback: () => graphOutput,
+        },
+        {
+          type: 'GET',
+          path: markdownOutputPath,
+          responseHeaders: {
+            'content-type': 'text/markdown; charset=utf-8',
+          },
+          callback: () => this.fileOutputAdapter.buildMarkdownText(graphOutput),
+        },
+      ],
+    );
+
+    try {
+      await httpServeAdapter.serve();
+    } catch (err) {
+      httpServeAdapter.close();
+      throw err;
+    }
+
+    this.httpServeAdapters.push(httpServeAdapter);
+
+    const informationOutputUrl = new URL(
       informationOutputPath,
-      (_req: unknown, res: HeaderResponse) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        httpAdapter.reply(res, INSPECTOR_ENDPOINT_INFO, 200);
-      },
+      registration.origin,
     );
+    const jsonOutputUrl = new URL(jsonOutputPath, registration.origin);
+    const markdownOutputUrl = new URL(markdownOutputPath, registration.origin);
 
-    httpAdapter.get(jsonOutputPath, (_req: unknown, res: HeaderResponse) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      httpAdapter.reply(res, graphOutput, 200);
-    });
-
-    httpAdapter.get(
-      markdownOutputPath,
-      (_req: unknown, res: HeaderResponse) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-        httpAdapter.reply(
-          res,
-          this.fileOutputAdapter.buildMarkdownText(graphOutput),
-          200,
-        );
-      },
-    );
-
-    return Promise.resolve({
-      message: `Graph inspector HTTP endpoints are installed at ${informationOutputPath}, ${jsonOutputPath}, and ${markdownOutputPath}`,
-    });
+    return {
+      message: `Graph inspector HTTP endpoints are installed at ${informationOutputUrl}, ${jsonOutputUrl}, and ${markdownOutputUrl}`,
+    };
   }
 
   normalizePath(path = '/__nest-graph-inspector'): string {

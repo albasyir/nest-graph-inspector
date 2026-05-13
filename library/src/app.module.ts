@@ -11,10 +11,10 @@ import { UserModule } from './user/user.module';
      */
     NestGraphInspectorModule.forRoot({
       outputs: [
-        { type: 'viewer', origin: `http://localhost:8889` },
+        { type: 'viewer', host: 'localhost', port: 33771 },
         { type: 'markdown', path: 'tmp/graph.md' },
         { type: 'json', path: 'tmp/graph.json' },
-        { type: 'http', path: 'graph' },
+        { type: 'http', host: 'localhost', port: 3998, path: 'graph' },
       ]
     }),
 

@@ -1,10 +1,24 @@
 import { Type } from '@nestjs/common';
+import type { ProxyGatewayOptions } from './ports/proxy.gateway';
 
 export type NestGraphInspectorOutput =
-  | { type: 'viewer'; origin?: string; path?: string }
+  | {
+      type: 'viewer';
+      origin?: string;
+      host?: string;
+      port?: number;
+      path?: string;
+      proxy?: ProxyGatewayOptions | false;
+    }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
-  | { type: 'http'; path?: string };
+  | {
+      type: 'http';
+      origin?: string;
+      host?: string;
+      port?: number;
+      path?: string;
+    };
 
 export interface NestGraphInspectorModuleOptions {
   /**
@@ -17,8 +31,9 @@ export interface NestGraphInspectorModuleOptions {
    *
    * - `type: 'markdown'` writes a markdown (.md) dependency graph
    * - `type: 'json'` writes the raw module map as JSON
-   * - `type: 'http'` serves the module map on the given route path, plus raw
-   *   JSON and markdown at `/output.json` and `/output.md` under that path
+   * - `type: 'http'` serves the module map from a native HTTP server on the
+   *   given host, port, and route path, plus raw JSON and markdown at
+   *   `/output.json` and `/output.md` under that path
    * - `type: 'viewer'` serves the graph for the visualizer. If origin is provided,
    *   it prints a direct viewer URL. Otherwise, it prints the viewer URL and the
    *   endpoint path to enter in the viewer.

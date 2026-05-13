@@ -1,37 +1,23 @@
+import http from 'node:http';
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpAdapterHost } from '@nestjs/core';
 
 import { HttpOutputAdapter } from './http-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
 import { FileOutputAdapter } from './file-output.adapter';
 
+type HttpResponse = {
+  statusCode?: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+};
+
 describe(HttpOutputAdapter.name, () => {
   let moduleRef: TestingModule;
   let adapter: HttpOutputAdapter;
-  let httpAdapter: { get: jest.Mock; reply: jest.Mock };
-  let fileOutputAdapter: { buildMarkdownText: jest.Mock };
 
   beforeEach(async () => {
-    httpAdapter = {
-      get: jest.fn(),
-      reply: jest.fn(),
-    };
-    fileOutputAdapter = {
-      buildMarkdownText: jest.fn().mockReturnValue('# NestJS Dependency Graph'),
-    };
-
     moduleRef = await Test.createTestingModule({
-      providers: [
-        HttpOutputAdapter,
-        {
-          provide: HttpAdapterHost,
-          useValue: { httpAdapter },
-        },
-        {
-          provide: FileOutputAdapter,
-          useValue: fileOutputAdapter,
-        },
-      ],
+      providers: [FileOutputAdapter, HttpOutputAdapter],
     }).compile();
 
     adapter = moduleRef.get(HttpOutputAdapter);
@@ -40,31 +26,20 @@ describe(HttpOutputAdapter.name, () => {
   afterEach(() => moduleRef.close());
 
   it('normalizes configured paths without mutating config', async () => {
-    const config = { type: 'http' as const, path: 'graph' };
+    const port = await availablePort();
+    const config = {
+      type: 'http' as const,
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+    };
 
     const result = await adapter.execute({} as never, config);
 
-    expect(httpAdapter.get).not.toHaveBeenCalledWith(
-      '/graph',
-      expect.any(Function),
-    );
-    expect(httpAdapter.get).toHaveBeenCalledWith(
-      '/graph/information.json',
-      expect.any(Function),
-    );
-    expect(httpAdapter.get).toHaveBeenCalledWith(
-      '/graph/output.json',
-      expect.any(Function),
-    );
-    expect(httpAdapter.get).toHaveBeenCalledWith(
-      '/graph/output.md',
-      expect.any(Function),
-    );
     expect(config.path).toBe('graph');
-    expect(result).toEqual({
-      message:
-        'Graph inspector HTTP endpoints are installed at /graph/information.json, /graph/output.json, and /graph/output.md',
-    });
+    expect(result.message).toBe(
+      `Graph inspector HTTP endpoints are installed at http://127.0.0.1:${port}/graph/information.json, http://127.0.0.1:${port}/graph/output.json, and http://127.0.0.1:${port}/graph/output.md`,
+    );
   });
 
   it('uses the default endpoint when no path is configured', () => {
@@ -72,6 +47,7 @@ describe(HttpOutputAdapter.name, () => {
   });
 
   it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
+    const port = await availablePort();
     const graphOutput: GraphOutput = {
       version: '1',
       root: 'AppModule',
@@ -84,71 +60,160 @@ describe(HttpOutputAdapter.name, () => {
         },
       },
     };
-    const res = {
-      setHeader: jest.fn(),
-    };
 
-    await adapter.execute(graphOutput, { type: 'http', path: '/graph' });
+    const result = await adapter.execute(graphOutput, {
+      type: 'http',
+      host: '127.0.0.1',
+      port,
+      path: '/graph',
+    });
+    const informationOutputUrl = urlFromMessage(
+      result.message,
+      '/graph/information.json',
+    );
+    const jsonOutputUrl = urlFromMessage(result.message, '/graph/output.json');
+    const markdownOutputUrl = urlFromMessage(
+      result.message,
+      '/graph/output.md',
+    );
 
-    const jsonHandler = httpAdapter.get.mock.calls.find(
-      ([route]) => route === '/graph/output.json',
-    )?.[1] as ((req: unknown, res: typeof res) => void) | undefined;
-    const markdownHandler = httpAdapter.get.mock.calls.find(
-      ([route]) => route === '/graph/output.md',
-    )?.[1] as ((req: unknown, res: typeof res) => void) | undefined;
-    const informationHandler = httpAdapter.get.mock.calls.find(
-      ([route]) => route === '/graph/information.json',
-    )?.[1] as ((req: unknown, res: typeof res) => void) | undefined;
-
-    if (!informationHandler) {
-      throw new Error(
-        'Expected /graph/information.json handler to be registered',
-      );
-    }
-    informationHandler(undefined, res);
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Access-Control-Allow-Origin',
+    const informationResponse = await get(informationOutputUrl);
+    expect(informationResponse.statusCode).toBe(200);
+    expect(informationResponse.headers['access-control-allow-origin']).toBe(
       '*',
     );
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
+    expect(informationResponse.headers['content-type']).toBe(
       'application/json; charset=utf-8',
     );
-    expect(httpAdapter.reply).toHaveBeenCalledWith(
-      res,
-      { for: 'nest-graph-inspector' },
-      200,
-    );
+    expect(JSON.parse(informationResponse.body)).toEqual({
+      for: 'nest-graph-inspector',
+    });
 
-    if (!jsonHandler) {
-      throw new Error('Expected /graph/output.json handler to be registered');
-    }
-    jsonHandler(undefined, res);
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Access-Control-Allow-Origin',
-      '*',
-    );
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
+    const jsonResponse = await get(jsonOutputUrl);
+    expect(jsonResponse.statusCode).toBe(200);
+    expect(jsonResponse.headers['content-type']).toBe(
       'application/json; charset=utf-8',
     );
-    expect(httpAdapter.reply).toHaveBeenCalledWith(res, graphOutput, 200);
+    expect(JSON.parse(jsonResponse.body)).toEqual(graphOutput);
 
-    if (!markdownHandler) {
-      throw new Error('Expected /graph/output.md handler to be registered');
-    }
-    markdownHandler(undefined, res);
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
+    const markdownResponse = await get(markdownOutputUrl);
+    expect(markdownResponse.statusCode).toBe(200);
+    expect(markdownResponse.headers['content-type']).toBe(
       'text/markdown; charset=utf-8',
     );
-    expect(fileOutputAdapter.buildMarkdownText).toHaveBeenCalledWith(
-      graphOutput,
-    );
-    expect(httpAdapter.reply).toHaveBeenCalledWith(
-      res,
-      '# NestJS Dependency Graph',
-      200,
+    expect(markdownResponse.body).toContain('# NestJS Dependency Graph');
+    expect(markdownResponse.body).toContain('Root Module: `AppModule`');
+  });
+
+  it('lets host and port override a configured origin', async () => {
+    const port = await availablePort();
+    const result = await adapter.execute({} as never, {
+      type: 'http',
+      origin: 'http://localhost:3998',
+      host: '127.0.0.1',
+      port,
+      path: '/graph',
+    });
+
+    expect(result.message).toContain(
+      `http://127.0.0.1:${port}/graph/information.json`,
     );
   });
+
+  it('uses a different native HTTP server for each output execution', async () => {
+    const port = await availablePort();
+    const firstResult = await adapter.execute({} as never, {
+      type: 'http',
+      host: '127.0.0.1',
+      port,
+      path: '/graph',
+    });
+    const firstOutputUrl = urlFromMessage(
+      firstResult.message,
+      '/graph/output.json',
+    );
+
+    await expect(
+      adapter.execute({} as never, {
+        type: 'http',
+        host: '127.0.0.1',
+        port,
+        path: '/inspector',
+      }),
+    ).rejects.toThrow(/EADDRINUSE|address already in use/);
+
+    const secondPort = await availablePort();
+    const secondResult = await adapter.execute({} as never, {
+      type: 'http',
+      host: '127.0.0.1',
+      port: secondPort,
+      path: '/inspector',
+    });
+    const secondOutputUrl = urlFromMessage(
+      secondResult.message,
+      '/inspector/output.json',
+    );
+
+    expect(new URL(secondOutputUrl).origin).not.toBe(
+      new URL(firstOutputUrl).origin,
+    );
+    await expect(get(firstOutputUrl)).resolves.toMatchObject({
+      statusCode: 200,
+    });
+    await expect(get(secondOutputUrl)).resolves.toMatchObject({
+      statusCode: 200,
+    });
+  });
 });
+
+function get(url: string): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, (res) => {
+      let body = '';
+
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body,
+        });
+      });
+    });
+
+    req.on('error', reject);
+  });
+}
+
+function availablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Expected TCP address')));
+        return;
+      }
+
+      const { port } = address;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+function urlFromMessage(message: string, path: string): string {
+  const match = message.match(
+    new RegExp(`http://127\\.0\\.0\\.1:\\d+${path.replace('.', '\\.')}`),
+  );
+
+  if (!match) {
+    throw new Error(`Expected message to include ${path}`);
+  }
+
+  return match[0];
+}
