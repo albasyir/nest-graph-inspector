@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { resolveComponent } from 'vue'
+
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -23,6 +25,7 @@ const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
 const RECOMMENDED_MODEL = 'qwen3.5:4b'
 
 const open = ref(false)
+const isFullscreen = ref(false)
 const prompt = ref('')
 const isLoading = ref(false)
 const isLoadingModels = ref(false)
@@ -59,6 +62,25 @@ const modelItems = computed(() => downloadedModels.value.map(model => ({
 
 const selectedProviderIcon = computed(() => {
   return providerItems.find(provider => provider.value === selectedProvider.value)?.icon
+})
+
+const chatOverlayComponent = computed(() => {
+  return isFullscreen.value ? resolveComponent('UModal') : resolveComponent('USlideover')
+})
+
+const chatOverlayProps = computed(() => {
+  return {
+    open: open.value,
+    title: 'AI Chat',
+    description: 'Graph-aware assistant',
+    ...(isFullscreen.value
+      ? {
+          fullscreen: true
+        }
+      : {
+          side: 'right' as const
+        })
+  }
 })
 
 const shouldShowRecommendedModelDownload = computed(() => {
@@ -153,6 +175,10 @@ async function loadDownloadedModels() {
 
 function handleOpenChange(value: boolean) {
   open.value = value
+
+  if (!value) {
+    isFullscreen.value = false
+  }
 
   if (value) {
     graphStore.fetchMarkdown()
@@ -456,16 +482,9 @@ async function handleSubmit(event: Event) {
 </script>
 
 <template>
-  <UDrawer
-    :open="open"
-    direction="right"
-    title="AI Chat"
-    description="Graph-aware assistant"
-    :ui="{
-      content: 'w-full sm:max-w-md',
-      body: 'flex min-h-0 flex-1 flex-col gap-4 p-0',
-      footer: 'p-4'
-    }"
+  <component
+    :is="chatOverlayComponent"
+    v-bind="chatOverlayProps"
     @update:open="handleOpenChange"
   >
     <UButton
@@ -474,6 +493,43 @@ async function handleSubmit(event: Event) {
       variant="outline"
       size="sm"
     />
+
+    <template #header="{ close }">
+      <div class="flex w-full items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 class="font-semibold text-highlighted">
+            AI Chat
+          </h2>
+          <p class="mt-1 text-sm text-muted">
+            Graph-aware assistant
+          </p>
+        </div>
+
+        <div class="flex items-center gap-1">
+          <UTooltip :text="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'">
+            <UButton
+              type="button"
+              :icon="isFullscreen ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              :aria-label="isFullscreen ? 'Exit fullscreen chat' : 'Open fullscreen chat'"
+              @click="isFullscreen = !isFullscreen"
+            />
+          </UTooltip>
+
+          <UButton
+            type="button"
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            aria-label="Close chat"
+            @click="close"
+          />
+        </div>
+      </div>
+    </template>
 
     <template #body>
       <div class="flex min-h-0 flex-1 flex-col">
@@ -611,7 +667,7 @@ async function handleSubmit(event: Event) {
         </UChatPrompt>
       </div>
     </template>
-  </UDrawer>
+  </component>
 </template>
 
 <style scoped>
