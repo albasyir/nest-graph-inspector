@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { resolveComponent } from 'vue'
-
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -20,12 +18,33 @@ type OllamaShowResponse = {
   capabilities?: string[]
 }
 
+type OllamaChatMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+type OllamaChatStreamResponse = {
+  message?: {
+    content?: string
+    thinking?: string
+  }
+  error?: string
+  done?: boolean
+}
+
 const OLLAMA_BASE_URL = 'http://localhost:11434'
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
+const OLLAMA_THINKING_EFFORT = 'low'
+const OLLAMA_THINKING_FALLBACK_CHAR_LIMIT = 3000
 const RECOMMENDED_MODEL = 'qwen3.5:4b'
 
+class OllamaThinkingFallbackError extends Error {
+  constructor() {
+    super('Ollama thinking stream did not produce answer content quickly enough.')
+  }
+}
+
 const open = ref(false)
-const isFullscreen = ref(false)
 const prompt = ref('')
 const isLoading = ref(false)
 const isLoadingModels = ref(false)
@@ -64,24 +83,21 @@ const selectedProviderIcon = computed(() => {
   return providerItems.find(provider => provider.value === selectedProvider.value)?.icon
 })
 
-const chatOverlayComponent = computed(() => {
-  return isFullscreen.value ? resolveComponent('UModal') : resolveComponent('USlideover')
-})
-
-const chatOverlayProps = computed(() => {
-  return {
-    open: open.value,
-    title: 'AI Chat',
-    description: 'Graph-aware assistant',
-    ...(isFullscreen.value
-      ? {
-          fullscreen: true
-        }
-      : {
-          side: 'right' as const
-        })
+const chatMessages = computed(() => messages.value.map((message, index) => ({
+  id: `message-${index}`,
+  role: message.role,
+  content: message.content,
+  parts: message.content
+    ? [{
+        type: 'text' as const,
+        text: message.content
+      }]
+    : [],
+  metadata: {
+    reasoning: message.reasoning,
+    reasoningStreaming: message.reasoningStreaming
   }
-})
+})))
 
 const shouldShowRecommendedModelDownload = computed(() => {
   return selectedProvider.value === 'ollama'
@@ -176,10 +192,6 @@ async function loadDownloadedModels() {
 function handleOpenChange(value: boolean) {
   open.value = value
 
-  if (!value) {
-    isFullscreen.value = false
-  }
-
   if (value) {
     graphStore.fetchMarkdown()
 
@@ -248,9 +260,7 @@ const systemPrompt = computed(() => {
     '- Keep answers concise and mention exact module/provider/controller names from the graph.',
     '- Format user-facing answers with GitHub-flavored Markdown.',
     '- Do not return JSON.',
-    '- Before the final answer, include a short visible reasoning summary inside `<reasoning>...</reasoning>`.',
-    '- The reasoning summary should explain what graph facts you checked, not private chain-of-thought.',
-    '- Put the user-facing Markdown answer inside `<answer>...</answer>`.',
+    '- Keep any model thinking brief, then provide the final answer.',
     '',
     '## Dependency Graph Markdown',
     '',
@@ -287,7 +297,7 @@ function getTaggedContent(content: string, tag: string) {
 }
 
 function parseAssistantReply(content: string) {
-  const reasoning = getTaggedContent(content, 'reasoning')
+  const reasoning = getTaggedContent(content, 'reasoning') || getTaggedContent(content, 'think')
   const answer = getTaggedContent(content, 'answer')
 
   if (answer) {
@@ -299,7 +309,10 @@ function parseAssistantReply(content: string) {
 
   return {
     reasoning,
-    content: content.replace(/<reasoning>[\s\S]*?<\/reasoning>/i, '').trim()
+    content: content
+      .replace(/<reasoning>[\s\S]*?<\/reasoning>/i, '')
+      .replace(/<think>[\s\S]*?<\/think>/i, '')
+      .trim()
   }
 }
 
@@ -307,19 +320,27 @@ function parseStreamingAssistantReply(content: string) {
   const lowerContent = content.toLowerCase()
   const reasoningOpenTag = '<reasoning>'
   const reasoningCloseTag = '</reasoning>'
+  const thinkOpenTag = '<think>'
+  const thinkCloseTag = '</think>'
   const answerOpenTag = '<answer>'
   const answerCloseTag = '</answer>'
   const reasoningOpenIndex = lowerContent.indexOf(reasoningOpenTag)
   const reasoningCloseIndex = lowerContent.indexOf(reasoningCloseTag)
+  const thinkOpenIndex = lowerContent.indexOf(thinkOpenTag)
+  const thinkCloseIndex = lowerContent.indexOf(thinkCloseTag)
   const answerOpenIndex = lowerContent.indexOf(answerOpenTag)
   const answerCloseIndex = lowerContent.indexOf(answerCloseTag)
+  const activeReasoningOpenTag = reasoningOpenIndex === -1 ? thinkOpenTag : reasoningOpenTag
+  const activeReasoningCloseTag = reasoningOpenIndex === -1 ? thinkCloseTag : reasoningCloseTag
+  const activeReasoningOpenIndex = reasoningOpenIndex === -1 ? thinkOpenIndex : reasoningOpenIndex
+  const activeReasoningCloseIndex = reasoningOpenIndex === -1 ? thinkCloseIndex : reasoningCloseIndex
 
-  const reasoning = reasoningOpenIndex === -1
+  const reasoning = activeReasoningOpenIndex === -1
     ? ''
     : content
         .slice(
-          reasoningOpenIndex + reasoningOpenTag.length,
-          reasoningCloseIndex === -1 ? content.length : reasoningCloseIndex
+          activeReasoningOpenIndex + activeReasoningOpenTag.length,
+          activeReasoningCloseIndex === -1 ? content.length : activeReasoningCloseIndex
         )
         .trim()
 
@@ -335,11 +356,11 @@ function parseStreamingAssistantReply(content: string) {
     }
   }
 
-  if (reasoningCloseIndex !== -1) {
+  if (activeReasoningCloseIndex !== -1) {
     return {
       reasoning,
       content: content
-        .slice(reasoningCloseIndex + reasoningCloseTag.length)
+        .slice(activeReasoningCloseIndex + activeReasoningCloseTag.length)
         .replace(new RegExp(answerOpenTag, 'gi'), '')
         .replace(new RegExp(answerCloseTag, 'gi'), '')
         .trim()
@@ -348,7 +369,7 @@ function parseStreamingAssistantReply(content: string) {
 
   return {
     reasoning,
-    content: reasoningOpenIndex === -1
+    content: activeReasoningOpenIndex === -1
       ? content
           .replace(new RegExp(answerOpenTag, 'gi'), '')
           .replace(new RegExp(answerCloseTag, 'gi'), '')
@@ -364,7 +385,7 @@ function getStreamReasoningText(chunk: unknown) {
   return typeof reasoningContent === 'string' ? reasoningContent : ''
 }
 
-function getAgentMessages() {
+function getAgentMessages(): OllamaChatMessage[] {
   return messages.value
     .filter((message, index) => !(index === 0 && message.role === 'assistant'))
     .filter(message => message.content.trim())
@@ -372,6 +393,105 @@ function getAgentMessages() {
       role: message.role,
       content: message.content
     }))
+}
+
+function parseOllamaStreamLine(line: string) {
+  try {
+    return JSON.parse(line) as OllamaChatStreamResponse
+  } catch {
+    return null
+  }
+}
+
+async function streamOllamaChat(
+  model: string,
+  modelMessages: OllamaChatMessage[],
+  think: boolean | 'low' | 'medium' | 'high',
+  onChunk: (chunk: OllamaChatStreamResponse) => void
+) {
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      messages: modelMessages,
+      stream: true,
+      think,
+      options: {
+        temperature: 0.2
+      }
+    })
+  })
+
+  if (!response.ok) {
+    throw new Error(`Ollama returned ${response.status} while streaming chat.`)
+  }
+
+  if (!response.body) {
+    throw new Error('Ollama did not return a readable stream.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+
+      if (done) {
+        break
+      }
+
+      pending += decoder.decode(value, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (!trimmedLine) {
+          continue
+        }
+
+        const chunk = parseOllamaStreamLine(trimmedLine)
+        if (!chunk) {
+          continue
+        }
+
+        if (chunk.error) {
+          throw new Error(chunk.error)
+        }
+
+        onChunk(chunk)
+
+        if (chunk.done) {
+          return
+        }
+      }
+    }
+
+    pending += decoder.decode()
+
+    const finalLine = pending.trim()
+    if (finalLine) {
+      const chunk = parseOllamaStreamLine(finalLine)
+
+      if (chunk?.error) {
+        throw new Error(chunk.error)
+      }
+
+      if (chunk) {
+        onChunk(chunk)
+      }
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 async function handleSubmit(event: Event) {
@@ -406,48 +526,60 @@ async function handleSubmit(event: Event) {
   }
 
   isLoading.value = true
-  const assistantMessage: ChatMessage = {
+  const assistantMessageIndex = messages.value.length
+
+  messages.value.push({
     role: 'assistant',
     content: '',
     reasoning: '',
     reasoningStreaming: true
-  }
+  })
 
-  messages.value.push(assistantMessage)
+  const getAssistantMessage = () => messages.value[assistantMessageIndex]
+  const updateAssistantMessage = (patch: Partial<ChatMessage>) => {
+    const currentMessage = getAssistantMessage()
+
+    if (!currentMessage) {
+      return
+    }
+
+    messages.value[assistantMessageIndex] = {
+      ...currentMessage,
+      ...patch
+    }
+  }
 
   try {
     await graphStore.fetchMarkdown()
 
-    const [{ ChatOllama }, { SystemMessage, HumanMessage, AIMessage }] = await Promise.all([
-      import('@langchain/ollama'),
-      import('@langchain/core/messages')
-    ])
-
-    const model = new ChatOllama({
-      baseUrl: OLLAMA_BASE_URL,
-      model: selectedModel.value,
-      temperature: 0.2,
-      streaming: true,
-      think: true
-    })
-
-    const modelMessages = [
-      new SystemMessage(systemPrompt.value),
-      ...getAgentMessages().map((message) => {
-        return message.role === 'user'
-          ? new HumanMessage(message.content)
-          : new AIMessage(message.content)
-      })
+    const modelMessages: OllamaChatMessage[] = [
+      {
+        role: 'system',
+        content: systemPrompt.value
+      },
+      ...getAgentMessages()
     ]
 
     let streamedContent = ''
-
-    for await (const chunk of await model.stream(modelMessages)) {
-      const reasoningDelta = getStreamReasoningText(chunk)
-      const contentDelta = getContentText((chunk as { content?: unknown }).content)
+    const handleOllamaChunk = (chunk: OllamaChatStreamResponse, fallbackOnLongThinking: boolean) => {
+      const reasoningDelta = chunk.message?.thinking || getStreamReasoningText(chunk)
+      const contentDelta = getContentText(chunk.message?.content)
 
       if (reasoningDelta) {
-        assistantMessage.reasoning = `${assistantMessage.reasoning || ''}${reasoningDelta}`
+        const currentReasoning = getAssistantMessage()?.reasoning || ''
+        const nextReasoning = `${currentReasoning}${reasoningDelta}`
+
+        updateAssistantMessage({
+          reasoning: nextReasoning
+        })
+
+        if (
+          fallbackOnLongThinking
+          && !streamedContent
+          && nextReasoning.length >= OLLAMA_THINKING_FALLBACK_CHAR_LIMIT
+        ) {
+          throw new OllamaThinkingFallbackError()
+        }
       }
 
       if (contentDelta) {
@@ -455,26 +587,60 @@ async function handleSubmit(event: Event) {
 
         const parsedReply = parseStreamingAssistantReply(streamedContent)
         if (parsedReply.reasoning && !reasoningDelta) {
-          assistantMessage.reasoning = parsedReply.reasoning
+          updateAssistantMessage({
+            reasoning: parsedReply.reasoning
+          })
         }
 
-        assistantMessage.content = parsedReply.content
+        updateAssistantMessage({
+          content: parsedReply.content
+        })
       }
+    }
+
+    try {
+      await streamOllamaChat(selectedModel.value, modelMessages, OLLAMA_THINKING_EFFORT, (chunk) => {
+        handleOllamaChunk(chunk, true)
+      })
+    } catch (error) {
+      if (!(error instanceof OllamaThinkingFallbackError)) {
+        throw error
+      }
+
+      updateAssistantMessage({
+        reasoningStreaming: false
+      })
+
+      streamedContent = ''
+
+      await streamOllamaChat(selectedModel.value, modelMessages, false, (chunk) => {
+        handleOllamaChunk(chunk, false)
+      })
     }
 
     const parsedReply = parseAssistantReply(streamedContent)
 
-    if (!assistantMessage.reasoning && parsedReply.reasoning) {
-      assistantMessage.reasoning = parsedReply.reasoning
+    const finalMessage = getAssistantMessage()
+    const finalContent = finalMessage?.content || parsedReply.content || 'I could not produce a response from Ollama.'
+
+    if (!finalMessage?.reasoning && parsedReply.reasoning) {
+      updateAssistantMessage({
+        reasoning: parsedReply.reasoning
+      })
     }
-    assistantMessage.reasoningStreaming = false
-    assistantMessage.content = assistantMessage.content || parsedReply.content || 'I could not produce a response from Ollama.'
+
+    updateAssistantMessage({
+      reasoningStreaming: false,
+      content: finalContent
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
 
-    assistantMessage.reasoning = ''
-    assistantMessage.reasoningStreaming = false
-    assistantMessage.content = `I could not reach Ollama from the browser. Make sure Ollama is running at ${OLLAMA_BASE_URL}, the selected model is available, and Ollama allows this site origin. Error: ${message}`
+    updateAssistantMessage({
+      reasoning: '',
+      reasoningStreaming: false,
+      content: `I could not reach Ollama from the browser. Make sure Ollama is running at ${OLLAMA_BASE_URL}, the selected model is available, and Ollama allows this site origin. Error: ${message}`
+    })
   } finally {
     isLoading.value = false
   }
@@ -482,9 +648,11 @@ async function handleSubmit(event: Event) {
 </script>
 
 <template>
-  <component
-    :is="chatOverlayComponent"
-    v-bind="chatOverlayProps"
+  <UModal
+    :open="open"
+    fullscreen
+    title="AI Chat"
+    description="Graph-aware assistant"
     @update:open="handleOpenChange"
   >
     <UButton
@@ -494,243 +662,133 @@ async function handleSubmit(event: Event) {
       size="sm"
     />
 
-    <template #header="{ close }">
-      <div class="flex w-full items-start gap-3">
-        <div class="min-w-0 flex-1">
-          <h2 class="font-semibold text-highlighted">
-            AI Chat
-          </h2>
-          <p class="mt-1 text-sm text-muted">
-            Graph-aware assistant
-          </p>
-        </div>
-
-        <div class="flex items-center gap-1">
-          <UTooltip :text="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'">
-            <UButton
-              type="button"
-              :icon="isFullscreen ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :aria-label="isFullscreen ? 'Exit fullscreen chat' : 'Open fullscreen chat'"
-              @click="isFullscreen = !isFullscreen"
-            />
-          </UTooltip>
-
-          <UButton
-            type="button"
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            aria-label="Close chat"
-            @click="close"
-          />
-        </div>
-      </div>
-    </template>
-
     <template #body>
-      <div class="flex min-h-0 flex-1 flex-col">
-        <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
-          <div
-            v-for="(message, index) in messages"
-            :key="index"
-            class="flex"
-            :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
-          >
-            <div
-              class="max-w-[85%] rounded-lg px-3 py-2 text-sm"
-              :class="message.role === 'user'
-                ? 'bg-primary text-inverted'
-                : 'bg-muted text-highlighted'"
-            >
-              <UChatReasoning
-                v-if="message.reasoning || message.reasoningStreaming"
-                :text="message.reasoning"
-                :streaming="message.reasoningStreaming"
-                icon="i-lucide-brain"
-                chevron="leading"
-                :auto-close-delay="1000"
-                class="mb-2"
-                :ui="{
-                  body: 'max-h-40 text-xs'
-                }"
-              />
+      <UChatMessages
+        :messages="chatMessages"
+        status="ready"
+        :assistant="{ side: 'left', variant: 'naked' }"
+        :user="{ side: 'right', variant: 'soft' }"
+        compact
+        should-auto-scroll
+      >
+        <template #content="{ message }">
+          <UChatReasoning
+            v-if="message.metadata?.reasoning || message.metadata?.reasoningStreaming"
+            :text="message.metadata?.reasoning || ''"
+            :streaming="message.metadata?.reasoningStreaming"
+            icon="i-lucide-brain"
+            chevron="leading"
+            :auto-close-delay="1000"
+          />
 
-              <MDC
-                v-if="message.content"
-                :value="message.content"
-                tag="div"
-                class="chat-markdown"
-                :class="message.role === 'user' ? 'chat-markdown-inverted' : undefined"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+          <MDC
+            v-if="message.content"
+            :value="message.content"
+            tag="div"
+          />
+        </template>
+      </UChatMessages>
     </template>
 
     <template #footer>
-      <div class="space-y-3">
-        <UChatPrompt
-          v-model="prompt"
-          icon="i-lucide-sparkles"
-          placeholder="Ask about this graph..."
-          variant="subtle"
-          :rows="1"
-          :maxrows="4"
-          :disabled="isLoading || isDownloadingRecommendedModel || !selectedProvider || !selectedModel"
-          class="w-full"
-          @submit="handleSubmit"
-        >
-          <UChatPromptSubmit
-            color="neutral"
-            :status="isLoading ? 'submitted' : 'ready'"
+      <UChatPrompt
+        v-model="prompt"
+        icon="i-lucide-sparkles"
+        placeholder="Ask about this graph..."
+        variant="subtle"
+        :rows="1"
+        :maxrows="4"
+        :disabled="isLoading || isDownloadingRecommendedModel || !selectedProvider || !selectedModel"
+        @submit="handleSubmit"
+      >
+        <UChatPromptSubmit
+          color="neutral"
+          :status="isLoading ? 'submitted' : 'ready'"
+        />
+
+        <template #footer>
+          <UFieldGroup>
+            <USelect
+              v-model="selectedProvider"
+              :items="providerItems"
+              :icon="selectedProviderIcon"
+              placeholder="Select provider"
+              variant="ghost"
+            />
+            <USelect
+              v-model="selectedModel"
+              :items="modelItems"
+              :loading="isLoadingModels || isDownloadingRecommendedModel"
+              :disabled="!selectedProvider"
+              icon="i-lucide-brain"
+              placeholder="Select model"
+              variant="ghost"
+            />
+            <UButton
+              type="button"
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="ghost"
+              :loading="isLoadingModels"
+              :disabled="isLoading || isDownloadingRecommendedModel || !selectedProvider"
+              aria-label="Refresh Ollama models"
+              @click="loadDownloadedModels"
+            />
+          </UFieldGroup>
+
+          <UAlert
+            v-if="isOllamaUnavailable"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="Ollama unavailable"
+            description="Please install Ollama and start it before selecting a model."
+          >
+            <template #actions>
+              <UButton
+                label="Install Ollama"
+                color="neutral"
+                variant="link"
+                size="xs"
+                :to="OLLAMA_DOWNLOAD_URL"
+                target="_blank"
+                rel="noopener noreferrer"
+                external
+              />
+            </template>
+          </UAlert>
+
+          <UAlert
+            v-else-if="modelError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="Model error"
+            :description="modelError"
           />
 
-          <template #footer>
-            <div class="flex w-full flex-col gap-2">
-              <div class="flex flex-wrap items-center gap-2">
-                <USelect
-                  v-model="selectedProvider"
-                  :items="providerItems"
-                  :icon="selectedProviderIcon"
-                  placeholder="Select provider"
-                  variant="ghost"
-                  class="w-32"
-                />
-                <USelect
-                  v-model="selectedModel"
-                  :items="modelItems"
-                  :loading="isLoadingModels || isDownloadingRecommendedModel"
-                  :disabled="!selectedProvider"
-                  icon="i-lucide-brain"
-                  placeholder="Select model"
-                  variant="ghost"
-                  class="min-w-40 flex-1"
-                />
-                <UButton
-                  type="button"
-                  icon="i-lucide-refresh-cw"
-                  color="neutral"
-                  variant="ghost"
-                  :loading="isLoadingModels"
-                  :disabled="isLoading || isDownloadingRecommendedModel || !selectedProvider"
-                  aria-label="Refresh Ollama models"
-                  @click="loadDownloadedModels"
-                />
-              </div>
-
-              <div
-                v-if="isOllamaUnavailable"
-                class="flex flex-wrap items-center gap-2 text-xs text-error"
-              >
-                <span>Please install Ollama and start it before selecting a model.</span>
-                <UButton
-                  label="Install Ollama"
-                  color="neutral"
-                  variant="link"
-                  size="xs"
-                  :to="OLLAMA_DOWNLOAD_URL"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  external
-                  class="p-0"
-                />
-              </div>
-              <p
-                v-else-if="modelError"
-                class="text-xs text-error"
-              >
-                {{ modelError }}
-              </p>
-              <div
-                v-if="shouldShowRecommendedModelDownload"
-                class="flex flex-wrap items-center gap-2 text-xs text-muted"
-              >
-                <span>No completion model found. Download {{ RECOMMENDED_MODEL }} to start chatting.</span>
-                <UButton
-                  type="button"
-                  :label="`Download ${RECOMMENDED_MODEL}`"
-                  color="neutral"
-                  variant="link"
-                  size="xs"
-                  :loading="isDownloadingRecommendedModel"
-                  class="p-0"
-                  @click="downloadRecommendedModel"
-                />
-              </div>
-            </div>
-          </template>
-        </UChatPrompt>
-      </div>
+          <UAlert
+            v-if="shouldShowRecommendedModelDownload"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-download"
+            title="No completion model found"
+            :description="`Download ${RECOMMENDED_MODEL} to start chatting.`"
+          >
+            <template #actions>
+              <UButton
+                type="button"
+                :label="`Download ${RECOMMENDED_MODEL}`"
+                color="neutral"
+                variant="link"
+                size="xs"
+                :loading="isDownloadingRecommendedModel"
+                @click="downloadRecommendedModel"
+              />
+            </template>
+          </UAlert>
+        </template>
+      </UChatPrompt>
     </template>
-  </component>
+  </UModal>
 </template>
-
-<style scoped>
-.chat-markdown {
-  overflow-wrap: anywhere;
-}
-
-.chat-markdown :deep(:first-child) {
-  margin-top: 0;
-}
-
-.chat-markdown :deep(:last-child) {
-  margin-bottom: 0;
-}
-
-.chat-markdown :deep(p),
-.chat-markdown :deep(ul),
-.chat-markdown :deep(ol),
-.chat-markdown :deep(pre),
-.chat-markdown :deep(blockquote),
-.chat-markdown :deep(table) {
-  margin: 0.5rem 0;
-}
-
-.chat-markdown :deep(ul),
-.chat-markdown :deep(ol) {
-  padding-left: 1rem;
-}
-
-.chat-markdown :deep(ul) {
-  list-style: disc;
-}
-
-.chat-markdown :deep(ol) {
-  list-style: decimal;
-}
-
-.chat-markdown :deep(code) {
-  border-radius: 0.25rem;
-  background: color-mix(in oklab, var(--ui-bg-inverted) 8%, transparent);
-  padding: 0.0625rem 0.25rem;
-  font-size: 0.8125rem;
-}
-
-.chat-markdown :deep(pre) {
-  overflow-x: auto;
-  border-radius: 0.375rem;
-  background: color-mix(in oklab, var(--ui-bg-inverted) 8%, transparent);
-  padding: 0.625rem;
-}
-
-.chat-markdown :deep(pre code) {
-  background: transparent;
-  padding: 0;
-}
-
-.chat-markdown :deep(a) {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.chat-markdown-inverted :deep(code),
-.chat-markdown-inverted :deep(pre) {
-  background: rgb(255 255 255 / 0.16);
-}
-</style>
