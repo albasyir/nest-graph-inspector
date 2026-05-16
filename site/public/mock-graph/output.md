@@ -10,6 +10,9 @@ graph TD
     provider_UserModule_UserRepository["UserRepository"]
     controller_UserModule_UserController["UserController"]
   end
+  subgraph module_group_MobileModule["MobileModule"]
+    provider_MobileModule_MobileService["MobileService"]
+  end
   subgraph module_group_ProductModule["ProductModule"]
     provider_ProductModule_ProductService["ProductService"]
     provider_ProductModule_ProductRepository["ProductRepository"]
@@ -27,10 +30,16 @@ graph TD
   module_group_AppModule --> module_group_UserModule
   module_group_AppModule --> module_group_ProductModule
   module_group_AppModule --> module_group_OrderModule
+  module_group_UserModule --> module_group_MobileModule
   provider_UserModule_UserService --> provider_UserModule_UserRepository
+  provider_UserModule_UserService --> provider_MobileModule_MobileService
   controller_UserModule_UserController --> provider_UserModule_UserService
+  module_group_MobileModule --> module_group_ProductModule
+  provider_MobileModule_MobileService --> provider_ProductModule_ProductService
   module_group_ProductModule --> module_group_UserModule
+  module_group_ProductModule --> module_group_MobileModule
   provider_ProductModule_ProductService --> provider_ProductModule_ProductRepository
+  provider_ProductModule_ProductService --> provider_MobileModule_MobileService
   controller_ProductModule_ProductController --> provider_ProductModule_ProductService
   module_group_OrderModule --> module_group_UserModule
   module_group_OrderModule --> module_group_ProductModule
@@ -55,29 +64,60 @@ graph TD
 
 ## UserModule
 
+> warnings
+> - circular dependency with MobileModule
+
+### Imports
+- MobileModule
+
 ### Exports
 - UserService
 
 ### Providers
 - UserService
   - depends on UserRepository from UserModule
+  - depends on MobileService from MobileModule
 - UserRepository
 
 ### Controllers
 - UserController
   - depends on UserService from UserModule
 
+## MobileModule
+
+> warnings
+> - circular dependency with ProductModule
+
+### Imports
+- ProductModule
+
+### Exports
+- MobileService
+
+### Providers
+- MobileService
+  - Warning: circular dependency with ProductService from ProductModule
+  - depends on ProductService from ProductModule
+
 ## ProductModule
+
+> warnings
+> - circular dependency with UserModule
+> - circular dependency with MobileModule
 
 ### Imports
 - UserModule
+  - Warning: unused import module
+- MobileModule
 
 ### Exports
 - ProductService
 
 ### Providers
 - ProductService
+  - Warning: circular dependency with MobileService from MobileModule
   - depends on ProductRepository from ProductModule
+  - depends on MobileService from MobileModule
 - ProductRepository
 
 ### Controllers
@@ -96,11 +136,13 @@ graph TD
 ### Providers
 - OrderRepository
 - OrderService
+  - Warning: circular dependency with OrderNotificationService from OrderModule
   - depends on OrderRepository from OrderModule
   - depends on UserService from UserModule
   - depends on ProductService from ProductModule
   - depends on OrderNotificationService from OrderModule
 - OrderNotificationService
+  - Warning: circular dependency with OrderService from OrderModule
   - depends on OrderService from OrderModule
 
 ### Controllers

@@ -13,7 +13,9 @@
       "controllers": []
     },
     "UserModule": {
-      "imports": [],
+      "imports": [
+        "MobileModule"
+      ],
       "exports": [
         "UserService"
       ],
@@ -24,6 +26,10 @@
             {
               "module": "UserModule",
               "token": "UserRepository"
+            },
+            {
+              "module": "MobileModule",
+              "token": "MobileService"
             }
           ]
         },
@@ -44,9 +50,30 @@
         }
       ]
     },
+    "MobileModule": {
+      "imports": [
+        "ProductModule"
+      ],
+      "exports": [
+        "MobileService"
+      ],
+      "providers": [
+        {
+          "name": "MobileService",
+          "dependencies": [
+            {
+              "module": "ProductModule",
+              "token": "ProductService"
+            }
+          ]
+        }
+      ],
+      "controllers": []
+    },
     "ProductModule": {
       "imports": [
-        "UserModule"
+        "UserModule",
+        "MobileModule"
       ],
       "exports": [
         "ProductService"
@@ -58,6 +85,10 @@
             {
               "module": "ProductModule",
               "token": "ProductRepository"
+            },
+            {
+              "module": "MobileModule",
+              "token": "MobileService"
             }
           ]
         },

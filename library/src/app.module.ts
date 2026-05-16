@@ -15,7 +15,7 @@ import { UserModule } from './user/user.module';
         { type: 'markdown', path: 'tmp/graph/output.md' },
         { type: 'json', path: 'tmp/graph/output.json' },
         { type: 'http', host: 'localhost', port: 3998, path: 'graph' },
-      ]
+      ],
     }),
 
     /**
@@ -26,4 +26,4 @@ import { UserModule } from './user/user.module';
     OrderModule,
   ],
 })
-export class AppModule { }
+export class AppModule {}

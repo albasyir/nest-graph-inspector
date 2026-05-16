@@ -4,7 +4,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { FileOutputAdapter } from './file-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
-import type { ModuleMap } from '../types/module-map.type';
 
 jest.mock('node:fs/promises', () => ({
   mkdir: jest.fn(),
@@ -35,7 +34,7 @@ describe(FileOutputAdapter.name, () => {
   });
 
   it('creates the target directory before writing markdown', async () => {
-    const moduleMap: ModuleMap = {
+    const graphOutput: GraphOutput = {
       version: '0',
       root: 'AppModule',
       modules: {
@@ -49,7 +48,7 @@ describe(FileOutputAdapter.name, () => {
     };
     const filePath = join(process.cwd(), 'tmp/graph.md');
 
-    const result = await adapter.execute(moduleMap, {
+    const result = await adapter.execute(graphOutput, {
       type: 'markdown',
       path: 'tmp/graph.md',
     });
@@ -153,6 +152,208 @@ describe(FileOutputAdapter.name, () => {
     expect(markdown).toContain('  - depends on UserService from UserModule');
     expect(markdown).toContain('### Controllers');
     expect(markdown).not.toContain('- None');
+  });
+
+  it('renders provider-level circular dependency warnings on providers', () => {
+    const graphOutput: GraphOutput = {
+      version: '0',
+      root: 'AppModule',
+      modules: {
+        ProductModule: {
+          imports: ['UserModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'ProductService',
+              dependencies: [
+                {
+                  providedBy: { type: 'module', name: 'MobileModule' },
+                  token: 'MobileService',
+                },
+              ],
+            },
+          ],
+          controllers: [],
+        },
+        UserModule: {
+          imports: ['MobileModule'],
+          exports: ['MobileModule'],
+          providers: [],
+          controllers: [],
+        },
+        MobileModule: {
+          imports: ['ProductModule'],
+          exports: ['MobileService'],
+          providers: [
+            {
+              name: 'MobileService',
+              dependencies: [
+                {
+                  providedBy: { type: 'module', name: 'ProductModule' },
+                  token: 'ProductService',
+                },
+              ],
+            },
+          ],
+          controllers: [],
+        },
+      },
+    };
+
+    const markdown = adapter.buildMarkdownText(graphOutput);
+
+    expect(markdown).toContain(
+      [
+        '## ProductModule',
+        '',
+        '> warnings',
+        '> - circular dependency with UserModule',
+        '',
+        '### Imports',
+        '- UserModule',
+        '',
+        '### Providers',
+        '- ProductService',
+        '  - Warning: circular dependency with MobileService from MobileModule',
+        '  - depends on MobileService from MobileModule',
+      ].join('\n'),
+    );
+    expect(markdown).toContain(
+      [
+        '## MobileModule',
+        '',
+        '> warnings',
+        '> - circular dependency with ProductModule',
+        '',
+        '### Imports',
+        '- ProductModule',
+        '',
+        '### Exports',
+        '- MobileService',
+        '',
+        '### Providers',
+        '- MobileService',
+        '  - Warning: circular dependency with ProductService from ProductModule',
+        '  - depends on ProductService from ProductModule',
+      ].join('\n'),
+    );
+  });
+
+  it('renders module-level circular dependency warnings on modules', () => {
+    const graphOutput: GraphOutput = {
+      version: '0',
+      root: 'AppModule',
+      modules: {
+        UserModule: {
+          imports: ['MobileModule'],
+          exports: [],
+          providers: [],
+          controllers: [],
+        },
+        MobileModule: {
+          imports: ['ProductModule'],
+          exports: [],
+          providers: [],
+          controllers: [],
+        },
+        ProductModule: {
+          imports: ['UserModule'],
+          exports: [],
+          providers: [],
+          controllers: [],
+        },
+      },
+    };
+
+    const markdown = adapter.buildMarkdownText(graphOutput);
+
+    expect(markdown).toContain(
+      [
+        '## UserModule',
+        '',
+        '> warnings',
+        '> - circular dependency with MobileModule',
+        '',
+        '### Imports',
+        '- MobileModule',
+      ].join('\n'),
+    );
+    expect(markdown).toContain(
+      [
+        '## MobileModule',
+        '',
+        '> warnings',
+        '> - circular dependency with ProductModule',
+        '',
+        '### Imports',
+        '- ProductModule',
+      ].join('\n'),
+    );
+    expect(markdown).toContain(
+      [
+        '## ProductModule',
+        '',
+        '> warnings',
+        '> - circular dependency with UserModule',
+        '',
+        '### Imports',
+        '- UserModule',
+      ].join('\n'),
+    );
+  });
+
+  it('renders unused import warnings on import items', () => {
+    const graphOutput: GraphOutput = {
+      version: '0',
+      root: 'AppModule',
+      modules: {
+        ProductModule: {
+          imports: ['UserModule', 'MobileModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'ProductService',
+              dependencies: [
+                {
+                  providedBy: { type: 'module', name: 'MobileModule' },
+                  token: 'MobileService',
+                },
+              ],
+            },
+          ],
+          controllers: [],
+        },
+        UserModule: {
+          imports: [],
+          exports: ['UserService'],
+          providers: [{ name: 'UserService', dependencies: [] }],
+          controllers: [],
+        },
+        MobileModule: {
+          imports: [],
+          exports: ['MobileService'],
+          providers: [{ name: 'MobileService', dependencies: [] }],
+          controllers: [],
+        },
+      },
+    };
+
+    const markdown = adapter.buildMarkdownText(graphOutput);
+
+    expect(markdown).toContain(
+      [
+        '## ProductModule',
+        '',
+        '### Imports',
+        '- UserModule',
+        '  - Warning: unused import module',
+        '- MobileModule',
+        '',
+        '### Providers',
+        '- ProductService',
+        '  - depends on MobileService from MobileModule',
+      ].join('\n'),
+    );
   });
 
   it('omits empty markdown sections', () => {
