@@ -1,8 +1,5 @@
 # NestJS Dependency Graph
 
-Root Module: `AppModule`
-Version: `1`
-
 ```mermaid
 graph TD
 
@@ -27,35 +24,27 @@ graph TD
   subgraph module_group_NestJSCoreModule["NestJSCoreModule"]
     provider_NestJSCoreModule_ModuleRef["ModuleRef"]
   end
-  module_group_UserModule --> module_group_AppModule
-  module_group_ProductModule --> module_group_AppModule
-  module_group_OrderModule --> module_group_AppModule
-  provider_UserModule_UserRepository --> provider_UserModule_UserService
-  provider_UserModule_UserService --> controller_UserModule_UserController
-  module_group_UserModule --> module_group_ProductModule
-  provider_ProductModule_ProductRepository --> provider_ProductModule_ProductService
-  provider_ProductModule_ProductService --> controller_ProductModule_ProductController
-  module_group_UserModule --> module_group_OrderModule
-  module_group_ProductModule --> module_group_OrderModule
-  provider_OrderModule_OrderRepository --> provider_OrderModule_OrderService
-  provider_UserModule_UserService --> provider_OrderModule_OrderService
-  provider_ProductModule_ProductService --> provider_OrderModule_OrderService
-  provider_OrderModule_OrderNotificationService --> provider_OrderModule_OrderService
+  module_group_AppModule --> module_group_UserModule
+  module_group_AppModule --> module_group_ProductModule
+  module_group_AppModule --> module_group_OrderModule
+  provider_UserModule_UserService --> provider_UserModule_UserRepository
+  controller_UserModule_UserController --> provider_UserModule_UserService
+  module_group_ProductModule --> module_group_UserModule
+  provider_ProductModule_ProductService --> provider_ProductModule_ProductRepository
+  controller_ProductModule_ProductController --> provider_ProductModule_ProductService
+  module_group_OrderModule --> module_group_UserModule
+  module_group_OrderModule --> module_group_ProductModule
+  provider_OrderModule_OrderService --> provider_OrderModule_OrderRepository
+  provider_OrderModule_OrderService --> provider_UserModule_UserService
+  provider_OrderModule_OrderService --> provider_ProductModule_ProductService
   provider_OrderModule_OrderService --> provider_OrderModule_OrderNotificationService
-  provider_OrderModule_OrderService --> controller_OrderModule_OrderController
-  provider_NestJSCoreModule_ModuleRef --> controller_OrderModule_OrderController
-  provider_OrderModule_OrderNotificationService --> controller_OrderModule_OrderController
+  provider_OrderModule_OrderNotificationService --> provider_OrderModule_OrderService
+  controller_OrderModule_OrderController --> provider_OrderModule_OrderService
+  controller_OrderModule_OrderController --> provider_NestJSCoreModule_ModuleRef
+  controller_OrderModule_OrderController --> provider_OrderModule_OrderNotificationService
 ```
 
-## Legend
-
-- Each module is rendered as a Mermaid group
-- Inside each module group: providers and controllers owned by that module
-- Arrows between groups: imported module points to importing module
-- Arrows point from dependency/owned node to the dependent/owner node
-- Providers and controllers are grouped inside their owning module without extra ownership arrows
-- Internal and external runtime dependencies point to the provider/controller that uses them
-- Standalone dependency nodes are only used when a dependency cannot be resolved to a provider node
+> Arrow direction: `A --> B` means `A` depends on `B`.
 
 ## AppModule
 
@@ -64,31 +53,19 @@ graph TD
 - ProductModule
 - OrderModule
 
-### Exports
-- None
-
-### Providers
-- None
-
-### Controllers
-- None
-
 ## UserModule
 
-### Imports
-- None
-
 ### Exports
 - UserService
 
 ### Providers
 - UserService
-  - depends on: UserModule:UserRepository
+  - depends on UserRepository from UserModule
 - UserRepository
 
 ### Controllers
 - UserController
-  - depends on: UserModule:UserService
+  - depends on UserService from UserModule
 
 ## ProductModule
 
@@ -100,12 +77,12 @@ graph TD
 
 ### Providers
 - ProductService
-  - depends on: ProductModule:ProductRepository
+  - depends on ProductRepository from ProductModule
 - ProductRepository
 
 ### Controllers
 - ProductController
-  - depends on: ProductModule:ProductService
+  - depends on ProductService from ProductModule
 
 ## OrderModule
 
@@ -119,29 +96,23 @@ graph TD
 ### Providers
 - OrderRepository
 - OrderService
-  - depends on: OrderModule:OrderRepository
-  - depends on: UserModule:UserService
-  - depends on: ProductModule:ProductService
-  - depends on: OrderModule:OrderNotificationService
+  - depends on OrderRepository from OrderModule
+  - depends on UserService from UserModule
+  - depends on ProductService from ProductModule
+  - depends on OrderNotificationService from OrderModule
 - OrderNotificationService
-  - depends on: OrderModule:OrderService
+  - depends on OrderService from OrderModule
 
 ### Controllers
 - OrderController
-  - depends on: OrderModule:OrderService
-  - depends on: NestJSCoreModule:ModuleRef
-  - depends on: OrderModule:OrderNotificationService
+  - depends on OrderService from OrderModule
+  - depends on ModuleRef from NestJSCoreModule
+  - depends on OrderNotificationService from OrderModule
 
 ## NestJSCoreModule
-
-### Imports
-- None
 
 ### Exports
 - ModuleRef
 
 ### Providers
 - ModuleRef
-
-### Controllers
-- None

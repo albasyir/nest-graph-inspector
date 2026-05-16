@@ -36,7 +36,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '1',
+      version: '0',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -78,6 +78,47 @@ describe(JsonOutputAdapter.name, () => {
     };
 
     const config = { type: 'json' as const, path: 'artifacts/module-map.json' };
+    const expectedJsonOutput = {
+      version: '0',
+      root: 'AppModule',
+      modules: {
+        AppModule: {
+          imports: ['UserModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'AppService',
+              dependencies: [
+                {
+                  module: 'UserModule',
+                  token: 'UserService',
+                },
+              ],
+            },
+          ],
+          controllers: [],
+        },
+        UserModule: {
+          imports: [],
+          exports: ['UserService'],
+          providers: [
+            { name: 'UserService', dependencies: [] },
+            { name: 'UserRepository', dependencies: [] },
+          ],
+          controllers: [
+            {
+              name: 'UserController',
+              dependencies: [
+                {
+                  module: 'UserModule',
+                  token: 'UserService',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
 
     const result = await adapter.execute(graphOutput, config);
 
@@ -88,8 +129,12 @@ describe(JsonOutputAdapter.name, () => {
     expect(mockedWriteFile).toHaveBeenCalledTimes(1);
     expect(mockedWriteFile).toHaveBeenCalledWith(
       join(process.cwd(), 'artifacts/module-map.json'),
-      JSON.stringify(graphOutput, null, 2),
+      JSON.stringify(expectedJsonOutput, null, 2),
     );
+    expect(graphOutput.modules.AppModule.providers[0].dependencies[0]).toEqual({
+      providedBy: { type: 'module', name: 'UserModule' },
+      token: 'UserService',
+    });
     expect(result).toEqual({
       message: `Graph inspector JSON output was written to ${join(process.cwd(), 'artifacts/module-map.json')}`,
     });
@@ -100,7 +145,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '1',
+      version: '0',
       root: 'App',
       modules: {},
     };

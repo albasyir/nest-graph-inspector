@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "0",
   "root": "AppModule",
   "modules": {
     "AppModule": {
@@ -22,10 +22,7 @@
           "name": "UserService",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "UserModule"
-              },
+              "module": "UserModule",
               "token": "UserRepository"
             }
           ]
@@ -40,10 +37,7 @@
           "name": "UserController",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "UserModule"
-              },
+              "module": "UserModule",
               "token": "UserService"
             }
           ]
@@ -62,10 +56,7 @@
           "name": "ProductService",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "ProductModule"
-              },
+              "module": "ProductModule",
               "token": "ProductRepository"
             }
           ]
@@ -80,10 +71,7 @@
           "name": "ProductController",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "ProductModule"
-              },
+              "module": "ProductModule",
               "token": "ProductService"
             }
           ]
@@ -107,31 +95,19 @@
           "name": "OrderService",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "OrderModule"
-              },
+              "module": "OrderModule",
               "token": "OrderRepository"
             },
             {
-              "providedBy": {
-                "type": "module",
-                "name": "UserModule"
-              },
+              "module": "UserModule",
               "token": "UserService"
             },
             {
-              "providedBy": {
-                "type": "module",
-                "name": "ProductModule"
-              },
+              "module": "ProductModule",
               "token": "ProductService"
             },
             {
-              "providedBy": {
-                "type": "module",
-                "name": "OrderModule"
-              },
+              "module": "OrderModule",
               "token": "OrderNotificationService"
             }
           ]
@@ -140,10 +116,7 @@
           "name": "OrderNotificationService",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "OrderModule"
-              },
+              "module": "OrderModule",
               "token": "OrderService"
             }
           ]
@@ -154,24 +127,15 @@
           "name": "OrderController",
           "dependencies": [
             {
-              "providedBy": {
-                "type": "module",
-                "name": "OrderModule"
-              },
+              "module": "OrderModule",
               "token": "OrderService"
             },
             {
-              "providedBy": {
-                "type": "module",
-                "name": "NestJSCoreModule"
-              },
+              "module": "NestJSCoreModule",
               "token": "ModuleRef"
             },
             {
-              "providedBy": {
-                "type": "module",
-                "name": "OrderModule"
-              },
+              "module": "OrderModule",
               "token": "OrderNotificationService"
             }
           ]

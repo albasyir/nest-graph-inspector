@@ -49,7 +49,7 @@ describe(HttpOutputAdapter.name, () => {
   it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
     const port = await availablePort();
     const graphOutput: GraphOutput = {
-      version: '1',
+      version: '0',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -102,7 +102,9 @@ describe(HttpOutputAdapter.name, () => {
       'text/markdown; charset=utf-8',
     );
     expect(markdownResponse.body).toContain('# NestJS Dependency Graph');
-    expect(markdownResponse.body).toContain('Root Module: `AppModule`');
+    expect(markdownResponse.body).toContain('```mermaid');
+    expect(markdownResponse.body).not.toContain('Root Module: `AppModule`');
+    expect(markdownResponse.body).not.toContain('Version: `0`');
   });
 
   it('lets host and port override a configured origin', async () => {

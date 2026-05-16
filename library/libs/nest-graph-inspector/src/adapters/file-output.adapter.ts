@@ -15,6 +15,9 @@ type FileOutputConfig = Extract<NestGraphInspectorOutput, { type: 'markdown' }>;
 
 @Injectable()
 export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
+  private readonly markdownTitle = 'NestJS Dependency Graph';
+  private readonly arrowDirectionDescription =
+    'Arrow direction: `A --> B` means `A` depends on `B`.';
   private readonly nestCoreModuleName = 'NestJSCoreModule';
 
   async execute(
@@ -36,10 +39,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     const lines: string[] = [];
     const moduleEntries = Object.entries(graphOutput.modules);
 
-    lines.push('# NestJS Dependency Graph');
-    lines.push('');
-    lines.push(`Root Module: \`${graphOutput.root}\``);
-    lines.push(`Version: \`${graphOutput.version}\``);
+    lines.push(`# ${this.markdownTitle}`);
     lines.push('');
     lines.push('```mermaid');
     lines.push('graph TD');
@@ -50,8 +50,9 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
 
     lines.push('```');
     lines.push('');
+    lines.push(`> ${this.arrowDirectionDescription}`);
+    lines.push('');
 
-    this.appendLegend(lines);
     this.appendModuleSections(lines, moduleEntries);
 
     return lines.join('\n');
@@ -115,7 +116,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     moduleData: GraphOutputModule,
     graphOutput: GraphOutput,
   ): void {
-    const moduleGroupId = this.moduleGroupId(moduleName);
+    const importingModuleGroupId = this.moduleGroupId(moduleName);
     if (moduleName === this.nestCoreModuleName) {
       return;
     }
@@ -125,8 +126,9 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
         continue;
       }
 
+      const importedModuleGroupId = this.moduleGroupId(importedModuleName);
       lines.push(
-        `  ${this.moduleGroupId(importedModuleName)} --> ${moduleGroupId}`,
+        `  ${importingModuleGroupId} --> ${importedModuleGroupId}`,
       );
     }
   }
@@ -180,56 +182,35 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     dependencies: GraphOutputDependencyRef[],
     graphOutput: GraphOutput,
   ): void {
-    for (const dep of dependencies) {
-      const targetModule = graphOutput.modules[dep.providedBy.name];
-      const hasProvider = targetModule?.providers.some(
-        (p) => p.name === dep.token,
+    for (const dependency of dependencies) {
+      const dependencyModule = graphOutput.modules[dependency.providedBy.name];
+      const hasDependencyProvider = dependencyModule?.providers.some(
+        (provider) => provider.name === dependency.token,
       );
 
-      if (hasProvider) {
+      if (hasDependencyProvider) {
+        const dependencyProviderNodeId = this.providerNodeId(
+          dependency.providedBy.name,
+          dependency.token,
+        );
         lines.push(
-          `  ${this.providerNodeId(dep.providedBy.name, dep.token)} --> ${ownerNodeId}`,
+          `  ${ownerNodeId} --> ${dependencyProviderNodeId}`,
         );
         continue;
       }
 
-      const depLabel = `${dep.providedBy.name}:${dep.token}`;
+      const dependencyLabel = `${dependency.providedBy.name}:${dependency.token}`;
       const dependencyNodeId = this.dependencyNodeId(
         moduleName,
         ownerName,
-        depLabel,
+        dependencyLabel,
       );
 
       lines.push(
-        `  ${dependencyNodeId}["${this.escapeMermaidLabel(depLabel)}"]`,
+        `  ${dependencyNodeId}["${this.escapeMermaidLabel(dependencyLabel)}"]`,
       );
-      lines.push(`  ${dependencyNodeId} --> ${ownerNodeId}`);
+      lines.push(`  ${ownerNodeId} --> ${dependencyNodeId}`);
     }
-  }
-
-  private appendLegend(lines: string[]): void {
-    lines.push('## Legend');
-    lines.push('');
-    lines.push('- Each module is rendered as a Mermaid group');
-    lines.push(
-      '- Inside each module group: providers and controllers owned by that module',
-    );
-    lines.push(
-      '- Arrows between groups: imported module points to importing module',
-    );
-    lines.push(
-      '- Arrows point from dependency/owned node to the dependent/owner node',
-    );
-    lines.push(
-      '- Providers and controllers are grouped inside their owning module without extra ownership arrows',
-    );
-    lines.push(
-      '- Internal and external runtime dependencies point to the provider/controller that uses them',
-    );
-    lines.push(
-      '- Standalone dependency nodes are only used when a dependency cannot be resolved to a provider node',
-    );
-    lines.push('');
   }
 
   private appendModuleSections(
@@ -256,13 +237,11 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     title: string,
     values: string[],
   ): void {
-    lines.push(`### ${title}`);
-
     if (values.length === 0) {
-      lines.push('- None');
-      lines.push('');
       return;
     }
+
+    lines.push(`### ${title}`);
 
     for (const value of values) {
       lines.push(`- ${value}`);
@@ -276,13 +255,11 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     title: string,
     providers: GraphOutputProvider[],
   ): void {
-    lines.push(`### ${title}`);
-
     if (providers.length === 0) {
-      lines.push('- None');
-      lines.push('');
       return;
     }
+
+    lines.push(`### ${title}`);
 
     for (const provider of providers) {
       this.appendNamedDependencyItem(
@@ -300,13 +277,11 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     title: string,
     controllers: GraphOutputController[],
   ): void {
-    lines.push(`### ${title}`);
-
     if (controllers.length === 0) {
-      lines.push('- None');
-      lines.push('');
       return;
     }
+
+    lines.push(`### ${title}`);
 
     for (const controller of controllers) {
       this.appendNamedDependencyItem(
@@ -326,8 +301,10 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
   ): void {
     lines.push(`- ${name}`);
 
-    for (const dep of dependencies) {
-      lines.push(`  - depends on: ${dep.providedBy.name}:${dep.token}`);
+    for (const dependency of dependencies) {
+      lines.push(
+        `  - depends on ${dependency.token} from ${dependency.providedBy.name}`,
+      );
     }
   }
 
