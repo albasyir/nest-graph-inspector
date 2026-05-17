@@ -8,7 +8,7 @@ useSeoMeta({
 const posthog = usePostHog()
 const route = useRoute()
 const graphStore = useGraphInspectorStore()
-const urlInput = ref('')
+const urlInput = ref('localhost:53371')
 const errorMessage = ref('')
 const isSubmitting = ref(false)
 
@@ -87,15 +87,14 @@ onMounted(() => {
           :ui="{ body: 'p-4 sm:p-5', footer: 'p-4 sm:p-5' }"
         >
           <div class="space-y-5">
-            <!-- Instructions Alert -->
             <UAlert
               icon="i-lucide-info"
-              title="Prerequisite"
+              title="Note"
               color="neutral"
               variant="subtle"
             >
               <template #description>
-                Configure the <code class="text-xs bg-neutral-200 dark:bg-neutral-800 px-1 py-0.5 rounded font-mono mx-1">http</code> output in your NestJS app to expose the graph endpoint.
+                You must install on your project to use the Graph Viewer, however you can load the example graph without installation to explore the features.
               </template>
             </UAlert>
 
@@ -116,11 +115,11 @@ onMounted(() => {
                 </UButton>
               </template>
               <template #description>
-                Your running application URL (e.g., localhost:3000)
+                it's usually in <code class="bg-muted/50 px-1 rounded">localhost:53371</code> however it can be different based on your configuration. Just put the URL here and start exploring your graph!
               </template>
               <UInput
                 v-model="urlInput"
-                placeholder="http://localhost:3000"
+                placeholder="Did you change default? just put here"
                 icon="i-lucide-link"
                 size="xl"
                 class="w-full font-mono text-lg"
