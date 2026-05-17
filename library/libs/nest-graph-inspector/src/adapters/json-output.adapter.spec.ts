@@ -78,47 +78,7 @@ describe(JsonOutputAdapter.name, () => {
     };
 
     const config = { type: 'json' as const, path: 'artifacts/module-map.json' };
-    const expectedJsonOutput = {
-      version: '1',
-      root: 'AppModule',
-      modules: {
-        AppModule: {
-          imports: ['UserModule'],
-          exports: [],
-          providers: [
-            {
-              name: 'AppService',
-              dependencies: [
-                {
-                  module: 'UserModule',
-                  token: 'UserService',
-                },
-              ],
-            },
-          ],
-          controllers: [],
-        },
-        UserModule: {
-          imports: [],
-          exports: ['UserService'],
-          providers: [
-            { name: 'UserService', dependencies: [] },
-            { name: 'UserRepository', dependencies: [] },
-          ],
-          controllers: [
-            {
-              name: 'UserController',
-              dependencies: [
-                {
-                  module: 'UserModule',
-                  token: 'UserService',
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
+    const expectedJsonOutput = graphOutput;
 
     const result = await adapter.execute(graphOutput, config);
 

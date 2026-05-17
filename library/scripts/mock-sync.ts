@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 
@@ -58,6 +59,10 @@ function main(): void {
     copyFileSync(sourcePath, destinationPath);
     console.log(`Copied ${sourcePath} to ${destinationPath}`);
   }
+
+  const informationPath = resolve(mockGraphDir, 'information.json');
+  writeFileSync(informationPath, JSON.stringify({ for: 'nest-graph-inspector' }, null, 2));
+  console.log(`Written ${informationPath}`);
 }
 
 main();
