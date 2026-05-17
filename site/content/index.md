@@ -58,13 +58,7 @@ Generate **runtime dependency graphs** directly from the Nest application contai
     import { NestGraphInspector } from 'nest-graph-inspector';
 
     @Module({
-      imports: [
-        NestGraphInspector.forRoot({
-          outputs: [
-            { type: 'viewer' }
-          ],
-        }),
-      ],
+      imports: [NestGraphInspector], // That's it!
     })
     export class RootModule {}
   filename: root.module.ts
@@ -75,13 +69,7 @@ Generate **runtime dependency graphs** directly from the Nest application contai
   import { NestGraphInspector } from 'nest-graph-inspector';
 
   @Module({
-    imports: [
-      NestGraphInspector.forRoot({
-        outputs: [
-          { type: 'viewer' }
-        ],
-      }),
-    ],
+    imports: [NestGraphInspector], // That's it!
   })
   export class RootModule {}
   ```
