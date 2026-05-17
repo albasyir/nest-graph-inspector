@@ -153,9 +153,9 @@ const selectedProviderIcon = computed(() => {
   return providerItems.find(provider => provider.value === selectedProvider.value)?.icon
 })
 
-const isMocked = computed(() => {
+const isAIAvailable = computed(() => {
   // TODO: this temporary solution
-  return graphStore.decodedUrl.includes('mock-graph')
+  return graphStore.decodedUrl.includes('mock-graph') || graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
 })
 
 const chatMessages = computed(() => messages.value.map((message, index) => ({
@@ -1055,11 +1055,11 @@ async function handleSubmit(event: Event) {
         <UChatPrompt
           v-model="prompt"
           icon="i-lucide-sparkles"
-          :placeholder="isMocked ? 'DISABLED: Use on real NestJS Project' : 'Ask about this graph...'"
+          :placeholder="isAIAvailable ? 'DISABLED: Dont use Example or Update Package' : 'Ask about this graph...'"
           variant="subtle"
           :rows="1"
           :maxrows="4"
-          :disabled="isMocked || isLoading || isDownloadingRecommendedModel"
+          :disabled="isAIAvailable || isLoading || isDownloadingRecommendedModel"
           @submit="handleSubmit"
         >
           <UChatPromptSubmit

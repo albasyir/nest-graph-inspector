@@ -36,7 +36,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '1',
+      version: '2',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -105,7 +105,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '1',
+      version: '2',
       root: 'App',
       modules: {},
     };

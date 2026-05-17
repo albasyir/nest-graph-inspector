@@ -54,9 +54,7 @@ function resolveOriginPath(value: string, pathName: string) {
   }
 }
 
-function isLegacyGraphOutput(value: unknown, graphData: GraphOutput | undefined): value is LegacyGraphOutput {
-  if(graphData?.version == '0') return true
-  
+function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {  
   return Boolean(
     value
     && typeof value === 'object'
@@ -159,7 +157,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     await executeLegacyGraph()
-    shouldShowUpdateModal.value = isLegacyGraphOutput(legacyGraphData.value, graphData.value)
+    shouldShowUpdateModal.value = isLegacyGraphOutput(legacyGraphData.value)
 
     return false
   }
