@@ -6,34 +6,21 @@ import {
 import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { FileOutputAdapter } from './adapters/file-output.adapter';
-import {
-  defaultHttpOutputHost,
-  defaultHttpOutputPort,
-  HttpOutputAdapter,
-} from './adapters/http-output.adapter';
+import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 import { ProxyAdapter } from './adapters/proxy.adapter';
-import type { ProxyGatewayOptions } from './ports/proxy.gateway';
-
-export const defaultProxyGatewayOptions: ProxyGatewayOptions = {
-  from: 'localhost:3999',
-  to: 'localhost:11434',
-  cors: {
-    origins: [
-      'https://albasyir.github.io',
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
-    ],
-  },
-};
+import { HttpServeAdapter } from './adapters/http-serve.adapter';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [
     {
       type: 'viewer',
-      host: defaultHttpOutputHost,
-      port: defaultHttpOutputPort,
-      proxy: defaultProxyGatewayOptions,
+      ...HttpOutputAdapter.defaultConfig,
+      ollama: {
+        origin: 'http://localhost:11434',
+        path: '/ollama',
+      },
     },
   ],
   ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
@@ -57,6 +44,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     NestGraphInspectorSetup,
     JsonOutputAdapter,
     FileOutputAdapter,
+    HttpServeAdapter,
     HttpOutputAdapter,
     ProxyAdapter,
     ViewerOutputAdapter,

@@ -13,22 +13,39 @@ import type {
 export class ProxyAdapter implements ProxyGateway {
   private readonly httpServeAdapters: HttpServeAdapter[] = [];
 
-  async serve(options: ProxyGatewayOptions): Promise<void> {
+  async serve(
+    options: ProxyGatewayOptions,
+    internalOptions: {
+      httpAdapter?: HttpServeAdapter;
+      pathPrefix?: string;
+    } = {},
+  ): Promise<void> {
     const fromUrl = this.normalizeUrl(options.from);
     const toUrl = this.normalizeUrl(options.to);
     const cors = options.cors === false ? undefined : options.cors;
-    const httpServeAdapter = new HttpServeAdapter();
+    const isReuseHttpAdapter = !!internalOptions.httpAdapter;
+    const httpServeAdapter =
+      internalOptions.httpAdapter ?? new HttpServeAdapter();
+    const pathPrefix = internalOptions.pathPrefix
+      ? this.normalizePath(internalOptions.pathPrefix)
+      : undefined;
 
-    httpServeAdapter.register({ origin: fromUrl.origin }, [
-      {
+    httpServeAdapter.register(
+      { origin: fromUrl.origin },
+      (pathPrefix ? [pathPrefix, `${pathPrefix}/*`] : ['*']).map((path) => ({
         type: '*',
-        path: '*',
+        path,
         rawCallback: (clientReq, clientRes) => {
           this.applyCors(cors, clientReq, clientRes);
-          this.forwardRequest(toUrl, cors, clientReq, clientRes);
+          this.forwardRequest(toUrl, cors, clientReq, clientRes, pathPrefix);
         },
-      },
-    ]);
+      })),
+    );
+
+    if (isReuseHttpAdapter) {
+      return;
+    }
+
     try {
       await httpServeAdapter.serve();
     } catch (err) {
@@ -51,8 +68,9 @@ export class ProxyAdapter implements ProxyGateway {
     cors: ProxyCorsOptions | undefined,
     clientReq: http.IncomingMessage,
     clientRes: http.ServerResponse,
+    pathPrefix?: string,
   ) {
-    const targetUrl = new URL(clientReq.url ?? '/', toUrl);
+    const targetUrl = this.targetUrl(clientReq.url ?? '/', toUrl, pathPrefix);
     const requestModule = this.getRequestModule(targetUrl);
 
     const proxyReq = requestModule.request(
@@ -66,6 +84,22 @@ export class ProxyAdapter implements ProxyGateway {
     });
 
     clientReq.pipe(proxyReq);
+  }
+
+  private targetUrl(requestUrl: string, toUrl: URL, pathPrefix?: string): URL {
+    const targetUrl = new URL(requestUrl, toUrl);
+    if (!pathPrefix) {
+      return targetUrl;
+    }
+
+    if (
+      targetUrl.pathname === pathPrefix ||
+      targetUrl.pathname.startsWith(`${pathPrefix}/`)
+    ) {
+      targetUrl.pathname = targetUrl.pathname.slice(pathPrefix.length) || '/';
+    }
+
+    return targetUrl;
   }
 
   private forwardResponse(
@@ -169,5 +203,11 @@ export class ProxyAdapter implements ProxyGateway {
     }
 
     return new URL(value);
+  }
+
+  private normalizePath(path: string): string {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+    return normalizedPath.replace(/\/$/, '');
   }
 }

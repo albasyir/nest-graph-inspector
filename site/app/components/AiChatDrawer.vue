@@ -32,7 +32,7 @@ type OllamaChatStreamResponse = {
   done?: boolean
 }
 
-const OLLAMA_BASE_URL = 'http://localhost:11434'
+const OLLAMA_PROXY_PATH = '/ollama'
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
 const OLLAMA_THINKING_EFFORT = 'low'
 const OLLAMA_THINKING_FALLBACK_CHAR_LIMIT = 3000
@@ -113,8 +113,18 @@ function hasCompletionCapability(capabilities?: string[]) {
   return normalizedCapabilities.includes('completion')
 }
 
+function getOllamaApiUrl(path: string) {
+  if (!graphStore.ollamaUrl) {
+    throw new Error('Ollama proxy URL is unavailable because the graph endpoint is not loaded.')
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+  return `${graphStore.ollamaUrl}${normalizedPath}`
+}
+
 async function loadModelCapabilities(model: string) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/show`, {
+  const response = await fetch(getOllamaApiUrl('/api/show'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -140,7 +150,7 @@ async function loadDownloadedModels() {
   isOllamaUnavailable.value = false
 
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`)
+    const response = await fetch(getOllamaApiUrl('/api/tags'))
     if (!response.ok) {
       throw new Error(`Ollama returned ${response.status}`)
     }
@@ -223,7 +233,7 @@ async function downloadRecommendedModel() {
   isOllamaUnavailable.value = false
 
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/pull`, {
+    const response = await fetch(getOllamaApiUrl('/api/pull'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -409,7 +419,7 @@ async function streamOllamaChat(
   think: boolean | 'low' | 'medium' | 'high',
   onChunk: (chunk: OllamaChatStreamResponse) => void
 ) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+  const response = await fetch(getOllamaApiUrl('/api/chat'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -639,7 +649,7 @@ async function handleSubmit(event: Event) {
     updateAssistantMessage({
       reasoning: '',
       reasoningStreaming: false,
-      content: `I could not reach Ollama from the browser. Make sure Ollama is running at ${OLLAMA_BASE_URL}, the selected model is available, and Ollama allows this site origin. Error: ${message}`
+      content: `I could not reach Ollama through the graph proxy at ${graphStore.ollamaUrl || OLLAMA_PROXY_PATH}. Make sure Ollama is running, the selected model is available, and the graph inspector proxy is configured. Error: ${message}`
     })
   } finally {
     isLoading.value = false

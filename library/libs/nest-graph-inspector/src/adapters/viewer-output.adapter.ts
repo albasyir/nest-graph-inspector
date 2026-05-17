@@ -1,20 +1,15 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
-import {
-  defaultHttpOutputHost,
-  defaultHttpOutputPort,
-  HttpOutputAdapter,
-} from './http-output.adapter';
+import { HttpOutputAdapter } from './http-output.adapter';
 import { ProxyAdapter } from './proxy.adapter';
+import { HttpServeAdapter } from './http-serve.adapter';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 
 @Injectable()
-export class ViewerOutputAdapter
-  implements OutputAdapter<ViewerOutputConfig>, OnModuleDestroy
-{
+export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
   private readonly viewerBaseUrl =
     process.env.____DEV_VIEWER_BASE_URL ||
     'https://albasyir.github.io/nest-graph-inspector';
@@ -22,11 +17,8 @@ export class ViewerOutputAdapter
   constructor(
     private readonly httpOutputAdapter: HttpOutputAdapter,
     private readonly proxyAdapter: ProxyAdapter,
+    private readonly httpServeAdapter: HttpServeAdapter,
   ) {}
-
-  onModuleDestroy(): void {
-    this.proxyAdapter.close();
-  }
 
   async execute(
     graphOutput: GraphOutput,
@@ -35,6 +27,7 @@ export class ViewerOutputAdapter
     const path = this.httpOutputAdapter.normalizePath(
       config.path ?? '/__graph-inspector',
     );
+    const ollama = this.ollamaProxyOptions(config);
 
     await this.httpOutputAdapter.execute(graphOutput, {
       type: 'http',
@@ -42,19 +35,28 @@ export class ViewerOutputAdapter
       host: config.host,
       port: config.port,
       path,
+      httpAdapter: this.httpServeAdapter,
     });
-    if (config.proxy) {
-      await this.proxyAdapter.serve(config.proxy);
+    await this.proxyAdapter.serve(
+      {
+        from: this.httpOrigin(config),
+        to: ollama.origin,
+        cors: false,
+      },
+      {
+        httpAdapter: this.httpServeAdapter,
+        pathPrefix: ollama.path,
+      },
+    );
+
+    try {
+      await this.httpServeAdapter.serve();
+    } catch (err) {
+      this.httpServeAdapter.close();
+      throw err;
     }
 
-    const origin = this.graphOrigin(config);
-    if (!origin) {
-      return {
-        message: `Graph Viewer is available at ${this.viewerBaseUrl}/view and follow the configuration instructions.`,
-      };
-    }
-
-    const graphEndpoint = new URL(path, origin).toString();
+    const graphEndpoint = new URL(path, this.httpOrigin(config)).toString();
     const base64Origin = Buffer.from(graphEndpoint).toString('base64url');
 
     const viewerLink = `${this.viewerBaseUrl}/view/${base64Origin}`;
@@ -64,15 +66,25 @@ export class ViewerOutputAdapter
     };
   }
 
-  private graphOrigin(config: ViewerOutputConfig): string | undefined {
-    if (config.origin) {
-      return config.origin;
+  private httpOrigin(config: ViewerOutputConfig): string {
+    const { host, port } = HttpOutputAdapter.defaultConfig;
+
+    return (
+      config.origin ??
+      `http://${config.host ?? host}:${config.port ?? port}`
+    );
+  }
+
+  private ollamaProxyOptions(
+    config: ViewerOutputConfig,
+  ): Required<NonNullable<ViewerOutputConfig['ollama']>> {
+    const origin = config.ollama?.origin;
+    const path = config.ollama?.path;
+
+    if (!origin || !path) {
+      throw new Error('Viewer output requires Ollama proxy origin and path');
     }
 
-    if (!config.host && config.port === undefined) {
-      return undefined;
-    }
-
-    return `http://${config.host ?? defaultHttpOutputHost}:${config.port ?? defaultHttpOutputPort}`;
+    return { origin, path };
   }
 }

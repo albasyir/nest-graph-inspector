@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpOutputAdapter } from './http-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
 import { FileOutputAdapter } from './file-output.adapter';
+import { HttpServeAdapter } from './http-serve.adapter';
 
 type HttpResponse = {
   statusCode?: number;
@@ -17,7 +18,7 @@ describe(HttpOutputAdapter.name, () => {
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
-      providers: [FileOutputAdapter, HttpOutputAdapter],
+      providers: [FileOutputAdapter, HttpServeAdapter, HttpOutputAdapter],
     }).compile();
 
     adapter = moduleRef.get(HttpOutputAdapter);
@@ -122,7 +123,7 @@ describe(HttpOutputAdapter.name, () => {
     );
   });
 
-  it('uses a different native HTTP server for each output execution', async () => {
+  it('registers multiple output routes on the injected native HTTP server', async () => {
     const port = await availablePort();
     const firstResult = await adapter.execute({} as never, {
       type: 'http',
@@ -135,20 +136,10 @@ describe(HttpOutputAdapter.name, () => {
       '/graph/output.json',
     );
 
-    await expect(
-      adapter.execute({} as never, {
-        type: 'http',
-        host: '127.0.0.1',
-        port,
-        path: '/inspector',
-      }),
-    ).rejects.toThrow(/EADDRINUSE|address already in use/);
-
-    const secondPort = await availablePort();
     const secondResult = await adapter.execute({} as never, {
       type: 'http',
       host: '127.0.0.1',
-      port: secondPort,
+      port,
       path: '/inspector',
     });
     const secondOutputUrl = urlFromMessage(
@@ -156,9 +147,7 @@ describe(HttpOutputAdapter.name, () => {
       '/inspector/output.json',
     );
 
-    expect(new URL(secondOutputUrl).origin).not.toBe(
-      new URL(firstOutputUrl).origin,
-    );
+    expect(new URL(secondOutputUrl).origin).toBe(new URL(firstOutputUrl).origin);
     await expect(get(firstOutputUrl)).resolves.toMatchObject({
       statusCode: 200,
     });

@@ -1,13 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import {
-  defaultHttpOutputHost,
-  defaultHttpOutputPort,
-} from './adapters/http-output.adapter';
-import {
-  defaultProxyGatewayOptions,
-  NestGraphInspectorModule,
-} from './nest-graph-inspector.module';
+import { HttpOutputAdapter } from './adapters/http-output.adapter';
+import { NestGraphInspectorModule } from './nest-graph-inspector.module';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 
 describe(NestGraphInspectorModule.name, () => {
@@ -22,9 +16,11 @@ describe(NestGraphInspectorModule.name, () => {
       outputs: [
         {
           type: 'viewer',
-          host: defaultHttpOutputHost,
-          port: defaultHttpOutputPort,
-          proxy: defaultProxyGatewayOptions,
+          ...HttpOutputAdapter.defaultConfig,
+          ollama: {
+            origin: 'http://localhost:11434',
+            path: '/ollama',
+          },
         },
       ],
       ignoreProvider: ['ModuleRef', 'ApplicationConfig'],

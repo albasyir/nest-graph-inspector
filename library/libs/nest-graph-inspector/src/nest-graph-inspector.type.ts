@@ -1,5 +1,9 @@
 import { Type } from '@nestjs/common';
-import type { ProxyGatewayOptions } from './ports/proxy.gateway';
+
+export type NestGraphInspectorOllamaProxyOptions = {
+  origin?: string;
+  path?: string;
+};
 
 export type NestGraphInspectorOutput =
   | {
@@ -8,7 +12,7 @@ export type NestGraphInspectorOutput =
       host?: string;
       port?: number;
       path?: string;
-      proxy?: ProxyGatewayOptions | false;
+      ollama?: NestGraphInspectorOllamaProxyOptions;
     }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
@@ -34,9 +38,10 @@ export interface NestGraphInspectorModuleOptions {
    * - `type: 'http'` serves the module map from a native HTTP server on the
    *   given host, port, and route path, plus raw JSON and markdown at
    *   `/output.json` and `/output.md` under that path
-   * - `type: 'viewer'` serves the graph for the visualizer. If origin is provided,
-   *   it prints a direct viewer URL. Otherwise, it prints the viewer URL and the
-   *   endpoint path to enter in the viewer.
+   * - `type: 'viewer'` serves the graph for the visualizer and proxies Ollama
+   *   requests from the configured same-origin path to the configured Ollama
+   *   origin. If origin is provided, it prints a direct viewer URL. Otherwise,
+   *   it prints the viewer URL and the endpoint path to enter in the viewer.
    */
   outputs?: NestGraphInspectorOutput[];
 

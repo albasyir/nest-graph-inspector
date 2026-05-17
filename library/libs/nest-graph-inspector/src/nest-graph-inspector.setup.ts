@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
@@ -83,6 +82,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     await Promise.all(
       this.options.outputs.map(async (output) => {
+        output = this.withDefaultOutputOptions(output);
         const adapter = this.outputAdapters[output.type];
         if (!adapter) {
           this.logger.warn(`Unsupported output type: ${output.type}`);
@@ -100,6 +100,30 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         }
       }),
     );
+  }
+
+  private withDefaultOutputOptions(
+    output: NestGraphInspectorOutput,
+  ): NestGraphInspectorOutput {
+    if (output.type !== 'viewer') {
+      return output;
+    }
+
+    const defaultViewerOutput = defaultOptions.outputs?.find(
+      (defaultOutput) => defaultOutput.type === 'viewer',
+    );
+
+    if (!defaultViewerOutput || defaultViewerOutput.type !== 'viewer') {
+      return output;
+    }
+
+    return {
+      ...output,
+      ollama: {
+        ...defaultViewerOutput.ollama,
+        ...output.ollama,
+      },
+    };
   }
 
   buildModuleMapFromAutoDetect(): ModuleMap {

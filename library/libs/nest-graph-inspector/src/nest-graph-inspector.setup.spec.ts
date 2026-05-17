@@ -172,6 +172,54 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(onModuleInitCompleted).toBe(true);
   });
 
+  it('should apply default viewer Ollama proxy options', async () => {
+    options.outputs = [{ type: 'viewer', host: '127.0.0.1', port: 3998 }];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        type: 'viewer',
+        host: '127.0.0.1',
+        port: 3998,
+        ollama: {
+          origin: 'http://localhost:11434',
+          path: '/ollama',
+        },
+      },
+    );
+  });
+
+  it('should let viewer output override default Ollama proxy options', async () => {
+    options.outputs = [
+      {
+        type: 'viewer',
+        host: '127.0.0.1',
+        port: 3998,
+        ollama: {
+          origin: 'http://localhost:11435',
+          path: '/llm',
+        },
+      },
+    ];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        type: 'viewer',
+        host: '127.0.0.1',
+        port: 3998,
+        ollama: {
+          origin: 'http://localhost:11435',
+          path: '/llm',
+        },
+      },
+    );
+  });
+
   it('should use the default inspector filtering options when none are configured', () => {
     class ModuleRef {}
     class ApplicationConfig {}

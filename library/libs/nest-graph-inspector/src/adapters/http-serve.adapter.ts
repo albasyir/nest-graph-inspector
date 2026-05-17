@@ -205,14 +205,43 @@ export class HttpServeAdapter implements OnModuleDestroy {
 
     const candidates = [
       ...(routes.get(this.routeKey(method, path)) ?? []),
+      ...this.wildcardPathCandidates(routes, method, path),
       ...(routes.get(this.routeKey(method, '*')) ?? []),
       ...(routes.get(this.routeKey('*', path)) ?? []),
+      ...this.wildcardPathCandidates(routes, '*', path),
       ...(routes.get(this.routeKey('*', '*')) ?? []),
     ];
 
     return candidates.find((route) =>
       this.requestHeadersMatch(route.requestHeaders, req),
     );
+  }
+
+  private wildcardPathCandidates(
+    routes: Map<string, HttpServeRoute[]>,
+    method: string,
+    path: string,
+  ): HttpServeRoute[] {
+    const methodPrefix = `${method.toUpperCase()} `;
+    const candidates: HttpServeRoute[] = [];
+
+    for (const [key, routeGroup] of routes) {
+      if (!key.startsWith(methodPrefix)) {
+        continue;
+      }
+
+      const routePath = key.slice(methodPrefix.length);
+      if (!routePath.endsWith('/*')) {
+        continue;
+      }
+
+      const prefix = routePath.slice(0, -1);
+      if (path === prefix.slice(0, -1) || path.startsWith(prefix)) {
+        candidates.push(...routeGroup);
+      }
+    }
+
+    return candidates;
   }
 
   private routeKey(method: string, path: string): string {

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
@@ -7,79 +7,90 @@ import { HttpServeAdapter } from './http-serve.adapter';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 
-const INSPECTOR_ENDPOINT_INFO = { for: 'nest-graph-inspector' };
-export const defaultHttpOutputHost = 'localhost';
-export const defaultHttpOutputPort = 3998;
-export const defaultHttpOutputOrigin = `http://${defaultHttpOutputHost}:${defaultHttpOutputPort}`;
+/**
+ * Internal Configuration Options
+ *
+ * @private internal usage only
+ */
+interface HttpOutputInternalOptions {
+  /**
+   * When provided, the adapter will reuse the given HttpServeAdapter instance instead of creating a new one. This is useful for scenarios where multiple outputs need to be served on the same HTTP server instance.
+   */
+  httpAdapter?: HttpServeAdapter;
+}
 
 @Injectable()
-export class HttpOutputAdapter
-  implements OutputAdapter<HttpOutputConfig>, OnModuleDestroy
-{
-  private readonly httpServeAdapters: HttpServeAdapter[] = [];
+export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
+  private static readonly inspectorEndpointInfo = {
+    for: 'nest-graph-inspector',
+  };
 
-  constructor(private readonly fileOutputAdapter: FileOutputAdapter) {}
+  static readonly defaultConfig: Readonly<
+    Required<Pick<HttpOutputConfig, 'host' | 'port'>>
+  > = {
+    host: 'localhost',
+    port: 53371,
+  };
 
-  onModuleDestroy(): void {
-    for (const httpServeAdapter of this.httpServeAdapters) {
-      httpServeAdapter.close();
-    }
-    this.httpServeAdapters.length = 0;
-  }
+  constructor(
+    private readonly fileOutputAdapter: FileOutputAdapter,
+    private readonly httpServeAdapter: HttpServeAdapter,
+  ) {}
 
   async execute(
     graphOutput: GraphOutput,
-    config: HttpOutputConfig,
+    config: HttpOutputConfig & HttpOutputInternalOptions,
   ): Promise<{ message: string }> {
-    const origin = config.origin ?? defaultHttpOutputOrigin;
+    const origin = config.origin ?? this.httpOrigin;
     const path = this.normalizePath(config.path);
     const informationOutputPath = this.joinPath(path, 'information.json');
     const jsonOutputPath = this.joinPath(path, 'output.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
-    const httpServeAdapter = new HttpServeAdapter();
 
-    const registration = httpServeAdapter.register(
+    const isReuseHttpAdapter = !!config.httpAdapter;
+    const httpAdapter = config.httpAdapter ?? this.httpServeAdapter;
+
+    const registration = httpAdapter.register(
       {
         origin,
         host: config.host,
         port: config.port,
       },
       [
-        {
-          type: 'GET',
-          path: informationOutputPath,
+        httpAdapter.get(
+          informationOutputPath,
+          () => HttpOutputAdapter.inspectorEndpointInfo,
+          {
+            responseHeaders: {
+              'content-type': 'application/json; charset=utf-8',
+            },
+          },
+        ),
+        httpAdapter.get(jsonOutputPath, () => graphOutput, {
           responseHeaders: {
             'content-type': 'application/json; charset=utf-8',
           },
-          callback: () => INSPECTOR_ENDPOINT_INFO,
-        },
-        {
-          type: 'GET',
-          path: jsonOutputPath,
-          responseHeaders: {
-            'content-type': 'application/json; charset=utf-8',
+        }),
+        httpAdapter.get(
+          markdownOutputPath,
+          () => this.fileOutputAdapter.buildMarkdownText(graphOutput),
+          {
+            responseHeaders: {
+              'content-type': 'text/markdown; charset=utf-8',
+            },
           },
-          callback: () => graphOutput,
-        },
-        {
-          type: 'GET',
-          path: markdownOutputPath,
-          responseHeaders: {
-            'content-type': 'text/markdown; charset=utf-8',
-          },
-          callback: () => this.fileOutputAdapter.buildMarkdownText(graphOutput),
-        },
+        ),
       ],
     );
 
-    try {
-      await httpServeAdapter.serve();
-    } catch (err) {
-      httpServeAdapter.close();
-      throw err;
+    if (!isReuseHttpAdapter) {
+      try {
+        await httpAdapter.serve();
+      } catch (err) {
+        httpAdapter.close(registration.origin);
+        throw err;
+      }
     }
-
-    this.httpServeAdapters.push(httpServeAdapter);
 
     const informationOutputUrl = new URL(
       informationOutputPath,
@@ -95,6 +106,12 @@ export class HttpOutputAdapter
 
   normalizePath(path = '/__nest-graph-inspector'): string {
     return path.startsWith('/') ? path : `/${path}`;
+  }
+
+  private get httpOrigin(): string {
+    const { host, port } = HttpOutputAdapter.defaultConfig;
+
+    return `http://${host}:${port}`;
   }
 
   private joinPath(basePath: string, childPath: string): string {

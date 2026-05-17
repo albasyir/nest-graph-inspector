@@ -37,6 +37,23 @@ function appendOutputPath(value: string, fileName: string) {
   }
 }
 
+function resolveOriginPath(value: string, pathName: string) {
+  if (!value) {
+    return ''
+  }
+
+  try {
+    const url = new URL(value)
+    url.pathname = `/${pathName.replace(/^\/+/, '')}`
+    url.search = ''
+    url.hash = ''
+
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
 function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
   return Boolean(
     value
@@ -66,6 +83,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const informationUrl = computed(() => appendOutputPath(decodedUrl.value, 'information.json'))
   const jsonUrl = computed(() => appendOutputPath(decodedUrl.value, 'output.json'))
   const markdownUrl = computed(() => appendOutputPath(decodedUrl.value, 'output.md'))
+  const ollamaUrl = computed(() => resolveOriginPath(decodedUrl.value, 'ollama'))
 
   const {
     data: endpointInfo,
@@ -203,6 +221,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     informationUrl,
     jsonUrl,
     markdownUrl,
+    ollamaUrl,
     graphData,
     graphMarkdown,
     status,
