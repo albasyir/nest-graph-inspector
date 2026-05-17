@@ -59,6 +59,57 @@ describe(ProxyAdapter.name, () => {
       url: '/api/tags?limit=1',
     });
   });
+
+  it('proxies request body to the target origin', async () => {
+    targetServer = http.createServer((req, res) => {
+      let body = '';
+
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        res.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+        });
+        res.end(JSON.stringify({ url: req.url, body }));
+      });
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: false,
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(
+      `http://127.0.0.1:${viewerPort}/ollama/api/pull`,
+      JSON.stringify({
+        model: 'qwen3:8b',
+        stream: true,
+      }),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      url: '/api/pull',
+      body: JSON.stringify({
+        model: 'qwen3:8b',
+        stream: true,
+      }),
+    });
+  });
 });
 
 function get(url: string): Promise<HttpResponse> {
@@ -79,6 +130,38 @@ function get(url: string): Promise<HttpResponse> {
     });
 
     req.on('error', reject);
+  });
+}
+
+function post(url: string, body: string): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let responseBody = '';
+
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode,
+            body: responseBody,
+          });
+        });
+      },
+    );
+
+    req.on('error', reject);
+    req.end(body);
   });
 }
 

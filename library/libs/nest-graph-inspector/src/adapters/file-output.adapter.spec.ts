@@ -35,7 +35,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('creates the target directory before writing markdown', async () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -68,7 +68,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('renders Mermaid edges from consumer to dependency', () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -156,7 +156,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('renders provider-level circular dependency warnings on providers', () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         ProductModule: {
@@ -241,7 +241,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('renders module-level circular dependency warnings on modules', () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         UserModule: {
@@ -304,7 +304,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('renders unused import warnings on import items', () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         ProductModule: {
@@ -358,7 +358,7 @@ describe(FileOutputAdapter.name, () => {
 
   it('omits empty markdown sections', () => {
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {

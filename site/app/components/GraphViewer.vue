@@ -3,6 +3,7 @@ import { VueFlow, useVueFlow, Position, Handle, MarkerType } from '@vue-flow/cor
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { Node, Edge } from '@vue-flow/core'
 import type { GraphOutput, GraphOutputModule, GraphOutputDependencyRef } from '@library/libs/nest-graph-inspector/src'
 
@@ -28,6 +29,7 @@ const props = defineProps<{
 }>()
 
 const { fitView } = useVueFlow()
+const graphViewerRef = ref<HTMLElement | null>(null)
 
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 32
@@ -38,6 +40,25 @@ const MODULE_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
 const EXPORTS_HEIGHT = 24
 const MODULE_GAP_X = 320
 const MODULE_GAP_Y = 100
+const GRAPH_FIT_PADDING = 0.3
+const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
+
+async function centerGraph(duration = 200) {
+  if (!import.meta.client) {
+    return
+  }
+
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  await fitView({
+    padding: GRAPH_FIT_PADDING,
+    duration
+  })
+}
+
+const debouncedCenterGraph = useDebounceFn(() => {
+  void centerGraph()
+}, GRAPH_RESIZE_CENTER_DEBOUNCE_MS)
 
 function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
   const layers = new Map<number, string[]>()
@@ -322,12 +343,21 @@ const flowNodes = shallowRef<FlowNode[]>(nodes)
 const flowEdges = shallowRef<FlowEdge[]>(edges)
 
 onMounted(() => {
-  setTimeout(() => fitView({ padding: 0.3 }), 200)
+  setTimeout(() => {
+    void centerGraph(0)
+  }, 200)
+})
+
+useResizeObserver(graphViewerRef, () => {
+  debouncedCenterGraph()
 })
 </script>
 
 <template>
-  <div class="graph-viewer">
+  <div
+    ref="graphViewerRef"
+    class="graph-viewer"
+  >
     <VueFlow
       v-model:nodes="flowNodes"
       v-model:edges="flowEdges"

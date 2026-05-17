@@ -36,7 +36,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -79,7 +79,7 @@ describe(JsonOutputAdapter.name, () => {
 
     const config = { type: 'json' as const, path: 'artifacts/module-map.json' };
     const expectedJsonOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {
@@ -145,7 +145,7 @@ describe(JsonOutputAdapter.name, () => {
     mockedWriteFile.mockResolvedValue(undefined);
 
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'App',
       modules: {},
     };

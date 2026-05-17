@@ -50,7 +50,7 @@ describe(HttpOutputAdapter.name, () => {
   it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
     const port = await availablePort();
     const graphOutput: GraphOutput = {
-      version: '0',
+      version: '1',
       root: 'AppModule',
       modules: {
         AppModule: {

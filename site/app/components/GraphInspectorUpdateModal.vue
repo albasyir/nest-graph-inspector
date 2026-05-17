@@ -13,7 +13,7 @@ const { shouldShowUpdateModal } = storeToRefs(graphStore)
   >
     <template #body>
       <p class="text-sm text-muted">
-        Please update <code>nest-graph-inspector</code> to at least <code>0.2.9</code> to use the web viewer and AI chat
+        Please update <code>nest-graph-inspector</code> to at least <code>0.3.0</code> to use the web viewer and AI chat
       </p>
     </template>
 

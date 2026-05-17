@@ -114,7 +114,7 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(jsonOutputAdapter.execute).toHaveBeenCalledWith(
       {
-        version: '0',
+        version: '1',
         root: AppModule.name,
         modules: {
           [AppModule.name]: {
