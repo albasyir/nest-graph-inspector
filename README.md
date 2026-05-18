@@ -81,10 +81,10 @@ npm install nest-graph-inspector
 
 ```ts
 import { Module } from '@nestjs/common';
-import { NestGraphInspector } from 'nest-graph-inspector';
+import { NestGraphInspectorModule } from 'nest-graph-inspector';
 
 @Module({
-  imports: [NestGraphInspector],
+  imports: [NestGraphInspectorModule],
 })
 export class RootModule {}
 ```
