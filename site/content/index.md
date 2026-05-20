@@ -1,7 +1,7 @@
 ---
 seo:
-  title: Nest Graph Inspector - Runtime Dependency Graph for NestJS
-  description: Generate runtime dependency graphs and explore them via an Interactive Web Viewer or JSON format from your NestJS application container.
+  title: Nest Graph Inspector - Runtime Architecture Inspection for NestJS
+  description: See how your NestJS app is actually wired at runtime with an interactive dependency graph.
 ---
 
 ::u-page-hero{class="dark:bg-gradient-to-b from-neutral-900 to-neutral-950"}
@@ -12,30 +12,30 @@ orientation: horizontal
 :hero-background
 
 #title
-Visualize Your [NestJS]{.text-primary} Architecture.
+See what your NestJS app actually wires at runtime.
 
 #description
-Generate **runtime dependency graphs** directly from the Nest application container. Explore them dynamically in an **Interactive Web Viewer** or export to JSON format. See modules, providers, controllers, and every dependency at a glance.
+Nest Graph Inspector reads the live NestJS container and shows an interactive graph of modules, providers, controllers, imports, and dependencies.
 
 #links
   :::u-button
   ---
-  to: /getting-started
+  to: /view
   size: xl
-  trailing-icon: i-lucide-arrow-right
+  icon: i-lucide-network
   ---
-  Get Started
+  View Graph
   :::
 
   :::u-button
   ---
-  to: /view
+  to: /getting-started
   color: neutral
   variant: outline
   size: xl
-  icon: i-lucide-network
+  trailing-icon: i-lucide-arrow-right
   ---
-  View Graph and Inspect
+  Get Started
   :::
 
   :::u-button
@@ -47,127 +47,94 @@ Generate **runtime dependency graphs** directly from the Nest application contai
   to: https://github.com/albasyir/nest-graph-inspector
   target: _blank
   ---
-  View on GitHub
+  GitHub
   :::
 
 #default
-  :::prose-pre
+  :runtime-graph-preview
+::
+
+::u-page-section{class="dark:bg-neutral-950"}
+#title
+Why It Matters
+
+#description
+NestJS gets complex quickly. Before changing code, teams need fast answers to impact and risk questions.
+
+#features
+  :::u-page-feature
   ---
-  code: |
-    import { Module } from '@nestjs/common';
-    import { NestGraphInspectorModule } from 'nest-graph-inspector';
-
-    @Module({
-      imports: [NestGraphInspectorModule], // That's it!
-    })
-    export class RootModule {}
-  filename: root.module.ts
+  icon: i-lucide-git-fork
   ---
+  #title
+  Dependency Impact
 
-  ```ts [root.module.ts]
-  import { Module } from '@nestjs/common';
-  import { NestGraphInspectorModule } from 'nest-graph-inspector';
+  #description
+  What depends on this provider?
+  :::
 
-  @Module({
-    imports: [NestGraphInspectorModule], // That's it!
-  })
-  export class RootModule {}
-  ```
+  :::u-page-feature
+  ---
+  icon: i-lucide-layers
+  ---
+  #title
+  Module Blast Radius
+
+  #description
+  Which modules are affected by this change?
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-refresh-cw
+  ---
+  #title
+  Circular Dependencies
+
+  #description
+  Is there any circular dependency?
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-flask-conical
+  ---
+  #title
+  Smoke Test Scope
+
+  #description
+  What should we smoke test before merge?
   :::
 ::
 
 ::u-page-section{class="dark:bg-neutral-950"}
 #title
-Why Nest Graph Inspector?
+Runtime, Not Guesswork
 
 #description
-Understand your NestJS architecture without digging through code. The graph is generated from the **runtime Nest container**, not static source parsing.
+Static graph tools show what source code suggests. Nest Graph Inspector shows what NestJS actually wires at runtime.
 
 #features
   :::u-page-feature
   ---
-  icon: i-lucide-git-branch
+  icon: i-lucide-check-check
   ---
   #title
-  Module Dependency Graph
+  Runtime Container Data
 
   #description
-  Automatically maps import relationships between all loaded modules from your root module, giving you a clear view of your application structure.
+  Graph is built from loaded runtime modules and resolved dependencies.
   :::
 
-  :::u-page-feature
-  ---
-  icon: i-lucide-boxes
-  ---
-  #title
-  Provider & Controller Mapping
-
-  #description
-  Lists every provider and controller in each module alongside their dependency chains, so you know exactly what depends on what.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-layout-dashboard
-  ---
-  #title
-  Interactive Web Viewer
-
-  #description
-  Explore your dependency graph dynamically in the browser. Zoom, pan, and inspect nodes to understand your architecture with ease.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-braces
-  ---
-  #title
-  JSON Output
-
-  #description
-  Get structured JSON output for programmatic analysis, custom tooling, or integration with your CI/CD pipeline.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-zap
-  ---
-  #title
-  Runtime Introspection
-
-  #description
-  Built on the actual Nest runtime container — what you see is what's really running. No guesswork from static analysis.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-plug
-  ---
-  #title
-  Drop-in Module
-
-  #description
-  Just import the module with `forRoot` or `forRootAsync` and you're done. No decorators to add, no code to change. Works with NestJS 10-11.
-  :::
-::
-
-::u-page-section{class="dark:bg-neutral-950"}
-#title
-Use Cases
-
-#description
-Real problems this solves for your team.
-
-#features
   :::u-page-feature
   ---
   icon: i-lucide-target
   ---
   #title
-  Impact Analysis
+  Better Blast Radius Analysis
 
   #description
-  Narrow regression test scope to relevant modules, understand blast radius before making a change, and reduce unnecessary testing for unrelated areas.
+  Know impact scope before refactor, review, or release.
   :::
 
   :::u-page-feature
@@ -175,43 +142,163 @@ Real problems this solves for your team.
   icon: i-lucide-list-checks
   ---
   #title
-  Test Prioritization
+  Smarter Regression Planning
 
   #description
-  Select critical providers for fast validation, understand dependency chains between providers/controllers, and prioritize which flows to check first.
+  Prioritize smoke tests using real dependency relationships.
+  :::
+::
+
+::u-page-section{class="dark:bg-neutral-950"}
+#title
+Simple Team Workflow
+
+#description
+From change request to safer merge:
+
+#features
+  :::u-page-feature
+  ---
+  icon: i-lucide-scan-search
+  ---
+  #title
+  1. Generate Graph
+
+  #description
+  Generate runtime graph data from your NestJS app.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-eye
+  icon: i-lucide-network
   ---
   #title
-  Architecture Visibility
+  2. Inspect Nodes
 
   #description
-  Onboard engineers faster, spot highly coupled modules/providers, and make refactors safer by visualizing relationships before changes.
+  Inspect affected modules, providers, and controllers.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-target
+  ---
+  #title
+  3. Identify Blast Radius
+
+  #description
+  See upstream and downstream dependency impact.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-shield-check
+  ---
+  #title
+  4. Prioritize Tests
+
+  #description
+  Focus smoke and regression tests on risky areas.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-file-json
+  ---
+  #title
+  5. Share Output
+
+  #description
+  Attach Markdown/JSON to PRs, docs, and internal tooling.
   :::
 ::
 
-::u-page-section{class="dark:bg-gradient-to-b from-neutral-950 to-neutral-900"}
+::u-page-section{class="dark:bg-neutral-950"}
+#title
+AI Chat in Viewer
+
+#description
+Move from graph exploration to decisions in seconds. AI Chat is grounded in the loaded runtime graph, so answers stay relevant to your architecture.
+
+#features
+  ::u-page-feature
+  ---
+  icon: i-lucide-bot
+  title: Ask in Plain Language
+  ---
+  No query syntax. Ask architecture questions the way engineers naturally ask them.
+  ::
+  :::u-page-feature
+  ---
+  icon: i-lucide-gauge
+  ---
+  #title
+  Faster Risk Checks
+
+  #description
+  Understand change impact before merge and reduce review uncertainty.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-orbit
+  ---
+  #title
+  Coupling Visibility
+
+  #description
+  Surface highly-coupled modules and dependency hotspots quickly.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-rotate-cw
+  ---
+  #title
+  Circular Dependency Detection
+
+  #description
+  Catch circular relationships early before they become production issues.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-shield-check
+  ---
+  #title
+  Smarter Test Priorities
+
+  #description
+  Turn dependency context into focused smoke and regression plans.
+  :::
+::
+
+::u-page-section
+---
+class: dark:bg-gradient-to-b from-neutral-950 to-neutral-900
+ui:
+  container: '!max-w-none px-4 sm:px-6 lg:px-8'
+---
   :::u-page-c-t-a
   ---
   links:
+    - label: View Your Graph
+      to: '/view'
+      icon: i-lucide-network
     - label: Get Started
       to: '/getting-started'
       trailingIcon: i-lucide-arrow-right
-    - label: View Graph and Inspect
-      to: '/view'
-      icon: i-lucide-network
       variant: subtle
     - label: GitHub
       to: 'https://github.com/albasyir/nest-graph-inspector'
       target: _blank
       variant: subtle
       icon: i-simple-icons-github
-  title: Ready to see your dependency graph?
-  description: Install in seconds, get a full graph of your NestJS application on the next run.
-  class: dark:bg-neutral-950
+  title: Inspect runtime wiring before you ship
+  description: Understand dependency impact quickly and ship safer changes.
+  class: dark:bg-neutral-950 w-full
+  ui:
+    container: '!max-w-none'
   ---
 
   :stars-bg

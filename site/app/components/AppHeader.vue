@@ -25,7 +25,7 @@ function resolveAsset(path: string | undefined) {
       <UButton
         to="/view"
         icon="i-lucide-network"
-        label="View Graph and Inspect"
+        label="View Graph"
         color="neutral"
         variant="subtle"
         size="md"

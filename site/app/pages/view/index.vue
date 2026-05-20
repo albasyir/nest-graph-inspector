@@ -94,7 +94,7 @@ onMounted(() => {
               variant="subtle"
             >
               <template #description>
-                You must install on your project to use the Graph Viewer, however you can load the example graph without installation to explore the features.
+                You must install it in your project to inspect your own application. You can still load the example graph without installing anything to explore the viewer.
               </template>
             </UAlert>
 
@@ -115,11 +115,11 @@ onMounted(() => {
                 </UButton>
               </template>
               <template #description>
-                it's usually in <code class="bg-muted/50 px-1 rounded">localhost:53371</code> however it can be different based on your configuration. Just put the URL here and start exploring your graph!
+                It usually runs on <code class="bg-muted/50 px-1 rounded">localhost:53371</code>, but this may differ based on your configuration. Enter your app origin to start inspecting the graph.
               </template>
               <UInput
                 v-model="urlInput"
-                placeholder="Did you change default? just put here"
+                placeholder="Enter your NestJS app origin"
                 icon="i-lucide-link"
                 size="xl"
                 class="w-full font-mono text-lg"

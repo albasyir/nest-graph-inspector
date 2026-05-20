@@ -42,7 +42,7 @@ export default defineAppConfig({
     links: [{
       'icon': 'i-lucide-network',
       'to': '/view',
-      'aria-label': 'View Graph and Inspect'
+      'aria-label': 'View Graph'
     }, {
       'icon': 'i-simple-icons-github',
       'to': 'https://github.com/albasyir/nest-graph-inspector',

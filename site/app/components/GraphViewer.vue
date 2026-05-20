@@ -24,9 +24,14 @@ type ItemNodeData = {
 type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<ItemNodeData, Record<string, never>, 'item'>
 type FlowEdge = Edge<Record<string, never>, Record<string, never>, 'smoothstep'>
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   data: GraphOutput
-}>()
+  height?: string
+  interactive?: boolean
+}>(), {
+  height: '75vh',
+  interactive: true
+})
 
 const { fitView } = useVueFlow()
 const graphViewerRef = ref<HTMLElement | null>(null)
@@ -357,6 +362,7 @@ useResizeObserver(graphViewerRef, () => {
   <div
     ref="graphViewerRef"
     class="graph-viewer"
+    :style="{ height: props.height }"
   >
     <VueFlow
       v-model:nodes="flowNodes"
@@ -365,6 +371,14 @@ useResizeObserver(graphViewerRef, () => {
       :min-zoom="0.05"
       :max-zoom="2"
       fit-view-on-init
+      :nodes-draggable="props.interactive"
+      :nodes-connectable="props.interactive"
+      :elements-selectable="props.interactive"
+      :pan-on-drag="props.interactive"
+      :pan-on-scroll="props.interactive"
+      :zoom-on-scroll="props.interactive"
+      :zoom-on-pinch="props.interactive"
+      :zoom-on-double-click="props.interactive"
       class="graph-flow"
     >
       <template #node-module="moduleProps">
@@ -476,8 +490,8 @@ useResizeObserver(graphViewerRef, () => {
       </template>
 
       <Background />
-      <Controls />
-      <MiniMap />
+      <Controls v-if="props.interactive" />
+      <MiniMap v-if="props.interactive" />
     </VueFlow>
   </div>
 </template>
@@ -518,7 +532,6 @@ useResizeObserver(graphViewerRef, () => {
 
 .graph-viewer {
   width: 100%;
-  height: 75vh;
   border-radius: 0.75rem;
   overflow: hidden;
   border: 1px solid var(--mg-subgraph-border);
