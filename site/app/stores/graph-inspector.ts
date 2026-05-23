@@ -54,7 +54,7 @@ function resolveOriginPath(value: string, pathName: string) {
   }
 }
 
-function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {  
+function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
   return Boolean(
     value
     && typeof value === 'object'
@@ -67,6 +67,7 @@ function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const encodedUrl = ref('')
   const shouldShowUpdateModal = ref(false)
+  const dependencyTraceEnabled = ref(false)
 
   const decodedUrl = computed(() => {
     if (!encodedUrl.value) {
@@ -133,6 +134,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   })
 
   const errorMessage = computed(() => error.value?.message || '')
+
+  function toggleDependencyTrace() {
+    dependencyTraceEnabled.value = !dependencyTraceEnabled.value
+  }
 
   function clearGraph() {
     clearEndpointInfo()
@@ -228,6 +233,8 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     error,
     errorMessage,
     shouldShowUpdateModal,
+    dependencyTraceEnabled,
+    toggleDependencyTrace,
     validateEndpoint,
     setEncodedUrl,
     setInputUrl,

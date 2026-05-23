@@ -28,9 +28,11 @@ const props = withDefaults(defineProps<{
   data: GraphOutput
   height?: string
   interactive?: boolean
+  flush?: boolean
 }>(), {
   height: '75vh',
-  interactive: true
+  interactive: true,
+  flush: false
 })
 
 const { fitView } = useVueFlow()
@@ -362,6 +364,7 @@ useResizeObserver(graphViewerRef, () => {
   <div
     ref="graphViewerRef"
     class="graph-viewer"
+    :class="{ 'graph-viewer--flush': props.flush }"
     :style="{ height: props.height }"
   >
     <VueFlow
@@ -535,6 +538,11 @@ useResizeObserver(graphViewerRef, () => {
   border-radius: 0.75rem;
   overflow: hidden;
   border: 1px solid var(--mg-subgraph-border);
+}
+
+.graph-viewer--flush {
+  border: 0;
+  border-radius: 0;
 }
 
 .module-subgraph {

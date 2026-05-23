@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 
+definePageMeta({
+  layout: 'viewer'
+})
+
 const route = useRoute()
 const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const { decodedUrl, graphData, status, errorMessage } = storeToRefs(graphStore)
-const aiChatOpen = ref(false)
 
 const urlBase64 = computed(() => {
   const param = route.params.url
@@ -64,157 +67,101 @@ watch(encodedUrl, (value) => {
 })
 
 function handleRefresh() {
-  posthog?.capture('Graph Refreshed', {
-    url: decodedUrl.value
-  })
   graphStore.fetchGraph()
-}
-
-function openNewUrl() {
-  posthog?.capture('Graph New URL Requested', {
-    url: decodedUrl.value
-  })
-  navigateTo('/view')
 }
 </script>
 
 <template>
-  <UDashboardGroup
-    storage-key="graph-view"
-    class="relative inset-auto min-h-[calc(100svh-4rem)] overflow-hidden"
+  <!-- Loading State -->
+  <div
+    v-if="status === 'pending'"
+    class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
   >
-    <UDashboardPanel
-      id="graph-viewer"
-      class="min-h-0 overflow-y-auto"
-    >
-      <UContainer class="w-full py-6">
-        <GraphInspectorUpdateModal />
+    <div class="flex size-16 animate-pulse items-center justify-center rounded-2xl bg-primary/10">
+      <UIcon
+        name="i-lucide-loader-2"
+        class="size-8 animate-spin text-primary"
+      />
+    </div>
+    <div class="space-y-1 text-center">
+      <p class="font-medium">
+        Fetching graph data...
+      </p>
+      <p class="text-sm text-muted">
+        Connecting to {{ decodedUrl }}
+      </p>
+    </div>
+  </div>
 
-        <!-- Header -->
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-          <div class="space-y-1 min-w-0">
-            <p class="text-sm text-muted font-mono truncate max-w-lg">
-              {{ decodedUrl }}
-            </p>
-          </div>
+  <!-- Error State -->
+  <div
+    v-else-if="status === 'error'"
+    class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
+  >
+    <div class="flex size-16 items-center justify-center rounded-2xl bg-red-500/10">
+      <UIcon
+        name="i-lucide-alert-triangle"
+        class="size-8 text-red-500"
+      />
+    </div>
+    <div class="space-y-2 text-center">
+      <p class="text-lg font-medium">
+        Failed to fetch graph data
+      </p>
+      <p class="max-w-md text-sm text-muted">
+        {{ errorMessage || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.' }}
+      </p>
+      <div class="mt-4 flex items-center justify-center gap-2">
+        <UButton
+          icon="i-lucide-refresh-cw"
+          label="Retry"
+          variant="outline"
+          @click="handleRefresh()"
+        />
+        <UButton
+          icon="i-lucide-link"
+          label="Try Another URL"
+          variant="soft"
+          to="/view"
+        />
+      </div>
+    </div>
+  </div>
 
-          <div class="flex items-center gap-2 shrink-0">
-            <UButton
-              icon="i-lucide-refresh-cw"
-              label="Reload"
-              variant="outline"
-              size="sm"
-              :loading="status === 'pending'"
-              @click="handleRefresh()"
-            />
-            <UButton
-              icon="i-lucide-sparkles"
-              label="Ask AI"
-              variant="outline"
-              size="sm"
-              @click="aiChatOpen = true"
-            />
-            <UButton
-              icon="i-lucide-link"
-              label="New URL"
-              variant="soft"
-              size="sm"
-              @click="openNewUrl"
-            />
-          </div>
-        </div>
+  <!-- Graph -->
+  <ClientOnly v-else-if="graphData">
+    <GraphViewer
+      :data="graphData"
+      height="100%"
+      flush
+    />
+  </ClientOnly>
 
-        <!-- Loading State -->
-        <div
-          v-if="status === 'pending'"
-          class="flex flex-col items-center justify-center min-h-[60vh] gap-4"
-        >
-          <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-pulse">
-            <UIcon
-              name="i-lucide-loader-2"
-              class="w-8 h-8 text-primary animate-spin"
-            />
-          </div>
-          <div class="text-center space-y-1">
-            <p class="font-medium">
-              Fetching graph data...
-            </p>
-            <p class="text-sm text-muted">
-              Connecting to {{ decodedUrl }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Error State -->
-        <div
-          v-else-if="status === 'error'"
-          class="flex flex-col items-center justify-center min-h-[60vh] gap-4"
-        >
-          <div class="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center">
-            <UIcon
-              name="i-lucide-alert-triangle"
-              class="w-8 h-8 text-red-500"
-            />
-          </div>
-          <div class="text-center space-y-2">
-            <p class="font-medium text-lg">
-              Failed to fetch graph data
-            </p>
-            <p class="text-sm text-muted max-w-md">
-              {{ errorMessage || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.' }}
-            </p>
-            <div class="flex items-center justify-center gap-2 mt-4">
-              <UButton
-                icon="i-lucide-refresh-cw"
-                label="Retry"
-                variant="outline"
-                @click="handleRefresh()"
-              />
-              <UButton
-                icon="i-lucide-link"
-                label="Try Another URL"
-                variant="soft"
-                @click="openNewUrl"
-              />
-            </div>
-          </div>
-        </div>
-
-        <!-- Graph -->
-        <ClientOnly v-else-if="graphData">
-          <GraphViewer :data="graphData" />
-        </ClientOnly>
-
-        <!-- Empty State -->
-        <div
-          v-else
-          class="flex flex-col items-center justify-center min-h-[60vh] gap-4"
-        >
-          <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <UIcon
-              name="i-lucide-file-json"
-              class="w-8 h-8 text-primary"
-            />
-          </div>
-          <div class="text-center space-y-2">
-            <p class="font-medium text-lg">
-              No data received
-            </p>
-            <p class="text-sm text-muted">
-              The endpoint returned an empty response.
-            </p>
-            <UButton
-              icon="i-lucide-refresh-cw"
-              label="Retry"
-              variant="outline"
-              class="mt-2"
-              @click="handleRefresh()"
-            />
-          </div>
-        </div>
-      </UContainer>
-    </UDashboardPanel>
-
-    <AiChatDrawer v-model:open="aiChatOpen" />
-  </UDashboardGroup>
+  <!-- Empty State -->
+  <div
+    v-else
+    class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
+  >
+    <div class="flex size-16 items-center justify-center rounded-2xl bg-primary/10">
+      <UIcon
+        name="i-lucide-file-json"
+        class="size-8 text-primary"
+      />
+    </div>
+    <div class="space-y-2 text-center">
+      <p class="text-lg font-medium">
+        No data received
+      </p>
+      <p class="text-sm text-muted">
+        The endpoint returned an empty response.
+      </p>
+      <UButton
+        icon="i-lucide-refresh-cw"
+        label="Retry"
+        variant="outline"
+        class="mt-2"
+        @click="handleRefresh()"
+      />
+    </div>
+  </div>
 </template>

@@ -119,7 +119,7 @@ export default defineNuxtConfig({
   },
 
   posthogConfig: {
-    publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'phc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
+    publicKey: process.env.NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN || 'XXXphc_CbFFE2bzfQCU5uSmrFbQRyMtjN8rGqBakxqE4ZdhCyyU',
     host: process.env.NUXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
     clientConfig: {
       api_host: 'https://integrity.nest-graph-inspector.albasyir.net',
