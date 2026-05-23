@@ -42,6 +42,18 @@
         {
           "name": "UserRepository",
           "dependencies": []
+        },
+        {
+          "name": "UserSchedule",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "UserModule"
+              },
+              "token": "UserRepository"
+            }
+          ]
         }
       ],
       "controllers": [
@@ -54,6 +66,13 @@
                 "name": "UserModule"
               },
               "token": "UserService"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "UserModule"
+              },
+              "token": "UserSchedule"
             }
           ]
         }

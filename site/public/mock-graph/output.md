@@ -8,6 +8,7 @@ graph TD
   subgraph module_group_UserModule["UserModule"]
     provider_UserModule_UserService["UserService"]
     provider_UserModule_UserRepository["UserRepository"]
+    provider_UserModule_UserSchedule["UserSchedule"]
     controller_UserModule_UserController["UserController"]
   end
   subgraph module_group_MobileModule["MobileModule"]
@@ -33,7 +34,9 @@ graph TD
   module_group_UserModule --> module_group_MobileModule
   provider_UserModule_UserService --> provider_UserModule_UserRepository
   provider_UserModule_UserService --> provider_MobileModule_MobileService
+  provider_UserModule_UserSchedule --> provider_UserModule_UserRepository
   controller_UserModule_UserController --> provider_UserModule_UserService
+  controller_UserModule_UserController --> provider_UserModule_UserSchedule
   module_group_MobileModule --> module_group_ProductModule
   provider_MobileModule_MobileService --> provider_ProductModule_ProductService
   module_group_ProductModule --> module_group_UserModule
@@ -78,10 +81,13 @@ graph TD
   - depends on UserRepository from UserModule
   - depends on MobileService from MobileModule
 - UserRepository
+- UserSchedule
+  - depends on UserRepository from UserModule
 
 ### Controllers
 - UserController
   - depends on UserService from UserModule
+  - depends on UserSchedule from UserModule
 
 ## MobileModule
 

@@ -16,6 +16,7 @@ type ModuleNodeData = {
   label: string
   isRoot: boolean
   isCollapsed: boolean
+  minWidth: number
   minHeight: number
 }
 
@@ -23,6 +24,12 @@ type ItemNodeData = {
   label: string
   kind: 'controller' | 'provider'
   isExported: boolean
+}
+
+type ModuleItemLayout = ItemNodeData & {
+  id: string
+  depth: number
+  dependencies: GraphOutputDependencyRef[]
 }
 
 type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<ItemNodeData, Record<string, never>, 'item'>
@@ -44,11 +51,12 @@ const graphViewerRef = ref<HTMLElement | null>(null)
 
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 32
-const NODE_GAP = 8
+const NODE_GAP_X = 52
+const NODE_LEVEL_GAP_Y = 72
 const MODULE_PADDING = 20
 const MODULE_TITLE_HEIGHT = 36
 const MODULE_COLLAPSED_HEIGHT = 40
-const MODULE_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
+const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
 const MODULE_GAP_X = 320
 const MODULE_GAP_Y = 100
 const GRAPH_FIT_PADDING = 0.3
@@ -117,22 +125,6 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
   return layers
 }
 
-function calcModuleHeight(mod: GraphOutputModule, isCollapsed = false): number {
-  if (isCollapsed) {
-    return MODULE_COLLAPSED_HEIGHT
-  }
-
-  const itemCount = mod.providers.length + mod.controllers.length
-  if (itemCount === 0) {
-    return MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
-  }
-  let h = MODULE_TITLE_HEIGHT + MODULE_PADDING
-  if (itemCount > 0) {
-    h += itemCount * NODE_HEIGHT + (itemCount - 1) * NODE_GAP
-  }
-  return h + MODULE_PADDING
-}
-
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
   return new Set(Object.entries(moduleMap.modules)
     .filter(([, mod]) => mod.providers.length === 0 && mod.controllers.length === 0)
@@ -164,6 +156,110 @@ function isNodeInModule(nodeId: string, moduleName: string): boolean {
   return nodeId.startsWith(`provider-${moduleName}-`) || nodeId.startsWith(`controller-${moduleName}-`)
 }
 
+function getModuleItemHierarchy(moduleName: string, mod: GraphOutputModule, moduleMap: GraphOutput): ModuleItemLayout[] {
+  const items: ModuleItemLayout[] = [
+    ...mod.providers.map(provider => ({
+      id: `provider-${moduleName}-${provider.name}`,
+      label: provider.name,
+      kind: 'provider' as const,
+      isExported: mod.exports.includes(provider.name),
+      dependencies: provider.dependencies,
+      depth: 0
+    })),
+    ...mod.controllers.map(controller => ({
+      id: `controller-${moduleName}-${controller.name}`,
+      label: controller.name,
+      kind: 'controller' as const,
+      isExported: mod.exports.includes(controller.name),
+      dependencies: controller.dependencies,
+      depth: 0
+    }))
+  ]
+
+  const itemIds = new Set(items.map(item => item.id))
+  const sameModuleDependencies = new Map<string, string[]>()
+  for (const item of items) {
+    sameModuleDependencies.set(item.id, item.dependencies
+      .map(dep => resolveDepNodeId(dep, moduleName, moduleMap))
+      .filter((nodeId): nodeId is string => Boolean(nodeId) && itemIds.has(nodeId) && isNodeInModule(nodeId, moduleName)))
+  }
+
+  const depthById = new Map<string, number>()
+  const visiting = new Set<string>()
+  function getDepth(itemId: string): number {
+    const knownDepth = depthById.get(itemId)
+    if (knownDepth !== undefined) {
+      return knownDepth
+    }
+
+    if (visiting.has(itemId)) {
+      return 0
+    }
+
+    visiting.add(itemId)
+    const dependencies = sameModuleDependencies.get(itemId) || []
+    const depth = dependencies.length === 0 ? 0 : Math.max(...dependencies.map(getDepth)) + 1
+    visiting.delete(itemId)
+    depthById.set(itemId, depth)
+    return depth
+  }
+
+  const kindRank: Record<ItemNodeData['kind'], number> = {
+    provider: 0,
+    controller: 1
+  }
+
+  return items
+    .map(item => ({ ...item, depth: getDepth(item.id) }))
+    .sort((a, b) => a.depth - b.depth || kindRank[a.kind] - kindRank[b.kind] || a.label.localeCompare(b.label))
+}
+
+function getHierarchyRows(items: ModuleItemLayout[]): ModuleItemLayout[][] {
+  const rows = new Map<number, ModuleItemLayout[]>()
+  for (const item of items) {
+    const row = rows.get(item.depth) || []
+    row.push(item)
+    rows.set(item.depth, row)
+  }
+
+  return Array.from(rows.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, row]) => row)
+}
+
+function calcModuleSize(
+  moduleName: string,
+  mod: GraphOutputModule,
+  moduleMap: GraphOutput,
+  isCollapsed = false
+): { width: number, height: number } {
+  if (isCollapsed) {
+    return { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
+  }
+
+  const itemCount = mod.providers.length + mod.controllers.length
+  if (itemCount === 0) {
+    return {
+      width: MODULE_MIN_WIDTH,
+      height: MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
+    }
+  }
+
+  const rows = getHierarchyRows(getModuleItemHierarchy(moduleName, mod, moduleMap))
+  const maxRowItemCount = Math.max(...rows.map(row => row.length), 1)
+  const width = Math.max(
+    MODULE_MIN_WIDTH,
+    MODULE_PADDING * 2 + maxRowItemCount * NODE_WIDTH + (maxRowItemCount - 1) * NODE_GAP_X
+  )
+  const height = MODULE_TITLE_HEIGHT
+    + MODULE_PADDING
+    + rows.length * NODE_HEIGHT
+    + Math.max(rows.length - 1, 0) * NODE_LEVEL_GAP_Y
+    + MODULE_PADDING
+
+  return { width, height }
+}
+
 function pickHandles(
   sourcePos: { x: number, y: number },
   targetPos: { x: number, y: number }
@@ -188,27 +284,45 @@ function pickHandles(
   return { sourceHandle: 'source-left', targetHandle: 'target-right' }
 }
 
+function pickDependencyHandles(
+  sourcePos: { x: number, y: number },
+  targetPos: { x: number, y: number }
+): { sourceHandle: string, targetHandle: string } {
+  if (targetPos.y >= sourcePos.y) {
+    return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+  }
+
+  return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
+}
+
 function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
 
+  const moduleSizes = new Map<string, { width: number, height: number }>()
+  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    moduleSizes.set(moduleName, calcModuleSize(moduleName, mod, moduleMap, collapsedModules.has(moduleName)))
+  }
+
   const modulePositions = new Map<string, { x: number, y: number }>()
   const nodeAbsPositions = new Map<string, { x: number, y: number }>()
   let currentY = 0
 
   for (const [, moduleNames] of sortedLayers) {
-    const layerWidth = moduleNames.length * MODULE_GAP_X
-    const startX = -(layerWidth / 2) + MODULE_GAP_X / 2
+    const layerWidth = moduleNames.reduce((sum, name) => {
+      const size = moduleSizes.get(name)
+      return sum + (size?.width || MODULE_MIN_WIDTH)
+    }, Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X)
+    let currentX = -(layerWidth / 2)
 
     let maxHeight = 0
-    for (const [index, name] of moduleNames.entries()) {
-      const mod = moduleMap.modules[name]
-      modulePositions.set(name, { x: startX + index * MODULE_GAP_X, y: currentY })
-      if (mod) {
-        maxHeight = Math.max(maxHeight, calcModuleHeight(mod, collapsedModules.has(name)))
-      }
+    for (const name of moduleNames) {
+      const size = moduleSizes.get(name) || { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
+      modulePositions.set(name, { x: currentX, y: currentY })
+      maxHeight = Math.max(maxHeight, size.height)
+      currentX += size.width + MODULE_GAP_X
     }
     currentY += maxHeight + MODULE_GAP_Y
   }
@@ -216,7 +330,7 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
     const isCollapsed = collapsedModules.has(moduleName)
-    const height = calcModuleHeight(mod, isCollapsed)
+    const size = moduleSizes.get(moduleName) || calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
 
     nodes.push({
       id: `module-${moduleName}`,
@@ -226,9 +340,10 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
         label: moduleName,
         isRoot: moduleName === moduleMap.root,
         isCollapsed,
-        minHeight: height
+        minWidth: size.width,
+        minHeight: size.height
       },
-      style: { width: `${MODULE_WIDTH}px`, height: `${height}px` }
+      style: { width: `${size.width}px`, height: `${size.height}px` }
     })
   }
 
@@ -238,54 +353,35 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
     }
 
     const modPos = modulePositions.get(moduleName) || { x: 0, y: 0 }
-    let itemIndex = 0
+    const moduleSize = moduleSizes.get(moduleName) || { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
+    const rows = getHierarchyRows(getModuleItemHierarchy(moduleName, mod, moduleMap))
 
-    for (const ctrl of mod.controllers) {
-      const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + itemIndex * (NODE_HEIGHT + NODE_GAP)
-      const nodeId = `controller-${moduleName}-${ctrl.name}`
-      nodeAbsPositions.set(nodeId, {
-        x: modPos.x + MODULE_PADDING + NODE_WIDTH / 2,
-        y: modPos.y + childY + NODE_HEIGHT / 2
-      })
-      nodes.push({
-        id: nodeId,
-        type: 'item',
-        position: { x: MODULE_PADDING, y: childY },
-        parentNode: `module-${moduleName}`,
-        extent: 'parent',
-        draggable: false,
-        data: {
-          label: ctrl.name,
-          kind: 'controller',
-          isExported: mod.exports.includes(ctrl.name)
-        },
-        style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
-      })
-      itemIndex++
-    }
+    for (const [rowIndex, row] of rows.entries()) {
+      const rowWidth = row.length * NODE_WIDTH + Math.max(row.length - 1, 0) * NODE_GAP_X
+      const startX = Math.max(MODULE_PADDING, (moduleSize.width - rowWidth) / 2)
+      const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + rowIndex * (NODE_HEIGHT + NODE_LEVEL_GAP_Y)
 
-    for (const prov of mod.providers) {
-      const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + itemIndex * (NODE_HEIGHT + NODE_GAP)
-      const nodeId = `provider-${moduleName}-${prov.name}`
-      nodeAbsPositions.set(nodeId, {
-        x: modPos.x + MODULE_PADDING + NODE_WIDTH / 2,
-        y: modPos.y + childY + NODE_HEIGHT / 2
-      })
-      nodes.push({
-        id: nodeId,
-        type: 'item',
-        position: { x: MODULE_PADDING, y: childY },
-        parentNode: `module-${moduleName}`,
-        extent: 'parent',
-        draggable: false,
-        data: {
-          label: prov.name,
-          kind: 'provider',
-          isExported: mod.exports.includes(prov.name)
-        },
-        style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
-      })
-      itemIndex++
+      for (const [itemIndex, item] of row.entries()) {
+        const childX = startX + itemIndex * (NODE_WIDTH + NODE_GAP_X)
+        nodeAbsPositions.set(item.id, {
+          x: modPos.x + childX + NODE_WIDTH / 2,
+          y: modPos.y + childY + NODE_HEIGHT / 2
+        })
+        nodes.push({
+          id: item.id,
+          type: 'item',
+          position: { x: childX, y: childY },
+          parentNode: `module-${moduleName}`,
+          extent: 'parent',
+          draggable: true,
+          data: {
+            label: item.label,
+            kind: item.kind,
+            isExported: item.isExported
+          },
+          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
+        })
+      }
     }
   }
 
@@ -326,7 +422,7 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             continue
           }
 
-          const { sourceHandle, targetHandle } = pickHandles(sPos, tPos)
+          const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
 
           edges.push({
             id: `e-dep-${sourceId}->${targetId}`,
@@ -353,7 +449,7 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             continue
           }
 
-          const { sourceHandle, targetHandle } = pickHandles(sPos, tPos)
+          const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
 
           edges.push({
             id: `e-dep-${sourceId}->${targetId}`,
@@ -442,7 +538,7 @@ useResizeObserver(graphViewerRef, () => {
       <template #node-module="moduleProps">
         <NodeResizer
           :is-visible="props.interactive && !moduleProps.data.isCollapsed"
-          :min-width="MODULE_WIDTH"
+          :min-width="moduleProps.data.minWidth"
           :min-height="moduleProps.data.minHeight"
           color="var(--mg-node-resizer-color)"
         />
