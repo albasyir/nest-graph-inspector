@@ -14,11 +14,13 @@ function normalizeDep(dep: GraphOutputDependencyRef): { moduleName: string, toke
 type ModuleNodeData = {
   label: string
   isRoot: boolean
+  isCollapsed: boolean
   exports: string[]
 }
 
 type ItemNodeData = {
   label: string
+  kind: 'controller' | 'provider'
 }
 
 type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<ItemNodeData, Record<string, never>, 'item'>
@@ -43,6 +45,7 @@ const NODE_HEIGHT = 32
 const NODE_GAP = 8
 const MODULE_PADDING = 20
 const MODULE_TITLE_HEIGHT = 36
+const MODULE_COLLAPSED_HEIGHT = 40
 const MODULE_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
 const EXPORTS_HEIGHT = 24
 const MODULE_GAP_X = 320
@@ -113,7 +116,11 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
   return layers
 }
 
-function calcModuleHeight(mod: GraphOutputModule): number {
+function calcModuleHeight(mod: GraphOutputModule, isCollapsed = false): number {
+  if (isCollapsed) {
+    return MODULE_COLLAPSED_HEIGHT
+  }
+
   const itemCount = mod.providers.length + mod.controllers.length
   if (itemCount === 0 && mod.exports.length === 0) {
     return MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
@@ -173,7 +180,7 @@ function pickHandles(
   return { sourceHandle: 'source-left', targetHandle: 'target-right' }
 }
 
-function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdge[] } {
+function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
@@ -192,7 +199,7 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
       const mod = moduleMap.modules[name]
       modulePositions.set(name, { x: startX + index * MODULE_GAP_X, y: currentY })
       if (mod) {
-        maxHeight = Math.max(maxHeight, calcModuleHeight(mod))
+        maxHeight = Math.max(maxHeight, calcModuleHeight(mod, collapsedModules.has(name)))
       }
     }
     currentY += maxHeight + MODULE_GAP_Y
@@ -200,7 +207,8 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
-    const height = calcModuleHeight(mod)
+    const isCollapsed = collapsedModules.has(moduleName)
+    const height = calcModuleHeight(mod, isCollapsed)
 
     nodes.push({
       id: `module-${moduleName}`,
@@ -209,6 +217,7 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
       data: {
         label: moduleName,
         isRoot: moduleName === moduleMap.root,
+        isCollapsed,
         exports: mod.exports
       },
       style: { width: `${MODULE_WIDTH}px`, height: `${height}px` }
@@ -216,6 +225,10 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    if (collapsedModules.has(moduleName)) {
+      continue
+    }
+
     const modPos = modulePositions.get(moduleName) || { x: 0, y: 0 }
     let itemIndex = 0
 
@@ -233,7 +246,7 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
         parentNode: `module-${moduleName}`,
         extent: 'parent',
         draggable: false,
-        data: { label: ctrl.name },
+        data: { label: ctrl.name, kind: 'controller' },
         style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
       })
       itemIndex++
@@ -253,7 +266,7 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
         parentNode: `module-${moduleName}`,
         extent: 'parent',
         draggable: false,
-        data: { label: prov.name },
+        data: { label: prov.name, kind: 'provider' },
         style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
       })
       itemIndex++
@@ -344,10 +357,36 @@ function buildGraph(moduleMap: GraphOutput): { nodes: FlowNode[], edges: FlowEdg
   return { nodes, edges }
 }
 
-const { nodes, edges } = buildGraph(props.data)
+const collapsedModuleNames = ref<Set<string>>(new Set())
+const initialGraph = buildGraph(props.data, collapsedModuleNames.value)
 
-const flowNodes = shallowRef<FlowNode[]>(nodes)
-const flowEdges = shallowRef<FlowEdge[]>(edges)
+const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
+const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
+
+function refreshGraph() {
+  const graph = buildGraph(props.data, collapsedModuleNames.value)
+  flowNodes.value = graph.nodes
+  flowEdges.value = graph.edges
+}
+
+function toggleModule(moduleName: string) {
+  const nextCollapsedModules = new Set(collapsedModuleNames.value)
+  if (nextCollapsedModules.has(moduleName)) {
+    nextCollapsedModules.delete(moduleName)
+  } else {
+    nextCollapsedModules.add(moduleName)
+  }
+
+  collapsedModuleNames.value = nextCollapsedModules
+  refreshGraph()
+  void centerGraph()
+}
+
+watch(() => props.data, () => {
+  collapsedModuleNames.value = new Set()
+  refreshGraph()
+  void centerGraph()
+}, { deep: true })
 
 onMounted(() => {
   setTimeout(() => {
@@ -408,14 +447,34 @@ useResizeObserver(graphViewerRef, () => {
 
         <div
           class="module-subgraph"
-          :class="{ 'module-subgraph--root': moduleProps.data.isRoot }"
+          :class="{
+            'module-subgraph--root': moduleProps.data.isRoot,
+            'module-subgraph--collapsed': moduleProps.data.isCollapsed
+          }"
         >
-          <div class="module-subgraph__title">
-            {{ moduleProps.data.label }}
-          </div>
-          <div class="module-subgraph__body" />
           <div
-            v-if="moduleProps.data.exports?.length"
+            class="module-subgraph__title"
+            @click.stop="toggleModule(moduleProps.data.label)"
+          >
+            <span class="module-subgraph__label">
+              {{ moduleProps.data.label }}
+            </span>
+            <button
+              type="button"
+              class="module-subgraph__toggle"
+              :aria-expanded="!moduleProps.data.isCollapsed"
+              :aria-label="moduleProps.data.isCollapsed ? `Open ${moduleProps.data.label}` : `Close ${moduleProps.data.label}`"
+              @click.stop="toggleModule(moduleProps.data.label)"
+            >
+              {{ moduleProps.data.isCollapsed ? '+' : '-' }}
+            </button>
+          </div>
+          <div
+            v-if="!moduleProps.data.isCollapsed"
+            class="module-subgraph__body"
+          />
+          <div
+            v-if="!moduleProps.data.isCollapsed && moduleProps.data.exports?.length"
             class="module-subgraph__exports"
           >
             Exports: {{ moduleProps.data.exports.join(', ') }}
@@ -466,8 +525,16 @@ useResizeObserver(graphViewerRef, () => {
           :position="Position.Right"
         />
 
-        <div class="mermaid-node">
-          {{ itemProps.data.label }}
+        <div
+          class="mermaid-node"
+          :class="`mermaid-node--${itemProps.data.kind}`"
+        >
+          <span class="mermaid-node__kind">
+            {{ itemProps.data.kind === 'controller' ? 'C' : 'P' }}
+          </span>
+          <span class="mermaid-node__label">
+            {{ itemProps.data.label }}
+          </span>
         </div>
 
         <Handle
@@ -509,6 +576,12 @@ useResizeObserver(graphViewerRef, () => {
   --mg-node-bg: #ECECFF;
   --mg-node-border: #9370DB;
   --mg-node-text: #333;
+  --mg-controller-bg: #EAF7FF;
+  --mg-controller-border: #38BDF8;
+  --mg-controller-kind-bg: #0284C7;
+  --mg-provider-bg: #ECFDF3;
+  --mg-provider-border: #22C55E;
+  --mg-provider-kind-bg: #16A34A;
   --mg-subgraph-bg: rgba(236, 236, 255, 0.12);
   --mg-subgraph-border: #bbb;
   --mg-subgraph-title-bg: rgba(0, 0, 0, 0.04);
@@ -523,6 +596,12 @@ useResizeObserver(graphViewerRef, () => {
   --mg-node-bg: #2d3748;
   --mg-node-border: #7c3aed;
   --mg-node-text: #e2e8f0;
+  --mg-controller-bg: rgba(14, 116, 144, 0.26);
+  --mg-controller-border: #22d3ee;
+  --mg-controller-kind-bg: #0891b2;
+  --mg-provider-bg: rgba(21, 128, 61, 0.26);
+  --mg-provider-border: #4ade80;
+  --mg-provider-kind-bg: #16a34a;
   --mg-subgraph-bg: rgba(255, 255, 255, 0.04);
   --mg-subgraph-border: #4a5568;
   --mg-subgraph-title-bg: rgba(255, 255, 255, 0.06);
@@ -569,10 +648,51 @@ useResizeObserver(graphViewerRef, () => {
   background: var(--mg-subgraph-title-bg);
   border-bottom: 1px solid var(--mg-subgraph-title-border);
   border-radius: 6px 6px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
 }
 
 .module-subgraph--root .module-subgraph__title {
   background: var(--mg-root-title-bg);
+}
+
+.module-subgraph--collapsed .module-subgraph__title {
+  flex: 1;
+  border-bottom: 0;
+  border-radius: 6px;
+}
+
+.module-subgraph__label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-subgraph__toggle {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 4px;
+  background: var(--mg-subgraph-bg);
+  color: var(--mg-node-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.module-subgraph__toggle:hover {
+  border-color: var(--mg-node-border);
 }
 
 .module-subgraph__body {
@@ -597,12 +717,51 @@ useResizeObserver(graphViewerRef, () => {
   border-radius: 4px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
   font-size: 12px;
   font-family: ui-monospace, 'SF Mono', monospace;
   color: var(--mg-node-text);
   box-sizing: border-box;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mermaid-node--controller {
+  background: var(--mg-controller-bg);
+  border-color: var(--mg-controller-border);
+}
+
+.mermaid-node--provider {
+  background: var(--mg-provider-bg);
+  border-color: var(--mg-provider-border);
+}
+
+.mermaid-node__kind {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.mermaid-node--controller .mermaid-node__kind {
+  background: var(--mg-controller-kind-bg);
+}
+
+.mermaid-node--provider .mermaid-node__kind {
+  background: var(--mg-provider-kind-bg);
+}
+
+.mermaid-node__label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
