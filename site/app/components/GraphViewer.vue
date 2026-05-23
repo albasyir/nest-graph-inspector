@@ -3,6 +3,7 @@ import { VueFlow, useVueFlow, Position, Handle, MarkerType } from '@vue-flow/cor
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { Node, Edge } from '@vue-flow/core'
 import type { GraphOutput, GraphOutputModule, GraphOutputDependencyRef } from '@library/libs/nest-graph-inspector/src'
@@ -15,6 +16,7 @@ type ModuleNodeData = {
   label: string
   isRoot: boolean
   isCollapsed: boolean
+  minHeight: number
 }
 
 type ItemNodeData = {
@@ -223,7 +225,8 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
       data: {
         label: moduleName,
         isRoot: moduleName === moduleMap.root,
-        isCollapsed
+        isCollapsed,
+        minHeight: height
       },
       style: { width: `${MODULE_WIDTH}px`, height: `${height}px` }
     })
@@ -437,6 +440,13 @@ useResizeObserver(graphViewerRef, () => {
       class="graph-flow"
     >
       <template #node-module="moduleProps">
+        <NodeResizer
+          :is-visible="props.interactive && !moduleProps.data.isCollapsed"
+          :min-width="MODULE_WIDTH"
+          :min-height="moduleProps.data.minHeight"
+          color="var(--mg-node-resizer-color)"
+        />
+
         <Handle
           id="target-top"
           type="target"
@@ -584,6 +594,7 @@ useResizeObserver(graphViewerRef, () => {
 @import '@vue-flow/core/dist/theme-default.css';
 @import '@vue-flow/controls/dist/style.css';
 @import '@vue-flow/minimap/dist/style.css';
+@import '@vue-flow/node-resizer/dist/style.css';
 
 :root {
   --mg-node-bg: #ECECFF;
@@ -603,6 +614,7 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-border: #ff6b6b;
   --mg-root-bg: rgba(255, 107, 107, 0.06);
   --mg-root-title-bg: rgba(255, 107, 107, 0.08);
+  --mg-node-resizer-color: #9370DB;
 }
 
 .dark {
@@ -623,6 +635,7 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-border: #f87171;
   --mg-root-bg: rgba(248, 113, 113, 0.08);
   --mg-root-title-bg: rgba(248, 113, 113, 0.1);
+  --mg-node-resizer-color: #a78bfa;
 }
 
 .graph-viewer {
