@@ -17,12 +17,14 @@ const activeOrigin = ref(DEFAULT_ORIGIN)
 const attemptCount = ref(0)
 const isRequestRunning = ref(false)
 const isNavigating = ref(false)
+const isSiteDetected = ref(false)
+const shouldNavigateOnLoad = ref(false)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 function loadExample() {
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
-  startPolling(`${window.location.origin}${base}mock-graph`)
+  startPolling(`${window.location.origin}${base}mock-graph`, true)
 }
 
 function clearPolling() {
@@ -46,13 +48,22 @@ async function tryLoadGraph() {
       return
     }
 
-    isNavigating.value = true
     clearPolling()
-    posthog?.capture('graph_auto_connected', {
+    if (shouldNavigateOnLoad.value) {
+      isNavigating.value = true
+      posthog?.capture('graph_auto_connected', {
+        url: graphStore.decodedUrl,
+        attempts: attemptCount.value
+      })
+      await navigateTo(`/view/${graphStore.encodedUrl}`)
+      return
+    }
+
+    isSiteDetected.value = true
+    posthog?.capture('graph_endpoint_detected', {
       url: graphStore.decodedUrl,
       attempts: attemptCount.value
     })
-    await navigateTo(`/view/${graphStore.encodedUrl}`)
   } catch {
     clearPolling()
   } finally {
@@ -60,7 +71,7 @@ async function tryLoadGraph() {
   }
 }
 
-function startPolling(origin: string) {
+function startPolling(origin: string, navigateOnLoad = false) {
   const input = origin.trim()
   if (!input) {
     return
@@ -69,6 +80,8 @@ function startPolling(origin: string) {
   activeOrigin.value = input
   attemptCount.value = 0
   isNavigating.value = false
+  isSiteDetected.value = false
+  shouldNavigateOnLoad.value = navigateOnLoad
   clearPolling()
 
   void tryLoadGraph()
@@ -96,6 +109,15 @@ onBeforeUnmount(() => {
     <GraphInspectorUpdateModal />
 
     <div class="w-full max-w-3xl space-y-5">
+      <UAlert
+        v-if="isSiteDetected"
+        icon="i-lucide-circle-check"
+        color="success"
+        variant="subtle"
+        title="Nest Graph Inspector detected"
+        description="Open your NestJS app console and click the Graph Viewer link printed there."
+      />
+
       <UCard :ui="{ body: 'p-5 sm:p-6' }">
         <template #header>
           <div class="space-y-3">
@@ -111,23 +133,23 @@ onBeforeUnmount(() => {
         <div>
           <div class="grid gap-3 sm:grid-cols-3">
             <UButton
-              to="/getting-started"
               icon="i-lucide-circle-help"
               label="Learn Why"
               size="lg"
               color="neutral"
               variant="subtle"
               class="cursor-pointer"
+              disabled
               block
             />
             <UButton
-              to="/getting-started/installation"
               icon="i-lucide-book-open"
               label="Install It"
               size="lg"
               color="neutral"
               variant="subtle"
               class="cursor-pointer"
+              disabled
               block
             />
             <UButton
