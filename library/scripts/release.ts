@@ -35,7 +35,7 @@ function getVersionArg(): string {
 
 function main(): void {
   const version = getVersionArg();
-  const readmePath = resolve(rootDir, 'README.md');
+  const readmePath = resolve(rootDir + '/../', 'README.md');
   const sourcePackageJsonPath = resolve(
     rootDir,
     'libs/nest-graph-inspector/package.json',

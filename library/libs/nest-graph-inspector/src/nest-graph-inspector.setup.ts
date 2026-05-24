@@ -184,7 +184,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     return {
-      version: '2',
+      version: '3',
       root: this.moduleName(root),
       modules,
     };

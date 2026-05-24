@@ -14,62 +14,28 @@ Nest Graph Inspector reads your NestJS runtime container and generates a depende
 
 ### Preview
 
-> This is a static preview. [**Try the interactive viewer with AI Chat →**](https://albasyir.github.io/nest-graph-inspector/view/) 
+This is a static preview. [**Try the interactive viewer with AI Chat →**](https://albasyir.github.io/nest-graph-inspector/view/) 
 
 > "Load Example" to see result without installing it
 
-```mermaid
-graph TD
-  subgraph module_group_AppModule["AppModule"]
-  end
-  subgraph module_group_UserModule["UserModule"]
-    provider_UserModule_UserService["UserService"]
-    provider_UserModule_UserRepository["UserRepository"]
-    controller_UserModule_UserController["UserController"]
-  end
-  subgraph module_group_ProductModule["ProductModule"]
-    provider_ProductModule_ProductService["ProductService"]
-    provider_ProductModule_ProductRepository["ProductRepository"]
-    controller_ProductModule_ProductController["ProductController"]
-  end
-  subgraph module_group_OrderModule["OrderModule"]
-    provider_OrderModule_OrderRepository["OrderRepository"]
-    provider_OrderModule_OrderService["OrderService"]
-    provider_OrderModule_OrderNotificationService["OrderNotificationService"]
-    controller_OrderModule_OrderController["OrderController"]
-  end
-  subgraph module_group_NestJSCoreModule["NestJSCoreModule"]
-    provider_NestJSCoreModule_ModuleRef["ModuleRef"]
-  end
-  module_group_UserModule --> module_group_AppModule
-  module_group_ProductModule --> module_group_AppModule
-  module_group_OrderModule --> module_group_AppModule
-  provider_UserModule_UserRepository --> provider_UserModule_UserService
-  provider_UserModule_UserService --> controller_UserModule_UserController
-  module_group_UserModule --> module_group_ProductModule
-  provider_ProductModule_ProductRepository --> provider_ProductModule_ProductService
-  provider_ProductModule_ProductService --> controller_ProductModule_ProductController
-  module_group_UserModule --> module_group_OrderModule
-  module_group_ProductModule --> module_group_OrderModule
-  provider_OrderModule_OrderRepository --> provider_OrderModule_OrderService
-  provider_UserModule_UserService --> provider_OrderModule_OrderService
-  provider_ProductModule_ProductService --> provider_OrderModule_OrderService
-  provider_OrderModule_OrderNotificationService --> provider_OrderModule_OrderService
-  provider_OrderModule_OrderService --> provider_OrderModule_OrderNotificationService
-  provider_OrderModule_OrderService --> controller_OrderModule_OrderController
-  provider_NestJSCoreModule_ModuleRef --> controller_OrderModule_OrderController
-  provider_OrderModule_OrderNotificationService --> controller_OrderModule_OrderController
-```
+## Why It Matters
 
-## Features
+Shipping speed depends on confidence. Teams need runtime visibility to trace impact, find architecture issues early, and ship safer changes.
 
-- **Runtime introspection** — graphs are built from the actual Nest container, not static source parsing
-- **Minimal setup** — import the module and you're done
-- **Interactive web viewer** — zoom, pan, and inspect nodes in the browser
-- **Chat with AI** — there's AI that help you to understand complex graph
-- **JSON output** — structured data for programmatic use or CI integration
-- **Markdown output** — AI-friendly graph representation
+- **Ship Changes Faster** — trace impact in minutes, not meetings, before touching critical providers or modules
+- **Cut Regression Risk** — catch circular and high-coupling patterns before they become release blockers
+- **Make PR Reviews Concrete** — replace assumptions with runtime-backed module and provider-level evidence
+- **Onboard With Real Context** — give new engineers a live map of how the system actually connects and behaves
+- **Find Architecture Issues Early** — use Issue Finder to surface structural problems before they grow into production incidents
 
+## Feature List
+
+- **Dependency Graph** — visualize modules, providers, controllers, imports, and dependency edges from the running app
+- **Circular Detection** — surface circular relationships early so teams can resolve risky loops before release
+- **Relation Focus** — coming soon: focus provider/module pairs to see how they relate and where dependencies connect
+- **Context-Aware AI Assistant** — ask graph and trace questions in plain language with context-aware answers, always free in the viewer
+- **Process Sequence** — coming soon: generate sequence diagrams from an entry point to completion flow
+- **Direct Run** — coming soon: execute runtime-resolved services and functions directly from graph context
 
 ## Quick Start
 

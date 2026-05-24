@@ -57,6 +57,12 @@ export const packageManagerCommandSets = {
     [NodeJSPackageManager.PNPM]: 'pnpm add nest-graph-inspector',
     [BunPackageManager.BUN]: 'bun add nest-graph-inspector'
   },
+  'update': {
+    [NodeJSPackageManager.NPM]: 'npm update nest-graph-inspector',
+    [NodeJSPackageManager.YARN]: 'yarn upgrade nest-graph-inspector',
+    [NodeJSPackageManager.PNPM]: 'pnpm update nest-graph-inspector',
+    [BunPackageManager.BUN]: 'bun update nest-graph-inspector'
+  },
   'force-install': {
     [NodeJSPackageManager.NPM]: 'npm install nest-graph-inspector --force',
     [NodeJSPackageManager.YARN]: 'yarn add nest-graph-inspector --ignore-engines',

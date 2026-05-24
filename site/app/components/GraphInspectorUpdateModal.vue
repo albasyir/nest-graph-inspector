@@ -9,12 +9,15 @@ const { shouldShowUpdateModal } = storeToRefs(graphStore)
   <UModal
     v-model:open="shouldShowUpdateModal"
     title="Update Nest Graph Inspector"
-    description="This endpoint is using an older HTTP output format."
+    description="This endpoint is using an unsupported graph output version."
   >
     <template #body>
-      <p class="text-sm text-muted">
-        Please update <code>nest-graph-inspector</code> to at least <code>0.3.0</code> to use the web viewer and AI chat
-      </p>
+      <div class="space-y-3">
+        <p class="text-sm text-muted">
+          Your app is using an older graph output format. Update <code>nest-graph-inspector</code> and restart your app.
+        </p>
+        <ContentPackageManagerCommand command="update" />
+      </div>
     </template>
 
     <template #footer>
@@ -26,9 +29,11 @@ const { shouldShowUpdateModal } = storeToRefs(graphStore)
           @click="shouldShowUpdateModal = false"
         />
         <UButton
-          label="Installation guide"
+          label="Upgrade guide"
           icon="i-lucide-book-open"
-          to="/getting-started/installation"
+          color="primary"
+          variant="solid"
+          to="/getting-started/upgrade-guide"
           @click="shouldShowUpdateModal = false"
         />
       </div>

@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { storeToRefs } from 'pinia'
+
 useSeoMeta({
   title: 'Graph Viewer',
   ogTitle: 'Graph Viewer - Nest Graph Inspector',
   description:
-    'Explore your NestJS dependency graph with an interactive viewer, setup guide, or live demo.',
+    'Explore your NestJS dependency graph with an interactive viewer, setup guide, or live demo.'
 })
 
 const posthog = usePostHog()
 const route = useRoute()
 const graphStore = useGraphInspectorStore()
+const { shouldShowUpdateModal } = storeToRefs(graphStore)
 const config = useRuntimeConfig()
 
 const DEFAULT_ORIGIN = 'localhost:53371'
@@ -46,6 +49,11 @@ async function tryLoadGraph() {
 
   try {
     const isLoaded = await graphStore.setInputUrl(activeOrigin.value)
+    if (shouldShowUpdateModal.value) {
+      clearPolling()
+      return
+    }
+
     if (!isLoaded || !graphStore.encodedUrl) {
       return
     }
@@ -55,7 +63,7 @@ async function tryLoadGraph() {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
         url: graphStore.decodedUrl,
-        attempts: attemptCount.value,
+        attempts: attemptCount.value
       })
       await navigateTo(`/view/${graphStore.encodedUrl}`)
       return
@@ -64,7 +72,7 @@ async function tryLoadGraph() {
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
       url: graphStore.decodedUrl,
-      attempts: attemptCount.value,
+      attempts: attemptCount.value
     })
   } catch {
     clearPolling()
@@ -103,6 +111,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearPolling()
+})
+
+watch(shouldShowUpdateModal, (visible) => {
+  if (visible) {
+    clearPolling()
+  }
 })
 </script>
 

@@ -6,6 +6,7 @@ type InspectorEndpointInfo = {
 }
 
 type LegacyGraphOutput = Partial<GraphOutput>
+const MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION = 3
 
 function withDefaultProtocol(input: string) {
   return input.startsWith('http://') || input.startsWith('https://')
@@ -63,6 +64,23 @@ function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
     'version' in value &&
     'root' in value &&
     'modules' in value,
+  )
+}
+
+function parseGraphOutputVersion(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null
+  }
+
+  const parsedVersion = Number.parseInt(String(value), 10)
+  return Number.isFinite(parsedVersion) ? parsedVersion : null
+}
+
+function isSupportedGraphOutputVersion(value: unknown): boolean {
+  const parsedVersion = parseGraphOutputVersion(value)
+  return (
+    parsedVersion !== null
+    && parsedVersion >= MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION
   )
 }
 
@@ -185,7 +203,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     await executeJson()
-    return status.value === 'success'
+    if (status.value !== 'success') {
+      shouldShowUpdateModal.value = false
+      return false
+    }
+
+    const hasSupportedVersion = isSupportedGraphOutputVersion(
+      graphData.value?.version,
+    )
+
+    shouldShowUpdateModal.value = !hasSupportedVersion
+    return hasSupportedVersion
   }
 
   async function fetchMarkdown() {
