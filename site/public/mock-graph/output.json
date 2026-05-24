@@ -3,22 +3,14 @@
   "root": "AppModule",
   "modules": {
     "AppModule": {
-      "imports": [
-        "UserModule",
-        "ProductModule",
-        "OrderModule"
-      ],
+      "imports": ["UserModule", "ProductModule", "OrderModule"],
       "exports": [],
       "providers": [],
       "controllers": []
     },
     "UserModule": {
-      "imports": [
-        "MobileModule"
-      ],
-      "exports": [
-        "UserService"
-      ],
+      "imports": ["MobileModule"],
+      "exports": ["UserService"],
       "providers": [
         {
           "name": "UserService",
@@ -79,12 +71,8 @@
       ]
     },
     "MobileModule": {
-      "imports": [
-        "ProductModule"
-      ],
-      "exports": [
-        "MobileService"
-      ],
+      "imports": ["ProductModule"],
+      "exports": ["MobileService"],
       "providers": [
         {
           "name": "MobileService",
@@ -102,13 +90,8 @@
       "controllers": []
     },
     "ProductModule": {
-      "imports": [
-        "UserModule",
-        "MobileModule"
-      ],
-      "exports": [
-        "ProductService"
-      ],
+      "imports": ["UserModule", "MobileModule"],
+      "exports": ["ProductService"],
       "providers": [
         {
           "name": "ProductService",
@@ -150,13 +133,8 @@
       ]
     },
     "OrderModule": {
-      "imports": [
-        "UserModule",
-        "ProductModule"
-      ],
-      "exports": [
-        "OrderService"
-      ],
+      "imports": ["UserModule", "ProductModule"],
+      "exports": ["OrderService"],
       "providers": [
         {
           "name": "OrderRepository",
@@ -239,9 +217,7 @@
     },
     "NestJSCoreModule": {
       "imports": [],
-      "exports": [
-        "ModuleRef"
-      ],
+      "exports": ["ModuleRef"],
       "providers": [
         {
           "name": "ModuleRef",
@@ -254,50 +230,37 @@
   "cycles": {
     "modules": [
       {
+        "id": 1,
         "from": "UserModule",
         "to": "MobileModule",
         "type": "indirect",
-        "path": [
-          "UserModule",
-          "MobileModule",
-          "ProductModule",
-          "UserModule"
-        ]
+        "path": ["UserModule", "MobileModule", "ProductModule", "UserModule"]
       },
       {
+        "id": 2,
         "from": "MobileModule",
         "to": "ProductModule",
         "type": "direct",
-        "path": [
-          "MobileModule",
-          "ProductModule",
-          "MobileModule"
-        ]
+        "path": ["MobileModule", "ProductModule", "MobileModule"]
       },
       {
+        "id": 3,
         "from": "ProductModule",
         "to": "UserModule",
         "type": "indirect",
-        "path": [
-          "ProductModule",
-          "UserModule",
-          "MobileModule",
-          "ProductModule"
-        ]
+        "path": ["ProductModule", "UserModule", "MobileModule", "ProductModule"]
       },
       {
+        "id": 4,
         "from": "ProductModule",
         "to": "MobileModule",
         "type": "direct",
-        "path": [
-          "ProductModule",
-          "MobileModule",
-          "ProductModule"
-        ]
+        "path": ["ProductModule", "MobileModule", "ProductModule"]
       }
     ],
     "providers": [
       {
+        "id": 5,
         "from": "MobileModule:MobileService",
         "to": "ProductModule:ProductService",
         "type": "direct",
@@ -329,6 +292,7 @@
         ]
       },
       {
+        "id": 6,
         "from": "ProductModule:ProductService",
         "to": "MobileModule:MobileService",
         "type": "direct",
@@ -360,6 +324,7 @@
         ]
       },
       {
+        "id": 7,
         "from": "OrderModule:OrderService",
         "to": "OrderModule:OrderNotificationService",
         "type": "direct",
@@ -391,6 +356,7 @@
         ]
       },
       {
+        "id": 8,
         "from": "OrderModule:OrderNotificationService",
         "to": "OrderModule:OrderService",
         "type": "direct",

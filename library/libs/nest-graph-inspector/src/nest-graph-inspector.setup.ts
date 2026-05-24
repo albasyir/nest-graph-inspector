@@ -36,6 +36,7 @@ type DependencyNode = {
   moduleName: string;
   name: string;
 };
+type NextCycleId = () => number;
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
@@ -597,14 +598,18 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private findGraphCycles(
     modules: Record<string, GraphOutputModule>,
   ): GraphOutputCycles {
+    let nextId = 1;
+    const nextCycleId: NextCycleId = () => nextId++;
+
     return {
-      modules: this.findModuleCycles(modules),
-      ...this.findDependencyCycles(modules),
+      modules: this.findModuleCycles(modules, nextCycleId),
+      ...this.findDependencyCycles(modules, nextCycleId),
     };
   }
 
   private findModuleCycles(
     modules: Record<string, GraphOutputModule>,
+    nextCycleId: NextCycleId,
   ): GraphOutputCycle[] {
     const graph = this.createGraph(Object.keys(modules));
 
@@ -616,11 +621,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       }
     }
 
-    return this.findCycles(graph);
+    return this.findCycles(graph, nextCycleId);
   }
 
   private findDependencyCycles(
     modules: Record<string, GraphOutputModule>,
+    nextCycleId: NextCycleId,
   ): Pick<GraphOutputCycles, 'providers' | 'controllers'> {
     const nodes = new Map<string, DependencyNode>();
 
@@ -668,7 +674,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       }
     }
 
-    const cycles = this.findCycles(graph);
+    const cycles = this.findCycles(graph, nextCycleId);
 
     return {
       providers: cycles
@@ -713,7 +719,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return graph;
   }
 
-  private findCycles(graph: Map<string, Set<string>>): GraphOutputCycle[] {
+  private findCycles(
+    graph: Map<string, Set<string>>,
+    nextCycleId: NextCycleId,
+  ): GraphOutputCycle[] {
     const cycles: GraphOutputCycle[] = [];
     const reachableKeys = new Map<string, Set<string>>();
 
@@ -733,6 +742,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
             : [source, ...this.findPath(target, source, graph)];
 
         cycles.push({
+          id: nextCycleId(),
           from: source,
           to: target,
           type: this.getCycleType(source, target, graph),

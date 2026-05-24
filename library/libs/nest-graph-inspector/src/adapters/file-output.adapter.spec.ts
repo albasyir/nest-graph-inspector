@@ -208,6 +208,7 @@ describe(FileOutputAdapter.name, () => {
       cycles: {
         modules: [
           {
+            id: 3,
             from: 'ProductModule',
             to: 'UserModule',
             type: 'indirect',
@@ -219,12 +220,14 @@ describe(FileOutputAdapter.name, () => {
             ],
           },
           {
+            id: 1,
             from: 'UserModule',
             to: 'MobileModule',
             type: 'indirect',
             path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
           },
           {
+            id: 2,
             from: 'MobileModule',
             to: 'ProductModule',
             type: 'indirect',
@@ -238,6 +241,7 @@ describe(FileOutputAdapter.name, () => {
         ],
         providers: [
           {
+            id: 1,
             from: 'ProductModule:ProductService',
             to: 'MobileModule:MobileService',
             type: 'direct',
@@ -257,6 +261,7 @@ describe(FileOutputAdapter.name, () => {
             ],
           },
           {
+            id: 2,
             from: 'MobileModule:MobileService',
             to: 'ProductModule:ProductService',
             type: 'direct',
@@ -346,12 +351,14 @@ describe(FileOutputAdapter.name, () => {
       cycles: {
         modules: [
           {
+            id: 1,
             from: 'UserModule',
             to: 'MobileModule',
             type: 'indirect',
             path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
           },
           {
+            id: 2,
             from: 'MobileModule',
             to: 'ProductModule',
             type: 'indirect',
@@ -363,6 +370,7 @@ describe(FileOutputAdapter.name, () => {
             ],
           },
           {
+            id: 3,
             from: 'ProductModule',
             to: 'UserModule',
             type: 'indirect',

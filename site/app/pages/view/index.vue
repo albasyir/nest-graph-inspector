@@ -2,7 +2,8 @@
 useSeoMeta({
   title: 'Graph Viewer',
   ogTitle: 'Graph Viewer - Nest Graph Inspector',
-  description: 'Explore your NestJS dependency graph with an interactive viewer, setup guide, or live demo.'
+  description:
+    'Explore your NestJS dependency graph with an interactive viewer, setup guide, or live demo.',
 })
 
 const posthog = usePostHog()
@@ -22,6 +23,7 @@ const shouldNavigateOnLoad = ref(false)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 function loadExample() {
+  graphStore.showCircularDependencies = true
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
   startPolling(`${window.location.origin}${base}mock-graph`, true)
@@ -53,7 +55,7 @@ async function tryLoadGraph() {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
         url: graphStore.decodedUrl,
-        attempts: attemptCount.value
+        attempts: attemptCount.value,
       })
       await navigateTo(`/view/${graphStore.encodedUrl}`)
       return
@@ -62,7 +64,7 @@ async function tryLoadGraph() {
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
       url: graphStore.decodedUrl,
-      attempts: attemptCount.value
+      attempts: attemptCount.value,
     })
   } catch {
     clearPolling()
@@ -105,7 +107,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <UContainer class="py-4 flex items-center justify-center min-h-[calc(100vh-140px)]">
+  <UContainer
+    class="py-4 flex items-center justify-center min-h-[calc(100vh-140px)]"
+  >
     <GraphInspectorUpdateModal />
 
     <div class="w-full max-w-3xl space-y-5">
@@ -125,7 +129,9 @@ onBeforeUnmount(() => {
               New to Nest Graph Inspector?
             </h1>
             <p class="max-w-2xl text-sm sm:text-base text-muted">
-              Understand your NestJS modules, providers, and dependencies as an interactive graph. Learn why it helps, connect your own app in minutes, or explore a ready-made demo first.
+              Understand your NestJS modules, providers, and dependencies as an
+              interactive graph. Learn why it helps, connect your own app in
+              minutes, or explore a ready-made demo first.
             </p>
           </div>
         </template>

@@ -61,12 +61,13 @@ type ModuleItemDependencyGraph = {
 type CircularEdgeKind = 'direct' | 'indirect'
 
 type CircularEdgeInfo = {
+  id: number
   kind: CircularEdgeKind
   path: string[]
 }
 
 type CircularEdgeData = {
-  circularKind: CircularEdgeKind
+  circularIds: number[]
   circularReason: string
 }
 
@@ -92,6 +93,11 @@ const props = withDefaults(
     interactive: true,
     flush: false,
   },
+)
+
+const showCircularDependencies = defineModel<boolean>(
+  'showCircularDependencies',
+  { default: true },
 )
 
 const { fitView } = useVueFlow()
@@ -403,22 +409,29 @@ function getModuleItemHierarchy(
     )
 }
 
-function getCircularEdgeDataProps(info: CircularEdgeInfo | undefined): {
+function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
   data?: CircularEdgeData
 } {
-  if (!info) {
+  if (!info?.length) {
     return {}
   }
 
   return {
     data: {
-      circularKind: info.kind,
-      circularReason:
-        info.kind === 'direct'
-          ? 'Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.'
-          : `Indirect circular dependency: ${info.path.join(' -> ')}.`,
+      circularIds: info.map((item) => item.id),
+      circularReason: info
+        .map((item) =>
+          item.kind === 'direct'
+            ? `ID ${item.id}: Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.`
+            : `ID ${item.id}: Indirect circular dependency: ${item.path.join(' -> ')}.`,
+        )
+        .join('\n'),
     },
   }
+}
+
+function formatCircularEdgeIds(ids: number[]): string {
+  return ids.join(', ')
 }
 
 function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
@@ -524,49 +537,104 @@ function resolveCycleNodeId(
   return null
 }
 
+function resolveCycleDisplayId(
+  cycle: Pick<GraphOutputCycle, 'id'>,
+  fallbackId: number,
+): number {
+  return typeof cycle.id === 'number' && Number.isFinite(cycle.id)
+    ? cycle.id
+    : fallbackId
+}
+
 function addDependencyCycleEdges(
-  circularEdges: Map<string, CircularEdgeInfo>,
+  circularEdges: Map<string, CircularEdgeInfo[]>,
   cycles: GraphOutputCycle[] | undefined,
   moduleMap: GraphOutput,
   fromKind: ItemNodeData['kind'],
 ): void {
-  for (const cycle of cycles || []) {
-    const fromId = resolveCycleNodeId(cycle.from, moduleMap, fromKind)
-    const toId = resolveCycleNodeId(cycle.to, moduleMap)
-    if (!fromId || !toId) {
-      continue
-    }
-
-    circularEdges.set(`${toId}->${fromId}`, {
+  for (const [cycleIndex, cycle] of (cycles || []).entries()) {
+    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1)
+    const info = {
+      id: displayId,
       kind: cycle.type,
       path: formatDependencyCyclePath(cycle.path),
-    })
+    }
+
+    addDependencyCyclePathEdges(
+      circularEdges,
+      cycle.path,
+      moduleMap,
+      fromKind,
+      info,
+    )
   }
 }
 
 function addProviderDependencyCycleEdges(
-  circularEdges: Map<string, CircularEdgeInfo>,
+  circularEdges: Map<string, CircularEdgeInfo[]>,
   cycles: GraphOutputProviderCycle[] | undefined,
   moduleMap: GraphOutput,
 ): void {
-  for (const cycle of cycles || []) {
-    const fromId = resolveCycleNodeId(cycle.from, moduleMap, 'provider')
-    const toId = resolveCycleNodeId(cycle.to, moduleMap)
+  for (const [cycleIndex, cycle] of (cycles || []).entries()) {
+    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1)
+    const info = {
+      id: displayId,
+      kind: cycle.type,
+      path: formatProviderCyclePath(cycle.path),
+    }
+
+    addDependencyCyclePathEdges(
+      circularEdges,
+      cycle.path.map(providerCyclePathItemToKey),
+      moduleMap,
+      'provider',
+      info,
+    )
+  }
+}
+
+function addDependencyCyclePathEdges(
+  circularEdges: Map<string, CircularEdgeInfo[]>,
+  path: string[],
+  moduleMap: GraphOutput,
+  fromKind: ItemNodeData['kind'],
+  info: CircularEdgeInfo,
+): void {
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const fromId = resolveCycleNodeId(path[index] || '', moduleMap, fromKind)
+    const toId = resolveCycleNodeId(path[index + 1] || '', moduleMap)
     if (!fromId || !toId) {
       continue
     }
 
-    circularEdges.set(`${toId}->${fromId}`, {
-      kind: cycle.type,
-      path: formatProviderCyclePath(cycle.path),
-    })
+    addCircularEdgeInfo(circularEdges, `${toId}->${fromId}`, info)
   }
+}
+
+function providerCyclePathItemToKey(
+  item: GraphOutputProviderCycle['path'][number],
+): string {
+  return `${item.module.name}:${item.provider.name}`
+}
+
+function addCircularEdgeInfo(
+  circularEdges: Map<string, CircularEdgeInfo[]>,
+  edgeKey: string,
+  info: CircularEdgeInfo,
+): void {
+  const existingInfo = circularEdges.get(edgeKey) || []
+  if (existingInfo.some((item) => item.id === info.id)) {
+    return
+  }
+
+  existingInfo.push(info)
+  circularEdges.set(edgeKey, existingInfo)
 }
 
 function getCircularDependencyEdges(
   moduleMap: GraphOutput,
-): Map<string, CircularEdgeInfo> {
-  const circularEdges = new Map<string, CircularEdgeInfo>()
+): Map<string, CircularEdgeInfo[]> {
+  const circularEdges = new Map<string, CircularEdgeInfo[]>()
   addProviderDependencyCycleEdges(
     circularEdges,
     moduleMap.cycles?.providers,
@@ -584,14 +652,25 @@ function getCircularDependencyEdges(
 
 function getCircularModuleEdges(
   moduleMap: GraphOutput,
-): Map<string, CircularEdgeInfo> {
-  const circularEdges = new Map<string, CircularEdgeInfo>()
+): Map<string, CircularEdgeInfo[]> {
+  const circularEdges = new Map<string, CircularEdgeInfo[]>()
 
-  for (const cycle of moduleMap.cycles?.modules || []) {
-    circularEdges.set(`${cycle.to}->${cycle.from}`, {
+  for (const [cycleIndex, cycle] of (
+    moduleMap.cycles?.modules || []
+  ).entries()) {
+    const info = {
+      id: resolveCycleDisplayId(cycle, cycleIndex + 1),
       kind: cycle.type,
       path: cycle.path,
-    })
+    }
+
+    for (let index = 0; index < cycle.path.length - 1; index += 1) {
+      addCircularEdgeInfo(
+        circularEdges,
+        `${cycle.path[index + 1]}->${cycle.path[index]}`,
+        info,
+      )
+    }
   }
 
   return circularEdges
@@ -694,13 +773,19 @@ function pickDependencyHandles(
 function buildGraph(
   moduleMap: GraphOutput,
   collapsedModules = new Set<string>(),
+  options: { showCircularDependencies?: boolean } = {},
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
-  const circularModuleEdges = getCircularModuleEdges(moduleMap)
-  const circularDependencyEdges = getCircularDependencyEdges(moduleMap)
+  const showCircularDependencies = options.showCircularDependencies ?? true
+  const circularModuleEdges = showCircularDependencies
+    ? getCircularModuleEdges(moduleMap)
+    : new Map<string, CircularEdgeInfo[]>()
+  const circularDependencyEdges = showCircularDependencies
+    ? getCircularDependencyEdges(moduleMap)
+    : new Map<string, CircularEdgeInfo[]>()
 
   const moduleSizes = new Map<string, { width: number; height: number }>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
@@ -821,8 +906,8 @@ function buildGraph(
         }
 
         const { sourceHandle, targetHandle } = pickHandles(sourcePos, targetPos)
-        const circularKind = circularModuleEdges.get(`${imp}->${moduleName}`)
-        const edgeColor = circularKind
+        const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
+        const edgeColor = circularInfo
           ? CIRCULAR_DEPENDENCY_EDGE_COLOR
           : MODULE_EDGE_COLOR
 
@@ -832,10 +917,10 @@ function buildGraph(
           target: `module-${moduleName}`,
           sourceHandle,
           targetHandle,
-          type: circularKind ? 'warning' : 'smoothstep',
-          style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
+          type: circularInfo ? 'warning' : 'smoothstep',
+          style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
           markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getCircularEdgeDataProps(circularKind),
+          ...getCircularEdgeDataProps(circularInfo),
         })
       }
     }
@@ -857,10 +942,10 @@ function buildGraph(
             sPos,
             tPos,
           )
-          const circularKind = circularDependencyEdges.get(
+          const circularInfo = circularDependencyEdges.get(
             `${sourceId}->${targetId}`,
           )
-          const edgeColor = circularKind
+          const edgeColor = circularInfo
             ? CIRCULAR_DEPENDENCY_EDGE_COLOR
             : DEPENDENCY_EDGE_COLOR
 
@@ -870,10 +955,10 @@ function buildGraph(
             target: targetId,
             sourceHandle,
             targetHandle,
-            type: circularKind ? 'warning' : 'smoothstep',
-            style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
+            type: circularInfo ? 'warning' : 'smoothstep',
+            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularKind),
+            ...getCircularEdgeDataProps(circularInfo),
           })
         }
       }
@@ -894,10 +979,10 @@ function buildGraph(
             sPos,
             tPos,
           )
-          const circularKind = circularDependencyEdges.get(
+          const circularInfo = circularDependencyEdges.get(
             `${sourceId}->${targetId}`,
           )
-          const edgeColor = circularKind
+          const edgeColor = circularInfo
             ? CIRCULAR_DEPENDENCY_EDGE_COLOR
             : DEPENDENCY_EDGE_COLOR
 
@@ -907,10 +992,10 @@ function buildGraph(
             target: targetId,
             sourceHandle,
             targetHandle,
-            type: circularKind ? 'warning' : 'smoothstep',
-            style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
+            type: circularInfo ? 'warning' : 'smoothstep',
+            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularKind),
+            ...getCircularEdgeDataProps(circularInfo),
           })
         }
       }
@@ -923,13 +1008,18 @@ function buildGraph(
 const collapsedModuleNames = ref<Set<string>>(
   getDefaultCollapsedModuleNames(props.data),
 )
-const initialGraph = buildGraph(props.data, collapsedModuleNames.value)
+const showGraphSettings = ref(false)
+const initialGraph = buildGraph(props.data, collapsedModuleNames.value, {
+  showCircularDependencies: showCircularDependencies.value,
+})
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
 const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
 
 function refreshGraph() {
-  const graph = buildGraph(props.data, collapsedModuleNames.value)
+  const graph = buildGraph(props.data, collapsedModuleNames.value, {
+    showCircularDependencies: showCircularDependencies.value,
+  })
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
 }
@@ -946,6 +1036,10 @@ function toggleModule(moduleName: string) {
   refreshGraph()
   void centerGraph()
 }
+
+watch(showCircularDependencies, () => {
+  refreshGraph()
+})
 
 watch(
   () => props.data,
@@ -975,6 +1069,35 @@ useResizeObserver(graphViewerRef, () => {
     :class="{ 'graph-viewer--flush': props.flush }"
     :style="{ height: props.height }"
   >
+    <div v-if="props.interactive" class="graph-viewer-settings">
+      <UPopover
+        v-model:open="showGraphSettings"
+        :content="{ side: 'left', align: 'start', sideOffset: 8 }"
+        arrow
+      >
+        <UButton
+          type="button"
+          icon="i-lucide-settings"
+          color="neutral"
+          variant="soft"
+          square
+          class="graph-viewer-settings__trigger nodrag nopan"
+          aria-label="Graph settings"
+          title="Graph settings"
+        />
+
+        <template #content>
+          <div class="graph-viewer-settings__content nodrag nopan">
+            <p class="graph-viewer-settings__title">Graph settings</p>
+            <UCheckbox
+              v-model="showCircularDependencies"
+              label="Circular dependencies"
+            />
+          </div>
+        </template>
+      </UPopover>
+    </div>
+
     <VueFlow
       v-model:nodes="flowNodes"
       v-model:edges="flowEdges"
@@ -1009,7 +1132,14 @@ useResizeObserver(graphViewerRef, () => {
             role="img"
             :aria-label="edgeProps.data.circularReason"
           >
-            !
+            <UIcon
+              name="i-lucide-triangle-alert"
+              class="circular-edge-warning__icon"
+            />
+            <span class="circular-edge-warning__id">
+              ID{{ edgeProps.data.circularIds.length > 1 ? 's' : '' }}
+              {{ formatCircularEdgeIds(edgeProps.data.circularIds) }}
+            </span>
           </div>
         </EdgeLabelRenderer>
       </template>
@@ -1152,6 +1282,7 @@ useResizeObserver(graphViewerRef, () => {
 
 .graph-viewer {
   width: 100%;
+  position: relative;
   border-radius: 0.75rem;
   overflow: hidden;
   border: 1px solid var(--mg-subgraph-border);
@@ -1160,6 +1291,36 @@ useResizeObserver(graphViewerRef, () => {
 .graph-viewer--flush {
   border: 0;
   border-radius: 0;
+}
+
+.graph-viewer-settings {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+.graph-viewer-settings__trigger {
+  width: 34px;
+  height: 34px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+}
+
+.graph-viewer-settings__content {
+  width: 240px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Public Sans', system-ui, sans-serif;
+}
+
+.graph-viewer-settings__title {
+  margin: 0;
+  color: var(--ui-text-highlighted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .module-subgraph {
@@ -1309,22 +1470,35 @@ useResizeObserver(graphViewerRef, () => {
 }
 
 .circular-edge-warning {
-  width: 18px;
-  height: 18px;
+  min-width: 46px;
+  height: 20px;
+  padding: 0 7px;
   border: 1px solid #f59e0b;
   border-radius: 999px;
   background: #facc15;
   color: #713f12;
   box-shadow: 0 1px 4px rgba(120, 53, 15, 0.28);
   cursor: help;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1;
+  white-space: nowrap;
   user-select: none;
+}
+
+.circular-edge-warning__icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.circular-edge-warning__id {
+  display: inline-block;
 }
 
 .vue-flow__node-module {

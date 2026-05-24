@@ -228,18 +228,21 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(graphOutput.cycles.modules).toEqual([
       {
+        id: 1,
         from: 'UserModule',
         to: 'MobileModule',
         type: 'indirect',
         path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
       },
       {
+        id: 2,
         from: 'MobileModule',
         to: 'ProductModule',
         type: 'indirect',
         path: ['MobileModule', 'ProductModule', 'UserModule', 'MobileModule'],
       },
       {
+        id: 3,
         from: 'ProductModule',
         to: 'UserModule',
         type: 'indirect',
@@ -248,6 +251,7 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
     expect(graphOutput.cycles.providers).toEqual([
       {
+        id: 4,
         from: 'UserModule:UserService',
         to: 'MobileModule:MobileService',
         type: 'indirect',
@@ -271,6 +275,7 @@ describe(NestGraphInspectorSetup.name, () => {
         ],
       },
       {
+        id: 5,
         from: 'MobileModule:MobileService',
         to: 'ProductModule:ProductService',
         type: 'indirect',
@@ -294,6 +299,7 @@ describe(NestGraphInspectorSetup.name, () => {
         ],
       },
       {
+        id: 6,
         from: 'ProductModule:ProductService',
         to: 'UserModule:UserService',
         type: 'indirect',

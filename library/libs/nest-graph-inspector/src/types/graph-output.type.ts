@@ -23,6 +23,7 @@ export type GraphOutputModule = {
 export type GraphOutputCycleType = 'direct' | 'indirect';
 
 export type GraphOutputCycleBase = {
+  id: number;
   from: string;
   to: string;
   type: GraphOutputCycleType;
