@@ -15,6 +15,11 @@ type HttpResponse = {
 describe(HttpOutputAdapter.name, () => {
   let moduleRef: TestingModule;
   let adapter: HttpOutputAdapter;
+  const emptyCycles = () => ({
+    modules: [],
+    providers: [],
+    controllers: [],
+  });
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
@@ -60,6 +65,7 @@ describe(HttpOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: emptyCycles(),
     };
 
     const result = await adapter.execute(graphOutput, {
@@ -147,7 +153,9 @@ describe(HttpOutputAdapter.name, () => {
       '/inspector/output.json',
     );
 
-    expect(new URL(secondOutputUrl).origin).toBe(new URL(firstOutputUrl).origin);
+    expect(new URL(secondOutputUrl).origin).toBe(
+      new URL(firstOutputUrl).origin,
+    );
     await expect(get(firstOutputUrl)).resolves.toMatchObject({
       statusCode: 200,
     });

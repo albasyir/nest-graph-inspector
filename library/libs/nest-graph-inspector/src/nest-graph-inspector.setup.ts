@@ -15,14 +15,27 @@ import { Modules } from './types/module.type';
 import { ModuleMap } from './types/module-map.type';
 import type {
   GraphOutput,
+  GraphOutputCycle,
+  GraphOutputCycles,
+  GraphOutputCycleType,
   GraphOutputDependencyRef,
   GraphOutputModule,
+  GraphOutputProviderCycle,
+  GraphOutputProviderCyclePathItem,
 } from './types/graph-output.type';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
+
+type DependencyNodeKind = 'provider' | 'controller';
+type DependencyNode = {
+  key: string;
+  kind: DependencyNodeKind;
+  moduleName: string;
+  name: string;
+};
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
@@ -577,7 +590,267 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return {
       ...moduleMap,
       modules: enrichedModules,
+      cycles: this.findGraphCycles(enrichedModules),
     };
+  }
+
+  private findGraphCycles(
+    modules: Record<string, GraphOutputModule>,
+  ): GraphOutputCycles {
+    return {
+      modules: this.findModuleCycles(modules),
+      ...this.findDependencyCycles(modules),
+    };
+  }
+
+  private findModuleCycles(
+    modules: Record<string, GraphOutputModule>,
+  ): GraphOutputCycle[] {
+    const graph = this.createGraph(Object.keys(modules));
+
+    for (const [moduleName, moduleData] of Object.entries(modules)) {
+      for (const importedModuleName of moduleData.imports) {
+        if (modules[importedModuleName]) {
+          graph.get(moduleName)?.add(importedModuleName);
+        }
+      }
+    }
+
+    return this.findCycles(graph);
+  }
+
+  private findDependencyCycles(
+    modules: Record<string, GraphOutputModule>,
+  ): Pick<GraphOutputCycles, 'providers' | 'controllers'> {
+    const nodes = new Map<string, DependencyNode>();
+
+    for (const [moduleName, moduleData] of Object.entries(modules)) {
+      for (const provider of moduleData.providers) {
+        const key = this.dependencyNodeKey(moduleName, provider.name);
+        nodes.set(key, {
+          key,
+          kind: 'provider',
+          moduleName,
+          name: provider.name,
+        });
+      }
+
+      for (const controller of moduleData.controllers) {
+        const key = this.dependencyNodeKey(moduleName, controller.name);
+        nodes.set(key, {
+          key,
+          kind: 'controller',
+          moduleName,
+          name: controller.name,
+        });
+      }
+    }
+
+    const graph = this.createGraph([...nodes.keys()]);
+
+    for (const [moduleName, moduleData] of Object.entries(modules)) {
+      for (const provider of moduleData.providers) {
+        this.addDependencyEdges(
+          graph,
+          this.dependencyNodeKey(moduleName, provider.name),
+          provider.dependencies,
+          nodes,
+        );
+      }
+
+      for (const controller of moduleData.controllers) {
+        this.addDependencyEdges(
+          graph,
+          this.dependencyNodeKey(moduleName, controller.name),
+          controller.dependencies,
+          nodes,
+        );
+      }
+    }
+
+    const cycles = this.findCycles(graph);
+
+    return {
+      providers: cycles
+        .filter((cycle) => nodes.get(cycle.from)?.kind === 'provider')
+        .map((cycle) => this.toProviderCycle(cycle, nodes)),
+      controllers: cycles.filter(
+        (cycle) => nodes.get(cycle.from)?.kind === 'controller',
+      ),
+    };
+  }
+
+  private addDependencyEdges(
+    graph: Map<string, Set<string>>,
+    sourceKey: string,
+    dependencies: GraphOutputDependencyRef[],
+    nodes: Map<string, DependencyNode>,
+  ): void {
+    const sourceEdges = graph.get(sourceKey);
+    if (!sourceEdges) {
+      return;
+    }
+
+    for (const dependency of dependencies) {
+      const targetKey = this.dependencyNodeKey(
+        dependency.providedBy.name,
+        dependency.token,
+      );
+
+      if (nodes.has(targetKey)) {
+        sourceEdges.add(targetKey);
+      }
+    }
+  }
+
+  private createGraph(keys: string[]): Map<string, Set<string>> {
+    const graph = new Map<string, Set<string>>();
+
+    for (const key of keys) {
+      graph.set(key, new Set<string>());
+    }
+
+    return graph;
+  }
+
+  private findCycles(graph: Map<string, Set<string>>): GraphOutputCycle[] {
+    const cycles: GraphOutputCycle[] = [];
+    const reachableKeys = new Map<string, Set<string>>();
+
+    for (const source of graph.keys()) {
+      reachableKeys.set(source, this.findReachableKeys(source, graph));
+    }
+
+    for (const [source, targets] of graph) {
+      for (const target of targets) {
+        if (source !== target && !reachableKeys.get(target)?.has(source)) {
+          continue;
+        }
+
+        const path =
+          source === target
+            ? [source, source]
+            : [source, ...this.findPath(target, source, graph)];
+
+        cycles.push({
+          from: source,
+          to: target,
+          type: this.getCycleType(source, target, graph),
+          path,
+        });
+      }
+    }
+
+    return cycles;
+  }
+
+  private toProviderCycle(
+    cycle: GraphOutputCycle,
+    nodes: Map<string, DependencyNode>,
+  ): GraphOutputProviderCycle {
+    return {
+      ...cycle,
+      path: cycle.path.map((key) => this.toProviderCyclePathItem(key, nodes)),
+    };
+  }
+
+  private toProviderCyclePathItem(
+    key: string,
+    nodes: Map<string, DependencyNode>,
+  ): GraphOutputProviderCyclePathItem {
+    const node = nodes.get(key);
+    if (node) {
+      return {
+        module: { name: node.moduleName },
+        provider: { name: node.name },
+      };
+    }
+
+    const separatorIndex = key.indexOf(':');
+    if (separatorIndex === -1) {
+      return {
+        module: { name: '' },
+        provider: { name: key },
+      };
+    }
+
+    return {
+      module: { name: key.slice(0, separatorIndex) },
+      provider: { name: key.slice(separatorIndex + 1) },
+    };
+  }
+
+  private getCycleType(
+    source: string,
+    target: string,
+    graph: Map<string, Set<string>>,
+  ): GraphOutputCycleType {
+    if (source === target || graph.get(target)?.has(source)) {
+      return 'direct';
+    }
+
+    return 'indirect';
+  }
+
+  private findPath(
+    source: string,
+    target: string,
+    graph: Map<string, Set<string>>,
+  ): string[] {
+    const visited = new Set<string>();
+    const pendingPaths = [[source]];
+
+    while (pendingPaths.length > 0) {
+      const currentPath = pendingPaths.shift();
+      const current = currentPath?.[currentPath.length - 1];
+
+      if (!currentPath || !current || visited.has(current)) {
+        continue;
+      }
+
+      if (current === target) {
+        return currentPath;
+      }
+
+      visited.add(current);
+
+      for (const next of graph.get(current) ?? []) {
+        pendingPaths.push([...currentPath, next]);
+      }
+    }
+
+    return [source, target];
+  }
+
+  private findReachableKeys(
+    source: string,
+    graph: Map<string, Set<string>>,
+  ): Set<string> {
+    const reachableKeys = new Set<string>();
+    const pendingKeys = [...(graph.get(source) ?? [])];
+
+    while (pendingKeys.length > 0) {
+      const currentKey = pendingKeys.pop();
+
+      if (!currentKey || reachableKeys.has(currentKey)) {
+        continue;
+      }
+
+      reachableKeys.add(currentKey);
+
+      for (const nextKey of graph.get(currentKey) ?? []) {
+        pendingKeys.push(nextKey);
+      }
+    }
+
+    return reachableKeys;
+  }
+
+  private dependencyNodeKey(
+    moduleName: string,
+    dependencyName: string,
+  ): string {
+    return `${moduleName}:${dependencyName}`;
   }
 
   private enrichDependency(

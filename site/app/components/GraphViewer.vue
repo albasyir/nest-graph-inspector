@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { VueFlow, useVueFlow, Position, Handle, MarkerType, BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@vue-flow/core'
+import {
+  VueFlow,
+  useVueFlow,
+  Position,
+  Handle,
+  MarkerType,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
+} from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
@@ -7,9 +16,18 @@ import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
 import type { Node, Edge, EdgeProps } from '@vue-flow/core'
-import type { GraphOutput, GraphOutputModule, GraphOutputDependencyRef } from '@library/libs/nest-graph-inspector/src'
+import type {
+  GraphOutput,
+  GraphOutputModule,
+  GraphOutputDependencyRef,
+  GraphOutputCycle,
+  GraphOutputProviderCycle,
+} from '@library/libs/nest-graph-inspector/src'
 
-function normalizeDep(dep: GraphOutputDependencyRef): { moduleName: string, token: string } {
+function normalizeDep(dep: GraphOutputDependencyRef): {
+  moduleName: string
+  token: string
+} {
   return { moduleName: dep.providedBy.name, token: dep.token }
 }
 
@@ -42,25 +60,39 @@ type ModuleItemDependencyGraph = {
 
 type CircularEdgeKind = 'direct' | 'indirect'
 
+type CircularEdgeInfo = {
+  kind: CircularEdgeKind
+  path: string[]
+}
+
 type CircularEdgeData = {
   circularKind: CircularEdgeKind
   circularReason: string
 }
 
-type FlowNode = Node<ModuleNodeData, Record<string, never>, 'module'> | Node<ItemNodeData, Record<string, never>, 'item'>
-type FlowEdge = Edge<CircularEdgeData, Record<string, never>, 'smoothstep' | 'warning'>
-type WarningEdgeProps = EdgeProps<CircularEdgeData, Record<string, never>, 'warning'>
+type FlowNode =
+  | Node<ModuleNodeData, Record<string, never>, 'module'>
+  | Node<ItemNodeData, Record<string, never>, 'item'>
+type FlowEdge = Edge<
+  CircularEdgeData,
+  Record<string, never>,
+  'smoothstep' | 'warning'
+>
+type WarningEdgeProps = EdgeProps<CircularEdgeData>
 
-const props = withDefaults(defineProps<{
-  data: GraphOutput
-  height?: string
-  interactive?: boolean
-  flush?: boolean
-}>(), {
-  height: '75vh',
-  interactive: true,
-  flush: false
-})
+const props = withDefaults(
+  defineProps<{
+    data: GraphOutput
+    height?: string
+    interactive?: boolean
+    flush?: boolean
+  }>(),
+  {
+    height: '75vh',
+    interactive: true,
+    flush: false,
+  },
+)
 
 const { fitView } = useVueFlow()
 const graphViewerRef = ref<HTMLElement | null>(null)
@@ -87,10 +119,10 @@ async function centerGraph(duration = 200) {
   }
 
   await nextTick()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   await fitView({
     padding: GRAPH_FIT_PADDING,
-    duration
+    duration,
   })
 }
 
@@ -101,7 +133,9 @@ const debouncedCenterGraph = useDebounceFn(() => {
 function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
   const layers = new Map<number, string[]>()
   const visited = new Set<string>()
-  const queue: { name: string, depth: number }[] = [{ name: moduleMap.root, depth: 0 }]
+  const queue: { name: string; depth: number }[] = [
+    { name: moduleMap.root, depth: 0 },
+  ]
   visited.add(moduleMap.root)
 
   while (queue.length > 0) {
@@ -145,18 +179,28 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
 }
 
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
-  return new Set(Object.entries(moduleMap.modules)
-    .filter(([, mod]) => mod.providers.length === 0 && mod.controllers.length === 0)
-    .map(([moduleName]) => moduleName))
+  return new Set(
+    Object.entries(moduleMap.modules)
+      .filter(
+        ([, mod]) => mod.providers.length === 0 && mod.controllers.length === 0,
+      )
+      .map(([moduleName]) => moduleName),
+  )
 }
 
-function resolveDepNodeId(dep: GraphOutputDependencyRef, currentModule: string, moduleMap: GraphOutput): string | null {
+function resolveDepNodeId(
+  dep: GraphOutputDependencyRef,
+  currentModule: string,
+  moduleMap: GraphOutput,
+): string | null {
   const { moduleName, token } = normalizeDep(dep)
 
   const targetMod = moduleMap.modules[moduleName]
   if (targetMod) {
-    if (targetMod.providers.some(provider => provider.name === token)) return `provider-${moduleName}-${token}`
-    if (targetMod.controllers.some(controller => controller.name === token)) return `controller-${moduleName}-${token}`
+    if (targetMod.providers.some((provider) => provider.name === token))
+      return `provider-${moduleName}-${token}`
+    if (targetMod.controllers.some((controller) => controller.name === token))
+      return `controller-${moduleName}-${token}`
   }
 
   if (moduleName !== currentModule) {
@@ -164,43 +208,58 @@ function resolveDepNodeId(dep: GraphOutputDependencyRef, currentModule: string, 
   }
 
   for (const [modName, modData] of Object.entries(moduleMap.modules)) {
-    if (modData.providers.some(provider => provider.name === token)) return `provider-${modName}-${token}`
-    if (modData.controllers.some(controller => controller.name === token)) return `controller-${modName}-${token}`
+    if (modData.providers.some((provider) => provider.name === token))
+      return `provider-${modName}-${token}`
+    if (modData.controllers.some((controller) => controller.name === token))
+      return `controller-${modName}-${token}`
   }
 
   return null
 }
 
 function isNodeInModule(nodeId: string, moduleName: string): boolean {
-  return nodeId.startsWith(`provider-${moduleName}-`) || nodeId.startsWith(`controller-${moduleName}-`)
+  return (
+    nodeId.startsWith(`provider-${moduleName}-`) ||
+    nodeId.startsWith(`controller-${moduleName}-`)
+  )
 }
 
-function getModuleItemDependencyGraph(moduleName: string, mod: GraphOutputModule, moduleMap: GraphOutput): ModuleItemDependencyGraph {
+function getModuleItemDependencyGraph(
+  moduleName: string,
+  mod: GraphOutputModule,
+  moduleMap: GraphOutput,
+): ModuleItemDependencyGraph {
   const items: ModuleItemLayout[] = [
-    ...mod.providers.map(provider => ({
+    ...mod.providers.map((provider) => ({
       id: `provider-${moduleName}-${provider.name}`,
       label: provider.name,
       kind: 'provider' as const,
       isExported: mod.exports.includes(provider.name),
       dependencies: provider.dependencies,
-      depth: 0
+      depth: 0,
     })),
-    ...mod.controllers.map(controller => ({
+    ...mod.controllers.map((controller) => ({
       id: `controller-${moduleName}-${controller.name}`,
       label: controller.name,
       kind: 'controller' as const,
       isExported: mod.exports.includes(controller.name),
       dependencies: controller.dependencies,
-      depth: 0
-    }))
+      depth: 0,
+    })),
   ]
 
-  const itemIds = new Set(items.map(item => item.id))
+  const itemIds = new Set(items.map((item) => item.id))
   const sameModuleDependencies = new Map<string, string[]>()
   for (const item of items) {
-    sameModuleDependencies.set(item.id, item.dependencies
-      .map(dep => resolveDepNodeId(dep, moduleName, moduleMap))
-      .filter((nodeId): nodeId is string => Boolean(nodeId) && itemIds.has(nodeId) && isNodeInModule(nodeId, moduleName)))
+    sameModuleDependencies.set(
+      item.id,
+      item.dependencies
+        .map((dep) => resolveDepNodeId(dep, moduleName, moduleMap))
+        .filter((nodeId): nodeId is string => typeof nodeId === 'string')
+        .filter(
+          (nodeId) => itemIds.has(nodeId) && isNodeInModule(nodeId, moduleName),
+        ),
+    )
   }
 
   const indexById = new Map<string, number>()
@@ -220,9 +279,21 @@ function getModuleItemDependencyGraph(moduleName: string, mod: GraphOutputModule
     for (const dependencyId of sameModuleDependencies.get(itemId) || []) {
       if (!indexById.has(dependencyId)) {
         visit(dependencyId)
-        lowLinkById.set(itemId, Math.min(lowLinkById.get(itemId) || 0, lowLinkById.get(dependencyId) || 0))
+        lowLinkById.set(
+          itemId,
+          Math.min(
+            lowLinkById.get(itemId) || 0,
+            lowLinkById.get(dependencyId) || 0,
+          ),
+        )
       } else if (stacked.has(dependencyId)) {
-        lowLinkById.set(itemId, Math.min(lowLinkById.get(itemId) || 0, indexById.get(dependencyId) || 0))
+        lowLinkById.set(
+          itemId,
+          Math.min(
+            lowLinkById.get(itemId) || 0,
+            indexById.get(dependencyId) || 0,
+          ),
+        )
       }
     }
 
@@ -259,20 +330,21 @@ function getModuleItemDependencyGraph(moduleName: string, mod: GraphOutputModule
     items,
     sameModuleDependencies,
     components,
-    componentByItemId
+    componentByItemId,
   }
 }
 
-function getModuleItemHierarchy(moduleName: string, mod: GraphOutputModule, moduleMap: GraphOutput): ModuleItemLayout[] {
-  const {
-    items,
-    sameModuleDependencies,
-    componentByItemId
-  } = getModuleItemDependencyGraph(moduleName, mod, moduleMap)
+function getModuleItemHierarchy(
+  moduleName: string,
+  mod: GraphOutputModule,
+  moduleMap: GraphOutput,
+): ModuleItemLayout[] {
+  const { items, sameModuleDependencies, componentByItemId } =
+    getModuleItemDependencyGraph(moduleName, mod, moduleMap)
 
   const kindRank: Record<ItemNodeData['kind'], number> = {
     provider: 0,
-    controller: 1
+    controller: 1,
   }
 
   const componentDependencies = new Map<number, Set<number>>()
@@ -282,10 +354,14 @@ function getModuleItemHierarchy(moduleName: string, mod: GraphOutputModule, modu
       continue
     }
 
-    const dependenciesSet = componentDependencies.get(componentIndex) || new Set<number>()
+    const dependenciesSet =
+      componentDependencies.get(componentIndex) || new Set<number>()
     for (const dependencyId of dependencies) {
       const dependencyComponentIndex = componentByItemId.get(dependencyId)
-      if (dependencyComponentIndex !== undefined && dependencyComponentIndex !== componentIndex) {
+      if (
+        dependencyComponentIndex !== undefined &&
+        dependencyComponentIndex !== componentIndex
+      ) {
         dependenciesSet.add(dependencyComponentIndex)
       }
     }
@@ -299,8 +375,13 @@ function getModuleItemHierarchy(moduleName: string, mod: GraphOutputModule, modu
       return knownDepth
     }
 
-    const dependencies = Array.from(componentDependencies.get(componentIndex) || [])
-    const depth = dependencies.length === 0 ? 0 : Math.max(...dependencies.map(getComponentDepth)) + 1
+    const dependencies = Array.from(
+      componentDependencies.get(componentIndex) || [],
+    )
+    const depth =
+      dependencies.length === 0
+        ? 0
+        : Math.max(...dependencies.map(getComponentDepth)) + 1
     depthByComponent.set(componentIndex, depth)
     return depth
   }
@@ -310,24 +391,33 @@ function getModuleItemHierarchy(moduleName: string, mod: GraphOutputModule, modu
       const componentIndex = componentByItemId.get(item.id)
       return {
         ...item,
-        depth: componentIndex === undefined ? 0 : getComponentDepth(componentIndex)
+        depth:
+          componentIndex === undefined ? 0 : getComponentDepth(componentIndex),
       }
     })
-    .sort((a, b) => a.depth - b.depth || kindRank[a.kind] - kindRank[b.kind] || a.label.localeCompare(b.label))
+    .sort(
+      (a, b) =>
+        a.depth - b.depth ||
+        kindRank[a.kind] - kindRank[b.kind] ||
+        a.label.localeCompare(b.label),
+    )
 }
 
-function getCircularEdgeDataProps(kind: CircularEdgeKind | undefined): { data?: CircularEdgeData } {
-  if (!kind) {
+function getCircularEdgeDataProps(info: CircularEdgeInfo | undefined): {
+  data?: CircularEdgeData
+} {
+  if (!info) {
     return {}
   }
 
   return {
     data: {
-      circularKind: kind,
-      circularReason: kind === 'direct'
-        ? 'Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.'
-        : 'Indirect circular dependency: this edge is part of a longer dependency cycle.'
-    }
+      circularKind: info.kind,
+      circularReason:
+        info.kind === 'direct'
+          ? 'Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.'
+          : `Indirect circular dependency: ${info.path.join(' -> ')}.`,
+    },
   }
 }
 
@@ -338,7 +428,7 @@ function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
     sourcePosition: edgeProps.sourcePosition,
     targetX: edgeProps.targetX,
     targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
+    targetPosition: edgeProps.targetPosition,
   })
 
   return path
@@ -351,139 +441,157 @@ function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
     sourcePosition: edgeProps.sourcePosition,
     targetX: edgeProps.targetX,
     targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
+    targetPosition: edgeProps.targetPosition,
   })
 
   return {
     position: 'absolute',
     transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-    pointerEvents: 'all'
+    pointerEvents: 'all',
   }
 }
 
-function getCircularDependencyEdges(moduleName: string, mod: GraphOutputModule, moduleMap: GraphOutput): Map<string, CircularEdgeKind> {
-  const {
-    sameModuleDependencies,
-    components,
-    componentByItemId
-  } = getModuleItemDependencyGraph(moduleName, mod, moduleMap)
-  const circularComponents = new Set<number>()
-
-  for (const [componentIndex, component] of components.entries()) {
-    const hasSelfLoop = component.length === 1
-      && (sameModuleDependencies.get(component[0]) || []).includes(component[0])
-
-    if (component.length > 1 || hasSelfLoop) {
-      circularComponents.add(componentIndex)
-    }
+function splitDependencyCycleKey(
+  key: string,
+): { moduleName: string; token: string } | null {
+  const separatorIndex = key.indexOf(':')
+  if (separatorIndex === -1) {
+    return null
   }
 
-  const circularEdges = new Map<string, CircularEdgeKind>()
-  for (const [targetId, dependencies] of sameModuleDependencies.entries()) {
-    const targetComponent = componentByItemId.get(targetId)
-    if (targetComponent === undefined || !circularComponents.has(targetComponent)) {
+  return {
+    moduleName: key.slice(0, separatorIndex),
+    token: key.slice(separatorIndex + 1),
+  }
+}
+
+function formatDependencyCyclePath(path: string[]): string[] {
+  return path.map((key) => {
+    const parsedKey = splitDependencyCycleKey(key)
+    if (!parsedKey) {
+      return key
+    }
+
+    return `${parsedKey.token} from ${parsedKey.moduleName}`
+  })
+}
+
+function formatProviderCyclePath(
+  path: GraphOutputProviderCycle['path'],
+): string[] {
+  return path.map((item) => `${item.provider.name} from ${item.module.name}`)
+}
+
+function resolveCycleNodeId(
+  key: string,
+  moduleMap: GraphOutput,
+  preferredKind?: ItemNodeData['kind'],
+): string | null {
+  const parsedKey = splitDependencyCycleKey(key)
+  if (!parsedKey) {
+    return null
+  }
+
+  const mod = moduleMap.modules[parsedKey.moduleName]
+  if (!mod) {
+    return null
+  }
+
+  if (
+    preferredKind === 'provider' &&
+    mod.providers.some((provider) => provider.name === parsedKey.token)
+  ) {
+    return `provider-${parsedKey.moduleName}-${parsedKey.token}`
+  }
+
+  if (
+    preferredKind === 'controller' &&
+    mod.controllers.some((controller) => controller.name === parsedKey.token)
+  ) {
+    return `controller-${parsedKey.moduleName}-${parsedKey.token}`
+  }
+
+  if (mod.providers.some((provider) => provider.name === parsedKey.token)) {
+    return `provider-${parsedKey.moduleName}-${parsedKey.token}`
+  }
+
+  if (
+    mod.controllers.some((controller) => controller.name === parsedKey.token)
+  ) {
+    return `controller-${parsedKey.moduleName}-${parsedKey.token}`
+  }
+
+  return null
+}
+
+function addDependencyCycleEdges(
+  circularEdges: Map<string, CircularEdgeInfo>,
+  cycles: GraphOutputCycle[] | undefined,
+  moduleMap: GraphOutput,
+  fromKind: ItemNodeData['kind'],
+): void {
+  for (const cycle of cycles || []) {
+    const fromId = resolveCycleNodeId(cycle.from, moduleMap, fromKind)
+    const toId = resolveCycleNodeId(cycle.to, moduleMap)
+    if (!fromId || !toId) {
       continue
     }
 
-    for (const sourceId of dependencies) {
-      if (componentByItemId.get(sourceId) === targetComponent) {
-        const isDirect = sourceId === targetId || (sameModuleDependencies.get(sourceId) || []).includes(targetId)
-        circularEdges.set(`${sourceId}->${targetId}`, isDirect ? 'direct' : 'indirect')
-      }
-    }
+    circularEdges.set(`${toId}->${fromId}`, {
+      kind: cycle.type,
+      path: formatDependencyCyclePath(cycle.path),
+    })
   }
+}
+
+function addProviderDependencyCycleEdges(
+  circularEdges: Map<string, CircularEdgeInfo>,
+  cycles: GraphOutputProviderCycle[] | undefined,
+  moduleMap: GraphOutput,
+): void {
+  for (const cycle of cycles || []) {
+    const fromId = resolveCycleNodeId(cycle.from, moduleMap, 'provider')
+    const toId = resolveCycleNodeId(cycle.to, moduleMap)
+    if (!fromId || !toId) {
+      continue
+    }
+
+    circularEdges.set(`${toId}->${fromId}`, {
+      kind: cycle.type,
+      path: formatProviderCyclePath(cycle.path),
+    })
+  }
+}
+
+function getCircularDependencyEdges(
+  moduleMap: GraphOutput,
+): Map<string, CircularEdgeInfo> {
+  const circularEdges = new Map<string, CircularEdgeInfo>()
+  addProviderDependencyCycleEdges(
+    circularEdges,
+    moduleMap.cycles?.providers,
+    moduleMap,
+  )
+  addDependencyCycleEdges(
+    circularEdges,
+    moduleMap.cycles?.controllers,
+    moduleMap,
+    'controller',
+  )
 
   return circularEdges
 }
 
-function getCircularModuleEdges(moduleMap: GraphOutput): Map<string, CircularEdgeKind> {
-  const moduleNames = Object.keys(moduleMap.modules)
-  const moduleImports = new Map<string, string[]>()
-  for (const moduleName of moduleNames) {
-    moduleImports.set(moduleName, [])
-  }
+function getCircularModuleEdges(
+  moduleMap: GraphOutput,
+): Map<string, CircularEdgeInfo> {
+  const circularEdges = new Map<string, CircularEdgeInfo>()
 
-  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    for (const imp of mod.imports) {
-      if (moduleMap.modules[imp]) {
-        moduleImports.get(imp)?.push(moduleName)
-      }
-    }
-  }
-
-  const indexById = new Map<string, number>()
-  const lowLinkById = new Map<string, number>()
-  const stack: string[] = []
-  const stacked = new Set<string>()
-  const components: string[][] = []
-  let nextIndex = 0
-
-  function visit(moduleName: string) {
-    indexById.set(moduleName, nextIndex)
-    lowLinkById.set(moduleName, nextIndex)
-    nextIndex += 1
-    stack.push(moduleName)
-    stacked.add(moduleName)
-
-    for (const importingModuleName of moduleImports.get(moduleName) || []) {
-      if (!indexById.has(importingModuleName)) {
-        visit(importingModuleName)
-        lowLinkById.set(moduleName, Math.min(lowLinkById.get(moduleName) || 0, lowLinkById.get(importingModuleName) || 0))
-      } else if (stacked.has(importingModuleName)) {
-        lowLinkById.set(moduleName, Math.min(lowLinkById.get(moduleName) || 0, indexById.get(importingModuleName) || 0))
-      }
-    }
-
-    if (lowLinkById.get(moduleName) !== indexById.get(moduleName)) {
-      return
-    }
-
-    const component: string[] = []
-    let stackedId: string | undefined
-    do {
-      stackedId = stack.pop()
-      if (stackedId) {
-        stacked.delete(stackedId)
-        component.push(stackedId)
-      }
-    } while (stackedId && stackedId !== moduleName)
-    components.push(component)
-  }
-
-  for (const moduleName of moduleNames) {
-    if (!indexById.has(moduleName)) {
-      visit(moduleName)
-    }
-  }
-
-  const componentByModule = new Map<string, number>()
-  const circularComponents = new Set<number>()
-  for (const [componentIndex, component] of components.entries()) {
-    for (const moduleName of component) {
-      componentByModule.set(moduleName, componentIndex)
-    }
-
-    const hasSelfImport = component.length === 1
-      && (moduleImports.get(component[0]) || []).includes(component[0])
-
-    if (component.length > 1 || hasSelfImport) {
-      circularComponents.add(componentIndex)
-    }
-  }
-
-  const circularEdges = new Map<string, CircularEdgeKind>()
-  for (const [sourceModuleName, targetModuleNames] of moduleImports.entries()) {
-    const sourceComponent = componentByModule.get(sourceModuleName)
-    if (sourceComponent === undefined || !circularComponents.has(sourceComponent)) {
-      continue
-    }
-
-    for (const targetModuleName of targetModuleNames) {
-      if (componentByModule.get(targetModuleName) === sourceComponent) {
-        const isDirect = sourceModuleName === targetModuleName || (moduleImports.get(targetModuleName) || []).includes(sourceModuleName)
-        circularEdges.set(`${sourceModuleName}->${targetModuleName}`, isDirect ? 'direct' : 'indirect')
-      }
-    }
+  for (const cycle of moduleMap.cycles?.modules || []) {
+    circularEdges.set(`${cycle.to}->${cycle.from}`, {
+      kind: cycle.type,
+      path: cycle.path,
+    })
   }
 
   return circularEdges
@@ -506,8 +614,8 @@ function calcModuleSize(
   moduleName: string,
   mod: GraphOutputModule,
   moduleMap: GraphOutput,
-  isCollapsed = false
-): { width: number, height: number } {
+  isCollapsed = false,
+): { width: number; height: number } {
   if (isCollapsed) {
     return { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
   }
@@ -516,29 +624,34 @@ function calcModuleSize(
   if (itemCount === 0) {
     return {
       width: MODULE_MIN_WIDTH,
-      height: MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
+      height: MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16,
     }
   }
 
-  const rows = getHierarchyRows(getModuleItemHierarchy(moduleName, mod, moduleMap))
-  const maxRowItemCount = Math.max(...rows.map(row => row.length), 1)
+  const rows = getHierarchyRows(
+    getModuleItemHierarchy(moduleName, mod, moduleMap),
+  )
+  const maxRowItemCount = Math.max(...rows.map((row) => row.length), 1)
   const width = Math.max(
     MODULE_MIN_WIDTH,
-    MODULE_PADDING * 2 + maxRowItemCount * NODE_WIDTH + (maxRowItemCount - 1) * NODE_GAP_X
+    MODULE_PADDING * 2 +
+      maxRowItemCount * NODE_WIDTH +
+      (maxRowItemCount - 1) * NODE_GAP_X,
   )
-  const height = MODULE_TITLE_HEIGHT
-    + MODULE_PADDING
-    + rows.length * NODE_HEIGHT
-    + Math.max(rows.length - 1, 0) * NODE_LEVEL_GAP_Y
-    + MODULE_PADDING
+  const height =
+    MODULE_TITLE_HEIGHT +
+    MODULE_PADDING +
+    rows.length * NODE_HEIGHT +
+    Math.max(rows.length - 1, 0) * NODE_LEVEL_GAP_Y +
+    MODULE_PADDING
 
   return { width, height }
 }
 
 function pickHandles(
-  sourcePos: { x: number, y: number },
-  targetPos: { x: number, y: number }
-): { sourceHandle: string, targetHandle: string } {
+  sourcePos: { x: number; y: number },
+  targetPos: { x: number; y: number },
+): { sourceHandle: string; targetHandle: string } {
   const dx = targetPos.x - sourcePos.x
   const dy = targetPos.y - sourcePos.y
 
@@ -560,9 +673,9 @@ function pickHandles(
 }
 
 function pickDependencyHandles(
-  sourcePos: { x: number, y: number },
-  targetPos: { x: number, y: number }
-): { sourceHandle: string, targetHandle: string } {
+  sourcePos: { x: number; y: number },
+  targetPos: { x: number; y: number },
+): { sourceHandle: string; targetHandle: string } {
   if (Math.abs(targetPos.y - sourcePos.y) < NODE_HEIGHT) {
     if (targetPos.x >= sourcePos.x) {
       return { sourceHandle: 'source-right', targetHandle: 'target-left' }
@@ -578,32 +691,50 @@ function pickDependencyHandles(
   return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
 }
 
-function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()): { nodes: FlowNode[], edges: FlowEdge[] } {
+function buildGraph(
+  moduleMap: GraphOutput,
+  collapsedModules = new Set<string>(),
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
   const circularModuleEdges = getCircularModuleEdges(moduleMap)
+  const circularDependencyEdges = getCircularDependencyEdges(moduleMap)
 
-  const moduleSizes = new Map<string, { width: number, height: number }>()
+  const moduleSizes = new Map<string, { width: number; height: number }>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    moduleSizes.set(moduleName, calcModuleSize(moduleName, mod, moduleMap, collapsedModules.has(moduleName)))
+    moduleSizes.set(
+      moduleName,
+      calcModuleSize(
+        moduleName,
+        mod,
+        moduleMap,
+        collapsedModules.has(moduleName),
+      ),
+    )
   }
 
-  const modulePositions = new Map<string, { x: number, y: number }>()
-  const nodeAbsPositions = new Map<string, { x: number, y: number }>()
+  const modulePositions = new Map<string, { x: number; y: number }>()
+  const nodeAbsPositions = new Map<string, { x: number; y: number }>()
   let currentY = 0
 
   for (const [, moduleNames] of sortedLayers) {
-    const layerWidth = moduleNames.reduce((sum, name) => {
-      const size = moduleSizes.get(name)
-      return sum + (size?.width || MODULE_MIN_WIDTH)
-    }, Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X)
+    const layerWidth = moduleNames.reduce(
+      (sum, name) => {
+        const size = moduleSizes.get(name)
+        return sum + (size?.width || MODULE_MIN_WIDTH)
+      },
+      Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X,
+    )
     let currentX = -(layerWidth / 2)
 
     let maxHeight = 0
     for (const name of moduleNames) {
-      const size = moduleSizes.get(name) || { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
+      const size = moduleSizes.get(name) || {
+        width: MODULE_MIN_WIDTH,
+        height: MODULE_COLLAPSED_HEIGHT,
+      }
       modulePositions.set(name, { x: currentX, y: currentY })
       maxHeight = Math.max(maxHeight, size.height)
       currentX += size.width + MODULE_GAP_X
@@ -614,7 +745,9 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
     const isCollapsed = collapsedModules.has(moduleName)
-    const size = moduleSizes.get(moduleName) || calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
+    const size =
+      moduleSizes.get(moduleName) ||
+      calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
 
     nodes.push({
       id: `module-${moduleName}`,
@@ -625,9 +758,9 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
         isRoot: moduleName === moduleMap.root,
         isCollapsed,
         minWidth: size.width,
-        minHeight: size.height
+        minHeight: size.height,
       },
-      style: { width: `${size.width}px`, height: `${size.height}px` }
+      style: { width: `${size.width}px`, height: `${size.height}px` },
     })
   }
 
@@ -637,19 +770,28 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
     }
 
     const modPos = modulePositions.get(moduleName) || { x: 0, y: 0 }
-    const moduleSize = moduleSizes.get(moduleName) || { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
-    const rows = getHierarchyRows(getModuleItemHierarchy(moduleName, mod, moduleMap))
+    const moduleSize = moduleSizes.get(moduleName) || {
+      width: MODULE_MIN_WIDTH,
+      height: MODULE_COLLAPSED_HEIGHT,
+    }
+    const rows = getHierarchyRows(
+      getModuleItemHierarchy(moduleName, mod, moduleMap),
+    )
 
     for (const [rowIndex, row] of rows.entries()) {
-      const rowWidth = row.length * NODE_WIDTH + Math.max(row.length - 1, 0) * NODE_GAP_X
+      const rowWidth =
+        row.length * NODE_WIDTH + Math.max(row.length - 1, 0) * NODE_GAP_X
       const startX = Math.max(MODULE_PADDING, (moduleSize.width - rowWidth) / 2)
-      const childY = MODULE_TITLE_HEIGHT + MODULE_PADDING + rowIndex * (NODE_HEIGHT + NODE_LEVEL_GAP_Y)
+      const childY =
+        MODULE_TITLE_HEIGHT +
+        MODULE_PADDING +
+        rowIndex * (NODE_HEIGHT + NODE_LEVEL_GAP_Y)
 
       for (const [itemIndex, item] of row.entries()) {
         const childX = startX + itemIndex * (NODE_WIDTH + NODE_GAP_X)
         nodeAbsPositions.set(item.id, {
           x: modPos.x + childX + NODE_WIDTH / 2,
-          y: modPos.y + childY + NODE_HEIGHT / 2
+          y: modPos.y + childY + NODE_HEIGHT / 2,
         })
         nodes.push({
           id: item.id,
@@ -661,9 +803,9 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
           data: {
             label: item.label,
             kind: item.kind,
-            isExported: item.isExported
+            isExported: item.isExported,
           },
-          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
+          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` },
         })
       }
     }
@@ -680,7 +822,9 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
 
         const { sourceHandle, targetHandle } = pickHandles(sourcePos, targetPos)
         const circularKind = circularModuleEdges.get(`${imp}->${moduleName}`)
-        const edgeColor = circularKind ? CIRCULAR_DEPENDENCY_EDGE_COLOR : MODULE_EDGE_COLOR
+        const edgeColor = circularKind
+          ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+          : MODULE_EDGE_COLOR
 
         edges.push({
           id: `e-mod-${imp}->${moduleName}`,
@@ -691,15 +835,13 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
           type: circularKind ? 'warning' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
           markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getCircularEdgeDataProps(circularKind)
+          ...getCircularEdgeDataProps(circularKind),
         })
       }
     }
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    const circularDependencyEdges = getCircularDependencyEdges(moduleName, mod, moduleMap)
-
     for (const provider of mod.providers) {
       for (const dep of provider.dependencies) {
         const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
@@ -711,9 +853,16 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             continue
           }
 
-          const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
-          const circularKind = circularDependencyEdges.get(`${sourceId}->${targetId}`)
-          const edgeColor = circularKind ? CIRCULAR_DEPENDENCY_EDGE_COLOR : DEPENDENCY_EDGE_COLOR
+          const { sourceHandle, targetHandle } = pickDependencyHandles(
+            sPos,
+            tPos,
+          )
+          const circularKind = circularDependencyEdges.get(
+            `${sourceId}->${targetId}`,
+          )
+          const edgeColor = circularKind
+            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+            : DEPENDENCY_EDGE_COLOR
 
           edges.push({
             id: `e-dep-${sourceId}->${targetId}`,
@@ -724,7 +873,7 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             type: circularKind ? 'warning' : 'smoothstep',
             style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularKind)
+            ...getCircularEdgeDataProps(circularKind),
           })
         }
       }
@@ -741,9 +890,16 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             continue
           }
 
-          const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
-          const circularKind = circularDependencyEdges.get(`${sourceId}->${targetId}`)
-          const edgeColor = circularKind ? CIRCULAR_DEPENDENCY_EDGE_COLOR : DEPENDENCY_EDGE_COLOR
+          const { sourceHandle, targetHandle } = pickDependencyHandles(
+            sPos,
+            tPos,
+          )
+          const circularKind = circularDependencyEdges.get(
+            `${sourceId}->${targetId}`,
+          )
+          const edgeColor = circularKind
+            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+            : DEPENDENCY_EDGE_COLOR
 
           edges.push({
             id: `e-dep-${sourceId}->${targetId}`,
@@ -754,7 +910,7 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
             type: circularKind ? 'warning' : 'smoothstep',
             style: { stroke: edgeColor, strokeWidth: circularKind ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularKind)
+            ...getCircularEdgeDataProps(circularKind),
           })
         }
       }
@@ -764,7 +920,9 @@ function buildGraph(moduleMap: GraphOutput, collapsedModules = new Set<string>()
   return { nodes, edges }
 }
 
-const collapsedModuleNames = ref<Set<string>>(getDefaultCollapsedModuleNames(props.data))
+const collapsedModuleNames = ref<Set<string>>(
+  getDefaultCollapsedModuleNames(props.data),
+)
 const initialGraph = buildGraph(props.data, collapsedModuleNames.value)
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
@@ -789,11 +947,15 @@ function toggleModule(moduleName: string) {
   void centerGraph()
 }
 
-watch(() => props.data, () => {
-  collapsedModuleNames.value = getDefaultCollapsedModuleNames(props.data)
-  refreshGraph()
-  void centerGraph()
-}, { deep: true })
+watch(
+  () => props.data,
+  () => {
+    collapsedModuleNames.value = getDefaultCollapsedModuleNames(props.data)
+    refreshGraph()
+    void centerGraph()
+  },
+  { deep: true },
+)
 
 onMounted(() => {
   setTimeout(() => {
@@ -860,32 +1022,16 @@ useResizeObserver(graphViewerRef, () => {
           color="var(--mg-node-resizer-color)"
         />
 
-        <Handle
-          id="target-top"
-          type="target"
-          :position="Position.Top"
-        />
-        <Handle
-          id="target-bottom"
-          type="target"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="target-left"
-          type="target"
-          :position="Position.Left"
-        />
-        <Handle
-          id="target-right"
-          type="target"
-          :position="Position.Right"
-        />
+        <Handle id="target-top" type="target" :position="Position.Top" />
+        <Handle id="target-bottom" type="target" :position="Position.Bottom" />
+        <Handle id="target-left" type="target" :position="Position.Left" />
+        <Handle id="target-right" type="target" :position="Position.Right" />
 
         <div
           class="module-subgraph"
           :class="{
             'module-subgraph--root': moduleProps.data.isRoot,
-            'module-subgraph--collapsed': moduleProps.data.isCollapsed
+            'module-subgraph--collapsed': moduleProps.data.isCollapsed,
           }"
         >
           <div
@@ -899,7 +1045,11 @@ useResizeObserver(graphViewerRef, () => {
               type="button"
               class="module-subgraph__toggle"
               :aria-expanded="!moduleProps.data.isCollapsed"
-              :aria-label="moduleProps.data.isCollapsed ? `Open ${moduleProps.data.label}` : `Close ${moduleProps.data.label}`"
+              :aria-label="
+                moduleProps.data.isCollapsed
+                  ? `Open ${moduleProps.data.label}`
+                  : `Close ${moduleProps.data.label}`
+              "
               @click.stop="toggleModule(moduleProps.data.label)"
             >
               {{ moduleProps.data.isCollapsed ? '+' : '-' }}
@@ -911,49 +1061,17 @@ useResizeObserver(graphViewerRef, () => {
           />
         </div>
 
-        <Handle
-          id="source-top"
-          type="source"
-          :position="Position.Top"
-        />
-        <Handle
-          id="source-bottom"
-          type="source"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="source-left"
-          type="source"
-          :position="Position.Left"
-        />
-        <Handle
-          id="source-right"
-          type="source"
-          :position="Position.Right"
-        />
+        <Handle id="source-top" type="source" :position="Position.Top" />
+        <Handle id="source-bottom" type="source" :position="Position.Bottom" />
+        <Handle id="source-left" type="source" :position="Position.Left" />
+        <Handle id="source-right" type="source" :position="Position.Right" />
       </template>
 
       <template #node-item="itemProps">
-        <Handle
-          id="target-top"
-          type="target"
-          :position="Position.Top"
-        />
-        <Handle
-          id="target-bottom"
-          type="target"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="target-left"
-          type="target"
-          :position="Position.Left"
-        />
-        <Handle
-          id="target-right"
-          type="target"
-          :position="Position.Right"
-        />
+        <Handle id="target-top" type="target" :position="Position.Top" />
+        <Handle id="target-bottom" type="target" :position="Position.Bottom" />
+        <Handle id="target-left" type="target" :position="Position.Left" />
+        <Handle id="target-right" type="target" :position="Position.Right" />
 
         <div
           class="mermaid-node"
@@ -962,10 +1080,7 @@ useResizeObserver(graphViewerRef, () => {
           <span class="mermaid-node__kind">
             {{ itemProps.data.kind === 'controller' ? 'C' : 'P' }}
           </span>
-          <span
-            v-if="itemProps.data.isExported"
-            class="mermaid-node__export"
-          >
+          <span v-if="itemProps.data.isExported" class="mermaid-node__export">
             E
           </span>
           <span class="mermaid-node__label">
@@ -973,26 +1088,10 @@ useResizeObserver(graphViewerRef, () => {
           </span>
         </div>
 
-        <Handle
-          id="source-top"
-          type="source"
-          :position="Position.Top"
-        />
-        <Handle
-          id="source-bottom"
-          type="source"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="source-left"
-          type="source"
-          :position="Position.Left"
-        />
-        <Handle
-          id="source-right"
-          type="source"
-          :position="Position.Right"
-        />
+        <Handle id="source-top" type="source" :position="Position.Top" />
+        <Handle id="source-bottom" type="source" :position="Position.Bottom" />
+        <Handle id="source-left" type="source" :position="Position.Left" />
+        <Handle id="source-right" type="source" :position="Position.Right" />
       </template>
 
       <Background />
@@ -1010,16 +1109,16 @@ useResizeObserver(graphViewerRef, () => {
 @import '@vue-flow/node-resizer/dist/style.css';
 
 :root {
-  --mg-node-bg: #ECECFF;
-  --mg-node-border: #9370DB;
+  --mg-node-bg: #ececff;
+  --mg-node-border: #9370db;
   --mg-node-text: #333;
-  --mg-controller-bg: #EAF7FF;
-  --mg-controller-border: #38BDF8;
-  --mg-controller-kind-bg: #0284C7;
-  --mg-provider-bg: #ECFDF3;
-  --mg-provider-border: #22C55E;
-  --mg-provider-kind-bg: #16A34A;
-  --mg-export-badge-bg: #D97706;
+  --mg-controller-bg: #eaf7ff;
+  --mg-controller-border: #38bdf8;
+  --mg-controller-kind-bg: #0284c7;
+  --mg-provider-bg: #ecfdf3;
+  --mg-provider-border: #22c55e;
+  --mg-provider-kind-bg: #16a34a;
+  --mg-export-badge-bg: #d97706;
   --mg-subgraph-bg: rgba(236, 236, 255, 0.12);
   --mg-subgraph-border: #bbb;
   --mg-subgraph-title-bg: rgba(0, 0, 0, 0.04);
@@ -1027,7 +1126,7 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-border: #ff6b6b;
   --mg-root-bg: rgba(255, 107, 107, 0.06);
   --mg-root-title-bg: rgba(255, 107, 107, 0.08);
-  --mg-node-resizer-color: #9370DB;
+  --mg-node-resizer-color: #9370db;
 }
 
 .dark {

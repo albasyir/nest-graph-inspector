@@ -3,20 +3,14 @@
   "root": "AppModule",
   "modules": {
     "AppModule": {
-      "imports": [
-        "UserModule",
-        "ProductModule",
-        "OrderModule"
-      ],
+      "imports": ["UserModule", "ProductModule", "OrderModule"],
       "exports": [],
       "providers": [],
       "controllers": []
     },
     "UserModule": {
       "imports": [],
-      "exports": [
-        "UserService"
-      ],
+      "exports": ["UserService"],
       "providers": [
         {
           "name": "UserService",
@@ -45,12 +39,8 @@
       ]
     },
     "ProductModule": {
-      "imports": [
-        "UserModule"
-      ],
-      "exports": [
-        "ProductService"
-      ],
+      "imports": ["UserModule"],
+      "exports": ["ProductService"],
       "providers": [
         {
           "name": "ProductService",
@@ -79,13 +69,8 @@
       ]
     },
     "OrderModule": {
-      "imports": [
-        "UserModule",
-        "ProductModule"
-      ],
-      "exports": [
-        "OrderService"
-      ],
+      "imports": ["UserModule", "ProductModule"],
+      "exports": ["OrderService"],
       "providers": [
         {
           "name": "OrderRepository",
@@ -144,9 +129,7 @@
     },
     "NestJSCoreModule": {
       "imports": [],
-      "exports": [
-        "ModuleRef"
-      ],
+      "exports": ["ModuleRef"],
       "providers": [
         {
           "name": "ModuleRef",
@@ -155,5 +138,49 @@
       ],
       "controllers": []
     }
+  },
+  "cycles": {
+    "modules": [],
+    "providers": [
+      {
+        "from": "OrderModule:OrderService",
+        "to": "OrderModule:OrderNotificationService",
+        "type": "direct",
+        "path": [
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderService" }
+          },
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderNotificationService" }
+          },
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderService" }
+          }
+        ]
+      },
+      {
+        "from": "OrderModule:OrderNotificationService",
+        "to": "OrderModule:OrderService",
+        "type": "direct",
+        "path": [
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderNotificationService" }
+          },
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderService" }
+          },
+          {
+            "module": { "name": "OrderModule" },
+            "provider": { "name": "OrderNotificationService" }
+          }
+        ]
+      }
+    ],
+    "controllers": []
   }
 }

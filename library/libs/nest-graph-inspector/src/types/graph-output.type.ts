@@ -20,8 +20,36 @@ export type GraphOutputModule = {
   controllers: GraphOutputController[];
 };
 
+export type GraphOutputCycleType = 'direct' | 'indirect';
+
+export type GraphOutputCycleBase = {
+  from: string;
+  to: string;
+  type: GraphOutputCycleType;
+};
+
+export type GraphOutputCycle = GraphOutputCycleBase & {
+  path: string[];
+};
+
+export type GraphOutputProviderCyclePathItem = {
+  module: { name: string };
+  provider: { name: string };
+};
+
+export type GraphOutputProviderCycle = GraphOutputCycleBase & {
+  path: GraphOutputProviderCyclePathItem[];
+};
+
+export type GraphOutputCycles = {
+  modules: GraphOutputCycle[];
+  providers: GraphOutputProviderCycle[];
+  controllers: GraphOutputCycle[];
+};
+
 export type GraphOutput = {
   version: string;
   root: string;
   modules: Record<string, GraphOutputModule>;
+  cycles: GraphOutputCycles;
 };

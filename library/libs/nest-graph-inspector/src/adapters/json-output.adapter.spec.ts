@@ -16,6 +16,11 @@ describe(JsonOutputAdapter.name, () => {
   let adapter: JsonOutputAdapter;
   const mockedMkdir = jest.mocked(mkdir);
   const mockedWriteFile = jest.mocked(writeFile);
+  const emptyCycles = () => ({
+    modules: [],
+    providers: [],
+    controllers: [],
+  });
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
@@ -75,6 +80,7 @@ describe(JsonOutputAdapter.name, () => {
           ],
         },
       },
+      cycles: emptyCycles(),
     };
 
     const config = { type: 'json' as const, path: 'artifacts/module-map.json' };
@@ -108,6 +114,7 @@ describe(JsonOutputAdapter.name, () => {
       version: '2',
       root: 'App',
       modules: {},
+      cycles: emptyCycles(),
     };
     const config = {
       type: 'json' as const,

@@ -5,6 +5,7 @@ import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type {
   GraphOutput,
+  GraphOutputCycle,
   GraphOutputModule,
   GraphOutputProvider,
   GraphOutputController,
@@ -13,6 +14,7 @@ import type {
 
 type FileOutputConfig = Extract<NestGraphInspectorOutput, { type: 'markdown' }>;
 type CircularDependencyWarnings = Map<string, string[]>;
+type CircularWarningCycle = Pick<GraphOutputCycle, 'from' | 'to' | 'type'>;
 type ImportWarnings = Map<string, Map<string, string[]>>;
 
 @Injectable()
@@ -216,14 +218,11 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     moduleEntries: [string, GraphOutputModule][],
     graphOutput: GraphOutput,
   ): void {
-    const providerCircularWarnings = this.findProviderCircularWarnings(
-      moduleEntries,
-      graphOutput,
-    );
-    const moduleCircularWarnings = this.findModuleCircularWarnings(
-      moduleEntries,
-      graphOutput,
-    );
+    const providerCircularWarnings =
+      this.findProviderCircularWarnings(graphOutput);
+    const controllerCircularWarnings =
+      this.findControllerCircularWarnings(graphOutput);
+    const moduleCircularWarnings = this.findModuleCircularWarnings(graphOutput);
     const unusedImportWarnings = this.findUnusedImportWarnings(
       moduleEntries,
       graphOutput,
@@ -256,77 +255,38 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
       this.appendControllerSection(
         lines,
         'Controllers',
+        moduleName,
         moduleData.controllers,
+        controllerCircularWarnings,
       );
     }
   }
 
   private findProviderCircularWarnings(
-    moduleEntries: [string, GraphOutputModule][],
     graphOutput: GraphOutput,
   ): CircularDependencyWarnings {
-    const providerKeys = new Set<string>();
-    const providerEdges = this.createNodeMap(moduleEntries, ([moduleName]) =>
-      graphOutput.modules[moduleName].providers.map((provider) =>
-        this.providerKey(moduleName, provider.name),
-      ),
+    return this.findCircularWarningsFromCycles(
+      graphOutput.cycles?.providers,
+      (providerKey) => this.providerDisplayNameFromKey(providerKey),
     );
+  }
 
-    for (const [moduleName, moduleData] of moduleEntries) {
-      for (const provider of moduleData.providers) {
-        providerKeys.add(this.providerKey(moduleName, provider.name));
-      }
-    }
-
-    for (const [moduleName, moduleData] of moduleEntries) {
-      for (const provider of moduleData.providers) {
-        const providerKey = this.providerKey(moduleName, provider.name);
-        const dependencies = this.getOrCreateSet(providerEdges, providerKey);
-
-        for (const dependency of provider.dependencies) {
-          const dependencyModule =
-            graphOutput.modules[dependency.providedBy.name];
-          const dependencyKey = this.providerKey(
-            dependency.providedBy.name,
-            dependency.token,
-          );
-          const hasDependencyProvider = dependencyModule?.providers.some(
-            (candidate) => candidate.name === dependency.token,
-          );
-
-          if (hasDependencyProvider && providerKeys.has(dependencyKey)) {
-            dependencies.add(dependencyKey);
-          }
-        }
-      }
-    }
-
-    return this.findCircularWarnings(providerEdges, (providerKey) =>
-      this.providerDisplayNameFromKey(providerKey),
+  private findControllerCircularWarnings(
+    graphOutput: GraphOutput,
+  ): CircularDependencyWarnings {
+    return this.findCircularWarningsFromCycles(
+      graphOutput.cycles?.controllers,
+      (controllerKey) => this.providerDisplayNameFromKey(controllerKey),
     );
   }
 
   private findModuleCircularWarnings(
-    moduleEntries: [string, GraphOutputModule][],
     graphOutput: GraphOutput,
   ): CircularDependencyWarnings {
-    const moduleEdges = this.createNodeMap(moduleEntries, ([moduleName]) => [
-      moduleName,
-    ]);
-
-    for (const [moduleName, moduleData] of moduleEntries) {
-      const imports = this.getOrCreateSet(moduleEdges, moduleName);
-
-      for (const importedModuleName of moduleData.imports) {
-        if (!graphOutput.modules[importedModuleName]) {
-          continue;
-        }
-
-        imports.add(importedModuleName);
-      }
-    }
-
-    return this.findCircularWarnings(moduleEdges, (moduleName) => moduleName);
+    return this.findCircularWarningsFromCycles(
+      graphOutput.cycles?.modules,
+      (moduleName) => moduleName,
+    );
   }
 
   private findUnusedImportWarnings(
@@ -451,7 +411,9 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
   private appendControllerSection(
     lines: string[],
     title: string,
+    moduleName: string,
     controllers: GraphOutputController[],
+    circularWarnings: CircularDependencyWarnings,
   ): void {
     if (controllers.length === 0) {
       return;
@@ -464,6 +426,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
         lines,
         controller.name,
         controller.dependencies,
+        circularWarnings.get(this.providerKey(moduleName, controller.name)),
       );
     }
 
@@ -546,20 +509,6 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     );
   }
 
-  private getOrCreateSet(
-    map: Map<string, Set<string>>,
-    key: string,
-  ): Set<string> {
-    const existingValue = map.get(key);
-    if (existingValue) {
-      return existingValue;
-    }
-
-    const value = new Set<string>();
-    map.set(key, value);
-    return value;
-  }
-
   private getOrCreateMap(
     map: Map<string, Map<string, string[]>>,
     key: string,
@@ -585,70 +534,20 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     return value;
   }
 
-  private createNodeMap<T>(
-    values: T[],
-    getKeys: (value: T) => string[],
-  ): Map<string, Set<string>> {
-    const map = new Map<string, Set<string>>();
-
-    for (const value of values) {
-      for (const key of getKeys(value)) {
-        this.getOrCreateSet(map, key);
-      }
-    }
-
-    return map;
-  }
-
-  private findCircularWarnings(
-    graph: Map<string, Set<string>>,
+  private findCircularWarningsFromCycles(
+    cycles: CircularWarningCycle[] = [],
     displayName: (key: string) => string,
   ): CircularDependencyWarnings {
     const circularWarnings: CircularDependencyWarnings = new Map();
-    const reachableKeys = new Map<string, Set<string>>();
 
-    for (const source of graph.keys()) {
-      reachableKeys.set(source, this.findReachableKeys(source, graph));
-    }
-
-    for (const [source, targets] of graph) {
-      const warnings = [...targets]
-        .filter(
-          (target) =>
-            source === target || reachableKeys.get(target)?.has(source),
-        )
-        .map((target) => `circular dependency with ${displayName(target)}`);
-
-      if (warnings.length > 0) {
-        circularWarnings.set(source, warnings);
-      }
+    for (const cycle of cycles) {
+      const warnings = this.getOrCreateArray(circularWarnings, cycle.from);
+      warnings.push(
+        `${cycle.type} circular dependency with ${displayName(cycle.to)}`,
+      );
     }
 
     return circularWarnings;
-  }
-
-  private findReachableKeys(
-    source: string,
-    graph: Map<string, Set<string>>,
-  ): Set<string> {
-    const reachableKeys = new Set<string>();
-    const pendingKeys = [...(graph.get(source) ?? [])];
-
-    while (pendingKeys.length > 0) {
-      const currentKey = pendingKeys.pop();
-
-      if (!currentKey || reachableKeys.has(currentKey)) {
-        continue;
-      }
-
-      reachableKeys.add(currentKey);
-
-      for (const nextKey of graph.get(currentKey) ?? []) {
-        pendingKeys.push(nextKey);
-      }
-    }
-
-    return reachableKeys;
   }
 
   private toMermaidNodeId(value: string): string {

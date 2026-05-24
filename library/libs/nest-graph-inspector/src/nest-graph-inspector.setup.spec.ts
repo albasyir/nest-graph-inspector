@@ -8,6 +8,12 @@ import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
+import type { GraphOutput } from './types/graph-output.type';
+import type { ModuleMap } from './types/module-map.type';
+
+type SetupWithPrivateMethods = NestGraphInspectorSetup & {
+  enrichModuleMap(moduleMap: ModuleMap): GraphOutput;
+};
 
 describe(NestGraphInspectorSetup.name, () => {
   class AppModule {}
@@ -124,6 +130,11 @@ describe(NestGraphInspectorSetup.name, () => {
             controllers: [],
           },
         },
+        cycles: {
+          modules: [],
+          providers: [],
+          controllers: [],
+        },
       },
       { type: 'json', path: 'graph.json' },
     );
@@ -170,6 +181,142 @@ describe(NestGraphInspectorSetup.name, () => {
     await onModuleInitPromise;
 
     expect(onModuleInitCompleted).toBe(true);
+  });
+
+  it('should enrich graph output with module and provider cycles', () => {
+    const graphOutput = (
+      service as unknown as SetupWithPrivateMethods
+    ).enrichModuleMap({
+      version: '2',
+      root: 'UserModule',
+      modules: {
+        UserModule: {
+          imports: ['MobileModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'UserService',
+              dependencies: ['MobileModule:MobileService'],
+            },
+          ],
+          controllers: [],
+        },
+        MobileModule: {
+          imports: ['ProductModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'MobileService',
+              dependencies: ['ProductModule:ProductService'],
+            },
+          ],
+          controllers: [],
+        },
+        ProductModule: {
+          imports: ['UserModule'],
+          exports: [],
+          providers: [
+            {
+              name: 'ProductService',
+              dependencies: ['UserModule:UserService'],
+            },
+          ],
+          controllers: [],
+        },
+      },
+    });
+
+    expect(graphOutput.cycles.modules).toEqual([
+      {
+        from: 'UserModule',
+        to: 'MobileModule',
+        type: 'indirect',
+        path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
+      },
+      {
+        from: 'MobileModule',
+        to: 'ProductModule',
+        type: 'indirect',
+        path: ['MobileModule', 'ProductModule', 'UserModule', 'MobileModule'],
+      },
+      {
+        from: 'ProductModule',
+        to: 'UserModule',
+        type: 'indirect',
+        path: ['ProductModule', 'UserModule', 'MobileModule', 'ProductModule'],
+      },
+    ]);
+    expect(graphOutput.cycles.providers).toEqual([
+      {
+        from: 'UserModule:UserService',
+        to: 'MobileModule:MobileService',
+        type: 'indirect',
+        path: [
+          {
+            module: { name: 'UserModule' },
+            provider: { name: 'UserService' },
+          },
+          {
+            module: { name: 'MobileModule' },
+            provider: { name: 'MobileService' },
+          },
+          {
+            module: { name: 'ProductModule' },
+            provider: { name: 'ProductService' },
+          },
+          {
+            module: { name: 'UserModule' },
+            provider: { name: 'UserService' },
+          },
+        ],
+      },
+      {
+        from: 'MobileModule:MobileService',
+        to: 'ProductModule:ProductService',
+        type: 'indirect',
+        path: [
+          {
+            module: { name: 'MobileModule' },
+            provider: { name: 'MobileService' },
+          },
+          {
+            module: { name: 'ProductModule' },
+            provider: { name: 'ProductService' },
+          },
+          {
+            module: { name: 'UserModule' },
+            provider: { name: 'UserService' },
+          },
+          {
+            module: { name: 'MobileModule' },
+            provider: { name: 'MobileService' },
+          },
+        ],
+      },
+      {
+        from: 'ProductModule:ProductService',
+        to: 'UserModule:UserService',
+        type: 'indirect',
+        path: [
+          {
+            module: { name: 'ProductModule' },
+            provider: { name: 'ProductService' },
+          },
+          {
+            module: { name: 'UserModule' },
+            provider: { name: 'UserService' },
+          },
+          {
+            module: { name: 'MobileModule' },
+            provider: { name: 'MobileService' },
+          },
+          {
+            module: { name: 'ProductModule' },
+            provider: { name: 'ProductService' },
+          },
+        ],
+      },
+    ]);
   });
 
   it('should apply default viewer Ollama proxy options', async () => {

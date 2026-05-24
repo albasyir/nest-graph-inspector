@@ -68,7 +68,7 @@ graph TD
 ## UserModule
 
 > warnings
-> - circular dependency with MobileModule
+> - indirect circular dependency with MobileModule
 
 ### Imports
 - MobileModule
@@ -92,7 +92,7 @@ graph TD
 ## MobileModule
 
 > warnings
-> - circular dependency with ProductModule
+> - direct circular dependency with ProductModule
 
 ### Imports
 - ProductModule
@@ -102,14 +102,14 @@ graph TD
 
 ### Providers
 - MobileService
-  - Warning: circular dependency with ProductService from ProductModule
+  - Warning: direct circular dependency with ProductService from ProductModule
   - depends on ProductService from ProductModule
 
 ## ProductModule
 
 > warnings
-> - circular dependency with UserModule
-> - circular dependency with MobileModule
+> - indirect circular dependency with UserModule
+> - direct circular dependency with MobileModule
 
 ### Imports
 - UserModule
@@ -121,7 +121,7 @@ graph TD
 
 ### Providers
 - ProductService
-  - Warning: circular dependency with MobileService from MobileModule
+  - Warning: direct circular dependency with MobileService from MobileModule
   - depends on ProductRepository from ProductModule
   - depends on MobileService from MobileModule
 - ProductRepository
@@ -142,13 +142,13 @@ graph TD
 ### Providers
 - OrderRepository
 - OrderService
-  - Warning: circular dependency with OrderNotificationService from OrderModule
+  - Warning: direct circular dependency with OrderNotificationService from OrderModule
   - depends on OrderRepository from OrderModule
   - depends on UserService from UserModule
   - depends on ProductService from ProductModule
   - depends on OrderNotificationService from OrderModule
 - OrderNotificationService
-  - Warning: circular dependency with OrderService from OrderModule
+  - Warning: direct circular dependency with OrderService from OrderModule
   - depends on OrderService from OrderModule
 
 ### Controllers

@@ -250,5 +250,178 @@
       ],
       "controllers": []
     }
+  },
+  "cycles": {
+    "modules": [
+      {
+        "from": "UserModule",
+        "to": "MobileModule",
+        "type": "indirect",
+        "path": [
+          "UserModule",
+          "MobileModule",
+          "ProductModule",
+          "UserModule"
+        ]
+      },
+      {
+        "from": "MobileModule",
+        "to": "ProductModule",
+        "type": "direct",
+        "path": [
+          "MobileModule",
+          "ProductModule",
+          "MobileModule"
+        ]
+      },
+      {
+        "from": "ProductModule",
+        "to": "UserModule",
+        "type": "indirect",
+        "path": [
+          "ProductModule",
+          "UserModule",
+          "MobileModule",
+          "ProductModule"
+        ]
+      },
+      {
+        "from": "ProductModule",
+        "to": "MobileModule",
+        "type": "direct",
+        "path": [
+          "ProductModule",
+          "MobileModule",
+          "ProductModule"
+        ]
+      }
+    ],
+    "providers": [
+      {
+        "from": "MobileModule:MobileService",
+        "to": "ProductModule:ProductService",
+        "type": "direct",
+        "path": [
+          {
+            "module": {
+              "name": "MobileModule"
+            },
+            "provider": {
+              "name": "MobileService"
+            }
+          },
+          {
+            "module": {
+              "name": "ProductModule"
+            },
+            "provider": {
+              "name": "ProductService"
+            }
+          },
+          {
+            "module": {
+              "name": "MobileModule"
+            },
+            "provider": {
+              "name": "MobileService"
+            }
+          }
+        ]
+      },
+      {
+        "from": "ProductModule:ProductService",
+        "to": "MobileModule:MobileService",
+        "type": "direct",
+        "path": [
+          {
+            "module": {
+              "name": "ProductModule"
+            },
+            "provider": {
+              "name": "ProductService"
+            }
+          },
+          {
+            "module": {
+              "name": "MobileModule"
+            },
+            "provider": {
+              "name": "MobileService"
+            }
+          },
+          {
+            "module": {
+              "name": "ProductModule"
+            },
+            "provider": {
+              "name": "ProductService"
+            }
+          }
+        ]
+      },
+      {
+        "from": "OrderModule:OrderService",
+        "to": "OrderModule:OrderNotificationService",
+        "type": "direct",
+        "path": [
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderService"
+            }
+          },
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderNotificationService"
+            }
+          },
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderService"
+            }
+          }
+        ]
+      },
+      {
+        "from": "OrderModule:OrderNotificationService",
+        "to": "OrderModule:OrderService",
+        "type": "direct",
+        "path": [
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderNotificationService"
+            }
+          },
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderService"
+            }
+          },
+          {
+            "module": {
+              "name": "OrderModule"
+            },
+            "provider": {
+              "name": "OrderNotificationService"
+            }
+          }
+        ]
+      }
+    ],
+    "controllers": []
   }
 }

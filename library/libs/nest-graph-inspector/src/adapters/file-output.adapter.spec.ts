@@ -15,6 +15,11 @@ describe(FileOutputAdapter.name, () => {
   let adapter: FileOutputAdapter;
   const mockedMkdir = jest.mocked(mkdir);
   const mockedWriteFile = jest.mocked(writeFile);
+  const emptyCycles = () => ({
+    modules: [],
+    providers: [],
+    controllers: [],
+  });
 
   beforeEach(async () => {
     mockedMkdir.mockResolvedValue(undefined);
@@ -45,6 +50,7 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: emptyCycles(),
     };
     const filePath = join(process.cwd(), 'tmp/graph.md');
 
@@ -108,6 +114,7 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: emptyCycles(),
     };
 
     const markdown = adapter.buildMarkdownText(graphOutput);
@@ -198,6 +205,79 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: {
+        modules: [
+          {
+            from: 'ProductModule',
+            to: 'UserModule',
+            type: 'indirect',
+            path: [
+              'ProductModule',
+              'UserModule',
+              'MobileModule',
+              'ProductModule',
+            ],
+          },
+          {
+            from: 'UserModule',
+            to: 'MobileModule',
+            type: 'indirect',
+            path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
+          },
+          {
+            from: 'MobileModule',
+            to: 'ProductModule',
+            type: 'indirect',
+            path: [
+              'MobileModule',
+              'ProductModule',
+              'UserModule',
+              'MobileModule',
+            ],
+          },
+        ],
+        providers: [
+          {
+            from: 'ProductModule:ProductService',
+            to: 'MobileModule:MobileService',
+            type: 'direct',
+            path: [
+              {
+                module: { name: 'ProductModule' },
+                provider: { name: 'ProductService' },
+              },
+              {
+                module: { name: 'MobileModule' },
+                provider: { name: 'MobileService' },
+              },
+              {
+                module: { name: 'ProductModule' },
+                provider: { name: 'ProductService' },
+              },
+            ],
+          },
+          {
+            from: 'MobileModule:MobileService',
+            to: 'ProductModule:ProductService',
+            type: 'direct',
+            path: [
+              {
+                module: { name: 'MobileModule' },
+                provider: { name: 'MobileService' },
+              },
+              {
+                module: { name: 'ProductModule' },
+                provider: { name: 'ProductService' },
+              },
+              {
+                module: { name: 'MobileModule' },
+                provider: { name: 'MobileService' },
+              },
+            ],
+          },
+        ],
+        controllers: [],
+      },
     };
 
     const markdown = adapter.buildMarkdownText(graphOutput);
@@ -207,14 +287,14 @@ describe(FileOutputAdapter.name, () => {
         '## ProductModule',
         '',
         '> warnings',
-        '> - circular dependency with UserModule',
+        '> - indirect circular dependency with UserModule',
         '',
         '### Imports',
         '- UserModule',
         '',
         '### Providers',
         '- ProductService',
-        '  - Warning: circular dependency with MobileService from MobileModule',
+        '  - Warning: direct circular dependency with MobileService from MobileModule',
         '  - depends on MobileService from MobileModule',
       ].join('\n'),
     );
@@ -223,7 +303,7 @@ describe(FileOutputAdapter.name, () => {
         '## MobileModule',
         '',
         '> warnings',
-        '> - circular dependency with ProductModule',
+        '> - indirect circular dependency with ProductModule',
         '',
         '### Imports',
         '- ProductModule',
@@ -233,7 +313,7 @@ describe(FileOutputAdapter.name, () => {
         '',
         '### Providers',
         '- MobileService',
-        '  - Warning: circular dependency with ProductService from ProductModule',
+        '  - Warning: direct circular dependency with ProductService from ProductModule',
         '  - depends on ProductService from ProductModule',
       ].join('\n'),
     );
@@ -263,6 +343,40 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: {
+        modules: [
+          {
+            from: 'UserModule',
+            to: 'MobileModule',
+            type: 'indirect',
+            path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
+          },
+          {
+            from: 'MobileModule',
+            to: 'ProductModule',
+            type: 'indirect',
+            path: [
+              'MobileModule',
+              'ProductModule',
+              'UserModule',
+              'MobileModule',
+            ],
+          },
+          {
+            from: 'ProductModule',
+            to: 'UserModule',
+            type: 'indirect',
+            path: [
+              'ProductModule',
+              'UserModule',
+              'MobileModule',
+              'ProductModule',
+            ],
+          },
+        ],
+        providers: [],
+        controllers: [],
+      },
     };
 
     const markdown = adapter.buildMarkdownText(graphOutput);
@@ -272,7 +386,7 @@ describe(FileOutputAdapter.name, () => {
         '## UserModule',
         '',
         '> warnings',
-        '> - circular dependency with MobileModule',
+        '> - indirect circular dependency with MobileModule',
         '',
         '### Imports',
         '- MobileModule',
@@ -283,7 +397,7 @@ describe(FileOutputAdapter.name, () => {
         '## MobileModule',
         '',
         '> warnings',
-        '> - circular dependency with ProductModule',
+        '> - indirect circular dependency with ProductModule',
         '',
         '### Imports',
         '- ProductModule',
@@ -294,7 +408,7 @@ describe(FileOutputAdapter.name, () => {
         '## ProductModule',
         '',
         '> warnings',
-        '> - circular dependency with UserModule',
+        '> - indirect circular dependency with UserModule',
         '',
         '### Imports',
         '- UserModule',
@@ -336,6 +450,7 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: emptyCycles(),
     };
 
     const markdown = adapter.buildMarkdownText(graphOutput);
@@ -368,6 +483,7 @@ describe(FileOutputAdapter.name, () => {
           controllers: [],
         },
       },
+      cycles: emptyCycles(),
     };
 
     const markdown = adapter.buildMarkdownText(graphOutput);

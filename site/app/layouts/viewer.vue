@@ -2,37 +2,13 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
 
-type NavigationBadge = NonNullable<NavigationMenuItem['badge']>
-
 const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const {
   decodedUrl,
-  status,
-  dependencyTraceEnabled
+  status
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
-
-function getFeatureBadge(enabled: boolean): NavigationBadge {
-  return {
-    label: enabled ? 'Enabled' : 'Disabled',
-    color: enabled ? 'success' : 'neutral',
-    variant: enabled ? 'subtle' : 'outline'
-  }
-}
-
-const dependencyTraceBadge = computed(() => getFeatureBadge(dependencyTraceEnabled.value))
-const enabledNavigatorFeatureCount = computed(() => dependencyTraceEnabled.value ? 1 : 0)
-const navigatorBadge = computed<NavigationBadge>(() => ({
-  label: enabledNavigatorFeatureCount.value,
-  color: enabledNavigatorFeatureCount.value ? 'success' : 'neutral',
-  variant: enabledNavigatorFeatureCount.value ? 'subtle' : 'outline'
-}))
-const comingSoonBadge: NavigationBadge = {
-  label: 'Coming soon',
-  color: 'neutral',
-  variant: 'outline'
-}
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -47,54 +23,13 @@ function handleAskAi(event?: Event) {
   aiChatOpen.value = true
 }
 
-function handleToggleDependencyTrace() {
-  graphStore.toggleDependencyTrace()
-}
-
-const navigatorFeatures = computed(() => [
-  {
-    value: 'dependency-trace',
-    label: 'Dependency Trace',
-    icon: 'i-lucide-plug',
-    description: 'Trace how injected modules or providers connect to others.',
-    badge: dependencyTraceBadge.value,
-    active: dependencyTraceEnabled.value,
-    onSelect: handleToggleDependencyTrace
-  },
-  {
-    value: 'circular-dependencies',
-    label: 'Show Circular Dependencies',
-    icon: 'i-lucide-refresh-ccw-dot',
-    description: 'Highlight modules or providers that depend on each other in a cycle.',
-    badge: comingSoonBadge,
-    disabled: true
-  },
-  {
-    value: 'process-sequence',
-    label: 'Process Sequence',
-    icon: 'i-lucide-list-ordered',
-    description: 'Visualize runtime flow so requests, handlers, and providers are easier to follow.',
-    badge: comingSoonBadge,
-    disabled: true
-  },
-  {
-    value: 'ignore-system-module',
-    label: 'Ignore System Module',
-    icon: 'i-lucide-filter-x',
-    description: 'Hide framework/system nodes so only your application graph is shown.',
-    badge: comingSoonBadge,
-    disabled: true
-  }
-] satisfies NavigationMenuItem[])
-
+/** Top-level actions shown in the graph viewer header. */
 const viewerMenuItems = computed(() => [
   {
+    value: 'navigator',
     label: 'Navigator',
     icon: 'i-lucide-map',
-    badge: navigatorBadge.value,
-    slot: 'navigator',
-    children: navigatorFeatures.value,
-    disabled: true,
+    active: true
   },
   {
     label: 'Repl',
@@ -156,57 +91,12 @@ const viewerMenuItems = computed(() => [
               :items="viewerMenuItems"
               variant="pill"
               orientation="horizontal"
-              :ui="{
-                viewport: 'sm:w-(--reka-navigation-menu-viewport-width)',
-                content: 'sm:w-auto',
-                childList: 'sm:w-80',
-                childLinkDescription: 'text-balance line-clamp-2'
-              }"
               class="w-full justify-center"
-            >
-              <template #navigator-content="{ item }">
-                <ul class="w-80 max-w-[calc(100vw-2rem)] space-y-1 p-2">
-                  <li
-                    v-for="feature in item.children"
-                    :key="feature.value || feature.label"
-                  >
-                    <ULink
-                      class="flex min-w-0 items-start gap-3 rounded-md p-3 text-left text-sm transition-colors hover:bg-elevated/50"
-                      :class="feature.disabled && 'pointer-events-none opacity-75'"
-                      @click="feature.onSelect"
-                    >
-                      <UIcon
-                        v-if="feature.icon"
-                        :name="feature.icon"
-                        class="mt-0.5 size-5 shrink-0"
-                        :class="feature.active ? 'text-success' : 'text-dimmed'"
-                      />
-
-                      <div class="min-w-0 flex-1 space-y-1">
-                        <div class="flex min-w-0 items-start justify-between gap-2">
-                          <p class="min-w-0 flex-1 font-medium text-default line-clamp-2">
-                            {{ feature.label }}
-                          </p>
-
-                          <UBadge
-                            v-if="feature.badge"
-                            size="sm"
-                            class="mt-0.5 shrink-0"
-                            v-bind="typeof feature.badge === 'object' ? feature.badge : { label: feature.badge }"
-                          />
-                        </div>
-
-                        <p class="text-muted line-clamp-2">
-                          {{ feature.description }}
-                        </p>
-                      </div>
-                    </ULink>
-                  </li>
-                </ul>
-              </template>
-            </UNavigationMenu>
+            />
 
             <div class="flex items-center justify-end gap-1">
+              <UColorModeButton />
+
               <UTooltip text="Reload graph">
                 <UButton
                   icon="i-lucide-refresh-cw"
