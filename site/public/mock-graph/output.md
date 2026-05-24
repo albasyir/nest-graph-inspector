@@ -1,7 +1,5 @@
 # NestJS Dependency Graph
 
-> Warning: Viewer is currently the only output with a long-term stability guarantee. Other output formats may change at any time without prior notice while the format is still evolving.
-
 ```mermaid
 graph TD
 

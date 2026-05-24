@@ -69,6 +69,12 @@ type CircularEdgeInfo = {
 type CircularEdgeData = {
   circularIds: number[]
   circularReason: string
+  circularDetails: CircularEdgeInfo[]
+}
+
+type CircularEdgeDialogData = {
+  circularIds: number[]
+  details: CircularEdgeInfo[]
 }
 
 type CircularEdgePairAggregate = {
@@ -434,12 +440,13 @@ function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
   return {
     data: {
       circularIds: normalizedInfo.map((item) => item.id),
+      circularDetails: normalizedInfo.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        path: [...item.path],
+      })),
       circularReason: normalizedInfo
-        .map((item) =>
-          item.kind === 'direct'
-            ? `ID ${item.id}: Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.`
-            : `ID ${item.id}: Indirect circular dependency: ${item.path.join(' -> ')}.`,
-        )
+        .map((item) => `ID ${item.id}: ${item.path.join(' -> ')}`)
         .join('\n'),
     },
   }
@@ -1115,8 +1122,36 @@ const initialGraph = buildGraph(props.data, collapsedModuleNames.value, {
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
 const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
+const activeCircularTooltipEdgeId = ref<string | null>(null)
+const showCircularDetailDialog = ref(false)
+const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
+
+function openCircularTooltip(edgeId: string): void {
+  activeCircularTooltipEdgeId.value = edgeId
+}
+
+function closeCircularTooltip(edgeId: string): void {
+  if (activeCircularTooltipEdgeId.value === edgeId) {
+    activeCircularTooltipEdgeId.value = null
+  }
+}
+
+function openCircularDetailDialog(edgeData: CircularEdgeData): void {
+  circularDetailDialogData.value = {
+    circularIds: [...edgeData.circularIds],
+    details: edgeData.circularDetails.map((detail) => ({
+      id: detail.id,
+      kind: detail.kind,
+      path: [...detail.path],
+    })),
+  }
+  showCircularDetailDialog.value = true
+}
 
 function refreshGraph() {
+  activeCircularTooltipEdgeId.value = null
+  showCircularDetailDialog.value = false
+  circularDetailDialogData.value = null
   const graph = buildGraph(props.data, collapsedModuleNames.value, {
     showCircularDependencies: showCircularDependencies.value,
   })
@@ -1225,22 +1260,39 @@ useResizeObserver(graphViewerRef, () => {
         />
 
         <EdgeLabelRenderer>
-          <div
-            class="circular-edge-warning nodrag nopan"
-            :style="getWarningEdgeLabelStyle(edgeProps)"
-            :title="edgeProps.data.circularReason"
-            role="img"
-            :aria-label="edgeProps.data.circularReason"
+          <UTooltip
+            :open="activeCircularTooltipEdgeId === edgeProps.id"
+            :delay-duration="0"
+            text="click for detail"
+            @update:open="
+              (isOpen) =>
+                isOpen
+                  ? openCircularTooltip(edgeProps.id)
+                  : closeCircularTooltip(edgeProps.id)
+            "
           >
-            <UIcon
-              name="i-lucide-triangle-alert"
-              class="circular-edge-warning__icon"
-            />
-            <span class="circular-edge-warning__id">
-              ID{{ edgeProps.data.circularIds.length > 1 ? 's' : '' }}
-              {{ formatCircularEdgeIds(edgeProps.data.circularIds) }}
-            </span>
-          </div>
+            <div
+              class="circular-edge-warning nodrag nopan"
+              :style="getWarningEdgeLabelStyle(edgeProps)"
+              role="button"
+              :aria-label="edgeProps.data.circularReason"
+              tabindex="0"
+              @mouseenter="openCircularTooltip(edgeProps.id)"
+              @mouseleave="closeCircularTooltip(edgeProps.id)"
+              @click.stop="openCircularDetailDialog(edgeProps.data)"
+              @keydown.enter.prevent="openCircularDetailDialog(edgeProps.data)"
+              @keydown.space.prevent="openCircularDetailDialog(edgeProps.data)"
+            >
+              <UIcon
+                name="i-lucide-triangle-alert"
+                class="circular-edge-warning__icon"
+              />
+              <span class="circular-edge-warning__id">
+                ID{{ edgeProps.data.circularIds.length > 1 ? 's' : '' }}
+                {{ formatCircularEdgeIds(edgeProps.data.circularIds) }}
+              </span>
+            </div>
+          </UTooltip>
         </EdgeLabelRenderer>
       </template>
 
@@ -1328,6 +1380,39 @@ useResizeObserver(graphViewerRef, () => {
       <Controls v-if="props.interactive" />
       <MiniMap v-if="props.interactive" />
     </VueFlow>
+
+    <UModal
+      v-model:open="showCircularDetailDialog"
+      title="Circular Dependency Detail"
+      :description="
+        circularDetailDialogData
+          ? `ID${circularDetailDialogData.circularIds.length > 1 ? 's' : ''} ${formatCircularEdgeIds(circularDetailDialogData.circularIds)}`
+          : undefined
+      "
+    >
+      <template #body>
+        <div class="circular-detail-dialog">
+          <p
+            v-for="detail in circularDetailDialogData?.details || []"
+            :key="detail.id"
+            class="circular-detail-dialog__line"
+          >
+            ID {{ detail.id }}: {{ detail.path.join(' -> ') }}
+          </p>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="circular-detail-dialog__footer">
+          <UButton
+            label="Close"
+            color="neutral"
+            variant="outline"
+            @click="showCircularDetailDialog = false"
+          />
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
@@ -1599,6 +1684,26 @@ useResizeObserver(graphViewerRef, () => {
 
 .circular-edge-warning__id {
   display: inline-block;
+}
+
+.circular-detail-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.circular-detail-dialog__line {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.circular-detail-dialog__footer {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .vue-flow__node-module {

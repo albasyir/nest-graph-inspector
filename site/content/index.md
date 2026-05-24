@@ -59,7 +59,7 @@ Nest Graph Inspector reads the live NestJS container and shows an interactive gr
 Why It Matters
 
 #description
-NestJS gets complex quickly. Before changing code, teams need fast answers to impact and risk questions.
+Architecture drift is expensive. Without runtime visibility, teams over-test safe changes, miss risky couplings, and slow down reviews.
 
 #features
   :::u-page-feature
@@ -67,10 +67,10 @@ NestJS gets complex quickly. Before changing code, teams need fast answers to im
   icon: i-lucide-git-fork
   ---
   #title
-  Dependency Impact
+  Ship Changes Faster
 
   #description
-  What depends on this provider?
+  Trace impact in minutes, not meetings, before touching critical providers.
   :::
 
   :::u-page-feature
@@ -78,10 +78,10 @@ NestJS gets complex quickly. Before changing code, teams need fast answers to im
   icon: i-lucide-layers
   ---
   #title
-  Module Blast Radius
+  Cut Regression Risk
 
   #description
-  Which modules are affected by this change?
+  Catch circular and high-coupling patterns before they become release issues.
   :::
 
   :::u-page-feature
@@ -89,10 +89,10 @@ NestJS gets complex quickly. Before changing code, teams need fast answers to im
   icon: i-lucide-refresh-cw
   ---
   #title
-  Circular Dependencies
+  Make PR Reviews Concrete
 
   #description
-  Is there any circular dependency?
+  Replace assumptions with module and provider-level evidence.
   :::
 
   :::u-page-feature
@@ -100,116 +100,74 @@ NestJS gets complex quickly. Before changing code, teams need fast answers to im
   icon: i-lucide-flask-conical
   ---
   #title
-  Smoke Test Scope
+  Onboard With Real Context
 
   #description
-  What should we smoke test before merge?
+  Give new engineers a live map of how the system actually connects.
   :::
 ::
 
 ::u-page-section{class="dark:bg-neutral-950"}
 #title
-Runtime, Not Guesswork
+Feature List
 
 #description
-Static graph tools show what source code suggests. Nest Graph Inspector shows what NestJS actually wires at runtime.
+Everything is built for graph clarity, fast tracing, and confident decisions.
 
 #features
-  :::u-page-feature
-  ---
-  icon: i-lucide-check-check
-  ---
-  #title
-  Runtime Container Data
-
-  #description
-  Graph is built from loaded runtime modules and resolved dependencies.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-target
-  ---
-  #title
-  Better Blast Radius Analysis
-
-  #description
-  Know impact scope before refactor, review, or release.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-list-checks
-  ---
-  #title
-  Smarter Regression Planning
-
-  #description
-  Prioritize smoke tests using real dependency relationships.
-  :::
-::
-
-::u-page-section{class="dark:bg-neutral-950"}
-#title
-Simple Team Workflow
-
-#description
-From change request to safer merge:
-
-#features
-  :::u-page-feature
-  ---
-  icon: i-lucide-scan-search
-  ---
-  #title
-  1. Generate Graph
-
-  #description
-  Generate runtime graph data from your NestJS app.
-  :::
-
   :::u-page-feature
   ---
   icon: i-lucide-network
   ---
   #title
-  2. Inspect Nodes
+  Dependency Graph
 
   #description
-  Inspect affected modules, providers, and controllers.
+  Visualize modules, providers, controllers, imports, and dependency edges from the running app.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-target
+  icon: i-lucide-refresh-cw
   ---
   #title
-  3. Identify Blast Radius
+  Circular Detection
 
   #description
-  See upstream and downstream dependency impact.
+  Surface circular relationships early so teams can resolve risky loops before release.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-shield-check
+  icon: i-lucide-focus
   ---
   #title
-  4. Prioritize Tests
+  Relation Focus
 
   #description
-  Focus smoke and regression tests on risky areas.
+  Focus any provider/module pair to see how they relate and where dependencies connect.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-file-json
+  icon: i-lucide-bot
   ---
   #title
-  5. Share Output
+  Context-Aware AI Assistant
 
   #description
-  Attach Markdown/JSON to PRs, docs, and internal tooling.
+  Ask graph and trace questions in plain language with context-aware answers, always free in the viewer.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-git-branch-plus
+  ---
+  #title
+  Process Sequence (Coming Soon)
+
+  #description
+  Generate sequence diagrams from an entry point to completion flow to document how a process really runs.
   :::
 ::
 
@@ -218,58 +176,62 @@ From change request to safer merge:
 AI Chat in Viewer
 
 #description
-Move from graph exploration to decisions in seconds. AI Chat is grounded in the loaded runtime graph, so answers stay relevant to your architecture.
+From graph to answer in seconds. Ask trace questions in plain language and get responses grounded in your current graph context.
 
 #features
-  ::u-page-feature
-  ---
-  icon: i-lucide-bot
-  title: Ask in Plain Language
-  ---
-  No query syntax. Ask architecture questions the way engineers naturally ask them.
-  ::
   :::u-page-feature
   ---
-  icon: i-lucide-gauge
+  icon: i-lucide-message-circle
   ---
   #title
-  Faster Risk Checks
+  Ask Naturally
 
   #description
-  Understand change impact before merge and reduce review uncertainty.
+  Ask things like "trace `AuthService` dependencies" or "show the path from `OrdersModule` to `PaymentService`" with zero query syntax.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-orbit
+  icon: i-lucide-file-check-2
   ---
   #title
-  Coupling Visibility
+  Grounded, Not Generic
 
   #description
-  Surface highly-coupled modules and dependency hotspots quickly.
+  Every answer is based on the loaded graph context, and missing data is called out clearly.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-rotate-cw
+  icon: i-lucide-messages-square
   ---
   #title
-  Circular Dependency Detection
+  Unlimited Follow-Ups
 
   #description
-  Catch circular relationships early before they become production issues.
+  Keep the conversation going until the dependency path is clear and decisions are ready.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-shield-check
+  icon: i-lucide-route
   ---
   #title
-  Smarter Test Priorities
+  Trace Paths Faster
 
   #description
-  Turn dependency context into focused smoke and regression plans.
+  Walk provider and module relationships quickly during debugging and pull request reviews.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-cpu
+  ---
+  #title
+  Your Model, Your Environment
+
+  #description
+  Connect a local model through Ollama and keep architecture analysis in your own environment.
   :::
 ::
 
