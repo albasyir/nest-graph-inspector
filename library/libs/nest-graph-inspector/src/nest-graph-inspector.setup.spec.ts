@@ -234,24 +234,10 @@ describe(NestGraphInspectorSetup.name, () => {
         type: 'indirect',
         path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
       },
-      {
-        id: 2,
-        from: 'MobileModule',
-        to: 'ProductModule',
-        type: 'indirect',
-        path: ['MobileModule', 'ProductModule', 'UserModule', 'MobileModule'],
-      },
-      {
-        id: 3,
-        from: 'ProductModule',
-        to: 'UserModule',
-        type: 'indirect',
-        path: ['ProductModule', 'UserModule', 'MobileModule', 'ProductModule'],
-      },
     ]);
     expect(graphOutput.cycles.providers).toEqual([
       {
-        id: 4,
+        id: 2,
         from: 'UserModule:UserService',
         to: 'MobileModule:MobileService',
         type: 'indirect',
@@ -271,54 +257,6 @@ describe(NestGraphInspectorSetup.name, () => {
           {
             module: { name: 'UserModule' },
             provider: { name: 'UserService' },
-          },
-        ],
-      },
-      {
-        id: 5,
-        from: 'MobileModule:MobileService',
-        to: 'ProductModule:ProductService',
-        type: 'indirect',
-        path: [
-          {
-            module: { name: 'MobileModule' },
-            provider: { name: 'MobileService' },
-          },
-          {
-            module: { name: 'ProductModule' },
-            provider: { name: 'ProductService' },
-          },
-          {
-            module: { name: 'UserModule' },
-            provider: { name: 'UserService' },
-          },
-          {
-            module: { name: 'MobileModule' },
-            provider: { name: 'MobileService' },
-          },
-        ],
-      },
-      {
-        id: 6,
-        from: 'ProductModule:ProductService',
-        to: 'UserModule:UserService',
-        type: 'indirect',
-        path: [
-          {
-            module: { name: 'ProductModule' },
-            provider: { name: 'ProductService' },
-          },
-          {
-            module: { name: 'UserModule' },
-            provider: { name: 'UserService' },
-          },
-          {
-            module: { name: 'MobileModule' },
-            provider: { name: 'MobileService' },
-          },
-          {
-            module: { name: 'ProductModule' },
-            provider: { name: 'ProductService' },
           },
         ],
       },

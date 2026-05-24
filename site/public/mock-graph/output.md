@@ -1,5 +1,7 @@
 # NestJS Dependency Graph
 
+> Warning: Viewer is currently the only output with a long-term stability guarantee. Other output formats may change at any time without prior notice while the format is still evolving.
+
 ```mermaid
 graph TD
 
@@ -61,7 +63,6 @@ graph TD
 ## AppModule
 
 ### Imports
-
 - UserModule
 - ProductModule
 - OrderModule
@@ -69,19 +70,15 @@ graph TD
 ## UserModule
 
 > warnings
->
 > - indirect circular dependency with MobileModule
 
 ### Imports
-
 - MobileModule
 
 ### Exports
-
 - UserService
 
 ### Providers
-
 - UserService
   - depends on UserRepository from UserModule
   - depends on MobileService from MobileModule
@@ -90,7 +87,6 @@ graph TD
   - depends on UserRepository from UserModule
 
 ### Controllers
-
 - UserController
   - depends on UserService from UserModule
   - depends on UserSchedule from UserModule
@@ -98,66 +94,49 @@ graph TD
 ## MobileModule
 
 > warnings
->
 > - direct circular dependency with ProductModule
 
 ### Imports
-
 - ProductModule
 
 ### Exports
-
 - MobileService
 
 ### Providers
-
 - MobileService
   - Warning: direct circular dependency with ProductService from ProductModule
   - depends on ProductService from ProductModule
 
 ## ProductModule
 
-> warnings
->
-> - indirect circular dependency with UserModule
-> - direct circular dependency with MobileModule
-
 ### Imports
-
 - UserModule
   - Warning: unused import module
 - MobileModule
 
 ### Exports
-
 - ProductService
 
 ### Providers
-
 - ProductService
-  - Warning: direct circular dependency with MobileService from MobileModule
   - depends on ProductRepository from ProductModule
   - depends on MobileService from MobileModule
 - ProductRepository
 
 ### Controllers
-
 - ProductController
   - depends on ProductService from ProductModule
 
 ## OrderModule
 
 ### Imports
-
 - UserModule
 - ProductModule
 
 ### Exports
-
 - OrderService
 
 ### Providers
-
 - OrderRepository
 - OrderService
   - Warning: direct circular dependency with OrderNotificationService from OrderModule
@@ -166,11 +145,9 @@ graph TD
   - depends on ProductService from ProductModule
   - depends on OrderNotificationService from OrderModule
 - OrderNotificationService
-  - Warning: direct circular dependency with OrderService from OrderModule
   - depends on OrderService from OrderModule
 
 ### Controllers
-
 - OrderController
   - depends on OrderService from OrderModule
   - depends on ModuleRef from NestJSCoreModule
@@ -179,9 +156,7 @@ graph TD
 ## NestJSCoreModule
 
 ### Exports
-
 - ModuleRef
 
 ### Providers
-
 - ModuleRef

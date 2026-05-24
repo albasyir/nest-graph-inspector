@@ -71,6 +71,12 @@ type CircularEdgeData = {
   circularReason: string
 }
 
+type CircularEdgePairAggregate = {
+  edgeKeys: string[]
+  infoById: Map<number, CircularEdgeInfo>
+  sizeByEdgeKey: Map<string, number>
+}
+
 type FlowNode =
   | Node<ModuleNodeData, Record<string, never>, 'module'>
   | Node<ItemNodeData, Record<string, never>, 'item'>
@@ -416,10 +422,19 @@ function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
     return {}
   }
 
+  const normalizedInfo = Array.from(
+    info.reduce<Map<number, CircularEdgeInfo>>((map, item) => {
+      map.set(item.id, item)
+      return map
+    }, new Map()),
+  )
+    .map(([, item]) => item)
+    .sort((a, b) => a.id - b.id)
+
   return {
     data: {
-      circularIds: info.map((item) => item.id),
-      circularReason: info
+      circularIds: normalizedInfo.map((item) => item.id),
+      circularReason: normalizedInfo
         .map((item) =>
           item.kind === 'direct'
             ? `ID ${item.id}: Direct circular dependency: this edge is a self-loop or has an opposite dependency edge.`
@@ -432,6 +447,76 @@ function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
 
 function formatCircularEdgeIds(ids: number[]): string {
   return ids.join(', ')
+}
+
+function deduplicateCircularEdgeLabels(
+  circularEdges: Map<string, CircularEdgeInfo[]>,
+): Map<string, CircularEdgeInfo[]> {
+  const pairAggregates = new Map<string, CircularEdgePairAggregate>()
+
+  for (const [edgeKey, info] of circularEdges.entries()) {
+    const [source, target] = edgeKey.split('->')
+    if (!source || !target) {
+      continue
+    }
+
+    const pairKey =
+      source < target ? `${source}<->${target}` : `${target}<->${source}`
+    let aggregate = pairAggregates.get(pairKey)
+    if (!aggregate) {
+      aggregate = {
+        edgeKeys: [],
+        infoById: new Map(),
+        sizeByEdgeKey: new Map(),
+      }
+      pairAggregates.set(pairKey, aggregate)
+    }
+
+    aggregate.edgeKeys.push(edgeKey)
+    aggregate.sizeByEdgeKey.set(
+      edgeKey,
+      new Set(info.map((item) => item.id)).size,
+    )
+
+    for (const item of info) {
+      aggregate.infoById.set(item.id, item)
+    }
+  }
+
+  const dedupedEdgeLabels = new Map<string, CircularEdgeInfo[]>()
+
+  for (const aggregate of pairAggregates.values()) {
+    const mergedInfo = Array.from(aggregate.infoById.values()).sort(
+      (a, b) => a.id - b.id,
+    )
+    if (!aggregate.edgeKeys.length || !mergedInfo.length) {
+      continue
+    }
+
+    const [firstEdgeKey] = aggregate.edgeKeys
+    if (!firstEdgeKey) {
+      continue
+    }
+
+    let displayEdgeKey = firstEdgeKey
+
+    for (const edgeKey of aggregate.edgeKeys.slice(1)) {
+      const currentSize = aggregate.sizeByEdgeKey.get(displayEdgeKey) || 0
+      const nextSize = aggregate.sizeByEdgeKey.get(edgeKey) || 0
+      if (nextSize > currentSize) {
+        displayEdgeKey = edgeKey
+        continue
+      }
+
+      if (nextSize === currentSize && edgeKey < displayEdgeKey) {
+        displayEdgeKey = edgeKey
+      }
+    }
+
+    dedupedEdgeLabels.set(displayEdgeKey, mergedInfo)
+  }
+
+  return dedupedEdgeLabels
 }
 
 function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
@@ -786,6 +871,12 @@ function buildGraph(
   const circularDependencyEdges = showCircularDependencies
     ? getCircularDependencyEdges(moduleMap)
     : new Map<string, CircularEdgeInfo[]>()
+  const circularModuleEdgeLabels = showCircularDependencies
+    ? deduplicateCircularEdgeLabels(circularModuleEdges)
+    : new Map<string, CircularEdgeInfo[]>()
+  const circularDependencyEdgeLabels = showCircularDependencies
+    ? deduplicateCircularEdgeLabels(circularDependencyEdges)
+    : new Map<string, CircularEdgeInfo[]>()
 
   const moduleSizes = new Map<string, { width: number; height: number }>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
@@ -907,6 +998,9 @@ function buildGraph(
 
         const { sourceHandle, targetHandle } = pickHandles(sourcePos, targetPos)
         const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
+        const circularLabelInfo = circularModuleEdgeLabels.get(
+          `${imp}->${moduleName}`,
+        )
         const edgeColor = circularInfo
           ? CIRCULAR_DEPENDENCY_EDGE_COLOR
           : MODULE_EDGE_COLOR
@@ -917,10 +1011,10 @@ function buildGraph(
           target: `module-${moduleName}`,
           sourceHandle,
           targetHandle,
-          type: circularInfo ? 'warning' : 'smoothstep',
+          type: circularLabelInfo ? 'warning' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
           markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getCircularEdgeDataProps(circularInfo),
+          ...getCircularEdgeDataProps(circularLabelInfo),
         })
       }
     }
@@ -945,6 +1039,9 @@ function buildGraph(
           const circularInfo = circularDependencyEdges.get(
             `${sourceId}->${targetId}`,
           )
+          const circularLabelInfo = circularDependencyEdgeLabels.get(
+            `${sourceId}->${targetId}`,
+          )
           const edgeColor = circularInfo
             ? CIRCULAR_DEPENDENCY_EDGE_COLOR
             : DEPENDENCY_EDGE_COLOR
@@ -955,10 +1052,10 @@ function buildGraph(
             target: targetId,
             sourceHandle,
             targetHandle,
-            type: circularInfo ? 'warning' : 'smoothstep',
+            type: circularLabelInfo ? 'warning' : 'smoothstep',
             style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularInfo),
+            ...getCircularEdgeDataProps(circularLabelInfo),
           })
         }
       }
@@ -982,6 +1079,9 @@ function buildGraph(
           const circularInfo = circularDependencyEdges.get(
             `${sourceId}->${targetId}`,
           )
+          const circularLabelInfo = circularDependencyEdgeLabels.get(
+            `${sourceId}->${targetId}`,
+          )
           const edgeColor = circularInfo
             ? CIRCULAR_DEPENDENCY_EDGE_COLOR
             : DEPENDENCY_EDGE_COLOR
@@ -992,10 +1092,10 @@ function buildGraph(
             target: targetId,
             sourceHandle,
             targetHandle,
-            type: circularInfo ? 'warning' : 'smoothstep',
+            type: circularLabelInfo ? 'warning' : 'smoothstep',
             style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularInfo),
+            ...getCircularEdgeDataProps(circularLabelInfo),
           })
         }
       }

@@ -724,6 +724,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     nextCycleId: NextCycleId,
   ): GraphOutputCycle[] {
     const cycles: GraphOutputCycle[] = [];
+    const seenCycleKeys = new Set<string>();
     const reachableKeys = new Map<string, Set<string>>();
 
     for (const source of graph.keys()) {
@@ -740,6 +741,13 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           source === target
             ? [source, source]
             : [source, ...this.findPath(target, source, graph)];
+        const cycleKey = this.getCanonicalCycleKey(path);
+
+        if (seenCycleKeys.has(cycleKey)) {
+          continue;
+        }
+
+        seenCycleKeys.add(cycleKey);
 
         cycles.push({
           id: nextCycleId(),
@@ -752,6 +760,23 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     return cycles;
+  }
+
+  private getCanonicalCycleKey(path: string[]): string {
+    const cyclePath = path.slice(0, -1);
+
+    if (cyclePath.length <= 1) {
+      return cyclePath.join('->');
+    }
+
+    const rotations = cyclePath.map((_, index) => [
+      ...cyclePath.slice(index),
+      ...cyclePath.slice(0, index),
+    ]);
+
+    return rotations
+      .map((rotation) => rotation.join('->'))
+      .sort((a, b) => a.localeCompare(b))[0];
   }
 
   private toProviderCycle(

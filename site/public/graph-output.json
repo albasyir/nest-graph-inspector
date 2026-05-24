@@ -161,26 +161,6 @@
             "provider": { "name": "OrderService" }
           }
         ]
-      },
-      {
-        "id": 2,
-        "from": "OrderModule:OrderNotificationService",
-        "to": "OrderModule:OrderService",
-        "type": "direct",
-        "path": [
-          {
-            "module": { "name": "OrderModule" },
-            "provider": { "name": "OrderNotificationService" }
-          },
-          {
-            "module": { "name": "OrderModule" },
-            "provider": { "name": "OrderService" }
-          },
-          {
-            "module": { "name": "OrderModule" },
-            "provider": { "name": "OrderNotificationService" }
-          }
-        ]
       }
     ],
     "controllers": []
