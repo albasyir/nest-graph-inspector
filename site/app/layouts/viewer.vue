@@ -3,12 +3,19 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
 
 const posthog = usePostHog()
+const route = useRoute()
 const graphStore = useGraphInspectorStore()
 const {
+  encodedUrl,
   decodedUrl,
   status
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
+
+const navigatorPath = computed(() =>
+  encodedUrl.value ? `/view/${encodedUrl.value}` : '/view'
+)
+const issuesPath = computed(() => `${navigatorPath.value}/issues`)
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -26,10 +33,11 @@ function handleAskAi(event?: Event) {
 /** Top-level actions shown in the graph viewer header. */
 const viewerMenuItems = computed(() => [
   {
-    value: 'navigator',
     label: 'Navigator',
     icon: 'i-lucide-map',
-    active: true
+    to: navigatorPath.value,
+    active: route.path === navigatorPath.value,
+    disabled: !encodedUrl.value
   },
   {
     label: 'Repl',
@@ -37,9 +45,16 @@ const viewerMenuItems = computed(() => [
     disabled: true
   },
   {
+    label: 'Process Sequence',
+    icon: 'i-lucide-list-ordered',
+    disabled: true
+  },
+  {
     label: 'Issues',
     icon: 'i-lucide-bug',
-    disabled: true
+    to: issuesPath.value,
+    active: route.path === issuesPath.value,
+    disabled: !encodedUrl.value
   }
 ] satisfies NavigationMenuItem[])
 </script>

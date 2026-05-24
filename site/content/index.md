@@ -59,7 +59,7 @@ Nest Graph Inspector reads the live NestJS container and shows an interactive gr
 Why It Matters
 
 #description
-Architecture drift is expensive. Without runtime visibility, teams over-test safe changes, miss risky couplings, and slow down reviews.
+Shipping speed depends on confidence. Teams need runtime visibility to trace impact, find architecture issues early, and ship safer changes.
 
 #features
   :::u-page-feature
@@ -70,7 +70,7 @@ Architecture drift is expensive. Without runtime visibility, teams over-test saf
   Ship Changes Faster
 
   #description
-  Trace impact in minutes, not meetings, before touching critical providers.
+  Trace impact in minutes, not meetings, before touching critical providers or modules.
   :::
 
   :::u-page-feature
@@ -81,7 +81,7 @@ Architecture drift is expensive. Without runtime visibility, teams over-test saf
   Cut Regression Risk
 
   #description
-  Catch circular and high-coupling patterns before they become release issues.
+  Catch circular and high-coupling patterns before they become release blockers.
   :::
 
   :::u-page-feature
@@ -92,7 +92,7 @@ Architecture drift is expensive. Without runtime visibility, teams over-test saf
   Make PR Reviews Concrete
 
   #description
-  Replace assumptions with module and provider-level evidence.
+  Replace assumptions with runtime-backed module and provider-level evidence.
   :::
 
   :::u-page-feature
@@ -103,7 +103,18 @@ Architecture drift is expensive. Without runtime visibility, teams over-test saf
   Onboard With Real Context
 
   #description
-  Give new engineers a live map of how the system actually connects.
+  Give new engineers a live map of how the system actually connects and behaves.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-search-check
+  ---
+  #title
+  Find Architecture Issues Early
+
+  #description
+  Use Issue Finder to surface structural problems before they grow into production incidents.
   :::
 ::
 
@@ -112,7 +123,7 @@ Architecture drift is expensive. Without runtime visibility, teams over-test saf
 Feature List
 
 #description
-Everything is built for graph clarity, fast tracing, and confident decisions.
+Everything is built for graph clarity, fast tracing, and confident runtime decisions.
 
 #features
   :::u-page-feature
@@ -142,10 +153,10 @@ Everything is built for graph clarity, fast tracing, and confident decisions.
   icon: i-lucide-focus
   ---
   #title
-  Relation Focus
+  Relation Focus :badge[Coming Soon]{.ml-2}
 
   #description
-  Focus any provider/module pair to see how they relate and where dependencies connect.
+  Coming soon: focus any provider/module pair to see how they relate and where dependencies connect.
   :::
 
   :::u-page-feature
@@ -164,10 +175,21 @@ Everything is built for graph clarity, fast tracing, and confident decisions.
   icon: i-lucide-git-branch-plus
   ---
   #title
-  Process Sequence (Coming Soon)
+  Process Sequence :badge[Coming Soon]{.ml-2}
 
   #description
-  Generate sequence diagrams from an entry point to completion flow to document how a process really runs.
+  Coming soon: generate sequence diagrams from an entry point to completion flow to document how a process really runs.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-play
+  ---
+  #title
+  Direct Run :badge[Coming Soon]{.ml-2}
+
+  #description
+  Coming soon: execute runtime-resolved services and functions directly from the graph context to validate behavior faster.
   :::
 ::
 
@@ -176,7 +198,7 @@ Everything is built for graph clarity, fast tracing, and confident decisions.
 AI Chat in Viewer
 
 #description
-From graph to answer in seconds. Ask trace questions in plain language and get responses grounded in your current graph context.
+From graph to decision in seconds. Ask trace questions in plain language and get answers grounded in your current runtime context.
 
 #features
   :::u-page-feature
@@ -198,7 +220,7 @@ From graph to answer in seconds. Ask trace questions in plain language and get r
   Grounded, Not Generic
 
   #description
-  Every answer is based on the loaded graph context, and missing data is called out clearly.
+  Every answer is grounded in loaded runtime graph context, and missing data is called out clearly.
   :::
 
   :::u-page-feature
@@ -220,7 +242,7 @@ From graph to answer in seconds. Ask trace questions in plain language and get r
   Trace Paths Faster
 
   #description
-  Walk provider and module relationships quickly during debugging and pull request reviews.
+  Walk provider and module relationships quickly during debugging, architecture reviews, and PR checks.
   :::
 
   :::u-page-feature
@@ -232,6 +254,17 @@ From graph to answer in seconds. Ask trace questions in plain language and get r
 
   #description
   Connect a local model through Ollama and keep architecture analysis in your own environment.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-zap
+  ---
+  #title
+  Direct Run Ready :badge[Coming Soon]{.ml-2}
+
+  #description
+  Today: trace and reason with context-aware chat. Coming soon: trigger runtime-resolved execution flows from the same workspace.
   :::
 ::
 

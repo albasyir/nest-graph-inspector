@@ -2,7 +2,7 @@
 import { storeToRefs } from 'pinia'
 
 definePageMeta({
-  layout: 'viewer',
+  layout: 'viewer'
 })
 
 const route = useRoute()
@@ -13,7 +13,7 @@ const {
   graphData,
   status,
   errorMessage,
-  showCircularDependencies,
+  showCircularDependencies
 } = storeToRefs(graphStore)
 
 const urlBase64 = computed(() => {
@@ -33,7 +33,7 @@ const encodedUrl = computed(() => {
 useSeoMeta({
   title: 'Graph Viewer',
   ogTitle: 'Graph Viewer - Nest Graph Inspector',
-  description: 'Viewing NestJS dependency graph data.',
+  description: 'Viewing NestJS dependency graph data.'
 })
 
 // Redirect to /view if no valid URL
@@ -50,12 +50,12 @@ async function loadGraphResources(value: string) {
 
   if (graphLoaded) {
     posthog?.capture('Graph Loaded', {
-      url: decodedUrl.value,
+      url: decodedUrl.value
     })
   } else {
     posthog?.capture('Graph Load Failed', {
       url: decodedUrl.value,
-      error_message: errorMessage.value || 'Unknown error',
+      error_message: errorMessage.value || 'Unknown error'
     })
   }
 
@@ -92,8 +92,12 @@ function handleRefresh() {
       />
     </div>
     <div class="space-y-1 text-center">
-      <p class="font-medium">Fetching graph data...</p>
-      <p class="text-sm text-muted">Connecting to {{ decodedUrl }}</p>
+      <p class="font-medium">
+        Fetching graph data...
+      </p>
+      <p class="text-sm text-muted">
+        Connecting to {{ decodedUrl }}
+      </p>
     </div>
   </div>
 
@@ -105,14 +109,19 @@ function handleRefresh() {
     <div
       class="flex size-16 items-center justify-center rounded-2xl bg-red-500/10"
     >
-      <UIcon name="i-lucide-alert-triangle" class="size-8 text-red-500" />
+      <UIcon
+        name="i-lucide-alert-triangle"
+        class="size-8 text-red-500"
+      />
     </div>
     <div class="space-y-2 text-center">
-      <p class="text-lg font-medium">Failed to fetch graph data</p>
+      <p class="text-lg font-medium">
+        Failed to fetch graph data
+      </p>
       <p class="max-w-md text-sm text-muted">
         {{
-          errorMessage ||
-          'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.'
+          errorMessage
+            || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.'
         }}
       </p>
       <div class="mt-4 flex items-center justify-center gap-2">
@@ -135,8 +144,8 @@ function handleRefresh() {
   <!-- Graph -->
   <ClientOnly v-else-if="graphData">
     <GraphViewer
-      :data="graphData"
       v-model:show-circular-dependencies="showCircularDependencies"
+      :data="graphData"
       height="100%"
       flush
     />
@@ -150,11 +159,18 @@ function handleRefresh() {
     <div
       class="flex size-16 items-center justify-center rounded-2xl bg-primary/10"
     >
-      <UIcon name="i-lucide-file-json" class="size-8 text-primary" />
+      <UIcon
+        name="i-lucide-file-json"
+        class="size-8 text-primary"
+      />
     </div>
     <div class="space-y-2 text-center">
-      <p class="text-lg font-medium">No data received</p>
-      <p class="text-sm text-muted">The endpoint returned an empty response.</p>
+      <p class="text-lg font-medium">
+        No data received
+      </p>
+      <p class="text-sm text-muted">
+        The endpoint returned an empty response.
+      </p>
       <UButton
         icon="i-lucide-refresh-cw"
         label="Retry"
