@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 
 const posthog = usePostHog()
 const route = useRoute()
+const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   encodedUrl,
@@ -28,6 +29,21 @@ function handleRefresh(event?: Event) {
 function handleAskAi(event?: Event) {
   event?.preventDefault()
   aiChatOpen.value = true
+}
+
+function handleBack(event?: Event) {
+  event?.preventDefault()
+
+  if (!import.meta.client) {
+    return
+  }
+
+  if (window.history.state?.back) {
+    router.back()
+    return
+  }
+
+  void navigateTo('/')
 }
 
 /** Top-level actions shown in the graph viewer header. */
@@ -75,11 +91,11 @@ const viewerMenuItems = computed(() => [
               <div class="shrink-0">
                 <UTooltip text="Back to graph input">
                   <UButton
-                    to="/view"
                     icon="i-lucide-arrow-left"
                     color="neutral"
                     variant="ghost"
                     aria-label="Back to graph input"
+                    @click="handleBack"
                   />
                 </UTooltip>
               </div>
