@@ -17,7 +17,7 @@ const githubCtaUrl = computed(() => {
           <span class="mr-2 inline-flex rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 dark:bg-white/20 dark:text-rose-200">
             Community
           </span>
-          Help us grow sustainably: donate, contribute, or leave a star on GitHub.
+          Help us grow sustainably: contribute or leave a star on GitHub.
         </p>
         <UButton
           :to="githubCtaUrl"
