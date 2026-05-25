@@ -24,6 +24,7 @@ import type {
   GraphOutputProviderCycle
 } from '@library/libs/nest-graph-inspector/src'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
+import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
@@ -1309,8 +1310,7 @@ useResizeObserver(graphViewerRef, () => {
                 class="circular-edge-warning__icon"
               />
               <span class="circular-edge-warning__id">
-                ID{{ edgeProps.data.circularIds.length > 1 ? 's' : '' }}
-                {{ formatCircularEdgeIds(edgeProps.data.circularIds) }}
+                {{ edgeProps.data.circularIds.length }}
               </span>
             </div>
           </UTooltip>
@@ -1469,21 +1469,38 @@ useResizeObserver(graphViewerRef, () => {
       <MiniMap v-if="props.interactive" />
     </VueFlow>
 
-    <UModal
+    <UDrawer
       v-model:open="showCircularDetailDialog"
-      title="Circular Dependency Detail"
-      :description="
-        circularDetailDialogData
-          ? `ID${circularDetailDialogData.circularIds.length > 1 ? 's' : ''} ${formatCircularEdgeIds(circularDetailDialogData.circularIds)}`
-          : undefined
-      "
+      side="right"
+      :ui="{ content: 'w-screen max-w-none' }"
     >
+      <template #header>
+        <div class="flex w-full items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-base font-semibold text-highlighted">
+              Circular Dependency Detail
+            </p>
+          </div>
+
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            square
+            aria-label="Close drawer"
+            @click="showCircularDetailDialog = false"
+          />
+        </div>
+      </template>
+
       <template #body>
         <div class="circular-detail-dialog">
           <CircularDependencyIssueCard
             v-for="issue in circularDetailDialogData?.issues || []"
             :key="issue.id"
             :issue="issue"
+            :flow="buildCircularIssueFlow(issue)"
+            :flow-id="`circular-issue-dialog-${issue.id}`"
           />
         </div>
       </template>
@@ -1498,7 +1515,7 @@ useResizeObserver(graphViewerRef, () => {
           />
         </div>
       </template>
-    </UModal>
+    </UDrawer>
   </div>
 </template>
 

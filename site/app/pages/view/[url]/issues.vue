@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { collectCircularDependencyIssues } from '~/utils/circular-dependency-issues'
 
 definePageMeta({
@@ -168,6 +169,8 @@ function handleRefresh() {
           v-for="issue in issues"
           :key="issue.id"
           :issue="issue"
+          :flow="buildCircularIssueFlow(issue)"
+          :flow-id="`circular-issue-list-${issue.id}`"
         />
       </div>
     </div>

@@ -159,7 +159,7 @@ watch(shouldShowUpdateModal, (visible) => {
               color="neutral"
               variant="subtle"
               class="cursor-pointer"
-              disabled
+              :disabled="isSiteDetected"
               block
             />
             <UButton
@@ -169,7 +169,7 @@ watch(shouldShowUpdateModal, (visible) => {
               color="neutral"
               variant="subtle"
               class="cursor-pointer"
-              disabled
+              :disabled="isSiteDetected"
               block
             />
             <UButton
