@@ -29,7 +29,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
   static readonly defaultConfig: Readonly<
     Required<Pick<HttpOutputConfig, 'host' | 'port'>>
   > = {
-    host: 'localhost',
+    host: '0.0.0.0',
     port: 53371,
   };
 
