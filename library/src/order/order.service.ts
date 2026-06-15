@@ -11,7 +11,7 @@ export class OrderService {
    * to break the circular dependency with OrderNotificationService
    */
   @Inject(forwardRef(() => OrderNotificationService))
-  private readonly notificationService: OrderNotificationService;
+  private readonly notificationService!: OrderNotificationService;
 
   constructor(
     private readonly orderRepository: OrderRepository,
@@ -19,6 +19,14 @@ export class OrderService {
     private readonly productService: ProductService,
   ) {}
 
+  /**
+   * create order
+   * 
+   * @param userId the user id
+   * @param productId the product id
+   * @param quantity how many
+   * @returns order or error
+   */
   createOrder(userId: number, productId: number, quantity: number): Order | { error: string } {
     const user = this.userService.getUserById(userId);
     if (!user) {

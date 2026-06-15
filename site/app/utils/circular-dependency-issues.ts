@@ -3,7 +3,7 @@ import type {
   GraphOutputCycle,
   GraphOutputCycleType,
   GraphOutputProviderCycle
-} from '@library/libs/nest-graph-inspector/src'
+} from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 
 export type CircularDependencyIssueCategory
   = | 'module'
@@ -70,7 +70,7 @@ export function resolveCircularDependencyEndpoints(path: string[]): {
 }
 
 function mapGraphCycleToIssue(
-  cycle: GraphOutputCycle,
+  cycle: Pick<GraphOutputCycle, 'id' | 'type'>,
   category: CircularDependencyIssueCategory,
   path: string[]
 ): CircularDependencyIssue {

@@ -60,12 +60,17 @@ graph TD
 
 ## AppModule
 
+This is playground root module 
+that imports the feature modules and the Nest Graph Inspector module.
+
 ### Imports
 - UserModule
 - ProductModule
 - OrderModule
 
 ## UserModule
+
+UserModule is example feature
 
 > warnings
 > - indirect circular dependency with MobileModule
@@ -82,6 +87,8 @@ graph TD
   - depends on MobileService from MobileModule
 - UserRepository
 - UserSchedule
+  scheduler for user module
+
   - depends on UserRepository from UserModule
 
 ### Controllers
@@ -106,6 +113,9 @@ graph TD
   - depends on ProductService from ProductModule
 
 ## ProductModule
+
+ProductModule imports UserModule but does NOT use any of its providers.
+This is an intentionally useless import to test graph-inspector detection.
 
 ### Imports
 - UserModule
@@ -143,6 +153,9 @@ graph TD
   - depends on ProductService from ProductModule
   - depends on OrderNotificationService from OrderModule
 - OrderNotificationService
+  OrderNotificationService has a circular dependency with OrderService.
+  Uses forwardRef in constructor
+
   - depends on OrderService from OrderModule
 
 ### Controllers

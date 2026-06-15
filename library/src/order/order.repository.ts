@@ -10,7 +10,15 @@ export interface Order {
 
 @Injectable()
 export class OrderRepository {
-  private orders: Order[] = [];
+  private orders: Order[] = [
+    {
+      id: 1,
+      userId: 1,
+      productId: 1,
+      quantity: 2,
+      status: 'pending',
+    }
+  ];
   private nextId = 1;
 
   create(userId: number, productId: number, quantity: number): Order {

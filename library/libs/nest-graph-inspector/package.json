@@ -35,6 +35,9 @@
     "url": "https://github.com/albasyir/nest-graph-inspector/issues"
   },
   "homepage": "https://albasyir.github.io/nest-graph-inspector",
+  "dependencies": {
+    "ts-morph": "^28.0.0"
+  },
   "peerDependencies": {
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0"

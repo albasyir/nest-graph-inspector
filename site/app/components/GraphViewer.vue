@@ -22,7 +22,7 @@ import type {
   GraphOutputDependencyRef,
   GraphOutputCycle,
   GraphOutputProviderCycle
-} from '@library/libs/nest-graph-inspector/src'
+} from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'

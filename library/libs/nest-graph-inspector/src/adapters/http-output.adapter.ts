@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
+import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
 import { FileOutputAdapter } from './file-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 
@@ -45,6 +46,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
     const path = this.normalizePath(config.path);
     const informationOutputPath = this.joinPath(path, 'information.json');
     const jsonOutputPath = this.joinPath(path, 'output.json');
+    const jsonSchemaOutputPath = this.joinPath(path, 'output.schema.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
 
     const isReuseHttpAdapter = !!config.httpAdapter;
@@ -69,6 +71,11 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
         httpAdapter.get(jsonOutputPath, () => graphOutput, {
           responseHeaders: {
             'content-type': 'application/json; charset=utf-8',
+          },
+        }),
+        httpAdapter.get(jsonSchemaOutputPath, () => GRAPH_OUTPUT_JSON_SCHEMA, {
+          responseHeaders: {
+            'content-type': 'application/schema+json; charset=utf-8',
           },
         }),
         httpAdapter.get(

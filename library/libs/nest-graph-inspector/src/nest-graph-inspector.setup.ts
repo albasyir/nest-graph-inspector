@@ -1,5 +1,13 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
+import type {
+  InjectionToken,
+  OptionalFactoryDependency,
+} from '@nestjs/common/interfaces';
 import { ModulesContainer } from '@nestjs/core';
+import type { InstanceWrapper } from '@nestjs/core/injector/instance-wrapper';
+import type { Module } from '@nestjs/core/injector/module';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type {
   NestGraphInspectorModuleOptions,
@@ -28,6 +36,7 @@ import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
+import { Project } from 'ts-morph';
 
 type DependencyNodeKind = 'provider' | 'controller';
 type DependencyNode = {
@@ -37,6 +46,16 @@ type DependencyNode = {
   name: string;
 };
 type NextCycleId = () => number;
+type ModuleTree = {
+  name: string;
+  jsdoc?: string;
+  moduleRef: Module | null;
+  imports: string[];
+  exports: string[];
+  providers: ModuleProvider[];
+  controllers: ModuleController[];
+  children: ModuleTree[];
+};
 
 @Injectable()
 export class NestGraphInspectorSetup implements OnModuleInit {
@@ -49,6 +68,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private readonly ignoreImport: string[];
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
+  private readonly tsMorphProject = this.createTsMorphProject();
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -83,37 +103,99 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    const rootModuleClass = this.options.rootModule;
-    const moduleMap = rootModuleClass
-      ? this.buildModuleMap(rootModuleClass)
-      : this.buildModuleMapFromAutoDetect();
+    await this.inspectAndPublishGraph();
+  }
 
-    if (!this.options.outputs?.length) {
+  private async inspectAndPublishGraph(): Promise<void> {
+    if (!this.hasOutput) {
       return;
     }
 
-    const graphOutput = this.enrichModuleMap(moduleMap);
+    const rootModule = this.getRootModule();
+    const moduleTree = this.getModuleTree(rootModule);
 
+    await this.publishModuleTree(moduleTree);
+  }
+
+  private get hasOutput(): boolean {
+    return !!this.options.outputs?.length;
+  }
+
+  private getRootModule(): Module {
+    const rootModuleClass = this.options.rootModule;
+
+    return rootModuleClass
+      ? this.getRootModuleFromClass(rootModuleClass)
+      : this.findRootModule();
+  }
+
+  private getRootModuleFromClass(rootModuleClass: Type<unknown>): Module {
+    const root = [...this.modulesContainer.values()].find(
+      (m) => m.metatype === rootModuleClass,
+    );
+
+    if (!root) {
+      throw new Error(`Root module not found: ${rootModuleClass.name}`);
+    }
+
+    return root;
+  }
+
+  private getModuleTree(rootModule: Module): ModuleTree {
+    const moduleTree = this.resolveModuleTree(rootModule);
+    this.resolveModuleMembers(moduleTree);
+    this.appendNestCoreModule(moduleTree);
+
+    return moduleTree;
+  }
+
+  private async publishModuleTree(moduleTree: ModuleTree): Promise<void> {
+    const moduleMap = this.createModuleMapFromModuleTree(moduleTree);
+    const graphOutput = this.createGraphOutput(moduleMap);
+    const outputs = this.prepareOutputs();
+
+    await this.publishOutputs({ graphOutput, outputs });
+  }
+
+  private createGraphOutput(moduleMap: ModuleMap): GraphOutput {
+    return this.enrichModuleMap(moduleMap);
+  }
+
+  private prepareOutputs(): NestGraphInspectorOutput[] {
+    return this.options.outputs ?? [];
+  }
+
+  private async publishOutputs(param: {
+    graphOutput: GraphOutput;
+    outputs: NestGraphInspectorOutput[];
+  }): Promise<void> {
     await Promise.all(
-      this.options.outputs.map(async (output) => {
-        output = this.withDefaultOutputOptions(output);
-        const adapter = this.outputAdapters[output.type];
-        if (!adapter) {
-          this.logger.warn(`Unsupported output type: ${output.type}`);
-          return;
-        }
-
-        try {
-          const { message } = await adapter.execute(graphOutput, output);
-          this.logger.debug(message);
-        } catch (err) {
-          this.logger.error(
-            `Failed to execute output adapter for type ${output.type}`,
-            err,
-          );
-        }
+      param.outputs.map(async (output) => {
+        await this.publishSingleOutput(param.graphOutput, output);
       }),
     );
+  }
+
+  private async publishSingleOutput(
+    graphOutput: GraphOutput,
+    output: NestGraphInspectorOutput,
+  ): Promise<void> {
+    output = this.withDefaultOutputOptions(output);
+    const adapter = this.outputAdapters[output.type];
+    if (!adapter) {
+      this.logger.warn(`Unsupported output type: ${output.type}`);
+      return;
+    }
+
+    try {
+      const { message } = await adapter.execute(graphOutput, output);
+      this.logger.debug(message);
+    } catch (err) {
+      this.logger.error(
+        `Failed to execute output adapter for type ${output.type}`,
+        err,
+      );
+    }
   }
 
   private withDefaultOutputOptions(
@@ -142,50 +224,22 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
   buildModuleMapFromAutoDetect(): ModuleMap {
     const root = this.findRootModule();
-    return this.buildModuleMapFromRef(root);
+    const moduleTree = this.getModuleTree(root);
+    return this.createModuleMapFromModuleTree(moduleTree);
   }
 
-  buildModuleMap(rootModuleClass: Type): ModuleMap {
-    const root = [...this.modulesContainer.values()].find(
-      (m) => m.metatype === rootModuleClass,
-    );
-
-    if (!root) {
-      throw new Error(`Root module not found: ${rootModuleClass.name}`);
-    }
-
-    return this.buildModuleMapFromRef(root);
+  buildModuleMap(rootModuleClass: Type<unknown>): ModuleMap {
+    const root = this.getRootModuleFromClass(rootModuleClass);
+    const moduleTree = this.getModuleTree(root);
+    return this.createModuleMapFromModuleTree(moduleTree);
   }
 
-  private buildModuleMapFromRef(root: any): ModuleMap {
-    const reachable = this.collectReachableModules(root, new Set<unknown>());
-    const modules: Record<string, Modules> = {};
-
-    for (const moduleRef of reachable) {
-      const moduleName = this.moduleName(moduleRef);
-      if (this.ignoreImport.includes(moduleName)) {
-        continue;
-      }
-
-      modules[moduleName] = {
-        imports: this.extractImports(moduleRef),
-        exports: this.extractExports(moduleRef),
-        providers: this.extractProviders(moduleRef, moduleName),
-        controllers: this.extractControllers(moduleRef, moduleName),
-      };
-    }
-
-    const usedNestCoreProviders = this.findUsedNestCoreProviders(modules);
-
-    if (usedNestCoreProviders.length > 0) {
-      modules[this.nestCoreModuleName] = this.buildNestCoreModule(
-        usedNestCoreProviders,
-      );
-    }
+  private createModuleMapFromModuleTree(moduleTree: ModuleTree): ModuleMap {
+    const modules = this.flattenModuleTree(moduleTree);
 
     return {
       version: '3',
-      root: this.moduleName(root),
+      root: moduleTree.name,
       modules,
     };
   }
@@ -193,7 +247,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   /**
    * Auto-detect the root module by finding which module imports NestGraphInspectorModule.
    */
-  private findRootModule(): any {
+  private findRootModule(): Module {
     for (const moduleRef of this.modulesContainer.values()) {
       const moduleName = this.moduleName(moduleRef);
 
@@ -216,25 +270,82 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     );
   }
 
-  private buildNestCoreModule(usedProviders: string[]): Modules {
+  private resolveModuleTree(
+    moduleRef: Module,
+    visited = new Set<Module>(),
+  ): ModuleTree {
+    if (visited.has(moduleRef)) {
+      return this.createModuleTreeReference(moduleRef);
+    }
+
+    visited.add(moduleRef);
+
     return {
+      name: this.moduleName(moduleRef),
+      jsdoc: this.extractModuleJsDoc(moduleRef),
+      moduleRef,
       imports: [],
-      exports: [...usedProviders],
-      providers: usedProviders.map((providerName) => ({
-        name: providerName,
-        dependencies: [],
-      })),
+      exports: [],
+      providers: [],
       controllers: [],
+      children: [...moduleRef.imports.values()]
+        .filter((childModule) => !this.shouldIgnoreModule(childModule))
+        .map((childModule) => this.resolveModuleTree(childModule, visited)),
     };
   }
 
-  private findUsedNestCoreProviders(
-    modules: Record<string, Modules>,
-  ): string[] {
+  private createModuleTreeReference(moduleRef: Module): ModuleTree {
+    return {
+      name: this.moduleName(moduleRef),
+      jsdoc: this.extractModuleJsDoc(moduleRef),
+      moduleRef,
+      imports: [],
+      exports: [],
+      providers: [],
+      controllers: [],
+      children: [],
+    };
+  }
+
+  private resolveModuleMembers(moduleTree: ModuleTree): void {
+    this.walkModuleTree(moduleTree, (node) => {
+      if (!node.moduleRef) {
+        return;
+      }
+
+      node.imports = node.children.map((child) => child.name);
+      node.exports = this.extractExports(node.moduleRef);
+      node.providers = this.extractProviders(node.moduleRef, node.name);
+      node.controllers = this.extractControllers(node.moduleRef, node.name);
+    });
+  }
+
+  private appendNestCoreModule(moduleTree: ModuleTree): void {
+    const usedProviders = this.findUsedNestCoreProvidersFromTree(moduleTree);
+
+    if (!usedProviders.length) {
+      return;
+    }
+
+    moduleTree.children.push({
+      name: this.nestCoreModuleName,
+      moduleRef: null,
+      imports: [],
+      exports: [...usedProviders],
+      providers: usedProviders.map((name) => ({
+        name,
+        dependencies: [],
+      })),
+      controllers: [],
+      children: [],
+    });
+  }
+
+  private findUsedNestCoreProvidersFromTree(moduleTree: ModuleTree): string[] {
     const usedProviders = new Set<string>();
 
-    for (const moduleData of Object.values(modules)) {
-      for (const provider of moduleData.providers) {
+    this.walkModuleTree(moduleTree, (node) => {
+      for (const provider of node.providers) {
         for (const dependencyName of provider.dependencies) {
           const nestCoreProviderName =
             this.extractNestCoreProviderName(dependencyName);
@@ -245,7 +356,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         }
       }
 
-      for (const controller of moduleData.controllers) {
+      for (const controller of node.controllers) {
         for (const dependencyName of controller.dependencies) {
           const nestCoreProviderName =
             this.extractNestCoreProviderName(dependencyName);
@@ -255,11 +366,46 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           }
         }
       }
-    }
+    });
 
     return this.nestCoreProviders.filter((providerName) =>
       usedProviders.has(providerName),
     );
+  }
+
+  private flattenModuleTree(moduleTree: ModuleTree): Record<string, Modules> {
+    const modules: Record<string, Modules> = {};
+
+    this.walkModuleTree(moduleTree, (node) => {
+      if (modules[node.name] || this.ignoreImport.includes(node.name)) {
+        return;
+      }
+
+      modules[node.name] = {
+        ...(node.jsdoc ? { jsdoc: node.jsdoc } : {}),
+        imports: node.imports,
+        exports: node.exports,
+        providers: node.providers,
+        controllers: node.controllers,
+      };
+    });
+
+    return modules;
+  }
+
+  private walkModuleTree(
+    moduleTree: ModuleTree,
+    visit: (node: ModuleTree) => void,
+  ): void {
+    visit(moduleTree);
+
+    for (const child of moduleTree.children) {
+      this.walkModuleTree(child, visit);
+    }
+  }
+
+  private shouldIgnoreModule(moduleRef: Module): boolean {
+    return this.ignoreImport.includes(this.moduleName(moduleRef));
   }
 
   private extractNestCoreProviderName(dependencyName: string): string | null {
@@ -281,28 +427,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return providerName;
   }
 
-  private collectReachableModules(root: any, visited: Set<unknown>): any[] {
-    if (visited.has(root)) return [];
-
-    visited.add(root);
-
-    const result = [root];
-    for (const imported of root.imports.values()) {
-      result.push(...this.collectReachableModules(imported, visited));
-    }
-
-    return result;
-  }
-
-  private extractImports(moduleRef: any): string[] {
+  private extractImports(moduleRef: Module): string[] {
     return [...moduleRef.imports.values()]
-      .map((importedModuleRef: any) => this.moduleName(importedModuleRef))
+      .map((importedModuleRef) => this.moduleName(importedModuleRef))
       .filter((importName) => !this.ignoreImport.includes(importName));
   }
 
-  private extractExports(moduleRef: any): string[] {
+  private extractExports(moduleRef: Module): string[] {
     return [...moduleRef.exports.values()]
-      .map((exportedItem: any) => this.exportName(exportedItem))
+      .map((exportedItem) => this.exportName(exportedItem))
       .filter(
         (exportName): exportName is string =>
           !!exportName && !this.ignoreProvider.includes(exportName),
@@ -310,65 +443,148 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private extractProviders(
-    moduleRef: any,
+    moduleRef: Module,
     moduleName: string,
   ): ModuleProvider[] {
-    return [...moduleRef.providers.values()]
-      .map((wrapper: any) =>
-        this.extractProvider(wrapper, moduleName, moduleRef),
-      )
-      .filter((provider): provider is ModuleProvider => !!provider);
+    return this.extractModuleMembers<ModuleProvider>({
+      wrappers: moduleRef.providers.values(),
+      moduleRef,
+      extract: (wrapper) =>
+        this.extractModuleMember({
+          wrapper,
+          moduleRef,
+          shouldIgnore: (name) => this.ignoreProvider.includes(name),
+        }),
+      shouldSkip: (provider) => provider.name === moduleName,
+    });
   }
 
   private extractControllers(
-    moduleRef: any,
+    moduleRef: Module,
     moduleName: string,
   ): ModuleController[] {
-    return [...moduleRef.controllers.values()]
-      .map((wrapper: any) =>
-        this.extractController(wrapper, moduleName, moduleRef),
-      )
-      .filter((controller): controller is ModuleController => !!controller);
+    return this.extractModuleMembers<ModuleController>({
+      wrappers: moduleRef.controllers.values(),
+      moduleRef,
+      extract: (wrapper) => this.extractModuleMember({ wrapper, moduleRef }),
+    });
   }
 
-  private extractProvider(
-    wrapper: any,
-    moduleName: string,
-    moduleRef: any,
-  ): ModuleProvider | null {
-    const name = this.wrapperName(wrapper);
-    if (!name || this.ignoreProvider.includes(name) || name === moduleName) {
+  private extractModuleMembers<T extends { name: string }>(param: {
+    wrappers: Iterable<InstanceWrapper<unknown>>;
+    moduleRef: Module;
+    extract: (wrapper: InstanceWrapper<object>, moduleRef: Module) => T | null;
+    shouldSkip?: (item: T) => boolean;
+  }): T[] {
+    return [...param.wrappers].reduce<T[]>((items, wrapper) => {
+      const executableWrapper = wrapper as InstanceWrapper<object>;
+      const item = param.extract(executableWrapper, param.moduleRef);
+      if (item) {
+        if (param.shouldSkip?.(item)) {
+          return items;
+        }
+
+        items.push(item);
+      }
+
+      return items;
+    }, []);
+  }
+
+  private extractModuleMember(param: {
+    wrapper: InstanceWrapper<object>;
+    moduleRef: Module;
+    shouldIgnore?: (name: string) => boolean;
+  }): ModuleProvider | null {
+    const { wrapper, moduleRef, shouldIgnore = () => false } = param;
+    const name =
+      this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+
+    if (!name || shouldIgnore(name)) {
       return null;
     }
 
+    const jsdoc = this.extractClassJsDoc(wrapper);
+
     return {
       name,
+      ...(jsdoc ? { jsdoc } : {}),
       dependencies: this.extractDependencies(wrapper, moduleRef),
     };
   }
 
-  private extractController(
-    wrapper: any,
-    moduleName: string,
-    moduleRef: any,
-  ): ModuleController | null {
-    const name = this.wrapperName(wrapper);
-    if (!name) {
-      return null;
+  private createTsMorphProject(): Project {
+    const tsConfigFilePath = join(process.cwd(), 'tsconfig.json');
+
+    if (!existsSync(tsConfigFilePath)) {
+      this.logger.warn(
+        `Could not find tsconfig.json at ${tsConfigFilePath}; JSDoc metadata will be skipped.`,
+      );
+      return new Project();
     }
-    return {
-      name,
-      dependencies: this.extractDependencies(wrapper, moduleRef),
-    };
+
+    return new Project({
+      tsConfigFilePath,
+      skipAddingFilesFromTsConfig: false,
+    });
   }
 
-  private extractDependencies(wrapper: any, moduleRef: any): string[] {
+  private extractModuleJsDoc(moduleRef: Module): string | undefined {
+    return moduleRef.metatype
+      ? this.extractClassJsDocByName(moduleRef.metatype.name)
+      : undefined;
+  }
+
+  private extractClassJsDoc(
+    wrapper: InstanceWrapper<unknown>,
+  ): string | undefined {
+    const className = this.wrapperClassName(wrapper);
+
+    return className ? this.extractClassJsDocByName(className) : undefined;
+  }
+
+  private extractClassJsDocByName(className: string): string | undefined {
+    const targetClass = this.tsMorphProject
+      .getSourceFiles()
+      .flatMap((sourceFile) => sourceFile.getClasses())
+      .find((classDeclaration) => classDeclaration.getName() === className);
+
+    return targetClass
+      ?.getJsDocs()
+      .map((doc) => doc.getCommentText())
+      .filter((comment): comment is string => !!comment)
+      .join('\n');
+  }
+
+  private wrapperClassName(wrapper: InstanceWrapper<unknown>): string | null {
+    if (wrapper.metatype?.name) {
+      return wrapper.metatype.name;
+    }
+
+    const instance = wrapper.instance;
+    if (
+      instance &&
+      (typeof instance === 'object' || typeof instance === 'function')
+    ) {
+      return instance.constructor?.name ?? null;
+    }
+
+    return null;
+  }
+
+  private extractDependencies(
+    wrapper: InstanceWrapper<unknown>,
+    moduleRef: Module,
+  ): string[] {
     const dependencies = new Set<string>();
 
     // Factory providers (useFactory with inject array)
     if (Array.isArray(wrapper?.inject)) {
       for (const token of wrapper.inject) {
-        const dependencyName = this.resolveDependencyName(token, moduleRef);
+        const dependencyName = this.resolveDependencyName(
+          this.resolveInjectionToken(token),
+          moduleRef,
+        );
         if (dependencyName) {
           dependencies.add(dependencyName);
         }
@@ -376,11 +592,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     // Constructor-injected dependencies (resolved by NestJS with @Inject() overrides)
-    const ctorDeps: any[] = wrapper?.getCtorMetadata?.() ?? [];
+    const ctorDeps = wrapper.getCtorMetadata?.() ?? [];
     for (const depWrapper of ctorDeps) {
       if (depWrapper) {
         const dependencyName = this.resolveDependencyName(
-          depWrapper.token ?? depWrapper.name,
+          depWrapper.token,
           moduleRef,
         );
         if (dependencyName && dependencyName !== 'Object') {
@@ -390,12 +606,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     // Property-injected dependencies (@Inject() on class properties)
-    const propertyDeps: any[] = wrapper?.getPropertiesMetadata?.() ?? [];
+    const propertyDeps = wrapper.getPropertiesMetadata?.() ?? [];
     for (const propertyDep of propertyDeps) {
       const depWrapper = propertyDep?.wrapper;
       if (depWrapper) {
         const dependencyName = this.resolveDependencyName(
-          depWrapper.token ?? depWrapper.name,
+          depWrapper.token,
           moduleRef,
         );
         if (dependencyName && dependencyName !== 'Object') {
@@ -407,7 +623,20 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return [...dependencies];
   }
 
-  private resolveDependencyName(token: any, moduleRef: any): string | null {
+  private resolveInjectionToken(
+    token: InjectionToken | OptionalFactoryDependency,
+  ): InjectionToken {
+    if (typeof token === 'object' && token !== null && 'token' in token) {
+      return token.token;
+    }
+
+    return token;
+  }
+
+  private resolveDependencyName(
+    token: InjectionToken,
+    moduleRef: Module,
+  ): string | null {
     const tokenName = this.tokenName(token);
     if (!tokenName) {
       return null;
@@ -444,8 +673,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private findProviderDependencyNameByToken(
-    moduleRef: any,
-    token: any,
+    moduleRef: Module,
+    token: InjectionToken,
     includeModulePrefix: boolean,
   ): string | null {
     const moduleName = this.moduleName(moduleRef);
@@ -455,7 +684,17 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         continue;
       }
 
-      const providerName = this.wrapperName(wrapper);
+      const providerInstance =
+        wrapper.instance &&
+        (typeof wrapper.instance === 'object' ||
+          typeof wrapper.instance === 'function')
+          ? (wrapper.instance as { constructor?: { name?: string } })
+          : null;
+      const providerName =
+        wrapper.metatype?.name ||
+        providerInstance?.constructor?.name ||
+        this.tokenName(wrapper.token);
+
       if (!providerName) {
         return null;
       }
@@ -470,7 +709,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return null;
   }
 
-  private isSameProviderToken(wrapper: any, token: any): boolean {
+  private isSameProviderToken(
+    wrapper: InstanceWrapper<unknown>,
+    token: InjectionToken,
+  ): boolean {
     if (wrapper?.token === token) {
       return true;
     }
@@ -479,37 +721,37 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return true;
     }
 
-    if (wrapper?.instance?.constructor === token) {
+    if (
+      wrapper.instance &&
+      typeof wrapper.instance === 'object' &&
+      wrapper.instance.constructor === token
+    ) {
       return true;
     }
 
     return false;
   }
 
-  private exportedNames(moduleRef: any): Set<string> {
+  private exportedNames(moduleRef: Module): Set<string> {
     return new Set(
       [...moduleRef.exports.values()]
-        .map((exportedItem: any) => this.exportName(exportedItem))
+        .map((exportedItem) => this.exportName(exportedItem))
         .filter((exportName): exportName is string => !!exportName),
     );
   }
 
-  private exportName(exportedItem: any): string | null {
-    return (
-      this.wrapperName(exportedItem) ||
-      this.tokenName(exportedItem?.token || exportedItem)
-    );
+  private exportName(exportedItem: InjectionToken): string | null {
+    return this.tokenName(exportedItem);
   }
 
-  private isExportedProviderToken(moduleRef: any, token: any): boolean {
+  private isExportedProviderToken(
+    moduleRef: Module,
+    token: InjectionToken,
+  ): boolean {
     const tokenName = this.tokenName(token);
 
     for (const exportedItem of moduleRef.exports.values()) {
-      if (
-        exportedItem === token ||
-        exportedItem?.token === token ||
-        exportedItem?.metatype === token
-      ) {
+      if (exportedItem === token) {
         return true;
       }
 
@@ -521,7 +763,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return false;
   }
 
-  private formatDependencyName(dependencyName: string, moduleRef: any): string {
+  private formatDependencyName(
+    dependencyName: string,
+    moduleRef: Module,
+  ): string {
     if (this.nestCoreProviders.includes(dependencyName)) {
       return `${this.nestCoreModuleName}:${dependencyName}`;
     }
@@ -538,7 +783,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return dependencyName;
   }
 
-  private moduleName(moduleRef: any): string {
+  private moduleName(moduleRef: Module): string {
     return (
       moduleRef.metatype?.name ||
       this.tokenName(moduleRef.token) ||
@@ -546,21 +791,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     );
   }
 
-  private wrapperName(wrapper: any): string | null {
-    return (
-      wrapper?.metatype?.name ||
-      wrapper?.instance?.constructor?.name ||
-      this.tokenName(wrapper?.token) ||
-      null
-    );
-  }
-
-  private tokenName(token: any): string | null {
+  private tokenName(token: InjectionToken | null | undefined): string | null {
     if (!token) return null;
     if (typeof token === 'string') return token;
     if (typeof token === 'symbol') return token.toString();
     if (typeof token === 'function') return token.name;
-    return String(token);
+    return null;
   }
 
   private enrichModuleMap(moduleMap: ModuleMap): GraphOutput {

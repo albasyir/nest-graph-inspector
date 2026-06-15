@@ -5,6 +5,7 @@ import { HttpOutputAdapter } from './http-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
 import { FileOutputAdapter } from './file-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
+import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
 
 type HttpResponse = {
   statusCode?: number;
@@ -52,7 +53,7 @@ describe(HttpOutputAdapter.name, () => {
     expect(adapter.normalizePath()).toBe('/__nest-graph-inspector');
   });
 
-  it('serves endpoint metadata, raw JSON, and markdown output under child paths', async () => {
+  it('serves endpoint metadata, raw JSON, schema, and markdown output under child paths', async () => {
     const port = await availablePort();
     const graphOutput: GraphOutput = {
       version: '2',
@@ -79,6 +80,10 @@ describe(HttpOutputAdapter.name, () => {
       '/graph/information.json',
     );
     const jsonOutputUrl = urlFromMessage(result.message, '/graph/output.json');
+    const jsonSchemaOutputUrl = new URL(
+      '/graph/output.schema.json',
+      jsonOutputUrl,
+    ).toString();
     const markdownOutputUrl = urlFromMessage(
       result.message,
       '/graph/output.md',
@@ -102,6 +107,25 @@ describe(HttpOutputAdapter.name, () => {
       'application/json; charset=utf-8',
     );
     expect(JSON.parse(jsonResponse.body)).toEqual(graphOutput);
+
+    const jsonSchemaResponse = await get(jsonSchemaOutputUrl);
+    expect(jsonSchemaResponse.statusCode).toBe(200);
+    expect(jsonSchemaResponse.headers['content-type']).toBe(
+      'application/schema+json; charset=utf-8',
+    );
+    expect(JSON.parse(jsonSchemaResponse.body)).toEqual(
+      GRAPH_OUTPUT_JSON_SCHEMA,
+    );
+    expect(
+      JSON.parse(jsonSchemaResponse.body).$defs.provider.properties.jsdoc,
+    ).toEqual({
+      type: 'string',
+    });
+    expect(
+      JSON.parse(jsonSchemaResponse.body).$defs.module.properties.jsdoc,
+    ).toEqual({
+      type: 'string',
+    });
 
     const markdownResponse = await get(markdownOutputUrl);
     expect(markdownResponse.statusCode).toBe(200);

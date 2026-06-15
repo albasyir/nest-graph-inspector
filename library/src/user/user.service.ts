@@ -5,7 +5,7 @@ import { UserRepository, User } from './user.repository';
 @Injectable()
 export class UserService {
   @Inject(forwardRef(() => MobileService))
-  private readonly mobileService: MobileService;
+  private readonly mobileService!: MobileService;
 
   constructor(private readonly userRepository: UserRepository) {}
 

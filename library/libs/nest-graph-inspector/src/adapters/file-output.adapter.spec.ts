@@ -161,6 +161,59 @@ describe(FileOutputAdapter.name, () => {
     expect(markdown).not.toContain('- None');
   });
 
+  it('renders module, provider, and controller JSDoc blocks', () => {
+    const graphOutput: GraphOutput = {
+      version: '3',
+      root: 'AppModule',
+      modules: {
+        AppModule: {
+          jsdoc: 'Coordinates app runtime.\nLoads feature modules.',
+          imports: [],
+          exports: [],
+          providers: [
+            {
+              name: 'AppService',
+              jsdoc: 'Handles app use cases.',
+              dependencies: [],
+            },
+          ],
+          controllers: [
+            {
+              name: 'AppController',
+              jsdoc: 'Exposes app HTTP endpoints.',
+              dependencies: [],
+            },
+          ],
+        },
+      },
+      cycles: emptyCycles(),
+    };
+
+    const markdown = adapter.buildMarkdownText(graphOutput);
+
+    expect(markdown).toContain(
+      [
+        '## AppModule',
+        '',
+        'Coordinates app runtime.',
+        'Loads feature modules.',
+        '',
+        '### Providers',
+        '- AppService',
+        '  Handles app use cases.',
+        '',
+      ].join('\n'),
+    );
+    expect(markdown).toContain(
+      [
+        '### Controllers',
+        '- AppController',
+        '  Exposes app HTTP endpoints.',
+        '',
+      ].join('\n'),
+    );
+  });
+
   it('renders provider-level circular dependency warnings on providers', () => {
     const graphOutput: GraphOutput = {
       version: '2',

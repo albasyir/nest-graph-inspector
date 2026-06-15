@@ -15,17 +15,27 @@ type SetupWithPrivateMethods = NestGraphInspectorSetup & {
   enrichModuleMap(moduleMap: ModuleMap): GraphOutput;
 };
 
+/**
+ * Provides documented app behavior.
+ */
+class DocumentedProvider {}
+
+/**
+ * Wires documented app dependencies.
+ */
+class DocumentedAppModule {}
+
 describe(NestGraphInspectorSetup.name, () => {
-  class AppModule {}
+  class TestRootModule {}
 
   let moduleRef: TestingModule;
   let service: NestGraphInspectorSetup;
   let options: NestGraphInspectorModuleOptions & {
-    rootModule: typeof AppModule;
+    rootModule: typeof TestRootModule;
     outputs: NonNullable<NestGraphInspectorModuleOptions['outputs']>;
   };
   let appModuleRef: {
-    metatype: typeof AppModule;
+    metatype: typeof TestRootModule;
     imports: Map<string, unknown>;
     exports: Map<string, unknown>;
     providers: Map<string, unknown>;
@@ -38,7 +48,7 @@ describe(NestGraphInspectorSetup.name, () => {
 
   beforeEach(async () => {
     options = {
-      rootModule: AppModule,
+      rootModule: TestRootModule,
       outputs: [{ type: 'json', path: 'graph.json' }],
     };
     fileOutputAdapter = {
@@ -63,7 +73,7 @@ describe(NestGraphInspectorSetup.name, () => {
     };
 
     appModuleRef = {
-      metatype: AppModule,
+      metatype: TestRootModule,
       imports: new Map(),
       exports: new Map(),
       providers: new Map(),
@@ -79,7 +89,7 @@ describe(NestGraphInspectorSetup.name, () => {
         },
         {
           provide: ModulesContainer,
-          useValue: new Map([[AppModule.name, appModuleRef]]),
+          useValue: new Map([[TestRootModule.name, appModuleRef]]),
         },
         {
           provide: HttpOutputAdapter,
@@ -120,10 +130,10 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(jsonOutputAdapter.execute).toHaveBeenCalledWith(
       {
-        version: '2',
-        root: AppModule.name,
+        version: '3',
+        root: TestRootModule.name,
         modules: {
-          [AppModule.name]: {
+          [TestRootModule.name]: {
             imports: [],
             exports: [],
             providers: [],
@@ -322,14 +332,83 @@ describe(NestGraphInspectorSetup.name, () => {
     });
     appModuleRef.providers.set(Reflector.name, { metatype: Reflector });
 
-    const moduleMap = service.buildModuleMap(AppModule);
+    const moduleMap = service.buildModuleMap(TestRootModule);
 
-    expect(moduleMap.modules[AppModule.name].providers).toEqual([
+    expect(moduleMap.modules[TestRootModule.name].providers).toEqual([
       {
         name: Reflector.name,
         dependencies: [],
       },
     ]);
+  });
+
+  it('should include class JSDoc on documented providers', () => {
+    appModuleRef.providers.set(DocumentedProvider.name, {
+      metatype: DocumentedProvider,
+    });
+
+    const moduleMap = service.buildModuleMap(TestRootModule);
+
+    expect(moduleMap.modules[TestRootModule.name].providers).toEqual([
+      {
+        name: DocumentedProvider.name,
+        jsdoc: 'Provides documented app behavior.',
+        dependencies: [],
+      },
+    ]);
+  });
+
+  it('should include class JSDoc on documented modules', () => {
+    const documentedModuleRef = {
+      metatype: DocumentedAppModule,
+      imports: new Map(),
+      exports: new Map(),
+      providers: new Map(),
+      controllers: new Map(),
+    };
+    const customService = new NestGraphInspectorSetup(
+      {
+        ...options,
+        rootModule: DocumentedAppModule,
+      },
+      new Map([[DocumentedAppModule.name, documentedModuleRef]]) as never,
+      httpOutputAdapter as never,
+      fileOutputAdapter as never,
+      jsonOutputAdapter as never,
+      viewerOutputAdapter as never,
+    );
+
+    const moduleMap = customService.buildModuleMap(DocumentedAppModule);
+
+    expect(moduleMap.modules[DocumentedAppModule.name]).toMatchObject({
+      jsdoc: 'Wires documented app dependencies.',
+      imports: [],
+      exports: [],
+      providers: [],
+      controllers: [],
+    });
+  });
+
+  it('should keep building the module map when the consumer tsconfig is missing', () => {
+    jest
+      .spyOn(process, 'cwd')
+      .mockReturnValue('/tmp/nest-graph-inspector-missing-tsconfig');
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const customService = new NestGraphInspectorSetup(
+      options,
+      new Map([[TestRootModule.name, appModuleRef]]) as never,
+      httpOutputAdapter as never,
+      fileOutputAdapter as never,
+      jsonOutputAdapter as never,
+      viewerOutputAdapter as never,
+    );
+
+    const moduleMap = customService.buildModuleMap(TestRootModule);
+
+    expect(moduleMap.modules[TestRootModule.name].providers).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Could not find tsconfig.json at /tmp/nest-graph-inspector-missing-tsconfig/tsconfig.json; JSDoc metadata will be skipped.',
+    );
   });
 
   it('should apply configured inspector filtering options', () => {
@@ -347,7 +426,7 @@ describe(NestGraphInspectorSetup.name, () => {
     };
 
     const customOptions: NestGraphInspectorModuleOptions = {
-      rootModule: AppModule,
+      rootModule: TestRootModule,
       outputs: [{ type: 'json', path: 'graph.json' }],
       ignoreProvider: [HiddenProvider.name],
       ignoreImport: [IgnoredModule.name],
@@ -367,18 +446,18 @@ describe(NestGraphInspectorSetup.name, () => {
     });
     const customService = new NestGraphInspectorSetup(
       customOptions,
-      new Map([[AppModule.name, appModuleRef]]) as never,
+      new Map([[TestRootModule.name, appModuleRef]]) as never,
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
     );
 
-    const moduleMap = customService.buildModuleMap(AppModule);
+    const moduleMap = customService.buildModuleMap(TestRootModule);
 
-    expect(moduleMap.modules[AppModule.name].imports).toEqual([]);
+    expect(moduleMap.modules[TestRootModule.name].imports).toEqual([]);
     expect(moduleMap.modules[IgnoredModule.name]).toBeUndefined();
-    expect(moduleMap.modules[AppModule.name].providers).toEqual([
+    expect(moduleMap.modules[TestRootModule.name].providers).toEqual([
       {
         name: VisibleProvider.name,
         dependencies: [],

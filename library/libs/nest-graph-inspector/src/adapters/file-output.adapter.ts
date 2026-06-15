@@ -231,6 +231,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     for (const [moduleName, moduleData] of moduleEntries) {
       lines.push(`## ${moduleName}`);
       lines.push('');
+      this.appendJsDocBlock(lines, moduleData.jsdoc);
 
       const moduleWarnings = moduleCircularWarnings.get(moduleName);
       this.appendModuleWarningBlock(lines, moduleWarnings);
@@ -400,6 +401,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
       this.appendNamedDependencyItem(
         lines,
         provider.name,
+        provider.jsdoc,
         provider.dependencies,
         circularWarnings.get(this.providerKey(moduleName, provider.name)),
       );
@@ -425,6 +427,7 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
       this.appendNamedDependencyItem(
         lines,
         controller.name,
+        controller.jsdoc,
         controller.dependencies,
         circularWarnings.get(this.providerKey(moduleName, controller.name)),
       );
@@ -436,11 +439,13 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
   private appendNamedDependencyItem(
     lines: string[],
     name: string,
+    jsdoc: string | undefined,
     dependencies: GraphOutputDependencyRef[],
     warnings: string[] = [],
   ): void {
     lines.push(`- ${name}`);
 
+    this.appendJsDocBlock(lines, jsdoc, '  ');
     this.appendWarningItems(lines, warnings, '  ');
 
     for (const dependency of dependencies) {
@@ -448,6 +453,22 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
         `  - depends on ${dependency.token} from ${dependency.providedBy.name}`,
       );
     }
+  }
+
+  private appendJsDocBlock(
+    lines: string[],
+    jsdoc: string | undefined,
+    indent = '',
+  ): void {
+    if (!jsdoc) {
+      return;
+    }
+
+    for (const line of jsdoc.split('\n')) {
+      lines.push(`${indent}${line}`);
+    }
+
+    lines.push('');
   }
 
   private appendWarningItems(

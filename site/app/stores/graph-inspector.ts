@@ -1,4 +1,4 @@
-import type { GraphOutput } from '@library/libs/nest-graph-inspector/src'
+import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 import { defineStore } from 'pinia'
 
 type InspectorEndpointInfo = {

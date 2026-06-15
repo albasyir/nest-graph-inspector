@@ -5,15 +5,18 @@ export type GraphOutputDependencyRef = {
 
 export type GraphOutputProvider = {
   name: string;
+  jsdoc?: string;
   dependencies: GraphOutputDependencyRef[];
 };
 
 export type GraphOutputController = {
   name: string;
+  jsdoc?: string;
   dependencies: GraphOutputDependencyRef[];
 };
 
 export type GraphOutputModule = {
+  jsdoc?: string;
   imports: string[];
   exports: string[];
   providers: GraphOutputProvider[];

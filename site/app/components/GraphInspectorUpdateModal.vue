@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import PackageManagerCommand from './content/PackageManagerCommand.vue';
 
 const graphStore = useGraphInspectorStore()
 const { shouldShowUpdateModal } = storeToRefs(graphStore)
@@ -16,7 +17,7 @@ const { shouldShowUpdateModal } = storeToRefs(graphStore)
         <p class="text-sm text-muted">
           Your app is using an older graph output format. Update <code>nest-graph-inspector</code> and restart your app.
         </p>
-        <ContentPackageManagerCommand command="update" />
+        <PackageManagerCommand command="update" />
       </div>
     </template>
 

@@ -4,6 +4,10 @@ import { OrderModule } from './order/order.module';
 import { NestGraphInspectorModule } from 'nest-graph-inspector/nest-graph-inspector';
 import { UserModule } from './user/user.module';
 
+/**
+ * This is playground root module 
+ * that imports the feature modules and the Nest Graph Inspector module.
+ */
 @Module({
   imports: [
     /**

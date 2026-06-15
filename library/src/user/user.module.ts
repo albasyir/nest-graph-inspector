@@ -5,6 +5,9 @@ import { UserRepository } from './user.repository';
 import { MobileModule } from '../mobile/mobile.module';
 import { UserSchedule } from './user.schedule';
 
+/**
+ * UserModule is example feature
+ */
 @Module({
   imports: [forwardRef(() => MobileModule)],
   controllers: [UserController],

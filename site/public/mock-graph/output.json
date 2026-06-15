@@ -3,6 +3,7 @@
   "root": "AppModule",
   "modules": {
     "AppModule": {
+      "jsdoc": "This is playground root module \nthat imports the feature modules and the Nest Graph Inspector module.",
       "imports": [
         "UserModule",
         "ProductModule",
@@ -13,6 +14,7 @@
       "controllers": []
     },
     "UserModule": {
+      "jsdoc": "UserModule is example feature",
       "imports": [
         "MobileModule"
       ],
@@ -45,6 +47,7 @@
         },
         {
           "name": "UserSchedule",
+          "jsdoc": "scheduler for user module",
           "dependencies": [
             {
               "providedBy": {
@@ -102,6 +105,7 @@
       "controllers": []
     },
     "ProductModule": {
+      "jsdoc": "ProductModule imports UserModule but does NOT use any of its providers.\nThis is an intentionally useless import to test graph-inspector detection.",
       "imports": [
         "UserModule",
         "MobileModule"
@@ -197,6 +201,7 @@
         },
         {
           "name": "OrderNotificationService",
+          "jsdoc": "OrderNotificationService has a circular dependency with OrderService.\nUses forwardRef in constructor",
           "dependencies": [
             {
               "providedBy": {
