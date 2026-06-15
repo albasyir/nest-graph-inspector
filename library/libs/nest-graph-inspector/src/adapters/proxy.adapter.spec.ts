@@ -6,6 +6,7 @@ import { ProxyAdapter } from './proxy.adapter';
 
 type HttpResponse = {
   statusCode?: number;
+  headers: http.IncomingHttpHeaders;
   body: string;
 };
 
@@ -110,11 +111,136 @@ describe(ProxyAdapter.name, () => {
       }),
     });
   });
+
+  it('adds CORS headers to proxied responses for allowed origins', async () => {
+    targetServer = http.createServer((req, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+      });
+      res.end(JSON.stringify({ url: req.url }));
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: {
+          origins: ['https://viewer.example'],
+          methods: ['GET', 'POST', 'OPTIONS'],
+          allowHeaders: ['content-type', 'authorization'],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        headers: {
+          origin: 'https://viewer.example',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://viewer.example',
+    );
+    expect(response.headers['access-control-allow-methods']).toBe(
+      'GET,POST,OPTIONS',
+    );
+    expect(response.headers['access-control-allow-headers']).toBe(
+      'content-type,authorization',
+    );
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers.vary).toBe('Origin');
+  });
+
+  it('responds to CORS preflight requests without forwarding to the target origin', async () => {
+    let targetRequestCount = 0;
+
+    targetServer = http.createServer((_req, res) => {
+      targetRequestCount += 1;
+      res.writeHead(405);
+      res.end();
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: {
+          origins: [/^https:\/\/viewer\.example$/],
+          methods: ['POST', 'OPTIONS'],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/pull`,
+      {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://viewer.example',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(response.body).toBe('');
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://viewer.example',
+    );
+    expect(response.headers['access-control-allow-methods']).toBe(
+      'POST,OPTIONS',
+    );
+    expect(response.headers['access-control-allow-headers']).toBe(
+      'content-type',
+    );
+    expect(targetRequestCount).toBe(0);
+  });
 });
 
 function get(url: string): Promise<HttpResponse> {
+  return request(url);
+}
+
+function post(url: string, body: string): Promise<HttpResponse> {
+  return request(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+    },
+    body,
+  });
+}
+
+function request(
+  url: string,
+  options: http.RequestOptions & { body?: string } = {},
+): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
-    const req = http.get(url, (res) => {
+    const req = http.request(url, options, (res) => {
       let body = '';
 
       res.setEncoding('utf8');
@@ -124,44 +250,14 @@ function get(url: string): Promise<HttpResponse> {
       res.on('end', () => {
         resolve({
           statusCode: res.statusCode,
+          headers: res.headers,
           body,
         });
       });
     });
 
     req.on('error', reject);
-  });
-}
-
-function post(url: string, body: string): Promise<HttpResponse> {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      url,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body),
-        },
-      },
-      (res) => {
-        let responseBody = '';
-
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => {
-          responseBody += chunk;
-        });
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode,
-            body: responseBody,
-          });
-        });
-      },
-    );
-
-    req.on('error', reject);
-    req.end(body);
+    req.end(options.body);
   });
 }
 

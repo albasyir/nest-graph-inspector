@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
+import type { ProxyCorsOptions } from '../ports/proxy.gateway';
 import { HttpOutputAdapter } from './http-output.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
@@ -41,7 +42,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       {
         from: this.httpOrigin(config),
         to: ollama.origin,
-        cors: false,
+        cors: this.viewerCorsOptions(),
       },
       {
         httpAdapter: this.httpServeAdapter,
@@ -70,8 +71,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     const { host, port } = HttpOutputAdapter.defaultConfig;
 
     return (
-      config.origin ??
-      `http://${config.host ?? host}:${config.port ?? port}`
+      config.origin ?? `http://${config.host ?? host}:${config.port ?? port}`
     );
   }
 
@@ -86,5 +86,11 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     }
 
     return { origin, path };
+  }
+
+  private viewerCorsOptions(): ProxyCorsOptions {
+    return {
+      origins: [new URL(this.viewerBaseUrl).origin],
+    };
   }
 }

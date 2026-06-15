@@ -94,7 +94,9 @@ describe(ViewerOutputAdapter.name, () => {
       {
         from: 'http://127.0.0.1:3998',
         to: 'http://localhost:11434',
-        cors: false,
+        cors: {
+          origins: ['https://albasyir.github.io'],
+        },
       },
       {
         httpAdapter: httpOutputConfig.httpAdapter,

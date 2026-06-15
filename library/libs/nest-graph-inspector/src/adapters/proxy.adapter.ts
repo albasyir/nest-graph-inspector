@@ -36,7 +36,10 @@ export class ProxyAdapter implements ProxyGateway {
         type: '*',
         path,
         rawCallback: (clientReq, clientRes) => {
-          this.applyCors(cors, clientReq, clientRes);
+          if (this.handleCorsPreflight(cors, clientReq, clientRes)) {
+            return;
+          }
+
           this.forwardRequest(toUrl, cors, clientReq, clientRes, pathPrefix);
         },
       })),
@@ -183,6 +186,32 @@ export class ProxyAdapter implements ProxyGateway {
         res.setHeader(key, value);
       }
     }
+  }
+
+  private handleCorsPreflight(
+    cors: ProxyCorsOptions | undefined,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): boolean {
+    if (!cors || !this.isCorsPreflightRequest(req)) {
+      return false;
+    }
+
+    this.applyCors(cors, req, res);
+    res.writeHead(204, {
+      'content-length': 0,
+    });
+    res.end();
+
+    return true;
+  }
+
+  private isCorsPreflightRequest(req: http.IncomingMessage): boolean {
+    return (
+      req.method === 'OPTIONS' &&
+      typeof req.headers.origin === 'string' &&
+      typeof req.headers['access-control-request-method'] === 'string'
+    );
   }
 
   private isAllowedOrigin(cors: ProxyCorsOptions, origin: unknown) {
