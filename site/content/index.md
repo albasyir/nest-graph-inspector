@@ -51,7 +51,7 @@ Nest Graph Inspector turns your live NestJS runtime into **architecture intellig
   :::
 
 #default
-  :runtime-graph-preview
+  :runtime-graph-complete-preview
 ::
 
 ::u-page-section
@@ -106,7 +106,61 @@ No manual tracing. Hover a module, provider, or controller and the graph shows t
   :::
 
 #default
-  :runtime-graph-preview{fix-bightline="UserRepository" exclude-modules="NestJSCoreModule,ProductModule,AppModule,MobileModule" height="clamp(18rem, 58vh, 34rem)"}
+  :runtime-graph-brigh-line-preview
+::
+
+::u-page-section
+---
+class: dark:bg-neutral-950
+orientation: horizontal
+ui:
+  container: py-10 sm:py-12 lg:py-16 gap-8 sm:gap-10
+---
+#title
+::span{class="inline-flex items-center gap-3"}
+  :u-icon{name="i-lucide-recycle" class="size-9 shrink-0 text-primary"}
+  Find Circular Dependencies Fast
+::
+
+#description
+Warnings mark circular dependencies. Click one to see the loop.
+
+#features
+  :::u-page-feature
+  ---
+  icon: i-lucide-recycle
+  ---
+  #title
+  Module Loops
+
+  #description
+  See when modules depend on each other in a circle.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-orbit
+  ---
+  #title
+  Provider Loops
+
+  #description
+  See when providers loop inside one module.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-circle-alert
+  ---
+  #title
+  Clear Fix Path
+
+  #description
+  Open the warning and follow the path to fix.
+  :::
+
+#default
+  :runtime-graph-circular-depedencies-preview
 ::
 
 ::u-page-section{class="dark:bg-neutral-950"}

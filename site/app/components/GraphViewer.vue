@@ -106,17 +106,23 @@ const props = withDefaults(
     height?: string
     interactive?: boolean
     flush?: boolean
+    flowId?: string
     defaultOpenModuleDetail?: boolean
     fixBightline?: boolean | string
     excludeModules?: string[] | string
+    enableBrightLine?: boolean
+    collapsedModules?: string[] | string
   }>(),
   {
     height: '75vh',
     interactive: true,
     flush: false,
+    flowId: undefined,
     defaultOpenModuleDetail: false,
     fixBightline: false,
-    excludeModules: () => []
+    excludeModules: () => [],
+    enableBrightLine: true,
+    collapsedModules: () => []
   }
 )
 
@@ -125,7 +131,9 @@ const showCircularDependencies = defineModel<boolean>(
   { default: true }
 )
 
-const { fitView } = useVueFlow()
+const generatedFlowId = useId()
+const flowId = props.flowId || generatedFlowId
+const { fitView } = useVueFlow(flowId)
 const graphViewerRef = ref<HTMLElement | null>(null)
 
 const NODE_WIDTH = 200
@@ -153,6 +161,10 @@ const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
 
+function parseModuleNameList(moduleNames: string[] | string): string[] {
+  return Array.isArray(moduleNames) ? moduleNames : moduleNames.split(',')
+}
+
 function shouldKeepDependency(
   dep: GraphOutputDependencyRef,
   excludedModules: Set<string>
@@ -177,9 +189,7 @@ function filterGraphOutput(
   moduleMap: GraphOutput,
   excludeModules: string[] | string
 ): GraphOutput {
-  const moduleNamesToExclude = Array.isArray(excludeModules)
-    ? excludeModules
-    : excludeModules.split(',')
+  const moduleNamesToExclude = parseModuleNameList(excludeModules)
   const excludedModules = new Set(
     moduleNamesToExclude.map(moduleName => moduleName.trim()).filter(Boolean)
   )
@@ -327,9 +337,18 @@ function getPermanentCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
 }
 
 function getInitialCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
-  return props.defaultOpenModuleDetail
+  const collapsedModules = props.defaultOpenModuleDetail
     ? getPermanentCollapsedModuleNames(moduleMap)
     : getDefaultCollapsedModuleNames(moduleMap)
+
+  for (const moduleName of parseModuleNameList(props.collapsedModules)) {
+    const normalizedModuleName = moduleName.trim()
+    if (normalizedModuleName && moduleMap.modules[normalizedModuleName]) {
+      collapsedModules.add(normalizedModuleName)
+    }
+  }
+
+  return collapsedModules
 }
 
 function resolveDepNodeId(
@@ -1287,9 +1306,10 @@ const collapsedModuleNames = ref<Set<string>>(
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
-const showBrightLine = ref(true)
+const showBrightLine = ref(props.enableBrightLine)
 const activeBrightLineNodeId = ref<string | null>(null)
-const hasInitialFixedBrightLine = props.fixBightline !== false
+const hasInitialFixedBrightLine = props.enableBrightLine
+  && props.fixBightline !== false
   && props.fixBightline !== undefined
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
@@ -1308,6 +1328,10 @@ const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
 const fixedBrightLineTarget = computed(() => {
+  if (!props.enableBrightLine) {
+    return null
+  }
+
   if (props.fixBightline === false || props.fixBightline === undefined) {
     return null
   }
@@ -1465,10 +1489,19 @@ function shouldShowCircularEdgeWarning(
 }
 
 function setActiveBrightLineNode(event: NodeMouseEvent): void {
+  if (!props.enableBrightLine) {
+    return
+  }
+
   activeBrightLineNodeId.value = event.node.id
 }
 
 function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
+  if (!props.enableBrightLine) {
+    activeBrightLineNodeId.value = null
+    return
+  }
+
   if (fixedBrightLineTarget.value) {
     if (!event || activeBrightLineNodeId.value === event.node.id) {
       syncFixedBrightLineNode()
@@ -1583,6 +1616,16 @@ watch(showBrightLine, (isEnabled) => {
   syncFixedBrightLineNode()
 })
 
+watch(
+  () => props.enableBrightLine,
+  (isEnabled) => {
+    showBrightLine.value = isEnabled
+    if (!isEnabled) {
+      activeBrightLineNodeId.value = null
+    }
+  }
+)
+
 watch(fixedBrightLineTarget, (target) => {
   if (target) {
     syncFixedBrightLineNode()
@@ -1616,7 +1659,7 @@ watch(
 )
 
 watch(
-  () => props.defaultOpenModuleDetail,
+  [() => props.defaultOpenModuleDetail, () => props.collapsedModules],
   () => {
     nodePositionOverrides.clear()
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
@@ -1681,7 +1724,10 @@ useResizeObserver(graphViewerRef, () => {
               v-model="showLegends"
               label="Show Legends"
             />
-            <div class="graph-viewer-settings__row">
+            <div
+              v-if="props.enableBrightLine"
+              class="graph-viewer-settings__row"
+            >
               <UCheckbox
                 v-model="showBrightLine"
                 label="Bright Line"
@@ -1751,6 +1797,7 @@ useResizeObserver(graphViewerRef, () => {
     </div>
 
     <VueFlow
+      :id="flowId"
       v-model:nodes="flowNodes"
       v-model:edges="flowEdges"
       :default-viewport="{ zoom: 0.8, x: 0, y: 0 }"
@@ -1990,7 +2037,7 @@ useResizeObserver(graphViewerRef, () => {
         <div class="flex w-full items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="text-base font-semibold text-highlighted">
-              Circular Dependency Detail
+              Circular Story
             </p>
           </div>
 

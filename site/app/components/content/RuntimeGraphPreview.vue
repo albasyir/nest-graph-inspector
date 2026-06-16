@@ -1,26 +1,70 @@
 <script setup lang="ts">
 import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 
-const props = withDefaults(
-  defineProps<{
-    fixBightline?: boolean | string
-    height?: string
-    excludeModules?: string[] | string
-  }>(),
-  {
-    fixBightline: false,
-    height: 'clamp(14rem, 52vh, 28rem)',
-    excludeModules: () => []
+type BooleanProp = boolean | string
+type ModuleListProp = string[] | string
+
+const props = withDefaults(defineProps<{
+  previewId?: string
+  fixBightline?: boolean | string
+  height?: string
+  excludeModules?: ModuleListProp
+  showCircularDependencies?: BooleanProp
+  showBrightLine?: BooleanProp
+  collapsedModules?: ModuleListProp
+  caption?: string
+}>(), {
+  previewId: undefined,
+  fixBightline: false,
+  height: 'clamp(14rem, 52vh, 28rem)',
+  excludeModules: () => [],
+  showCircularDependencies: true,
+  showBrightLine: true,
+  collapsedModules: () => [],
+  caption: 'Interactive preview from the built-in mock graph.'
+})
+
+function parseBooleanProp(value: BooleanProp | undefined, fallback: boolean) {
+  if (value === undefined) {
+    return fallback
   }
+
+  return value !== false && value !== 'false'
+}
+
+const generatedPreviewId = useId()
+
+const previewId = computed(() => {
+  const explicitId = props.previewId?.trim()
+  return explicitId || generatedPreviewId
+})
+
+const viewerFlowId = computed(() => `runtime-graph-preview-${previewId.value}`)
+
+const shouldShowCircularDependencies = computed(() =>
+  parseBooleanProp(props.showCircularDependencies, true)
 )
 
-const fixedBrightLineLabel = computed(() => {
-  if (props.fixBightline === false || props.fixBightline === undefined) {
+const shouldShowBrightLine = computed(() =>
+  parseBooleanProp(props.showBrightLine, true)
+)
+
+const previewCaption = computed(() => {
+  if (fixedBrightLineLabel.value) {
     return null
   }
 
-  if (typeof props.fixBightline === 'string') {
-    const label = props.fixBightline.trim()
+  return props.caption
+})
+
+const fixedBrightLineLabel = computed(() => {
+  const fixedTarget = props.fixBightline
+  if (fixedTarget === false || fixedTarget === undefined) {
+    return null
+  }
+
+  if (typeof fixedTarget === 'string') {
+    const label = fixedTarget.trim()
     return label || 'UserRepository'
   }
 
@@ -34,7 +78,7 @@ if (!base.endsWith('/')) {
 }
 
 const { data, status, error } = await useLazyAsyncData(
-  'runtime-graph-preview',
+  `runtime-graph-preview:${previewId.value}`,
   () => $fetch<GraphOutput>(`${base}mock-graph/output.json`),
   { server: false }
 )
@@ -46,10 +90,14 @@ const { data, status, error } = await useLazyAsyncData(
       <GraphViewer
         v-if="status === 'success' && data"
         :data="data"
+        :flow-id="viewerFlowId"
         :height="props.height"
         :interactive="false"
         :fix-bightline="props.fixBightline"
         :exclude-modules="props.excludeModules"
+        :collapsed-modules="props.collapsedModules"
+        :show-circular-dependencies="shouldShowCircularDependencies"
+        :enable-bright-line="shouldShowBrightLine"
         default-open-module-detail
       />
       <UAlert
@@ -80,7 +128,7 @@ const { data, status, error } = await useLazyAsyncData(
         <span class="font-medium text-highlighted">{{ fixedBrightLineLabel }}</span>.
       </template>
       <template v-else>
-        Interactive preview from the built-in mock graph.
+        {{ previewCaption }}
       </template>
       <NuxtLink
         to="/view?preview=true"
