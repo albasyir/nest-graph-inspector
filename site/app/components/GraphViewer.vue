@@ -65,10 +65,17 @@ type ModuleItemDependencyGraph = {
 type CircularEdgeInfo = CircularDependencyIssue
 
 type CircularEdgeData = {
+  isNormallyVisible: boolean
   circularIds: number[]
   circularReason: string
   circularDetails: CircularEdgeInfo[]
 }
+
+type StandardEdgeData = {
+  isNormallyVisible: boolean
+}
+
+type FlowEdgeData = CircularEdgeData | StandardEdgeData
 
 type CircularEdgeDialogData = {
   circularIds: number[]
@@ -85,7 +92,7 @@ type FlowNode
   = | Node<ModuleNodeData, Record<string, never>, 'module'>
     | Node<ItemNodeData, Record<string, never>, 'item'>
 type FlowEdge = Edge<
-  CircularEdgeData,
+  FlowEdgeData,
   Record<string, never>,
   'smoothstep' | 'warning'
 >
@@ -137,6 +144,7 @@ const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
 const BRIGHT_LINE_NODE_DIMMED_CLASS = 'bright-line-node--dimmed'
 const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
+const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
 
 async function centerGraph(duration = 200) {
   if (!import.meta.client) {
@@ -440,11 +448,14 @@ function getModuleItemHierarchy(
     )
 }
 
-function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
-  data?: CircularEdgeData
+function getEdgeDataProps(
+  info: CircularEdgeInfo[] | undefined,
+  isNormallyVisible: boolean
+): {
+  data: FlowEdgeData
 } {
   if (!info?.length) {
-    return {}
+    return { data: { isNormallyVisible } }
   }
 
   const normalizedInfo = Array.from(
@@ -458,6 +469,7 @@ function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
 
   return {
     data: {
+      isNormallyVisible,
       circularIds: normalizedInfo.map(item => item.id),
       circularDetails: normalizedInfo.map(item => ({
         id: item.id,
@@ -1053,44 +1065,51 @@ function buildGraph(
     }
   }
 
-  if (showModuleToModuleLine) {
-    for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-      for (const imp of mod.imports) {
-        if (moduleMap.modules[imp]) {
-          const sourcePos = modulePositions.get(imp)
-          const targetPos = modulePositions.get(moduleName)
-          if (!sourcePos || !targetPos) {
-            continue
-          }
-
-          const { sourceHandle, targetHandle }
-            = pickHandles(sourcePos, targetPos)
-          const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
-          const circularLabelInfo = circularModuleEdgeLabels.get(
-            `${imp}->${moduleName}`
-          )
-          const edgeColor = circularInfo
-            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-            : MODULE_EDGE_COLOR
-
-          edges.push({
-            id: `e-mod-${imp}->${moduleName}`,
-            source: `module-${imp}`,
-            target: `module-${moduleName}`,
-            sourceHandle,
-            targetHandle,
-            type: circularLabelInfo ? 'warning' : 'smoothstep',
-            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-            class: edge => getBrightLineEdgeClass(edge.source, edge.target),
-            markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularLabelInfo)
-          })
+  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    for (const imp of mod.imports) {
+      if (moduleMap.modules[imp]) {
+        const sourcePos = modulePositions.get(imp)
+        const targetPos = modulePositions.get(moduleName)
+        if (!sourcePos || !targetPos) {
+          continue
         }
+
+        const { sourceHandle, targetHandle }
+          = pickHandles(sourcePos, targetPos)
+        const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
+        const circularLabelInfo = circularModuleEdgeLabels.get(
+          `${imp}->${moduleName}`
+        )
+        const edgeColor = circularInfo
+          ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+          : MODULE_EDGE_COLOR
+
+        edges.push({
+          id: `e-mod-${imp}->${moduleName}`,
+          source: `module-${imp}`,
+          target: `module-${moduleName}`,
+          sourceHandle,
+          targetHandle,
+          type: circularLabelInfo ? 'warning' : 'smoothstep',
+          style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
+          class: edge =>
+            getBrightLineEdgeClass(
+              edge.source,
+              edge.target,
+              edge.data?.isNormallyVisible ?? true
+            ),
+          markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+          ...getEdgeDataProps(circularLabelInfo, showModuleToModuleLine)
+        })
       }
     }
   }
 
-  function addDependencyEdge(sourceId: string, targetId: string): void {
+  function addDependencyEdge(
+    sourceId: string,
+    targetId: string,
+    isNormallyVisible: boolean
+  ): void {
     const sPos = nodeAbsPositions.get(sourceId)
     const tPos = nodeAbsPositions.get(targetId)
     if (!sPos || !tPos) {
@@ -1117,22 +1136,28 @@ function buildGraph(
         stroke: edgeColor,
         strokeWidth: circularInfo ? 2.2 : 1.5
       },
-      class: edge => getBrightLineEdgeClass(edge.source, edge.target),
+      class: edge =>
+        getBrightLineEdgeClass(
+          edge.source,
+          edge.target,
+          edge.data?.isNormallyVisible ?? true
+        ),
       markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-      ...getCircularEdgeDataProps(circularLabelInfo)
+      ...getEdgeDataProps(circularLabelInfo, isNormallyVisible)
     })
   }
 
-  function addModuleItemDependencyEdges(
-    shouldAddEdge: (sourceId: string, moduleName: string) => boolean
-  ): void {
+  function addModuleItemDependencyEdges(): void {
     for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
       for (const provider of mod.providers) {
         for (const dep of provider.dependencies) {
           const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
           const targetId = `provider-${moduleName}-${provider.name}`
-          if (sourceId && shouldAddEdge(sourceId, moduleName)) {
-            addDependencyEdge(sourceId, targetId)
+          if (sourceId) {
+            const isNormallyVisible = isNodeInModule(sourceId, moduleName)
+              ? showProviderToProviderInsideModule
+              : showProviderToProviderAcrossModule
+            addDependencyEdge(sourceId, targetId, isNormallyVisible)
           }
         }
       }
@@ -1141,25 +1166,18 @@ function buildGraph(
         for (const dep of controller.dependencies) {
           const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
           const targetId = `controller-${moduleName}-${controller.name}`
-          if (sourceId && shouldAddEdge(sourceId, moduleName)) {
-            addDependencyEdge(sourceId, targetId)
+          if (sourceId) {
+            const isNormallyVisible = isNodeInModule(sourceId, moduleName)
+              ? showProviderToProviderInsideModule
+              : showProviderToProviderAcrossModule
+            addDependencyEdge(sourceId, targetId, isNormallyVisible)
           }
         }
       }
     }
   }
 
-  if (showProviderToProviderInsideModule) {
-    addModuleItemDependencyEdges((sourceId, moduleName) =>
-      isNodeInModule(sourceId, moduleName)
-    )
-  }
-
-  if (showProviderToProviderAcrossModule) {
-    addModuleItemDependencyEdges((sourceId, moduleName) =>
-      !isNodeInModule(sourceId, moduleName)
-    )
-  }
+  addModuleItemDependencyEdges()
 
   return { nodes, edges }
 }
@@ -1269,18 +1287,43 @@ function getBrightLineNodeClass(nodeId: string): string[] {
   return [BRIGHT_LINE_NODE_DIMMED_CLASS]
 }
 
-function getBrightLineEdgeClass(sourceId: string, targetId: string): string[] {
+function isBrightLineEdgeActive(sourceId: string, targetId: string): boolean {
   const activeNodeId = activeBrightLineNodeId.value
   if (!showBrightLine.value || !activeNodeId) {
-    return []
+    return false
   }
 
   const connectedNodeIds = activeBrightLineConnectedNodeIds.value
-  if (connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)) {
+  return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)
+}
+
+function getBrightLineEdgeClass(
+  sourceId: string,
+  targetId: string,
+  isNormallyVisible: boolean
+): string[] {
+  if (isBrightLineEdgeActive(sourceId, targetId)) {
     return [BRIGHT_LINE_EDGE_CLASS]
   }
 
-  return [BRIGHT_LINE_EDGE_DIMMED_CLASS]
+  if (!isNormallyVisible) {
+    return [BRIGHT_LINE_EDGE_HIDDEN_CLASS]
+  }
+
+  if (hasActiveBrightLine()) {
+    return [BRIGHT_LINE_EDGE_DIMMED_CLASS]
+  }
+
+  return []
+}
+
+function shouldShowCircularEdgeWarning(
+  sourceId: string,
+  targetId: string,
+  edgeData: CircularEdgeData
+): boolean {
+  return edgeData.isNormallyVisible
+    || isBrightLineEdgeActive(sourceId, targetId)
 }
 
 function setActiveBrightLineNode(event: NodeMouseEvent): void {
@@ -1578,7 +1621,15 @@ useResizeObserver(graphViewerRef, () => {
           :interaction-width="edgeProps.interactionWidth"
         />
 
-        <EdgeLabelRenderer>
+        <EdgeLabelRenderer
+          v-if="
+            shouldShowCircularEdgeWarning(
+              edgeProps.source,
+              edgeProps.target,
+              edgeProps.data
+            )
+          "
+        >
           <UTooltip
             :open="activeCircularTooltipEdgeId === edgeProps.id"
             :delay-duration="0"
@@ -2058,6 +2109,11 @@ useResizeObserver(graphViewerRef, () => {
 
 .graph-viewer .bright-line-edge--dimmed {
   opacity: 0.16;
+}
+
+.graph-viewer .bright-line-edge--hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .module-subgraph {
