@@ -3,12 +3,13 @@ import theme from '#build/ui/prose/code-group'
 </script>
 
 <script setup lang="ts">
+import type { ClassValue } from 'tailwind-variants'
 import type { VNode } from 'vue'
 import { computed, isVNode, onBeforeUpdate, onMounted, ref, watch } from 'vue'
 import { TabsContent, TabsIndicator, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import { useAppConfig, useState } from '#imports'
 import ProseCodeIcon from '@nuxt/ui/components/prose/CodeIcon.vue'
-import { useComponentUI } from '@nuxt/ui/composables/useComponentUI'
+import { useComponentProps } from '@nuxt/ui/composables/useComponentProps'
 import { tv } from '@nuxt/ui/utils/tv'
 import { usePackageManagerStore } from '~/stores/package-manager'
 import { isSupportedPackageManager } from '~/utils/supported-runtime'
@@ -23,11 +24,11 @@ type CodeGroupItem = {
 const codeGroupTheme = tv(theme)
 type CodeGroupUi = ReturnType<typeof codeGroupTheme>
 
-const props = withDefaults(defineProps<{
+const _props = withDefaults(defineProps<{
   defaultValue?: string
   sync?: string
-  class?: unknown
-  ui?: Record<string, unknown>
+  class?: ClassValue
+  ui?: Record<string, ClassValue>
 }>(), {
   defaultValue: '0'
 })
@@ -38,7 +39,7 @@ const slots = defineSlots<{
 const model = defineModel<string>()
 const appConfig = useAppConfig()
 const packageManagerStore = usePackageManagerStore()
-const uiProp = useComponentUI('prose.codeGroup', props)
+const props = useComponentProps('prose.codeGroup', _props)
 const codeGroupUi = computed<CodeGroupUi>(() => {
   return tv({ extend: codeGroupTheme, ...getCodeGroupConfig(appConfig) })()
 })
@@ -157,26 +158,26 @@ onBeforeUpdate(() => rerenderCount.value++)
 <template>
   <TabsRoot
     v-model="model"
-    :default-value="defaultValue"
+    :default-value="props.defaultValue"
     :unmount-on-hide="false"
-    :class="codeGroupUi.root({ class: [uiProp?.root, props.class] })"
+    :class="codeGroupUi.root({ class: [props.ui?.root, props.class] })"
   >
-    <TabsList :class="codeGroupUi.list({ class: uiProp?.list })">
-      <TabsIndicator :class="codeGroupUi.indicator({ class: uiProp?.indicator })" />
+    <TabsList :class="codeGroupUi.list({ class: props.ui?.list })">
+      <TabsIndicator :class="codeGroupUi.indicator({ class: props.ui?.indicator })" />
 
       <TabsTrigger
         v-for="(item, index) of items"
         :key="index"
         :value="String(index)"
-        :class="codeGroupUi.trigger({ class: uiProp?.trigger })"
+        :class="codeGroupUi.trigger({ class: props.ui?.trigger })"
       >
         <ProseCodeIcon
           :icon="item.icon"
           :filename="item.label"
-          :class="codeGroupUi.triggerIcon({ class: uiProp?.triggerIcon })"
+          :class="codeGroupUi.triggerIcon({ class: props.ui?.triggerIcon })"
         />
 
-        <span :class="codeGroupUi.triggerLabel({ class: uiProp?.triggerLabel })">{{ item.label }}</span>
+        <span :class="codeGroupUi.triggerLabel({ class: props.ui?.triggerLabel })">{{ item.label }}</span>
       </TabsTrigger>
     </TabsList>
 
