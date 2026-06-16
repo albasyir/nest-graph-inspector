@@ -89,6 +89,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const shouldShowUpdateModal = ref(false)
   const dependencyTraceEnabled = ref(false)
   const showCircularDependencies = ref(true)
+  const openModuleDetail = ref(false)
 
   const decodedUrl = computed(() => {
     if (!encodedUrl.value) {
@@ -274,6 +275,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     shouldShowUpdateModal,
     dependencyTraceEnabled,
     showCircularDependencies,
+    openModuleDetail,
     toggleDependencyTrace,
     validateEndpoint,
     setEncodedUrl,

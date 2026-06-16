@@ -13,7 +13,8 @@ const {
   graphData,
   status,
   errorMessage,
-  showCircularDependencies
+  showCircularDependencies,
+  openModuleDetail
 } = storeToRefs(graphStore)
 
 const urlBase64 = computed(() => {
@@ -146,6 +147,7 @@ function handleRefresh() {
     <GraphViewer
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
+      :default-open-module-detail="openModuleDetail"
       height="100%"
       flush
     />

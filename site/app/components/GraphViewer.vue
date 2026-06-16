@@ -98,11 +98,13 @@ const props = withDefaults(
     height?: string
     interactive?: boolean
     flush?: boolean
+    defaultOpenModuleDetail?: boolean
   }>(),
   {
     height: '75vh',
     interactive: true,
-    flush: false
+    flush: false,
+    defaultOpenModuleDetail: false
   }
 )
 
@@ -209,6 +211,12 @@ function getPermanentCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
       .filter(([, mod]) => !hasModuleComponents(mod))
       .map(([moduleName]) => moduleName)
   )
+}
+
+function getInitialCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
+  return props.defaultOpenModuleDetail
+    ? getPermanentCollapsedModuleNames(moduleMap)
+    : getDefaultCollapsedModuleNames(moduleMap)
 }
 
 function resolveDepNodeId(
@@ -885,6 +893,9 @@ function buildGraph(
   collapsedModules = new Set<string>(),
   options: {
     showCircularDependencies?: boolean
+    showModuleToModuleLine?: boolean
+    showProviderToProviderInsideModule?: boolean
+    showProviderToProviderAcrossModule?: boolean
     nodePositions?: Map<string, NodePosition>
   } = {}
 ): { nodes: FlowNode[], edges: FlowEdge[] } {
@@ -893,6 +904,11 @@ function buildGraph(
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
   const showCircularDependencies = options.showCircularDependencies ?? true
+  const showModuleToModuleLine = options.showModuleToModuleLine ?? true
+  const showProviderToProviderInsideModule
+    = options.showProviderToProviderInsideModule ?? true
+  const showProviderToProviderAcrossModule
+    = options.showProviderToProviderAcrossModule ?? false
   const nodePositions = options.nodePositions ?? new Map<string, NodePosition>()
   const circularModuleEdges = showCircularDependencies
     ? getCircularModuleEdges(moduleMap)
@@ -1029,131 +1045,129 @@ function buildGraph(
     }
   }
 
-  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    for (const imp of mod.imports) {
-      if (moduleMap.modules[imp]) {
-        const sourcePos = modulePositions.get(imp)
-        const targetPos = modulePositions.get(moduleName)
-        if (!sourcePos || !targetPos) {
-          continue
+  if (showModuleToModuleLine) {
+    for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+      for (const imp of mod.imports) {
+        if (moduleMap.modules[imp]) {
+          const sourcePos = modulePositions.get(imp)
+          const targetPos = modulePositions.get(moduleName)
+          if (!sourcePos || !targetPos) {
+            continue
+          }
+
+          const { sourceHandle, targetHandle }
+            = pickHandles(sourcePos, targetPos)
+          const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
+          const circularLabelInfo = circularModuleEdgeLabels.get(
+            `${imp}->${moduleName}`
+          )
+          const edgeColor = circularInfo
+            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+            : MODULE_EDGE_COLOR
+
+          edges.push({
+            id: `e-mod-${imp}->${moduleName}`,
+            source: `module-${imp}`,
+            target: `module-${moduleName}`,
+            sourceHandle,
+            targetHandle,
+            type: circularLabelInfo ? 'warning' : 'smoothstep',
+            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+            ...getCircularEdgeDataProps(circularLabelInfo)
+          })
         }
-
-        const { sourceHandle, targetHandle } = pickHandles(sourcePos, targetPos)
-        const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
-        const circularLabelInfo = circularModuleEdgeLabels.get(
-          `${imp}->${moduleName}`
-        )
-        const edgeColor = circularInfo
-          ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-          : MODULE_EDGE_COLOR
-
-        edges.push({
-          id: `e-mod-${imp}->${moduleName}`,
-          source: `module-${imp}`,
-          target: `module-${moduleName}`,
-          sourceHandle,
-          targetHandle,
-          type: circularLabelInfo ? 'warning' : 'smoothstep',
-          style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getCircularEdgeDataProps(circularLabelInfo)
-        })
       }
     }
   }
 
-  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    for (const provider of mod.providers) {
-      for (const dep of provider.dependencies) {
-        const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
-        const targetId = `provider-${moduleName}-${provider.name}`
-        if (sourceId && isNodeInModule(sourceId, moduleName)) {
-          const sPos = nodeAbsPositions.get(sourceId)
-          const tPos = nodeAbsPositions.get(targetId)
-          if (!sPos || !tPos) {
-            continue
+  function addDependencyEdge(sourceId: string, targetId: string): void {
+    const sPos = nodeAbsPositions.get(sourceId)
+    const tPos = nodeAbsPositions.get(targetId)
+    if (!sPos || !tPos) {
+      return
+    }
+
+    const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
+    const circularInfo = circularDependencyEdges.get(`${sourceId}->${targetId}`)
+    const circularLabelInfo = circularDependencyEdgeLabels.get(
+      `${sourceId}->${targetId}`
+    )
+    const edgeColor = circularInfo
+      ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+      : DEPENDENCY_EDGE_COLOR
+
+    edges.push({
+      id: `e-dep-${sourceId}->${targetId}`,
+      source: sourceId,
+      target: targetId,
+      sourceHandle,
+      targetHandle,
+      type: circularLabelInfo ? 'warning' : 'smoothstep',
+      style: {
+        stroke: edgeColor,
+        strokeWidth: circularInfo ? 2.2 : 1.5
+      },
+      markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+      ...getCircularEdgeDataProps(circularLabelInfo)
+    })
+  }
+
+  function addModuleItemDependencyEdges(
+    shouldAddEdge: (sourceId: string, moduleName: string) => boolean
+  ): void {
+    for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+      for (const provider of mod.providers) {
+        for (const dep of provider.dependencies) {
+          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
+          const targetId = `provider-${moduleName}-${provider.name}`
+          if (sourceId && shouldAddEdge(sourceId, moduleName)) {
+            addDependencyEdge(sourceId, targetId)
           }
+        }
+      }
 
-          const { sourceHandle, targetHandle } = pickDependencyHandles(
-            sPos,
-            tPos
-          )
-          const circularInfo = circularDependencyEdges.get(
-            `${sourceId}->${targetId}`
-          )
-          const circularLabelInfo = circularDependencyEdgeLabels.get(
-            `${sourceId}->${targetId}`
-          )
-          const edgeColor = circularInfo
-            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-            : DEPENDENCY_EDGE_COLOR
-
-          edges.push({
-            id: `e-dep-${sourceId}->${targetId}`,
-            source: sourceId,
-            target: targetId,
-            sourceHandle,
-            targetHandle,
-            type: circularLabelInfo ? 'warning' : 'smoothstep',
-            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-            markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularLabelInfo)
-          })
+      for (const controller of mod.controllers) {
+        for (const dep of controller.dependencies) {
+          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
+          const targetId = `controller-${moduleName}-${controller.name}`
+          if (sourceId && shouldAddEdge(sourceId, moduleName)) {
+            addDependencyEdge(sourceId, targetId)
+          }
         }
       }
     }
+  }
 
-    for (const controller of mod.controllers) {
-      for (const dep of controller.dependencies) {
-        const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
-        const targetId = `controller-${moduleName}-${controller.name}`
-        if (sourceId && isNodeInModule(sourceId, moduleName)) {
-          const sPos = nodeAbsPositions.get(sourceId)
-          const tPos = nodeAbsPositions.get(targetId)
-          if (!sPos || !tPos) {
-            continue
-          }
+  if (showProviderToProviderInsideModule) {
+    addModuleItemDependencyEdges((sourceId, moduleName) =>
+      isNodeInModule(sourceId, moduleName)
+    )
+  }
 
-          const { sourceHandle, targetHandle } = pickDependencyHandles(
-            sPos,
-            tPos
-          )
-          const circularInfo = circularDependencyEdges.get(
-            `${sourceId}->${targetId}`
-          )
-          const circularLabelInfo = circularDependencyEdgeLabels.get(
-            `${sourceId}->${targetId}`
-          )
-          const edgeColor = circularInfo
-            ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-            : DEPENDENCY_EDGE_COLOR
-
-          edges.push({
-            id: `e-dep-${sourceId}->${targetId}`,
-            source: sourceId,
-            target: targetId,
-            sourceHandle,
-            targetHandle,
-            type: circularLabelInfo ? 'warning' : 'smoothstep',
-            style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-            markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-            ...getCircularEdgeDataProps(circularLabelInfo)
-          })
-        }
-      }
-    }
+  if (showProviderToProviderAcrossModule) {
+    addModuleItemDependencyEdges((sourceId, moduleName) =>
+      !isNodeInModule(sourceId, moduleName)
+    )
   }
 
   return { nodes, edges }
 }
 
 const collapsedModuleNames = ref<Set<string>>(
-  getDefaultCollapsedModuleNames(props.data)
+  getInitialCollapsedModuleNames(props.data)
 )
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
+const showLegends = ref(true)
+const showModuleToModuleLine = ref(true)
+const showProviderToProviderInsideModule = ref(true)
+const showProviderToProviderAcrossModule = ref(false)
 const initialGraph = buildGraph(props.data, collapsedModuleNames.value, {
-  showCircularDependencies: showCircularDependencies.value
+  showCircularDependencies: showCircularDependencies.value,
+  showModuleToModuleLine: showModuleToModuleLine.value,
+  showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
+  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
@@ -1234,6 +1248,9 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   circularDetailDialogData.value = null
   const graph = buildGraph(props.data, collapsedModuleNames.value, {
     showCircularDependencies: showCircularDependencies.value,
+    showModuleToModuleLine: showModuleToModuleLine.value,
+    showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
+    showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value,
     nodePositions: preservePositions ? nodePositionOverrides : undefined
   })
   flowNodes.value = graph.nodes
@@ -1275,15 +1292,37 @@ watch(showCircularDependencies, () => {
   refreshGraph()
 })
 
+watch(showModuleToModuleLine, () => {
+  refreshGraph()
+})
+
+watch(showProviderToProviderInsideModule, () => {
+  refreshGraph()
+})
+
+watch(showProviderToProviderAcrossModule, () => {
+  refreshGraph()
+})
+
 watch(
   () => props.data,
   () => {
     nodePositionOverrides.clear()
-    collapsedModuleNames.value = getDefaultCollapsedModuleNames(props.data)
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(props.data)
     refreshGraph({ preservePositions: false })
     void centerGraph()
   },
   { deep: true }
+)
+
+watch(
+  () => props.defaultOpenModuleDetail,
+  () => {
+    nodePositionOverrides.clear()
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(props.data)
+    refreshGraph({ preservePositions: false })
+    void centerGraph()
+  }
 )
 
 onMounted(() => {
@@ -1339,12 +1378,56 @@ useResizeObserver(graphViewerRef, () => {
               label="Auto Re-position"
             />
             <UCheckbox
+              v-model="showLegends"
+              label="Show Legends"
+            />
+            <UCheckbox
+              v-model="showModuleToModuleLine"
+              label="Show module to module line"
+            />
+            <UCheckbox
+              v-model="showProviderToProviderInsideModule"
+              label="Show provider to provider inside module"
+            />
+            <UCheckbox
+              v-model="showProviderToProviderAcrossModule"
+              label="Show provider to provider across module"
+            />
+            <UCheckbox
               v-model="showCircularDependencies"
               label="Circular dependencies"
             />
           </div>
         </template>
       </UPopover>
+    </div>
+
+    <div
+      v-if="showLegends"
+      class="graph-viewer-legends nodrag nopan"
+      aria-label="Graph legends"
+    >
+      <p class="graph-viewer-legends__title">
+        Legends
+      </p>
+      <div class="graph-viewer-legends__item">
+        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--provider">
+          P
+        </span>
+        <span class="graph-viewer-legends__label">Provider</span>
+      </div>
+      <div class="graph-viewer-legends__item">
+        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--export">
+          E
+        </span>
+        <span class="graph-viewer-legends__label">Exported by module</span>
+      </div>
+      <div class="graph-viewer-legends__item">
+        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--controller">
+          C
+        </span>
+        <span class="graph-viewer-legends__label">Controller</span>
+      </div>
     </div>
 
     <VueFlow
@@ -1446,13 +1529,7 @@ useResizeObserver(graphViewerRef, () => {
             'module-subgraph--expandable': moduleProps.data.isExpandable
           }"
         >
-          <div
-            class="module-subgraph__title"
-            @click.stop="
-              moduleProps.data.isExpandable
-                && toggleModule(moduleProps.data.label)
-            "
-          >
+          <div class="module-subgraph__title">
             <span class="module-subgraph__label">
               {{ moduleProps.data.label }}
             </span>
@@ -1468,7 +1545,14 @@ useResizeObserver(graphViewerRef, () => {
               "
               @click.stop="toggleModule(moduleProps.data.label)"
             >
-              {{ moduleProps.data.isCollapsed ? '+' : '-' }}
+              <UIcon
+                :name="
+                  moduleProps.data.isCollapsed
+                    ? 'i-lucide-plus'
+                    : 'i-lucide-minus'
+                "
+                class="module-subgraph__toggle-icon"
+              />
             </button>
           </div>
           <div
@@ -1642,6 +1726,13 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-bg: rgba(255, 107, 107, 0.06);
   --mg-root-title-bg: rgba(255, 107, 107, 0.08);
   --mg-node-resizer-color: #9370db;
+  --mg-toggle-bg: var(--ui-secondary);
+  --mg-toggle-bg-hover: color-mix(
+    in srgb,
+    var(--ui-secondary) 88%,
+    var(--ui-text-highlighted)
+  );
+  --mg-toggle-text: var(--ui-bg);
 }
 
 .dark {
@@ -1713,6 +1804,72 @@ useResizeObserver(graphViewerRef, () => {
   line-height: 1.2;
 }
 
+.graph-viewer-legends {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  min-width: 178px;
+  padding: 10px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: 'Public Sans', system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.graph-viewer-legends__title {
+  margin: 0;
+  color: var(--ui-text-highlighted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.graph-viewer-legends__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-viewer-legends__badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.graph-viewer-legends__badge--provider {
+  background: var(--mg-provider-kind-bg);
+}
+
+.graph-viewer-legends__badge--export {
+  background: var(--mg-export-badge-bg);
+}
+
+.graph-viewer-legends__badge--controller {
+  background: var(--mg-controller-kind-bg);
+}
+
+.graph-viewer-legends__label {
+  min-width: 0;
+  color: var(--ui-text);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .module-subgraph {
   width: 100%;
   height: 100%;
@@ -1733,7 +1890,7 @@ useResizeObserver(graphViewerRef, () => {
 .module-subgraph__title {
   font-weight: 700;
   font-size: 13px;
-  padding: 8px 14px;
+  padding: 4px 12px 4px 14px;
   background: var(--mg-subgraph-title-bg);
   border-bottom: 1px solid var(--mg-subgraph-title-border);
   border-radius: 6px 6px 0 0;
@@ -1743,10 +1900,6 @@ useResizeObserver(graphViewerRef, () => {
   min-height: 34px;
   box-sizing: border-box;
   user-select: none;
-}
-
-.module-subgraph--expandable .module-subgraph__title {
-  cursor: pointer;
 }
 
 .module-subgraph--root .module-subgraph__title {
@@ -1768,23 +1921,35 @@ useResizeObserver(graphViewerRef, () => {
 }
 
 .module-subgraph__toggle {
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--mg-subgraph-title-border);
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--mg-toggle-bg);
   border-radius: 4px;
-  background: var(--mg-subgraph-bg);
-  color: var(--mg-node-text);
+  background: var(--mg-toggle-bg);
+  color: var(--mg-toggle-text);
+  box-shadow: 0 2px 8px rgba(76, 29, 149, 0.28);
+  flex: 0 0 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  font: inherit;
   line-height: 1;
   cursor: pointer;
 }
 
 .module-subgraph__toggle:hover {
-  border-color: var(--mg-node-border);
+  border-color: var(--mg-toggle-bg-hover);
+  background: var(--mg-toggle-bg-hover);
+}
+
+.module-subgraph__toggle:focus-visible {
+  outline: 2px solid var(--mg-toggle-bg-hover);
+  outline-offset: 2px;
+}
+
+.module-subgraph__toggle-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .module-subgraph__body {

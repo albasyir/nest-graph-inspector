@@ -27,6 +27,7 @@ const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 function loadExample() {
   graphStore.showCircularDependencies = true
+  graphStore.openModuleDetail = true
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
   startPolling(`${window.location.origin}${base}mock-graph`, true)
@@ -106,6 +107,7 @@ onMounted(() => {
     return
   }
 
+  graphStore.openModuleDetail = false
   startPolling(DEFAULT_ORIGIN)
 })
 
