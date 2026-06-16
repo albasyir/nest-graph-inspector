@@ -163,87 +163,22 @@ Warnings mark circular dependencies. Click one to see the loop.
   :runtime-graph-circular-depedencies-preview
 ::
 
-::u-page-section{class="dark:bg-neutral-950"}
+::u-page-section
+---
+class: dark:bg-neutral-950
+orientation: horizontal
+reverse: true
+ui:
+  container: py-10 sm:py-12 lg:py-16 gap-8 sm:gap-10
+---
 #title
-Feature List
-
-#description
-Built for clear graphs, fast tracing, and confident runtime decisions.
-
-#features
-  :::u-page-feature
-  ---
-  icon: i-lucide-network
-  ---
-  #title
-  Dependency Graph
-
-  #description
-  Visualize modules, providers, controllers, imports, and runtime dependency edges.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-refresh-cw
-  ---
-  #title
-  Circular Detection
-
-  #description
-  Find circular relationships early and resolve risky loops before release.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-focus
-  ---
-  #title
-  Relation Focus :badge[Coming Soon]{.ml-2}
-
-  #description
-  Coming soon: focus any provider/module pair and inspect their dependency path.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-bot
-  ---
-  #title
+::span{class="inline-flex items-center gap-3"}
+  :u-icon{name="i-lucide-bot" class="size-9 shrink-0 text-primary"}
   Context-Aware AI Assistant
-
-  #description
-  Ask graph and trace questions in plain language, free in the viewer.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-git-branch-plus
-  ---
-  #title
-  Process Sequence :badge[Coming Soon]{.ml-2}
-
-  #description
-  Coming soon: generate sequence diagrams from entry point to completion.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-play
-  ---
-  #title
-  Direct Run :badge[Coming Soon]{.ml-2}
-
-  #description
-  Coming soon: execute runtime-resolved services directly from graph context.
-  :::
 ::
 
-::u-page-section{class="dark:bg-neutral-950"}
-#title
-AI Chat in Viewer
-
 #description
-Go from graph to decision faster with runtime-grounded answers.
+Ask graph and trace questions in plain language. In the real viewer, answers are grounded in your loaded runtime graph.
 
 #features
   :::u-page-feature
@@ -270,28 +205,6 @@ Go from graph to decision faster with runtime-grounded answers.
 
   :::u-page-feature
   ---
-  icon: i-lucide-messages-square
-  ---
-  #title
-  Unlimited Follow-Ups
-
-  #description
-  Keep asking until the dependency path is clear.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-route
-  ---
-  #title
-  Trace Paths Faster
-
-  #description
-  Walk provider and module relationships during debugging, reviews, and PR checks.
-  :::
-
-  :::u-page-feature
-  ---
   icon: i-lucide-cpu
   ---
   #title
@@ -301,15 +214,38 @@ Go from graph to decision faster with runtime-grounded answers.
   Use Ollama to keep architecture analysis in your own environment.
   :::
 
+#default
+  :runtime-a-i-chat-preview
+::
+
+::u-page-section{class="dark:bg-neutral-950"}
+#title
+Next Feature List
+
+#description
+Better than now, just for you
+
+#features
   :::u-page-feature
   ---
-  icon: i-lucide-zap
+  icon: i-lucide-git-branch-plus
   ---
   #title
-  Direct Run Ready :badge[Coming Soon]{.ml-2}
+  Process Sequence :badge[Coming Soon]{.ml-2}
 
   #description
-  Today, trace with context-aware chat; soon, run resolved execution flows.
+  Coming soon: generate sequence diagrams from entry point to completion.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-play
+  ---
+  #title
+  Direct Run :badge[Coming Soon]{.ml-2}
+
+  #description
+  Coming soon: execute runtime-resolved services directly from graph context.
   :::
 ::
 
