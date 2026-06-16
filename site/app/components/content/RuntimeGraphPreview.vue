@@ -22,6 +22,7 @@ const { data, status, error } = await useLazyAsyncData(
         :data="data"
         height="clamp(14rem, 52vh, 28rem)"
         :interactive="false"
+        default-open-module-detail
       />
       <UAlert
         v-else-if="status === 'error'"

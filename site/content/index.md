@@ -12,10 +12,10 @@ orientation: horizontal
 :hero-background
 
 #title
-See what your NestJS app actually wires at runtime.
+Deliver Reliable NestJS Application
 
 #description
-Nest Graph Inspector reads the live NestJS container and shows an interactive graph of modules, providers, controllers, imports, and dependencies.
+Nest Graph Inspector turns your live NestJS runtime into **transparent architecture intelligence**, so every change is **easier to measure**, every dependency is **visible**, and every **blast effect is clear** before it reaches production.
 
 #links
   :::u-button

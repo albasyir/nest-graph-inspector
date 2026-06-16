@@ -126,7 +126,7 @@ const MODULE_COLLAPSED_HEIGHT = 40
 const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
 const MODULE_GAP_X = 320
 const MODULE_GAP_Y = 100
-const GRAPH_FIT_PADDING = 0.3
+const GRAPH_FIT_PADDING = 0.12
 const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
 const MODULE_EDGE_COLOR = '#888'
 const DEPENDENCY_EDGE_COLOR = '#555'
@@ -1420,7 +1420,7 @@ useResizeObserver(graphViewerRef, () => {
         <span class="graph-viewer-legends__badge graph-viewer-legends__badge--export">
           E
         </span>
-        <span class="graph-viewer-legends__label">Exported by module</span>
+        <span class="graph-viewer-legends__label">Exported</span>
       </div>
       <div class="graph-viewer-legends__item">
         <span class="graph-viewer-legends__badge graph-viewer-legends__badge--controller">
@@ -1437,6 +1437,7 @@ useResizeObserver(graphViewerRef, () => {
       :min-zoom="0.05"
       :max-zoom="2"
       fit-view-on-init
+      :fit-view-on-init-options="{ padding: GRAPH_FIT_PADDING }"
       :nodes-draggable="props.interactive"
       :nodes-connectable="props.interactive"
       :elements-selectable="props.interactive"
