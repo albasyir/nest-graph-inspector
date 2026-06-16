@@ -89,6 +89,7 @@ type FlowEdge = Edge<
   'smoothstep' | 'warning'
 >
 type WarningEdgeProps = EdgeProps<CircularEdgeData>
+type NodePosition = { x: number, y: number }
 
 const props = withDefaults(
   defineProps<{
@@ -869,13 +870,17 @@ function pickDependencyHandles(
 function buildGraph(
   moduleMap: GraphOutput,
   collapsedModules = new Set<string>(),
-  options: { showCircularDependencies?: boolean } = {}
+  options: {
+    showCircularDependencies?: boolean
+    nodePositions?: Map<string, NodePosition>
+  } = {}
 ): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const layers = assignLayers(moduleMap)
   const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
   const showCircularDependencies = options.showCircularDependencies ?? true
+  const nodePositions = options.nodePositions ?? new Map<string, NodePosition>()
   const circularModuleEdges = showCircularDependencies
     ? getCircularModuleEdges(moduleMap)
     : new Map<string, CircularEdgeInfo[]>()
@@ -929,6 +934,16 @@ function buildGraph(
     currentY += maxHeight + MODULE_GAP_Y
   }
 
+  for (const moduleName of Object.keys(moduleMap.modules)) {
+    const savedPosition = nodePositions.get(`module-${moduleName}`)
+    if (savedPosition) {
+      modulePositions.set(moduleName, {
+        x: savedPosition.x,
+        y: savedPosition.y
+      })
+    }
+  }
+
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
     const isCollapsed = collapsedModules.has(moduleName)
@@ -976,14 +991,18 @@ function buildGraph(
 
       for (const [itemIndex, item] of row.entries()) {
         const childX = startX + itemIndex * (NODE_WIDTH + NODE_GAP_X)
+        const savedPosition = nodePositions.get(item.id)
+        const itemPosition = savedPosition
+          ? { x: savedPosition.x, y: savedPosition.y }
+          : { x: childX, y: childY }
         nodeAbsPositions.set(item.id, {
-          x: modPos.x + childX + NODE_WIDTH / 2,
-          y: modPos.y + childY + NODE_HEIGHT / 2
+          x: modPos.x + itemPosition.x + NODE_WIDTH / 2,
+          y: modPos.y + itemPosition.y + NODE_HEIGHT / 2
         })
         nodes.push({
           id: item.id,
           type: 'item',
-          position: { x: childX, y: childY },
+          position: itemPosition,
           parentNode: `module-${moduleName}`,
           extent: 'parent',
           draggable: true,
@@ -1120,12 +1139,14 @@ const collapsedModuleNames = ref<Set<string>>(
   getDefaultCollapsedModuleNames(props.data)
 )
 const showGraphSettings = ref(false)
+const autoAdjustGraphView = ref(true)
 const initialGraph = buildGraph(props.data, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
 const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
+const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
@@ -1175,12 +1196,29 @@ function openCircularDetailDialog(edgeData: CircularEdgeData): void {
   showCircularDetailDialog.value = true
 }
 
-function refreshGraph() {
+function rememberCurrentNodePositions(): void {
+  for (const node of flowNodes.value) {
+    nodePositionOverrides.set(node.id, {
+      x: node.position.x,
+      y: node.position.y
+    })
+  }
+}
+
+function refreshGraph(options: { preservePositions?: boolean } = {}) {
+  const preservePositions = options.preservePositions ?? true
+  if (preservePositions) {
+    rememberCurrentNodePositions()
+  } else {
+    nodePositionOverrides.clear()
+  }
+
   activeCircularTooltipEdgeId.value = null
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
   const graph = buildGraph(props.data, collapsedModuleNames.value, {
-    showCircularDependencies: showCircularDependencies.value
+    showCircularDependencies: showCircularDependencies.value,
+    nodePositions: preservePositions ? nodePositionOverrides : undefined
   })
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
@@ -1195,15 +1233,19 @@ function toggleModule(moduleName: string) {
   }
 
   collapsedModuleNames.value = nextCollapsedModules
-  refreshGraph()
-  void centerGraph()
+  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
+  if (autoAdjustGraphView.value) {
+    void centerGraph()
+  }
 }
 
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
   collapsedModuleNames.value
     = isOpen === true ? new Set() : getDefaultCollapsedModuleNames(props.data)
-  refreshGraph()
-  void centerGraph()
+  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
+  if (autoAdjustGraphView.value) {
+    void centerGraph()
+  }
 }
 
 watch(showCircularDependencies, () => {
@@ -1213,8 +1255,9 @@ watch(showCircularDependencies, () => {
 watch(
   () => props.data,
   () => {
+    nodePositionOverrides.clear()
     collapsedModuleNames.value = getDefaultCollapsedModuleNames(props.data)
-    refreshGraph()
+    refreshGraph({ preservePositions: false })
     void centerGraph()
   },
   { deep: true }
@@ -1267,6 +1310,10 @@ useResizeObserver(graphViewerRef, () => {
               :model-value="allModulesOpenState"
               label="Open Module Detail"
               @update:model-value="setAllModulesOpen"
+            />
+            <UCheckbox
+              v-model="autoAdjustGraphView"
+              label="Auto Re-position"
             />
             <UCheckbox
               v-model="showCircularDependencies"
