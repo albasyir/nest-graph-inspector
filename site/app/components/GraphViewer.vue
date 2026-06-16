@@ -1162,7 +1162,6 @@ const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
-const moduleNames = computed(() => Object.keys(props.data.modules))
 const expandableModuleNames = computed(() =>
   Object.entries(props.data.modules)
     .filter(([, mod]) => hasModuleComponents(mod))

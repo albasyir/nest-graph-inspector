@@ -982,7 +982,7 @@ async function handleSubmit(event: Event) {
     :default-size="32"
     :min-size="24"
     :max-size="48"
-    class="order-3 fixed inset-0 z-50 min-h-0 bg-default lg:relative lg:inset-auto lg:z-auto lg:border-s lg:border-default lg:not-last:border-e-0"
+    class="order-3 fixed inset-0 z-50 h-dvh max-h-dvh min-h-0 overflow-hidden bg-default lg:relative lg:inset-auto lg:z-auto lg:border-s lg:border-default lg:not-last:border-e-0"
   >
     <div class="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-default px-4">
       <div class="flex min-w-0 items-center gap-2">
@@ -1019,9 +1019,9 @@ async function handleSubmit(event: Event) {
     </div>
 
     <UChatPalette
-      class="min-h-0 flex-1"
+      class="min-h-0 flex-1 overflow-hidden"
       :ui="{
-        content: 'px-4 sm:px-5 py-4',
+        content: 'min-h-0 px-4 sm:px-5 py-4',
         prompt: 'px-4 sm:px-5 py-4 bg-default'
       }"
     >
