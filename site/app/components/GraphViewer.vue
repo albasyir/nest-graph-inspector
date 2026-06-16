@@ -38,6 +38,7 @@ type ModuleNodeData = {
   label: string
   isRoot: boolean
   isCollapsed: boolean
+  isExpandable: boolean
   minWidth: number
   minHeight: number
 }
@@ -196,6 +197,18 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
 
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
   return new Set(Object.keys(moduleMap.modules))
+}
+
+function hasModuleComponents(mod: GraphOutputModule): boolean {
+  return mod.providers.length > 0 || mod.controllers.length > 0
+}
+
+function getPermanentCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
+  return new Set(
+    Object.entries(moduleMap.modules)
+      .filter(([, mod]) => !hasModuleComponents(mod))
+      .map(([moduleName]) => moduleName)
+  )
 }
 
 function resolveDepNodeId(
@@ -896,14 +909,11 @@ function buildGraph(
 
   const moduleSizes = new Map<string, { width: number, height: number }>()
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    const isCollapsed = collapsedModules.has(moduleName)
+      || !hasModuleComponents(mod)
     moduleSizes.set(
       moduleName,
-      calcModuleSize(
-        moduleName,
-        mod,
-        moduleMap,
-        collapsedModules.has(moduleName)
-      )
+      calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
     )
   }
 
@@ -946,7 +956,8 @@ function buildGraph(
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
-    const isCollapsed = collapsedModules.has(moduleName)
+    const isExpandable = hasModuleComponents(mod)
+    const isCollapsed = collapsedModules.has(moduleName) || !isExpandable
     const size
       = moduleSizes.get(moduleName)
         || calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
@@ -959,6 +970,7 @@ function buildGraph(
         label: moduleName,
         isRoot: moduleName === moduleMap.root,
         isCollapsed,
+        isExpandable,
         minWidth: size.width,
         minHeight: size.height
       },
@@ -967,7 +979,7 @@ function buildGraph(
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    if (collapsedModules.has(moduleName)) {
+    if (collapsedModules.has(moduleName) || !hasModuleComponents(mod)) {
       continue
     }
 
@@ -1151,12 +1163,17 @@ const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
 const moduleNames = computed(() => Object.keys(props.data.modules))
+const expandableModuleNames = computed(() =>
+  Object.entries(props.data.modules)
+    .filter(([, mod]) => hasModuleComponents(mod))
+    .map(([moduleName]) => moduleName)
+)
 const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
-  if (moduleNames.value.length === 0) {
+  if (expandableModuleNames.value.length === 0) {
     return false
   }
 
-  const openModuleCount = moduleNames.value.filter(
+  const openModuleCount = expandableModuleNames.value.filter(
     moduleName => !collapsedModuleNames.value.has(moduleName)
   ).length
 
@@ -1164,7 +1181,7 @@ const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
     return false
   }
 
-  if (openModuleCount === moduleNames.value.length) {
+  if (openModuleCount === expandableModuleNames.value.length) {
     return true
   }
 
@@ -1225,6 +1242,11 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
 }
 
 function toggleModule(moduleName: string) {
+  const mod = props.data.modules[moduleName]
+  if (!mod || !hasModuleComponents(mod)) {
+    return
+  }
+
   const nextCollapsedModules = new Set(collapsedModuleNames.value)
   if (nextCollapsedModules.has(moduleName)) {
     nextCollapsedModules.delete(moduleName)
@@ -1241,7 +1263,9 @@ function toggleModule(moduleName: string) {
 
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
   collapsedModuleNames.value
-    = isOpen === true ? new Set() : getDefaultCollapsedModuleNames(props.data)
+    = isOpen === true
+      ? getPermanentCollapsedModuleNames(props.data)
+      : getDefaultCollapsedModuleNames(props.data)
   refreshGraph({ preservePositions: !autoAdjustGraphView.value })
   if (autoAdjustGraphView.value) {
     void centerGraph()
@@ -1419,17 +1443,22 @@ useResizeObserver(graphViewerRef, () => {
           class="module-subgraph"
           :class="{
             'module-subgraph--root': moduleProps.data.isRoot,
-            'module-subgraph--collapsed': moduleProps.data.isCollapsed
+            'module-subgraph--collapsed': moduleProps.data.isCollapsed,
+            'module-subgraph--expandable': moduleProps.data.isExpandable
           }"
         >
           <div
             class="module-subgraph__title"
-            @click.stop="toggleModule(moduleProps.data.label)"
+            @click.stop="
+              moduleProps.data.isExpandable
+                && toggleModule(moduleProps.data.label)
+            "
           >
             <span class="module-subgraph__label">
               {{ moduleProps.data.label }}
             </span>
             <button
+              v-if="moduleProps.data.isExpandable"
               type="button"
               class="module-subgraph__toggle"
               :aria-expanded="!moduleProps.data.isCollapsed"
@@ -1714,8 +1743,11 @@ useResizeObserver(graphViewerRef, () => {
   gap: 8px;
   min-height: 34px;
   box-sizing: border-box;
-  cursor: pointer;
   user-select: none;
+}
+
+.module-subgraph--expandable .module-subgraph__title {
+  cursor: pointer;
 }
 
 .module-subgraph--root .module-subgraph__title {
