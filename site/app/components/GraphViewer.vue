@@ -194,13 +194,7 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
 }
 
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
-  return new Set(
-    Object.entries(moduleMap.modules)
-      .filter(
-        ([, mod]) => mod.providers.length === 0 && mod.controllers.length === 0
-      )
-      .map(([moduleName]) => moduleName)
-  )
+  return new Set(Object.keys(moduleMap.modules))
 }
 
 function resolveDepNodeId(
@@ -450,10 +444,6 @@ function getCircularEdgeDataProps(info: CircularEdgeInfo[] | undefined): {
         .join('\n')
     }
   }
-}
-
-function formatCircularEdgeIds(ids: number[]): string {
-  return ids.join(', ')
 }
 
 function deduplicateCircularEdgeLabels(
@@ -1139,6 +1129,26 @@ const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
+const moduleNames = computed(() => Object.keys(props.data.modules))
+const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
+  if (moduleNames.value.length === 0) {
+    return false
+  }
+
+  const openModuleCount = moduleNames.value.filter(
+    moduleName => !collapsedModuleNames.value.has(moduleName)
+  ).length
+
+  if (openModuleCount === 0) {
+    return false
+  }
+
+  if (openModuleCount === moduleNames.value.length) {
+    return true
+  }
+
+  return 'indeterminate'
+})
 
 function openCircularTooltip(edgeId: string): void {
   activeCircularTooltipEdgeId.value = edgeId
@@ -1185,6 +1195,13 @@ function toggleModule(moduleName: string) {
   }
 
   collapsedModuleNames.value = nextCollapsedModules
+  refreshGraph()
+  void centerGraph()
+}
+
+function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
+  collapsedModuleNames.value
+    = isOpen === true ? new Set() : getDefaultCollapsedModuleNames(props.data)
   refreshGraph()
   void centerGraph()
 }
@@ -1246,6 +1263,11 @@ useResizeObserver(graphViewerRef, () => {
             <p class="graph-viewer-settings__title">
               Graph settings
             </p>
+            <UCheckbox
+              :model-value="allModulesOpenState"
+              label="Open Module Detail"
+              @update:model-value="setAllModulesOpen"
+            />
             <UCheckbox
               v-model="showCircularDependencies"
               label="Circular dependencies"
