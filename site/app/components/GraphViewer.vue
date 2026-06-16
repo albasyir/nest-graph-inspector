@@ -15,7 +15,7 @@ import { MiniMap } from '@vue-flow/minimap'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
-import type { Node, Edge, EdgeProps } from '@vue-flow/core'
+import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
 import type {
   GraphOutput,
   GraphOutputModule,
@@ -131,6 +131,12 @@ const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
 const MODULE_EDGE_COLOR = '#888'
 const DEPENDENCY_EDGE_COLOR = '#555'
 const CIRCULAR_DEPENDENCY_EDGE_COLOR = '#facc15'
+const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
+const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
+const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
+const BRIGHT_LINE_NODE_DIMMED_CLASS = 'bright-line-node--dimmed'
+const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
+const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 
 async function centerGraph(duration = 200) {
   if (!import.meta.client) {
@@ -990,7 +996,8 @@ function buildGraph(
         minWidth: size.width,
         minHeight: size.height
       },
-      style: { width: `${size.width}px`, height: `${size.height}px` }
+      style: { width: `${size.width}px`, height: `${size.height}px` },
+      class: node => getBrightLineNodeClass(node.id)
     })
   }
 
@@ -1039,7 +1046,8 @@ function buildGraph(
             kind: item.kind,
             isExported: item.isExported
           },
-          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
+          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` },
+          class: node => getBrightLineNodeClass(node.id)
         })
       }
     }
@@ -1073,6 +1081,7 @@ function buildGraph(
             targetHandle,
             type: circularLabelInfo ? 'warning' : 'smoothstep',
             style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
+            class: edge => getBrightLineEdgeClass(edge.source, edge.target),
             markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
             ...getCircularEdgeDataProps(circularLabelInfo)
           })
@@ -1108,6 +1117,7 @@ function buildGraph(
         stroke: edgeColor,
         strokeWidth: circularInfo ? 2.2 : 1.5
       },
+      class: edge => getBrightLineEdgeClass(edge.source, edge.target),
       markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
       ...getCircularEdgeDataProps(circularLabelInfo)
     })
@@ -1160,6 +1170,8 @@ const collapsedModuleNames = ref<Set<string>>(
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
+const showBrightLine = ref(true)
+const activeBrightLineNodeId = ref<string | null>(null)
 const showModuleToModuleLine = ref(true)
 const showProviderToProviderInsideModule = ref(true)
 const showProviderToProviderAcrossModule = ref(false)
@@ -1176,6 +1188,42 @@ const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
+const activeBrightLineConnectedNodeIds = computed(() => {
+  const activeNodeId = activeBrightLineNodeId.value
+  const connectedNodeIds = new Set<string>()
+  if (!showBrightLine.value || !activeNodeId) {
+    return connectedNodeIds
+  }
+
+  const edgesByNodeId = new Map<string, FlowEdge[]>()
+  for (const edge of flowEdges.value) {
+    const sourceEdges = edgesByNodeId.get(edge.source) || []
+    sourceEdges.push(edge)
+    edgesByNodeId.set(edge.source, sourceEdges)
+  }
+
+  const queue = [activeNodeId]
+  connectedNodeIds.add(activeNodeId)
+
+  while (queue.length > 0) {
+    const currentNodeId = queue.shift()
+    if (!currentNodeId) {
+      continue
+    }
+
+    for (const edge of edgesByNodeId.get(currentNodeId) || []) {
+      const nextNodeId = edge.target
+      if (connectedNodeIds.has(nextNodeId)) {
+        continue
+      }
+
+      connectedNodeIds.add(nextNodeId)
+      queue.push(nextNodeId)
+    }
+  }
+
+  return connectedNodeIds
+})
 const expandableModuleNames = computed(() =>
   Object.entries(props.data.modules)
     .filter(([, mod]) => hasModuleComponents(mod))
@@ -1200,6 +1248,50 @@ const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
 
   return 'indeterminate'
 })
+
+function hasActiveBrightLine(): boolean {
+  return showBrightLine.value && activeBrightLineNodeId.value !== null
+}
+
+function getBrightLineNodeClass(nodeId: string): string[] {
+  if (!hasActiveBrightLine()) {
+    return []
+  }
+
+  if (activeBrightLineNodeId.value === nodeId) {
+    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS]
+  }
+
+  if (activeBrightLineConnectedNodeIds.value.has(nodeId)) {
+    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_CONNECTED_CLASS]
+  }
+
+  return [BRIGHT_LINE_NODE_DIMMED_CLASS]
+}
+
+function getBrightLineEdgeClass(sourceId: string, targetId: string): string[] {
+  const activeNodeId = activeBrightLineNodeId.value
+  if (!showBrightLine.value || !activeNodeId) {
+    return []
+  }
+
+  const connectedNodeIds = activeBrightLineConnectedNodeIds.value
+  if (connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)) {
+    return [BRIGHT_LINE_EDGE_CLASS]
+  }
+
+  return [BRIGHT_LINE_EDGE_DIMMED_CLASS]
+}
+
+function setActiveBrightLineNode(event: NodeMouseEvent): void {
+  activeBrightLineNodeId.value = event.node.id
+}
+
+function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
+  if (!event || activeBrightLineNodeId.value === event.node.id) {
+    activeBrightLineNodeId.value = null
+  }
+}
 
 function openCircularTooltip(edgeId: string): void {
   activeCircularTooltipEdgeId.value = edgeId
@@ -1244,6 +1336,7 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   }
 
   activeCircularTooltipEdgeId.value = null
+  activeBrightLineNodeId.value = null
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
   const graph = buildGraph(props.data, collapsedModuleNames.value, {
@@ -1290,6 +1383,12 @@ function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
 
 watch(showCircularDependencies, () => {
   refreshGraph()
+})
+
+watch(showBrightLine, (isEnabled) => {
+  if (!isEnabled) {
+    activeBrightLineNodeId.value = null
+  }
 })
 
 watch(showModuleToModuleLine, () => {
@@ -1381,6 +1480,26 @@ useResizeObserver(graphViewerRef, () => {
               v-model="showLegends"
               label="Show Legends"
             />
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showBrightLine"
+                label="Bright Line"
+              />
+              <UTooltip
+                text="Highlight the full path of modules, providers, or controllers that depend on the hovered item."
+                :delay-duration="0"
+              >
+                <UButton
+                  type="button"
+                  icon="i-lucide-circle-help"
+                  color="neutral"
+                  variant="ghost"
+                  square
+                  class="graph-viewer-settings__help"
+                  aria-label="Bright Line help"
+                />
+              </UTooltip>
+            </div>
             <UCheckbox
               v-model="showModuleToModuleLine"
               label="Show module to module line"
@@ -1447,6 +1566,8 @@ useResizeObserver(graphViewerRef, () => {
       :zoom-on-pinch="props.interactive"
       :zoom-on-double-click="props.interactive"
       class="graph-flow"
+      @node-mouse-enter="setActiveBrightLineNode"
+      @node-mouse-leave="clearActiveBrightLineNode"
     >
       <template #edge-warning="edgeProps">
         <BaseEdge
@@ -1805,6 +1926,20 @@ useResizeObserver(graphViewerRef, () => {
   line-height: 1.2;
 }
 
+.graph-viewer-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-viewer-settings__help {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}
+
 .graph-viewer-legends {
   position: absolute;
   top: 12px;
@@ -1869,6 +2004,60 @@ useResizeObserver(graphViewerRef, () => {
   color: var(--ui-text);
   font-size: 12px;
   line-height: 1.25;
+}
+
+.graph-viewer .vue-flow__node {
+  transition:
+    opacity 140ms ease,
+    filter 140ms ease;
+}
+
+.graph-viewer .vue-flow__edge {
+  transition: opacity 140ms ease;
+}
+
+.graph-viewer .vue-flow__edge-path {
+  transition:
+    stroke 140ms ease,
+    stroke-width 140ms ease,
+    filter 140ms ease;
+}
+
+.graph-viewer .bright-line-node--dimmed {
+  opacity: 0.28;
+  filter: saturate(0.55);
+}
+
+.graph-viewer .bright-line-node--active .module-subgraph,
+.graph-viewer .bright-line-node--connected .module-subgraph,
+.graph-viewer .bright-line-node--active .mermaid-node,
+.graph-viewer .bright-line-node--connected .mermaid-node {
+  border-color: var(--ui-primary) !important;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--ui-primary) 34%, transparent),
+    0 10px 26px rgba(15, 23, 42, 0.2);
+}
+
+.graph-viewer .bright-line-node--active .module-subgraph,
+.graph-viewer .bright-line-node--active .mermaid-node {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ui-primary) 42%, transparent),
+    0 12px 30px rgba(15, 23, 42, 0.24);
+}
+
+.graph-viewer .bright-line-edge {
+  opacity: 1;
+  z-index: 12;
+}
+
+.graph-viewer .bright-line-edge .vue-flow__edge-path {
+  stroke: var(--ui-primary) !important;
+  stroke-width: 3.2px !important;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ui-primary) 52%, transparent));
+}
+
+.graph-viewer .bright-line-edge--dimmed {
+  opacity: 0.16;
 }
 
 .module-subgraph {
