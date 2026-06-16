@@ -21,7 +21,8 @@ import type {
   GraphOutputModule,
   GraphOutputDependencyRef,
   GraphOutputCycle,
-  GraphOutputProviderCycle
+  GraphOutputProviderCycle,
+  GraphOutputCycles
 } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
@@ -106,12 +107,16 @@ const props = withDefaults(
     interactive?: boolean
     flush?: boolean
     defaultOpenModuleDetail?: boolean
+    fixBightline?: boolean | string
+    excludeModules?: string[] | string
   }>(),
   {
     height: '75vh',
     interactive: true,
     flush: false,
-    defaultOpenModuleDetail: false
+    defaultOpenModuleDetail: false,
+    fixBightline: false,
+    excludeModules: () => []
   }
 )
 
@@ -138,13 +143,107 @@ const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
 const MODULE_EDGE_COLOR = '#888'
 const DEPENDENCY_EDGE_COLOR = '#555'
 const CIRCULAR_DEPENDENCY_EDGE_COLOR = '#facc15'
+const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'UserRepository'
 const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
 const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
 const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
 const BRIGHT_LINE_NODE_DIMMED_CLASS = 'bright-line-node--dimmed'
+const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
 const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
+
+function shouldKeepDependency(
+  dep: GraphOutputDependencyRef,
+  excludedModules: Set<string>
+): boolean {
+  return !excludedModules.has(dep.providedBy.name)
+}
+
+function filterDependencyCycle(
+  cycle: GraphOutputCycle,
+  excludedModules: Set<string>,
+  moduleNames: Set<string>
+): boolean {
+  return cycle.path.every((key) => {
+    const parsedKey = splitDependencyCycleKey(key)
+    return parsedKey
+      && !excludedModules.has(parsedKey.moduleName)
+      && moduleNames.has(parsedKey.moduleName)
+  })
+}
+
+function filterGraphOutput(
+  moduleMap: GraphOutput,
+  excludeModules: string[] | string
+): GraphOutput {
+  const moduleNamesToExclude = Array.isArray(excludeModules)
+    ? excludeModules
+    : excludeModules.split(',')
+  const excludedModules = new Set(
+    moduleNamesToExclude.map(moduleName => moduleName.trim()).filter(Boolean)
+  )
+
+  if (excludedModules.size === 0) {
+    return moduleMap
+  }
+
+  const modules: GraphOutput['modules'] = {}
+  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    if (excludedModules.has(moduleName)) {
+      continue
+    }
+
+    modules[moduleName] = {
+      ...mod,
+      imports: mod.imports.filter(importName => !excludedModules.has(importName)),
+      providers: mod.providers.map(provider => ({
+        ...provider,
+        dependencies: provider.dependencies.filter(dep =>
+          shouldKeepDependency(dep, excludedModules)
+        )
+      })),
+      controllers: mod.controllers.map(controller => ({
+        ...controller,
+        dependencies: controller.dependencies.filter(dep =>
+          shouldKeepDependency(dep, excludedModules)
+        )
+      }))
+    }
+  }
+
+  const moduleNames = new Set(Object.keys(modules))
+  const root = moduleNames.has(moduleMap.root)
+    ? moduleMap.root
+    : Object.keys(modules)[0] || moduleMap.root
+  const cycles: GraphOutputCycles = {
+    modules: (moduleMap.cycles?.modules || []).filter(cycle =>
+      cycle.path.every(moduleName =>
+        !excludedModules.has(moduleName) && moduleNames.has(moduleName)
+      )
+    ),
+    providers: (moduleMap.cycles?.providers || []).filter(cycle =>
+      cycle.path.every(item =>
+        !excludedModules.has(item.module.name)
+        && moduleNames.has(item.module.name)
+      )
+    ),
+    controllers: (moduleMap.cycles?.controllers || []).filter(cycle =>
+      filterDependencyCycle(cycle, excludedModules, moduleNames)
+    )
+  }
+
+  return {
+    ...moduleMap,
+    root,
+    modules,
+    cycles
+  }
+}
+
+const graphData = computed(() =>
+  filterGraphOutput(props.data, props.excludeModules)
+)
 
 async function centerGraph(duration = 200) {
   if (!import.meta.client) {
@@ -1183,17 +1282,19 @@ function buildGraph(
 }
 
 const collapsedModuleNames = ref<Set<string>>(
-  getInitialCollapsedModuleNames(props.data)
+  getInitialCollapsedModuleNames(graphData.value)
 )
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
 const showBrightLine = ref(true)
 const activeBrightLineNodeId = ref<string | null>(null)
-const showModuleToModuleLine = ref(true)
-const showProviderToProviderInsideModule = ref(true)
+const hasInitialFixedBrightLine = props.fixBightline !== false
+  && props.fixBightline !== undefined
+const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
+const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderAcrossModule = ref(false)
-const initialGraph = buildGraph(props.data, collapsedModuleNames.value, {
+const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
   showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
@@ -1206,6 +1307,18 @@ const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
+const fixedBrightLineTarget = computed(() => {
+  if (props.fixBightline === false || props.fixBightline === undefined) {
+    return null
+  }
+
+  if (typeof props.fixBightline === 'string') {
+    const target = props.fixBightline.trim()
+    return target || DEFAULT_FIXED_BRIGHT_LINE_TARGET
+  }
+
+  return DEFAULT_FIXED_BRIGHT_LINE_TARGET
+})
 const activeBrightLineConnectedNodeIds = computed(() => {
   const activeNodeId = activeBrightLineNodeId.value
   const connectedNodeIds = new Set<string>()
@@ -1243,7 +1356,7 @@ const activeBrightLineConnectedNodeIds = computed(() => {
   return connectedNodeIds
 })
 const expandableModuleNames = computed(() =>
-  Object.entries(props.data.modules)
+  Object.entries(graphData.value.modules)
     .filter(([, mod]) => hasModuleComponents(mod))
     .map(([moduleName]) => moduleName)
 )
@@ -1267,6 +1380,25 @@ const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
   return 'indeterminate'
 })
 
+function resolveBrightLineNodeId(target: string): string | null {
+  const matchedNode = flowNodes.value.find(node =>
+    node.id === target
+    || node.data?.label === target
+    || node.id.endsWith(`-${target}`)
+  )
+
+  return matchedNode?.id || null
+}
+
+function syncFixedBrightLineNode(): void {
+  const target = fixedBrightLineTarget.value
+  if (!target) {
+    return
+  }
+
+  activeBrightLineNodeId.value = resolveBrightLineNodeId(target)
+}
+
 function hasActiveBrightLine(): boolean {
   return showBrightLine.value && activeBrightLineNodeId.value !== null
 }
@@ -1277,7 +1409,13 @@ function getBrightLineNodeClass(nodeId: string): string[] {
   }
 
   if (activeBrightLineNodeId.value === nodeId) {
-    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS]
+    const classes = [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS]
+    const fixedTarget = fixedBrightLineTarget.value
+    if (fixedTarget && resolveBrightLineNodeId(fixedTarget) === nodeId) {
+      classes.push(BRIGHT_LINE_NODE_FIXED_CLASS)
+    }
+
+    return classes
   }
 
   if (activeBrightLineConnectedNodeIds.value.has(nodeId)) {
@@ -1331,6 +1469,13 @@ function setActiveBrightLineNode(event: NodeMouseEvent): void {
 }
 
 function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
+  if (fixedBrightLineTarget.value) {
+    if (!event || activeBrightLineNodeId.value === event.node.id) {
+      syncFixedBrightLineNode()
+    }
+    return
+  }
+
   if (!event || activeBrightLineNodeId.value === event.node.id) {
     activeBrightLineNodeId.value = null
   }
@@ -1382,7 +1527,7 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   activeBrightLineNodeId.value = null
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
-  const graph = buildGraph(props.data, collapsedModuleNames.value, {
+  const graph = buildGraph(graphData.value, collapsedModuleNames.value, {
     showCircularDependencies: showCircularDependencies.value,
     showModuleToModuleLine: showModuleToModuleLine.value,
     showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
@@ -1391,10 +1536,11 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   })
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
+  syncFixedBrightLineNode()
 }
 
 function toggleModule(moduleName: string) {
-  const mod = props.data.modules[moduleName]
+  const mod = graphData.value.modules[moduleName]
   if (!mod || !hasModuleComponents(mod)) {
     return
   }
@@ -1416,8 +1562,8 @@ function toggleModule(moduleName: string) {
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
   collapsedModuleNames.value
     = isOpen === true
-      ? getPermanentCollapsedModuleNames(props.data)
-      : getDefaultCollapsedModuleNames(props.data)
+      ? getPermanentCollapsedModuleNames(graphData.value)
+      : getDefaultCollapsedModuleNames(graphData.value)
   refreshGraph({ preservePositions: !autoAdjustGraphView.value })
   if (autoAdjustGraphView.value) {
     void centerGraph()
@@ -1431,8 +1577,20 @@ watch(showCircularDependencies, () => {
 watch(showBrightLine, (isEnabled) => {
   if (!isEnabled) {
     activeBrightLineNodeId.value = null
+    return
   }
+
+  syncFixedBrightLineNode()
 })
+
+watch(fixedBrightLineTarget, (target) => {
+  if (target) {
+    syncFixedBrightLineNode()
+    return
+  }
+
+  activeBrightLineNodeId.value = null
+}, { immediate: true })
 
 watch(showModuleToModuleLine, () => {
   refreshGraph()
@@ -1447,10 +1605,10 @@ watch(showProviderToProviderAcrossModule, () => {
 })
 
 watch(
-  () => props.data,
+  graphData,
   () => {
     nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(props.data)
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
     void centerGraph()
   },
@@ -1461,7 +1619,7 @@ watch(
   () => props.defaultOpenModuleDetail,
   () => {
     nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(props.data)
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
     void centerGraph()
   }
@@ -2094,6 +2252,12 @@ useResizeObserver(graphViewerRef, () => {
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--ui-primary) 42%, transparent),
     0 12px 30px rgba(15, 23, 42, 0.24);
+}
+
+.graph-viewer .bright-line-node--fixed .module-subgraph,
+.graph-viewer .bright-line-node--fixed .mermaid-node {
+  outline: 2px dashed var(--ui-primary);
+  outline-offset: 4px;
 }
 
 .graph-viewer .bright-line-edge {

@@ -12,10 +12,10 @@ orientation: horizontal
 :hero-background
 
 #title
-Deliver Reliable NestJS Application
+Deliver Reliable NestJS Applications
 
 #description
-Nest Graph Inspector turns your live NestJS runtime into **transparent architecture intelligence**, so every change is **easier to measure**, every dependency is **visible**, and every **blast effect is clear** before it reaches production.
+Nest Graph Inspector turns your live NestJS runtime into **architecture intelligence**: visible dependencies, measurable change impact, and clear blast radius before production.
 
 #links
   :::u-button
@@ -54,68 +54,59 @@ Nest Graph Inspector turns your live NestJS runtime into **transparent architect
   :runtime-graph-preview
 ::
 
-::u-page-section{class="dark:bg-neutral-950"}
+::u-page-section
+---
+class: dark:bg-neutral-950
+orientation: horizontal
+reverse: true
+ui:
+  container: py-10 sm:py-12 lg:py-16 gap-8 sm:gap-10
+---
 #title
-Why It Matters
+::span{class="inline-flex items-center gap-3"}
+  :u-icon{name="i-lucide-route" class="size-9 shrink-0 text-primary"}
+  See Impact Paths Easily
+::
 
 #description
-Shipping speed depends on confidence. Teams need runtime visibility to trace impact, find architecture issues early, and ship safer changes.
+No manual tracing. Hover a module, provider, or controller and the graph shows the impact path for you.
 
 #features
   :::u-page-feature
   ---
-  icon: i-lucide-git-fork
+  icon: i-lucide-eye
   ---
   #title
-  Ship Changes Faster
+  Hover Any Node
 
   #description
-  Trace impact in minutes, not meetings, before touching critical providers or modules.
+  Start from the module, provider, or controller you plan to change.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-layers
+  icon: i-lucide-route
   ---
   #title
-  Cut Regression Risk
+  Follow the Highlight
 
   #description
-  Catch circular and high-coupling patterns before they become release blockers.
+  Related paths stay visible while unrelated edges fade back.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-refresh-cw
+  icon: i-lucide-list-checks
   ---
   #title
-  Make PR Reviews Concrete
+  Decide With Context
 
   #description
-  Replace assumptions with runtime-backed module and provider-level evidence.
+  See affected app areas before making changes.
   :::
 
-  :::u-page-feature
-  ---
-  icon: i-lucide-flask-conical
-  ---
-  #title
-  Onboard With Real Context
-
-  #description
-  Give new engineers a live map of how the system actually connects and behaves.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-search-check
-  ---
-  #title
-  Find Architecture Issues Early
-
-  #description
-  Use Issue Finder to surface structural problems before they grow into production incidents.
-  :::
+#default
+  :runtime-graph-preview{fix-bightline="UserRepository" exclude-modules="NestJSCoreModule,ProductModule,AppModule,MobileModule" height="clamp(18rem, 58vh, 34rem)"}
 ::
 
 ::u-page-section{class="dark:bg-neutral-950"}
@@ -123,7 +114,7 @@ Shipping speed depends on confidence. Teams need runtime visibility to trace imp
 Feature List
 
 #description
-Everything is built for graph clarity, fast tracing, and confident runtime decisions.
+Built for clear graphs, fast tracing, and confident runtime decisions.
 
 #features
   :::u-page-feature
@@ -134,7 +125,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Dependency Graph
 
   #description
-  Visualize modules, providers, controllers, imports, and dependency edges from the running app.
+  Visualize modules, providers, controllers, imports, and runtime dependency edges.
   :::
 
   :::u-page-feature
@@ -145,7 +136,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Circular Detection
 
   #description
-  Surface circular relationships early so teams can resolve risky loops before release.
+  Find circular relationships early and resolve risky loops before release.
   :::
 
   :::u-page-feature
@@ -156,7 +147,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Relation Focus :badge[Coming Soon]{.ml-2}
 
   #description
-  Coming soon: focus any provider/module pair to see how they relate and where dependencies connect.
+  Coming soon: focus any provider/module pair and inspect their dependency path.
   :::
 
   :::u-page-feature
@@ -167,7 +158,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Context-Aware AI Assistant
 
   #description
-  Ask graph and trace questions in plain language with context-aware answers, always free in the viewer.
+  Ask graph and trace questions in plain language, free in the viewer.
   :::
 
   :::u-page-feature
@@ -178,7 +169,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Process Sequence :badge[Coming Soon]{.ml-2}
 
   #description
-  Coming soon: generate sequence diagrams from an entry point to completion flow to document how a process really runs.
+  Coming soon: generate sequence diagrams from entry point to completion.
   :::
 
   :::u-page-feature
@@ -189,7 +180,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
   Direct Run :badge[Coming Soon]{.ml-2}
 
   #description
-  Coming soon: execute runtime-resolved services and functions directly from the graph context to validate behavior faster.
+  Coming soon: execute runtime-resolved services directly from graph context.
   :::
 ::
 
@@ -198,7 +189,7 @@ Everything is built for graph clarity, fast tracing, and confident runtime decis
 AI Chat in Viewer
 
 #description
-From graph to decision in seconds. Ask trace questions in plain language and get answers grounded in your current runtime context.
+Go from graph to decision faster with runtime-grounded answers.
 
 #features
   :::u-page-feature
@@ -209,7 +200,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Ask Naturally
 
   #description
-  Ask things like "trace `AuthService` dependencies" or "show the path from `OrdersModule` to `PaymentService`" with zero query syntax.
+  Ask "trace `AuthService` dependencies" or "show `OrdersModule` to `PaymentService`" without query syntax.
   :::
 
   :::u-page-feature
@@ -220,7 +211,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Grounded, Not Generic
 
   #description
-  Every answer is grounded in loaded runtime graph context, and missing data is called out clearly.
+  Answers use loaded graph context and call out missing data.
   :::
 
   :::u-page-feature
@@ -231,7 +222,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Unlimited Follow-Ups
 
   #description
-  Keep the conversation going until the dependency path is clear and decisions are ready.
+  Keep asking until the dependency path is clear.
   :::
 
   :::u-page-feature
@@ -242,7 +233,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Trace Paths Faster
 
   #description
-  Walk provider and module relationships quickly during debugging, architecture reviews, and PR checks.
+  Walk provider and module relationships during debugging, reviews, and PR checks.
   :::
 
   :::u-page-feature
@@ -253,7 +244,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Your Model, Your Environment
 
   #description
-  Connect a local model through Ollama and keep architecture analysis in your own environment.
+  Use Ollama to keep architecture analysis in your own environment.
   :::
 
   :::u-page-feature
@@ -264,7 +255,7 @@ From graph to decision in seconds. Ask trace questions in plain language and get
   Direct Run Ready :badge[Coming Soon]{.ml-2}
 
   #description
-  Today: trace and reason with context-aware chat. Coming soon: trigger runtime-resolved execution flows from the same workspace.
+  Today, trace with context-aware chat; soon, run resolved execution flows.
   :::
 ::
 

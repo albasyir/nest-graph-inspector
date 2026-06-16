@@ -1,6 +1,32 @@
 <script setup lang="ts">
 import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 
+const props = withDefaults(
+  defineProps<{
+    fixBightline?: boolean | string
+    height?: string
+    excludeModules?: string[] | string
+  }>(),
+  {
+    fixBightline: false,
+    height: 'clamp(14rem, 52vh, 28rem)',
+    excludeModules: () => []
+  }
+)
+
+const fixedBrightLineLabel = computed(() => {
+  if (props.fixBightline === false || props.fixBightline === undefined) {
+    return null
+  }
+
+  if (typeof props.fixBightline === 'string') {
+    const label = props.fixBightline.trim()
+    return label || 'UserRepository'
+  }
+
+  return 'UserRepository'
+})
+
 const config = useRuntimeConfig()
 let base = config.app.baseURL || '/'
 if (!base.endsWith('/')) {
@@ -20,8 +46,10 @@ const { data, status, error } = await useLazyAsyncData(
       <GraphViewer
         v-if="status === 'success' && data"
         :data="data"
-        height="clamp(14rem, 52vh, 28rem)"
+        :height="props.height"
         :interactive="false"
+        :fix-bightline="props.fixBightline"
+        :exclude-modules="props.excludeModules"
         default-open-module-detail
       />
       <UAlert
@@ -34,16 +62,26 @@ const { data, status, error } = await useLazyAsyncData(
       />
       <USkeleton
         v-else
-        class="h-[clamp(14rem,52vh,28rem)] w-full rounded-xl"
+        class="runtime-graph-preview__skeleton w-full rounded-xl"
+        :style="{ height: props.height }"
       />
 
       <template #fallback>
-        <USkeleton class="h-[clamp(14rem,52vh,28rem)] w-full rounded-xl" />
+        <USkeleton
+          class="runtime-graph-preview__skeleton w-full rounded-xl"
+          :style="{ height: props.height }"
+        />
       </template>
     </ClientOnly>
 
     <p class="text-sm text-muted">
-      Interactive preview from the built-in mock graph.
+      <template v-if="fixedBrightLineLabel">
+        This example shows what happens when you hover
+        <span class="font-medium text-highlighted">{{ fixedBrightLineLabel }}</span>.
+      </template>
+      <template v-else>
+        Interactive preview from the built-in mock graph.
+      </template>
       <NuxtLink
         to="/view?preview=true"
         class="text-primary font-medium"
