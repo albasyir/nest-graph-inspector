@@ -56,13 +56,8 @@ const viewerMenuItems = computed(() => [
     disabled: !encodedUrl.value
   },
   {
-    label: 'Repl',
+    label: 'Direct Run',
     icon: 'i-lucide-terminal',
-    disabled: true
-  },
-  {
-    label: 'Process Sequence',
-    icon: 'i-lucide-list-ordered',
     disabled: true
   },
   {
