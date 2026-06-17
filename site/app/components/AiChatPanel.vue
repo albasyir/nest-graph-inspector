@@ -1118,6 +1118,7 @@ async function handleSubmit(event: Event) {
           icon="i-lucide-sparkles"
           :placeholder="promptPlaceholder"
           variant="subtle"
+          :autofocus="!props.preview && props.active"
           :rows="1"
           :maxrows="4"
           :disabled="isPromptDisabled"
