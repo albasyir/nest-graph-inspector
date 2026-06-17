@@ -34,6 +34,16 @@ export default defineNuxtConfig({
     }
   },
 
+  ogImage: {
+    enabled: true
+  },
+
+  fonts: {
+    families: [
+      { name: 'Public Sans', provider: 'none' }
+    ]
+  },
+
   runtimeConfig: {
     public: {
       posthog: {
@@ -82,7 +92,7 @@ export default defineNuxtConfig({
   },
 
   llms: {
-    domain: 'https://nest-graph-inspector.dev/',
+    domain: 'https://albasyir.github.io/nest-graph-inspector/',
     title: 'Nest Graph Inspector',
     description: 'A NestJS module to generate runtime dependency graphs to view dynamically in an Interactive Web Viewer or via JSON format.',
     full: {

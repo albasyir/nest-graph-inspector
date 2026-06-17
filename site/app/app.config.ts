@@ -12,7 +12,8 @@ export default defineAppConfig({
     }
   },
   seo: {
-    siteName: 'Nest Graph Inspector'
+    siteName: 'Nest Graph Inspector',
+    url: 'https://albasyir.github.io/nest-graph-inspector/'
   },
   header: {
     title: 'Nest Graph Inspector',
