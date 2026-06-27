@@ -2,6 +2,7 @@
 import { storeToRefs } from 'pinia'
 import {
   createGraphViewerEventProperties,
+  resolveGraphViewerLoadSource,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
 
@@ -79,10 +80,6 @@ async function loadGraphResources(
   }
 
   if (graphLoaded) {
-    if (loadSource === 'initial_mount') {
-      hasTrackedInitialMount = true
-    }
-
     trackGraphViewerEvent('graph_viewer_load_succeeded', {
       loadSource,
       isRetry
@@ -101,7 +98,8 @@ async function loadGraphResources(
 }
 
 watch(encodedUrl, (value) => {
-  const loadSource: LoadSource = hasTrackedInitialMount ? 'route_change' : 'initial_mount'
+  const loadSource = resolveGraphViewerLoadSource(hasTrackedInitialMount)
+  hasTrackedInitialMount = true
   loadGraphResources(value, loadSource)
 }, { immediate: true })
 

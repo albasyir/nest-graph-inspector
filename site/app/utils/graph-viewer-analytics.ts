@@ -1,5 +1,9 @@
 export type LoadSource = 'initial_mount' | 'route_change' | 'manual_refresh'
 
+export function resolveGraphViewerLoadSource(hasTrackedInitialMount: boolean): LoadSource {
+  return hasTrackedInitialMount ? 'route_change' : 'initial_mount'
+}
+
 function parseGraphUrl(graphUrl: string) {
   if (!graphUrl) {
     return {
