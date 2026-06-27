@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import {
+  createGraphViewerEventProperties,
+  type LoadSource
+} from '~/utils/graph-viewer-analytics'
 
 definePageMeta({
   layout: 'viewer'
@@ -16,6 +20,8 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
+
+let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
   const param = route.params.url
@@ -37,12 +43,35 @@ useSeoMeta({
   description: 'Viewing NestJS dependency graph data.'
 })
 
+function trackGraphViewerEvent(event: string, options: {
+  loadSource: LoadSource
+  isRetry?: boolean
+  errorMessage?: string
+}) {
+  posthog?.capture(event, createGraphViewerEventProperties({
+    graphUrl: decodedUrl.value,
+    viewerRoute: route.path,
+    loadSource: options.loadSource,
+    isRetry: options.isRetry,
+    errorMessage: options.errorMessage
+  }))
+}
+
 // Redirect to /view if no valid URL
-async function loadGraphResources(value: string) {
+async function loadGraphResources(
+  value: string,
+  loadSource: 'initial_mount' | 'route_change' | 'manual_refresh',
+  isRetry = false
+) {
   if (!value) {
     navigateTo('/view')
     return
   }
+
+  trackGraphViewerEvent('graph_viewer_load_started', {
+    loadSource,
+    isRetry
+  })
 
   const graphLoaded = await graphStore.setEncodedUrl(value)
   if (graphLoaded) {
@@ -50,13 +79,19 @@ async function loadGraphResources(value: string) {
   }
 
   if (graphLoaded) {
-    posthog?.capture('Graph Loaded', {
-      url: decodedUrl.value
+    if (loadSource === 'initial_mount') {
+      hasTrackedInitialMount = true
+    }
+
+    trackGraphViewerEvent('graph_viewer_load_succeeded', {
+      loadSource,
+      isRetry
     })
   } else {
-    posthog?.capture('Graph Load Failed', {
-      url: decodedUrl.value,
-      error_message: errorMessage.value || 'Unknown error'
+    trackGraphViewerEvent('graph_viewer_load_failed', {
+      loadSource,
+      isRetry,
+      errorMessage: errorMessage.value || 'Unknown error'
     })
   }
 
@@ -65,16 +100,13 @@ async function loadGraphResources(value: string) {
   }
 }
 
-onMounted(() => {
-  loadGraphResources(encodedUrl.value)
-})
-
 watch(encodedUrl, (value) => {
-  loadGraphResources(value)
-})
+  const loadSource: LoadSource = hasTrackedInitialMount ? 'route_change' : 'initial_mount'
+  loadGraphResources(value, loadSource)
+}, { immediate: true })
 
 function handleRefresh() {
-  graphStore.fetchGraph()
+  loadGraphResources(encodedUrl.value, 'manual_refresh', true)
 }
 </script>
 
