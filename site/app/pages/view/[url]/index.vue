@@ -22,8 +22,6 @@ const {
   openModuleDetail
 } = storeToRefs(graphStore)
 
-let hasTrackedInitialMount = false
-
 const urlBase64 = computed(() => {
   const param = route.params.url
   return Array.isArray(param) ? param[0] : param
@@ -97,9 +95,8 @@ async function loadGraphResources(
   }
 }
 
-watch(encodedUrl, (value) => {
-  const loadSource = resolveGraphViewerLoadSource(hasTrackedInitialMount)
-  hasTrackedInitialMount = true
+watch(encodedUrl, (value, previousValue) => {
+  const loadSource = resolveGraphViewerLoadSource(Boolean(previousValue))
   loadGraphResources(value, loadSource)
 }, { immediate: true })
 
