@@ -22,6 +22,10 @@ import { ModuleProvider } from './types/module-provider.type';
 import { Modules } from './types/module.type';
 import { ModuleMap } from './types/module-map.type';
 import type {
+  DirectRunProviderMeta,
+  DirectRunProviderMethod,
+} from './types/direct-run.type';
+import type {
   GraphOutput,
   GraphOutputCycle,
   GraphOutputCycles,
@@ -30,13 +34,15 @@ import type {
   GraphOutputModule,
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
+  GraphOutputProvider,
 } from './types/graph-output.type';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
-import { Project } from 'ts-morph';
+import { Node, Project, SyntaxKind, Type as TsMorphType } from 'ts-morph';
+import type { NestGraphInspectorViewerDirectRunOptions } from './nest-graph-inspector.type';
 
 type DependencyNodeKind = 'provider' | 'controller';
 type DependencyNode = {
@@ -219,6 +225,26 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         ...defaultViewerOutput.ollama,
         ...output.ollama,
       },
+      directRun: this.mergeViewerDirectRunOptions(
+        defaultViewerOutput.directRun,
+        output.directRun,
+      ),
+    };
+  }
+
+  private mergeViewerDirectRunOptions(
+    defaultOptions?: NestGraphInspectorViewerDirectRunOptions,
+    outputOptions?: NestGraphInspectorViewerDirectRunOptions,
+  ) {
+    const path = outputOptions?.path ?? defaultOptions?.path;
+    if (!path) {
+      return undefined;
+    }
+
+    return {
+      path,
+      instanceLookup: (moduleName: string, providerName: string) =>
+        this.findDirectRunProviderInstance(moduleName, providerName),
     };
   }
 
@@ -814,6 +840,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           dependencies: provider.dependencies.map((dep) =>
             this.enrichDependency(dep, moduleName),
           ),
+          directRun: this.resolveDirectRunProviderMeta(provider.name, moduleName),
         })),
         controllers: moduleData.controllers.map((controller) => ({
           ...controller,
@@ -829,6 +856,323 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       modules: enrichedModules,
       cycles: this.findGraphCycles(enrichedModules),
     };
+  }
+
+  private resolveDirectRunProviderMeta(
+    providerName: string,
+    moduleName: string,
+  ): DirectRunProviderMeta | undefined {
+    const instance = this.findDirectRunProviderInstance(moduleName, providerName);
+    if (!instance) {
+      return undefined;
+    }
+
+    const methods = this.getDirectRunMethods(instance);
+    if (!methods.length) {
+      return undefined;
+    }
+
+    return {
+      methods,
+    };
+  }
+
+  private findDirectRunProviderInstance(
+    moduleName: string,
+    providerName: string,
+  ): unknown {
+    const moduleRef = [...this.modulesContainer.values()].find(
+      candidate => this.moduleName(candidate) === moduleName,
+    );
+    if (!moduleRef) {
+      return undefined;
+    }
+
+    const providerWrapper = [...moduleRef.providers.values()].find((wrapper) => {
+      const instance =
+        wrapper.instance &&
+        (typeof wrapper.instance === 'object' || typeof wrapper.instance === 'function')
+          ? (wrapper.instance as { constructor?: { name?: string } })
+          : null;
+      const resolvedName =
+        wrapper.metatype?.name ||
+        instance?.constructor?.name ||
+        this.tokenName(wrapper.token);
+
+      return resolvedName === providerName;
+    });
+
+    return providerWrapper?.instance;
+  }
+
+  private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
+    if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) {
+      return [];
+    }
+
+    const prototype = Object.getPrototypeOf(instance) as Record<string, unknown> | null;
+    if (!prototype || prototype === Object.prototype) {
+      return [];
+    }
+
+    const methods = Object.getOwnPropertyNames(prototype)
+      .filter(name => name !== 'constructor')
+      .map((name) => {
+        const candidate = prototype[name];
+        if (typeof candidate !== 'function') {
+          return null;
+        }
+
+        const method = candidate as (...args: unknown[]) => unknown;
+        const parameterTypes = this.getDirectRunMethodParameterTypes({
+          instance,
+          method,
+          methodName: name,
+        });
+
+        return {
+          name,
+          parameterTypes,
+        };
+      })
+      .filter((method): method is DirectRunProviderMethod => method !== null)
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return [...new Map(methods.map(method => [method.name, method])).values()];
+  }
+
+  private getDirectRunMethodParameterTypes(param: {
+    instance: object | ((...args: unknown[]) => unknown);
+    method: (...args: unknown[]) => unknown;
+    methodName: string;
+  }): string {
+    const { instance, method, methodName } = param;
+    const className =
+      typeof instance === 'function'
+        ? instance.name
+        : instance.constructor?.name;
+    const sourceTypes = className
+      ? this.extractMethodParameterTypesFromProject(className, methodName)
+      : undefined;
+    if (sourceTypes) {
+      return sourceTypes;
+    }
+
+    const runtimeNames = this.extractMethodParameterNamesFromFunctionSource(
+      methodName,
+      method,
+    );
+    if (!runtimeNames?.length) {
+      return '[]';
+    }
+
+    return `[${runtimeNames.map(name => `${name}: unknown`).join(', ')}]`;
+  }
+
+  private extractMethodParameterTypesFromProject(
+    className: string,
+    methodName: string,
+  ): string | undefined {
+    const targetClass = this.tsMorphProject
+      .getSourceFiles()
+      .flatMap(sourceFile =>
+        sourceFile.getDescendantsOfKind(SyntaxKind.ClassDeclaration),
+      )
+      .find(classDeclaration => classDeclaration.getName() === className);
+
+    const method = targetClass?.getInstanceMethod(methodName);
+    if (!method) {
+      return undefined;
+    }
+
+    const parameters = method.getParameters();
+    return `[${parameters
+      .map(parameter =>
+        `${parameter.getName()}: ${this.typeToTypeScriptCode(parameter.getType(), parameter)}`,
+      )
+      .join(', ')}]`;
+  }
+
+  private extractMethodParameterNamesFromFunctionSource(
+    methodName: string,
+    method: (...args: unknown[]) => unknown,
+  ): string[] | undefined {
+    const methodSource = method.toString().trim();
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    try {
+      const sourceFile = project.createSourceFile(
+        'direct-run-method.ts',
+        `class DirectRunMethodSource { ${methodSource} }`,
+      );
+
+      const names = sourceFile
+        .getClassOrThrow('DirectRunMethodSource')
+        .getInstanceMethod(methodName)
+        ?.getParameters()
+        .map(parameter => parameter.getName());
+      if (names) {
+        return names;
+      }
+    } catch {
+      // Runtime function strings are best-effort metadata only.
+    }
+
+    try {
+      const sourceFile = project.createSourceFile(
+        'direct-run-function.ts',
+        `const directRunMethod = ${methodSource};`,
+      );
+      const initializer = sourceFile
+        .getVariableDeclarationOrThrow('directRunMethod')
+        .getInitializer();
+      const callable =
+        initializer?.asKind(SyntaxKind.FunctionExpression) ??
+        initializer?.asKind(SyntaxKind.ArrowFunction);
+
+      return callable?.getParameters().map(parameter => parameter.getName());
+    } catch {
+      return undefined;
+    }
+  }
+
+  private typeToTypeScriptCode(
+    type: TsMorphType,
+    enclosingNode: Node,
+    seenTypeTexts = new Set<string>(),
+  ): string {
+    if (
+      type.isAny()
+      || type.isUnknown()
+    ) {
+      return 'unknown';
+    }
+
+    if (type.isNever()) {
+      return 'never';
+    }
+
+    if (type.isUndefined()) {
+      return 'undefined';
+    }
+
+    if (type.isVoid()) {
+      return 'void';
+    }
+
+    if (type.isString()) {
+      return 'string';
+    }
+
+    if (type.isNumber()) {
+      return 'number';
+    }
+
+    if (type.isBoolean()) {
+      return 'boolean';
+    }
+
+    if (type.isNull()) {
+      return 'null';
+    }
+
+    if (type.isStringLiteral()) {
+      return JSON.stringify(type.getLiteralValue());
+    }
+
+    if (type.isNumberLiteral()) {
+      return String(type.getLiteralValue());
+    }
+
+    if (type.isBooleanLiteral()) {
+      return type.getText(enclosingNode);
+    }
+
+    if (type.isUnion()) {
+      return type
+        .getUnionTypes()
+        .map(unionType =>
+          this.typeToTypeScriptCode(
+            unionType,
+            enclosingNode,
+            new Set(seenTypeTexts),
+          ),
+        )
+        .join(' | ');
+    }
+
+    if (type.isTuple()) {
+      return `[${type
+        .getTupleElements()
+        .map(tupleType =>
+          this.typeToTypeScriptCode(
+            tupleType,
+            enclosingNode,
+            new Set(seenTypeTexts),
+          ),
+        )
+        .join(', ')}]`;
+    }
+
+    if (type.isArray() || type.isReadonlyArray()) {
+      const itemType = this.typeToTypeScriptCode(
+        type.getArrayElementType() ?? type,
+        enclosingNode,
+        new Set(seenTypeTexts),
+      );
+
+      return `${this.wrapArrayItemType(itemType)}[]`;
+    }
+
+    if (!type.isObject() || type.getCallSignatures().length > 0) {
+      return type.getText(enclosingNode);
+    }
+
+    const typeText = type.getText(enclosingNode);
+    if (seenTypeTexts.has(typeText)) {
+      return typeText;
+    }
+
+    seenTypeTexts.add(typeText);
+
+    const properties = type.getProperties();
+    if (properties.length === 0) {
+      return typeText;
+    }
+
+    return `{ ${properties
+      .map((property) => {
+        const propertyNode =
+          property.getValueDeclaration() ?? property.getDeclarations()[0];
+        const propertyType = property.getTypeAtLocation(
+          propertyNode ?? enclosingNode,
+        );
+        const optional = property.isOptional()
+          || this.typeAllowsUndefined(propertyType);
+
+        return `${this.propertyNameToTypeScriptCode(property.getName())}${optional ? '?' : ''}: ${this.typeToTypeScriptCode(
+          propertyType,
+          propertyNode ?? enclosingNode,
+          new Set(seenTypeTexts),
+        )}`;
+      })
+      .join('; ')} }`;
+  }
+
+  private wrapArrayItemType(typeText: string): string {
+    return typeText.includes(' | ') || typeText.includes('&')
+      ? `(${typeText})`
+      : typeText;
+  }
+
+  private propertyNameToTypeScriptCode(name: string): string {
+    return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
+  }
+
+  private typeAllowsUndefined(type: TsMorphType): boolean {
+    return type.isUndefined()
+      || (type.isUnion()
+        && type.getUnionTypes().some(unionType => unionType.isUndefined()));
   }
 
   private findGraphCycles(

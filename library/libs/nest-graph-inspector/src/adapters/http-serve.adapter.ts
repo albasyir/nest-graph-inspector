@@ -170,6 +170,11 @@ export class HttpServeAdapter implements OnModuleDestroy {
     const route = this.route(originUrl, routes, req);
 
     if (!route) {
+      if (this.isCorsPreflightRequest(req)) {
+        this.sendCorsPreflight(res);
+        return;
+      }
+
       this.sendText(res, 404, 'Not Found');
       return;
     }
@@ -393,7 +398,26 @@ export class HttpServeAdapter implements OnModuleDestroy {
 
   private setCorsHeaders(res: http.ServerResponse) {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    );
     res.setHeader('Access-Control-Allow-Headers', '*');
+  }
+
+  private sendCorsPreflight(res: http.ServerResponse) {
+    res.writeHead(204, {
+      'content-length': 0,
+    });
+    res.end();
+  }
+
+  private isCorsPreflightRequest(req: http.IncomingMessage): boolean {
+    return (
+      req.method === 'OPTIONS' &&
+      typeof req.headers.origin === 'string' &&
+      typeof req.headers['access-control-request-method'] === 'string'
+    );
   }
 
   private resolveDynamicPort(state: HttpServerState) {

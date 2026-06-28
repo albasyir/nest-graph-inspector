@@ -5,6 +5,10 @@ export type NestGraphInspectorOllamaProxyOptions = {
   path?: string;
 };
 
+export type NestGraphInspectorViewerDirectRunOptions = {
+  path?: string;
+};
+
 export type NestGraphInspectorOutput =
   | {
       type: 'viewer';
@@ -13,6 +17,7 @@ export type NestGraphInspectorOutput =
       port?: number;
       path?: string;
       ollama?: NestGraphInspectorOllamaProxyOptions;
+      directRun?: NestGraphInspectorViewerDirectRunOptions;
     }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
@@ -38,10 +43,12 @@ export interface NestGraphInspectorModuleOptions {
    * - `type: 'http'` serves the module map from a native HTTP server on the
    *   given host, port, and route path, plus raw JSON and markdown at
    *   `/output.json` and `/output.md` under that path
-   * - `type: 'viewer'` serves the graph for the visualizer and proxies Ollama
+   * - `type: 'viewer'` serves the graph for the visualizer, proxies Ollama
    *   requests from the configured same-origin path to the configured Ollama
-   *   origin. If origin is provided, it prints a direct viewer URL. Otherwise,
-   *   it prints the viewer URL and the endpoint path to enter in the viewer.
+   *   origin, and exposes direct-run provider execution on the configured
+   *   same-origin path. If origin is provided, it prints a direct viewer URL.
+   *   Otherwise, it prints the viewer URL and the endpoint path to enter in
+   *   the viewer.
    */
   outputs?: NestGraphInspectorOutput[];
 

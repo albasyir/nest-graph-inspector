@@ -9,7 +9,7 @@ export class UserService {
 
   constructor(private readonly userRepository: UserRepository) {}
 
-  createUser(name: string, email: string): User {
+  createUser({ name, email }: { name: string; email: string }): User {
     return this.userRepository.create(name, email);
   }
 

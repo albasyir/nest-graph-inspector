@@ -3,10 +3,13 @@ export type GraphOutputDependencyRef = {
   token: string;
 };
 
+import type { DirectRunProviderMeta } from './direct-run.type';
+
 export type GraphOutputProvider = {
   name: string;
   jsdoc?: string;
   dependencies: GraphOutputDependencyRef[];
+  directRun?: DirectRunProviderMeta;
 };
 
 export type GraphOutputController = {

@@ -39,11 +39,47 @@
               },
               "token": "MobileService"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "createUser",
+                "parameterTypes": "[{ name, email }: { name: string; email: string }]"
+              },
+              {
+                "name": "getAllUsers",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "getFeaturedMobileProductName",
+                "parameterTypes": "[productId: number]"
+              },
+              {
+                "name": "getUserById",
+                "parameterTypes": "[id: number]"
+              }
+            ]
+          }
         },
         {
           "name": "UserRepository",
-          "dependencies": []
+          "dependencies": [],
+          "directRun": {
+            "methods": [
+              {
+                "name": "create",
+                "parameterTypes": "[name: string, email: string]"
+              },
+              {
+                "name": "findAll",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "findById",
+                "parameterTypes": "[id: number]"
+              }
+            ]
+          }
         },
         {
           "name": "UserSchedule",
@@ -56,7 +92,15 @@
               },
               "token": "UserRepository"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "reward",
+                "parameterTypes": "[]"
+              }
+            ]
+          }
         }
       ],
       "controllers": [
@@ -99,7 +143,15 @@
               },
               "token": "ProductService"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "getFeaturedProductName",
+                "parameterTypes": "[productId: number]"
+              }
+            ]
+          }
         }
       ],
       "controllers": []
@@ -131,11 +183,55 @@
               },
               "token": "MobileService"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "createProduct",
+                "parameterTypes": "[name: string, price: number, ownerId: number]"
+              },
+              {
+                "name": "getAllProducts",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "getMobileFeaturedProductName",
+                "parameterTypes": "[productId: number]"
+              },
+              {
+                "name": "getProductById",
+                "parameterTypes": "[id: number]"
+              },
+              {
+                "name": "getProductsByOwner",
+                "parameterTypes": "[ownerId: number]"
+              }
+            ]
+          }
         },
         {
           "name": "ProductRepository",
-          "dependencies": []
+          "dependencies": [],
+          "directRun": {
+            "methods": [
+              {
+                "name": "create",
+                "parameterTypes": "[name: string, price: number, ownerId: number]"
+              },
+              {
+                "name": "findAll",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "findById",
+                "parameterTypes": "[id: number]"
+              },
+              {
+                "name": "findByOwnerId",
+                "parameterTypes": "[ownerId: number]"
+              }
+            ]
+          }
         }
       ],
       "controllers": [
@@ -164,7 +260,31 @@
       "providers": [
         {
           "name": "OrderRepository",
-          "dependencies": []
+          "dependencies": [],
+          "directRun": {
+            "methods": [
+              {
+                "name": "create",
+                "parameterTypes": "[userId: number, productId: number, quantity: number]"
+              },
+              {
+                "name": "findAll",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "findById",
+                "parameterTypes": "[id: number]"
+              },
+              {
+                "name": "findByUserId",
+                "parameterTypes": "[userId: number]"
+              },
+              {
+                "name": "updateStatus",
+                "parameterTypes": "[id: number, status: \"pending\" | \"confirmed\" | \"shipped\"]"
+              }
+            ]
+          }
         },
         {
           "name": "OrderService",
@@ -197,7 +317,31 @@
               },
               "token": "OrderNotificationService"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "confirmOrder",
+                "parameterTypes": "[id: number]"
+              },
+              {
+                "name": "createOrder",
+                "parameterTypes": "[userId: number, productId: number, quantity: number]"
+              },
+              {
+                "name": "getAllOrders",
+                "parameterTypes": "[]"
+              },
+              {
+                "name": "getOrderById",
+                "parameterTypes": "[id: number]"
+              },
+              {
+                "name": "getOrdersByUser",
+                "parameterTypes": "[userId: number]"
+              }
+            ]
+          }
         },
         {
           "name": "OrderNotificationService",
@@ -210,7 +354,19 @@
               },
               "token": "OrderService"
             }
-          ]
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "notifyOrderCreated",
+                "parameterTypes": "[order: { id: number; userId: number; productId: number; quantity: number; status: \"pending\" | \"confirmed\" | \"shipped\" }]"
+              },
+              {
+                "name": "notifyOrderShipped",
+                "parameterTypes": "[orderId: number]"
+              }
+            ]
+          }
         }
       ],
       "controllers": [

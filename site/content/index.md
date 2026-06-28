@@ -218,12 +218,66 @@ Ask graph and trace questions in plain language. In the real viewer, answers are
   :runtime-a-i-chat-preview
 ::
 
+::u-page-section
+---
+class: dark:bg-neutral-950
+orientation: horizontal
+ui:
+  container: py-10 sm:py-12 lg:py-16 gap-8 sm:gap-10
+---
+#title
+::span{class="inline-flex items-center gap-3"}
+  :u-icon{name="i-lucide-play" class="size-9 shrink-0 text-primary"}
+  Run Providers From The Graph
+::
+
+#description
+Turn your runtime graph into an action surface. Select `Service` inside `Module`, choose a method, and execute the resolved provider without building a temporary endpoint.
+
+#features
+  :::u-page-feature
+  ---
+  icon: i-lucide-box
+  ---
+  #title
+  Provider-First Execution
+
+  #description
+  Run the provider NestJS already resolved in its module context.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-file-json
+  ---
+  #title
+  JSON Arguments
+
+  #description
+  Pass method inputs from the graph and inspect the result in place.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-zap
+  ---
+  #title
+  Faster Runtime Checks
+
+  #description
+  Validate service behavior without wiring a controller, route, or one-off script.
+  :::
+
+#default
+  :runtime-graph-direct-run-preview
+::
+
 ::u-page-section{class="dark:bg-neutral-950"}
 #title
 Next Feature List
 
 #description
-Better than now, just for you
+Better than now, make our service more stable
 
 #features
   :::u-page-feature
@@ -235,17 +289,6 @@ Better than now, just for you
 
   #description
   Coming soon: generate sequence diagrams from entry point to completion.
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-play
-  ---
-  #title
-  Direct Run :badge[Coming Soon]{.ml-2}
-
-  #description
-  Coming soon: execute runtime-resolved services directly from graph context.
   :::
 ::
 

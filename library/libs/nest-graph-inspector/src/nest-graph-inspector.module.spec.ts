@@ -21,6 +21,9 @@ describe(NestGraphInspectorModule.name, () => {
             origin: 'http://localhost:11434',
             path: '/ollama',
           },
+          directRun: {
+            path: '/direct-run',
+          },
         },
       ],
       ignoreProvider: ['ModuleRef', 'ApplicationConfig'],

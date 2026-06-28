@@ -1,0 +1,274 @@
+import http from 'node:http';
+import { Test, TestingModule } from '@nestjs/testing';
+
+import { DirectRunOutputAdapter } from './direct-run-output.adapter';
+import { HttpServeAdapter } from './http-serve.adapter';
+
+describe(DirectRunOutputAdapter.name, () => {
+  let moduleRef: TestingModule;
+  let adapter: DirectRunOutputAdapter;
+
+  beforeEach(async () => {
+    moduleRef = await Test.createTestingModule({
+      providers: [HttpServeAdapter, DirectRunOutputAdapter],
+    }).compile();
+
+    adapter = moduleRef.get(DirectRunOutputAdapter);
+  });
+
+  afterEach(() => moduleRef.close());
+
+  it('executes zero-argument provider methods over HTTP', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', (moduleName, providerName) => {
+          if (moduleName === 'AppModule' && providerName === 'PingProvider') {
+            return {
+              ping: () => 'pong',
+            };
+          }
+
+          return undefined;
+        }),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'PingProvider',
+      method: 'ping',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'ping',
+      result: 'pong',
+    });
+  });
+
+  it('responds to browser preflight requests for direct run', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: () => 'pong',
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(`http://127.0.0.1:${port}/direct-run`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://viewer.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.body).toBe('');
+    expect(response.headers['access-control-allow-origin']).toBe('*');
+    expect(response.headers['access-control-allow-methods']).toContain('POST');
+    expect(response.headers['access-control-allow-headers']).toBe('*');
+  });
+
+  it('accepts JSON content types with charset parameters', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: () => 'pong',
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(
+      `http://127.0.0.1:${port}/direct-run`,
+      {
+        module: 'AppModule',
+        provider: 'PingProvider',
+        method: 'ping',
+      },
+      {
+        'content-type': 'application/json; charset=utf-8',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'ping',
+      result: 'pong',
+    });
+  });
+
+  it('passes JSON args to provider methods', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: (value: { message: string }) => `pong:${value.message}`,
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'PingProvider',
+      method: 'ping',
+      args: {
+        message: 'hello',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'ping',
+      result: 'pong:hello',
+    });
+  });
+
+  it('passes JSON arrays to multi-argument provider methods', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          add: (left: number, right: number) => left + right,
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'MathProvider',
+      method: 'add',
+      args: [2, 3],
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'add',
+      result: 5,
+    });
+  });
+});
+
+type HttpResponse = {
+  statusCode?: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+};
+
+function post(
+  url: string,
+  payload: unknown,
+  headers: http.OutgoingHttpHeaders = {},
+): Promise<HttpResponse> {
+  const body = JSON.stringify(payload);
+
+  return request(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+      ...headers,
+    },
+    body,
+  });
+}
+
+function request(
+  url: string,
+  options: http.RequestOptions & { body?: string } = {},
+): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const req = http.request(
+      target,
+      options,
+      (res) => {
+        let responseBody = '';
+
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode,
+            headers: res.headers,
+            body: responseBody,
+          });
+        });
+      },
+    );
+
+    req.on('error', reject);
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
+
+function availablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Failed to allocate port'));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
