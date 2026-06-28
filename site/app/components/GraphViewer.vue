@@ -16,17 +16,25 @@ import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
 import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
+import type * as Monaco from 'monaco-editor'
 import type {
   GraphOutput,
   GraphOutputModule,
   GraphOutputDependencyRef,
   GraphOutputCycle,
   GraphOutputProviderCycle,
-  GraphOutputCycles
+  GraphOutputCycles,
+  GraphOutputProvider
 } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
+import {
+  getDirectRunProviderState,
+  parseProviderNodeId,
+  type DirectRunExecutionSnapshot,
+  type DirectRunProviderMethod
+} from '~/utils/direct-run-provider'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -48,6 +56,44 @@ type ItemNodeData = {
   label: string
   kind: 'controller' | 'provider'
   isExported: boolean
+}
+
+type DirectRunActionRequest = {
+  moduleName: string
+  providerName: string
+  methodName: string
+  args?: unknown[]
+}
+
+type DirectRunProviderContext = {
+  nodeId: string
+  moduleName: string
+  provider: GraphOutputProvider
+}
+
+type DirectRunStatusBadge = {
+  label: string
+  color: 'neutral' | 'primary' | 'success' | 'error'
+  variant: 'soft' | 'solid' | 'outline'
+}
+
+type DirectRunMethodTab = {
+  label: string
+  value: string
+  method: DirectRunProviderMethod
+  badge?: string
+}
+
+type DirectRunArgsJsonSchema = Monaco.json.JSONSchema
+type DirectRunEditorMarker = Monaco.editor.IMarker
+type DirectRunParameterInfo = {
+  name: string
+  type: string
+  schema: DirectRunArgsJsonSchema
+}
+type DirectRunArgsSchemaCacheEntry = {
+  fingerprint: string
+  schema: DirectRunArgsJsonSchema
 }
 
 type ModuleItemLayout = ItemNodeData & {
@@ -100,6 +146,10 @@ type FlowEdge = Edge<
 type WarningEdgeProps = EdgeProps<CircularEdgeData>
 type NodePosition = { x: number, y: number }
 
+const emit = defineEmits<{
+  directRun: [request: DirectRunActionRequest]
+}>()
+
 const props = withDefaults(
   defineProps<{
     data: GraphOutput
@@ -112,6 +162,16 @@ const props = withDefaults(
     excludeModules?: string[] | string
     enableBrightLine?: boolean
     collapsedModules?: string[] | string
+    directRunResult?: {
+      moduleName: string
+      providerName: string
+      snapshot: DirectRunExecutionSnapshot
+    } | null
+    directRunError?: {
+      moduleName: string
+      providerName: string
+      error: string
+    } | null
   }>(),
   {
     height: '75vh',
@@ -1314,6 +1374,15 @@ const hasInitialFixedBrightLine = props.enableBrightLine
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderAcrossModule = ref(false)
+const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>({})
+const selectedProviderNodeId = ref<string | null>(null)
+const directRunPendingMethodByNodeId = ref<Record<string, string>>({})
+const directRunErrorByNodeId = ref<Record<string, string>>({})
+const directRunArgsInputByKey = ref<Record<string, string>>({})
+const directRunArgsErrorByKey = ref<Record<string, string>>({})
+const directRunArgsInvalidByKey = ref<Record<string, boolean>>({})
+const directRunActiveTab = ref<string>('')
+const directRunArgsSchemaCache = new Map<string, DirectRunArgsSchemaCacheEntry>()
 const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
@@ -1402,6 +1471,140 @@ const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
   }
 
   return 'indeterminate'
+})
+const selectedProviderContext = computed<DirectRunProviderContext | null>(() => {
+  const nodeId = selectedProviderNodeId.value
+  if (!nodeId) {
+    return null
+  }
+
+  const parsed = parseProviderNodeId(nodeId)
+  if (!parsed) {
+    return null
+  }
+
+  const provider = graphData.value.modules[parsed.moduleName]?.providers
+    .find(item => item.name === parsed.providerName)
+
+  if (!provider) {
+    return null
+  }
+
+  return {
+    nodeId,
+    moduleName: parsed.moduleName,
+    provider
+  }
+})
+const selectedProviderDirectRunState = computed(() => {
+  const context = selectedProviderContext.value
+  return context ? getDirectRunProviderState(context.provider) : null
+})
+const showDirectRunDrawer = computed({
+  get: () => Boolean(selectedProviderContext.value),
+  set: (value: boolean) => {
+    if (!value) {
+      selectedProviderNodeId.value = null
+    }
+  }
+})
+const directRunMethodTabs = computed<DirectRunMethodTab[]>(() =>
+  (selectedProviderDirectRunState.value?.methods || []).map((method) => {
+    const parameterCount = getDirectRunParameterCount(method)
+
+    return {
+      label: method.name,
+      value: method.name,
+      method,
+      badge: parameterCount
+        ? `${parameterCount} ${parameterCount === 1 ? 'arg' : 'args'}`
+        : undefined
+    }
+  })
+)
+const selectedProviderSnapshot = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunStateByNodeId.value[nodeId] || null : null
+})
+const selectedProviderPendingMethod = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunPendingMethodByNodeId.value[nodeId] || '' : ''
+})
+const selectedProviderError = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunErrorByNodeId.value[nodeId] || '' : ''
+})
+const selectedProviderArgsErrors = computed<Record<string, string>>(() => {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    (selectedProviderDirectRunState.value?.methods || []).map(method => [
+      method.name,
+      directRunArgsErrorByKey.value[
+        directRunArgsKey(context.nodeId, method.name)
+      ] || ''
+    ])
+  )
+})
+const selectedProviderLastRunLabel = computed(() => {
+  const value = selectedProviderSnapshot.value?.updatedAt
+  if (!value) {
+    return ''
+  }
+
+  return new Date(value).toLocaleString()
+})
+const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return null
+  }
+
+  const directRunState = selectedProviderDirectRunState.value
+  if (!directRunState) {
+    return null
+  }
+
+  if (!directRunState.runnable) {
+    return {
+      label: 'Not runnable',
+      color: 'neutral',
+      variant: 'outline'
+    }
+  }
+
+  const pendingMethod = selectedProviderPendingMethod.value
+  if (pendingMethod) {
+    return {
+      label: 'Running',
+      color: 'primary',
+      variant: 'solid'
+    }
+  }
+
+  const snapshot = selectedProviderSnapshot.value
+  if (!snapshot) {
+    return {
+      label: 'Idle',
+      color: 'neutral',
+      variant: 'soft'
+    }
+  }
+
+  return snapshot.state === 'success'
+    ? {
+        label: 'Success',
+        color: 'success',
+        variant: 'solid'
+      }
+    : {
+        label: 'Failed',
+        color: 'error',
+        variant: 'solid'
+      }
 })
 
 function resolveBrightLineNodeId(target: string): string | null {
@@ -1514,6 +1717,897 @@ function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
   }
 }
 
+function selectProviderNode(nodeId: string | null): void {
+  if (nodeId && parseProviderNodeId(nodeId)) {
+    selectedProviderNodeId.value = nodeId
+    return
+  }
+
+  selectedProviderNodeId.value = null
+}
+
+function handleNodeClick(event: NodeMouseEvent): void {
+  selectProviderNode(event.node.id)
+}
+
+function clearDirectRunPending(nodeId: string): void {
+  const { [nodeId]: _removed, ...nextPendingState } = directRunPendingMethodByNodeId.value
+  directRunPendingMethodByNodeId.value = nextPendingState
+}
+
+function setDirectRunError(nodeId: string, error: string): void {
+  directRunErrorByNodeId.value = {
+    ...directRunErrorByNodeId.value,
+    [nodeId]: error
+  }
+}
+
+function clearDirectRunError(nodeId: string): void {
+  const { [nodeId]: _removed, ...nextErrorState } = directRunErrorByNodeId.value
+  directRunErrorByNodeId.value = nextErrorState
+}
+
+function directRunArgsKey(nodeId: string, methodName: string): string {
+  return `${nodeId}:${methodName}`
+}
+
+function getDirectRunMethodSignature(method: DirectRunProviderMethod): string {
+  const parameters = getDirectRunParameterInfos(method)
+  if (parameters.length === 0) {
+    return `${method.name}()`
+  }
+
+  const args = parameters.map(parameter => parameter.name).join(', ')
+
+  return `${method.name}(${args})`
+}
+
+function getDirectRunParameterCount(method: DirectRunProviderMethod): number {
+  return getDirectRunParameterInfos(method).length
+}
+
+function getDirectRunParameterInfos(
+  method: DirectRunProviderMethod
+): DirectRunParameterInfo[] {
+  const parameterTypes = method.parameterTypes?.trim() || '[]'
+  const tupleBody = parseDirectRunTupleBody(parameterTypes)
+  if (!tupleBody) {
+    return []
+  }
+
+  return splitTopLevel(tupleBody, ',')
+    .map((parameter, index): DirectRunParameterInfo => {
+      const separatorIndex = findTopLevelSeparator(parameter, ':')
+      const rawName = separatorIndex >= 0
+        ? parameter.slice(0, separatorIndex).trim()
+        : `arg${index + 1}`
+      const type = separatorIndex >= 0
+        ? parameter.slice(separatorIndex + 1).trim() || 'unknown'
+        : parameter.trim() || 'unknown'
+      const name = sanitizeDirectRunParameterName(rawName) || `arg${index + 1}`
+
+      return {
+        name,
+        type,
+        schema: typeScriptTypeToJsonSchema(type)
+      }
+    })
+}
+
+function parseDirectRunTupleBody(parameterTypes: string): string {
+  const trimmed = stripOuterParens(parameterTypes.trim())
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return ''
+  }
+
+  return trimmed.slice(1, -1).trim()
+}
+
+function sanitizeDirectRunParameterName(name: string): string {
+  return name
+    .replace(/^\.\.\./, '')
+    .replace(/^readonly\s+/, '')
+    .replace(/\?$/, '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
+}
+
+function getDirectRunEditorPath(methodName: string): string {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return `direct-run://${methodName}.json`
+  }
+
+  return `direct-run://${context.moduleName}/${context.provider.name}/${methodName}.json`
+}
+
+function getDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJsonSchema {
+  const context = selectedProviderContext.value
+  const cacheKey = context
+    ? directRunArgsKey(context.nodeId, method.name)
+    : method.name
+  const fingerprint = method.parameterTypes || '[]'
+  const cachedSchema = directRunArgsSchemaCache.get(cacheKey)
+  if (cachedSchema?.fingerprint === fingerprint) {
+    return cachedSchema.schema
+  }
+
+  const schema = buildDirectRunArgsSchema(method)
+  directRunArgsSchemaCache.set(cacheKey, {
+    fingerprint,
+    schema
+  })
+
+  return schema
+}
+
+function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJsonSchema {
+  const parameters = getDirectRunParameterInfos(method)
+  const parameterCount = parameters.length
+
+  if (parameterCount <= 1) {
+    const parameter = parameters[0]
+    const parameterName = parameter?.name || 'argument'
+    const parameterType = parameter?.type || 'unknown'
+    const parameterSchema = parameter?.schema || {}
+
+    return {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: `${method.name}() ${parameterName}`,
+      description: `JSON value passed as ${parameterName}: ${parameterType}.`,
+      ...parameterSchema
+    }
+  }
+
+  return {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    title: `${method.name}() arguments`,
+    description: `JSON array passed as ${parameterCount} method arguments.`,
+    type: 'array',
+    minItems: parameterCount,
+    maxItems: parameterCount,
+    items: parameters.map((parameter): DirectRunArgsJsonSchema => ({
+      title: parameter.name,
+      description: parameter.type,
+      ...parameter.schema
+    }))
+  }
+}
+
+function typeScriptTypeToJsonSchema(typeText: string): DirectRunArgsJsonSchema {
+  const type = stripOuterParens(typeText.trim())
+  if (!type || type === 'unknown' || type === 'any') {
+    return {}
+  }
+
+  if (type === 'string') {
+    return { type: 'string' }
+  }
+  if (type === 'number') {
+    return { type: 'number' }
+  }
+  if (type === 'boolean') {
+    return { type: 'boolean' }
+  }
+  if (type === 'null') {
+    return { type: 'null' }
+  }
+  if (type === 'object') {
+    return { type: 'object' }
+  }
+
+  const literal = parseTypeScriptLiteral(type)
+  if (literal.matched) {
+    return { enum: [literal.value] }
+  }
+
+  const rawUnionTypes = splitTopLevel(type, '|')
+  const unionTypes = rawUnionTypes
+    .map(candidate => candidate.trim())
+    .filter(candidate => candidate && candidate !== 'undefined' && candidate !== 'void')
+  if (rawUnionTypes.length > 1) {
+    if (unionTypes.length === 1) {
+      return typeScriptTypeToJsonSchema(unionTypes[0] || 'unknown')
+    }
+
+    const literals = unionTypes.map(parseTypeScriptLiteral)
+    if (literals.every(candidate => candidate.matched)) {
+      return { enum: literals.map(candidate => candidate.value) }
+    }
+
+    return {
+      anyOf: unionTypes.map(candidate => typeScriptTypeToJsonSchema(candidate))
+    }
+  }
+
+  if (isArrayType(type)) {
+    return {
+      type: 'array',
+      items: typeScriptTypeToJsonSchema(type.slice(0, -2))
+    }
+  }
+
+  if (type.startsWith('[') && type.endsWith(']')) {
+    const tupleItems = splitTopLevel(type.slice(1, -1), ',')
+      .map(item => typeScriptTypeToJsonSchema(item))
+
+    return {
+      type: 'array',
+      minItems: tupleItems.length,
+      maxItems: tupleItems.length,
+      items: tupleItems
+    }
+  }
+
+  if (type.startsWith('{') && type.endsWith('}')) {
+    return objectTypeToJsonSchema(type.slice(1, -1))
+  }
+
+  return {}
+}
+
+function objectTypeToJsonSchema(typeBody: string): DirectRunArgsJsonSchema {
+  const properties: Record<string, DirectRunArgsJsonSchema> = {}
+  const required: string[] = []
+
+  for (const member of splitTopLevelAny(typeBody, [';', ','])) {
+    const separatorIndex = findTopLevelSeparator(member, ':')
+    if (separatorIndex <= 0) {
+      continue
+    }
+
+    const rawName = member.slice(0, separatorIndex).trim()
+    const propertyType = member.slice(separatorIndex + 1).trim()
+    const optional = rawName.endsWith('?')
+    const name = sanitizeDirectRunParameterName(rawName)
+    if (!name) {
+      continue
+    }
+
+    properties[name] = typeScriptTypeToJsonSchema(propertyType)
+    if (!optional && !typeIncludesUndefined(propertyType)) {
+      required.push(name)
+    }
+  }
+
+  return {
+    type: 'object',
+    additionalProperties: true,
+    properties,
+    required
+  }
+}
+
+function stripOuterParens(value: string): string {
+  let next = value.trim()
+  while (next.startsWith('(') && next.endsWith(')') && enclosesWholeValue(next)) {
+    next = next.slice(1, -1).trim()
+  }
+
+  return next
+}
+
+function enclosesWholeValue(value: string): boolean {
+  let depth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+    if (character === '(') {
+      depth += 1
+    } else if (character === ')') {
+      depth -= 1
+      if (depth === 0 && index < value.length - 1) {
+        return false
+      }
+    }
+  }
+
+  return depth === 0
+}
+
+function splitTopLevel(value: string, separator: string): string[] {
+  return splitTopLevelAny(value, [separator])
+}
+
+function splitTopLevelAny(value: string, separators: string[]): string[] {
+  const parts: string[] = []
+  let start = 0
+  let angleDepth = 0
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+
+    if (character === '{') {
+      braceDepth += 1
+    } else if (character === '}') {
+      braceDepth -= 1
+    } else if (character === '[') {
+      bracketDepth += 1
+    } else if (character === ']') {
+      bracketDepth -= 1
+    } else if (character === '(') {
+      parenDepth += 1
+    } else if (character === ')') {
+      parenDepth -= 1
+    } else if (character === '<') {
+      angleDepth += 1
+    } else if (character === '>') {
+      angleDepth -= 1
+    } else if (
+      separators.includes(character)
+      && angleDepth === 0
+      && braceDepth === 0
+      && bracketDepth === 0
+      && parenDepth === 0
+    ) {
+      const part = value.slice(start, index).trim()
+      if (part) {
+        parts.push(part)
+      }
+      start = index + 1
+    }
+  }
+
+  const part = value.slice(start).trim()
+  if (part) {
+    parts.push(part)
+  }
+
+  return parts
+}
+
+function findTopLevelSeparator(value: string, separator: string): number {
+  let angleDepth = 0
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+
+    if (character === '{') {
+      braceDepth += 1
+    } else if (character === '}') {
+      braceDepth -= 1
+    } else if (character === '[') {
+      bracketDepth += 1
+    } else if (character === ']') {
+      bracketDepth -= 1
+    } else if (character === '(') {
+      parenDepth += 1
+    } else if (character === ')') {
+      parenDepth -= 1
+    } else if (character === '<') {
+      angleDepth += 1
+    } else if (character === '>') {
+      angleDepth -= 1
+    } else if (
+      character === separator
+      && angleDepth === 0
+      && braceDepth === 0
+      && bracketDepth === 0
+      && parenDepth === 0
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function parseTypeScriptLiteral(
+  value: string
+): { matched: true, value: unknown } | { matched: false } {
+  if (/^'(?:\\.|[^'\\])*'$/.test(value) || /^"(?:\\.|[^"\\])*"$/.test(value)) {
+    try {
+      const normalizedValue = value.startsWith("'")
+        ? `"${value.slice(1, -1).replace(/"/g, '\\"')}"`
+        : value
+
+      return { matched: true, value: JSON.parse(normalizedValue) }
+    } catch {
+      return { matched: true, value: value.slice(1, -1) }
+    }
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return { matched: true, value: Number(value) }
+  }
+  if (value === 'true') {
+    return { matched: true, value: true }
+  }
+  if (value === 'false') {
+    return { matched: true, value: false }
+  }
+  if (value === 'null') {
+    return { matched: true, value: null }
+  }
+
+  return { matched: false }
+}
+
+function isArrayType(type: string): boolean {
+  return type.endsWith('[]') && stripOuterParens(type.slice(0, -2)).length > 0
+}
+
+function typeIncludesUndefined(type: string): boolean {
+  return splitTopLevel(type, '|').some(candidate =>
+    candidate.trim() === 'undefined'
+  )
+}
+
+function getDirectRunArgsInput(methodName: string): string {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId
+    ? directRunArgsInputByKey.value[directRunArgsKey(nodeId, methodName)] || ''
+    : ''
+}
+
+function setDirectRunArgsInput(methodName: string, value: unknown): void {
+  const nodeId = selectedProviderContext.value?.nodeId
+  if (!nodeId) {
+    return
+  }
+
+  const key = directRunArgsKey(nodeId, methodName)
+  directRunArgsInputByKey.value = {
+    ...directRunArgsInputByKey.value,
+    [key]: typeof value === 'string' ? value : String(value ?? '')
+  }
+
+  const { [key]: _removed, ...nextArgsErrorState } = directRunArgsErrorByKey.value
+  directRunArgsErrorByKey.value = nextArgsErrorState
+}
+
+function setDirectRunArgsValidation(
+  methodName: string,
+  markers: DirectRunEditorMarker[]
+): void {
+  const nodeId = selectedProviderContext.value?.nodeId
+  if (!nodeId) {
+    return
+  }
+
+  directRunArgsInvalidByKey.value = {
+    ...directRunArgsInvalidByKey.value,
+    [directRunArgsKey(nodeId, methodName)]: markers.some(marker =>
+      marker.severity >= 8
+    )
+  }
+}
+
+function hasDirectRunArgsValidationError(methodName: string): boolean {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId
+    ? Boolean(directRunArgsInvalidByKey.value[directRunArgsKey(nodeId, methodName)])
+    : false
+}
+
+function isDirectRunActionDisabled(method: DirectRunProviderMethod): boolean {
+  if (selectedProviderPendingMethod.value) {
+    return true
+  }
+
+  if (getDirectRunParameterCount(method) === 0) {
+    return false
+  }
+
+  return !parseDirectRunArgs(method, getDirectRunArgsInput(method.name)).ok
+    || hasDirectRunArgsValidationError(method.name)
+}
+
+function getDirectRunArgsError(method: DirectRunProviderMethod): string {
+  const storedError = selectedProviderArgsErrors.value[method.name]
+  if (storedError) {
+    return storedError
+  }
+
+  const input = getDirectRunArgsInput(method.name)
+  if (!input.trim()) {
+    return ''
+  }
+
+  const parsedArgs = parseDirectRunArgs(method, input)
+  return parsedArgs.ok ? '' : parsedArgs.error
+}
+
+function setDirectRunArgsError(
+  nodeId: string,
+  methodName: string,
+  error: string
+): void {
+  directRunArgsErrorByKey.value = {
+    ...directRunArgsErrorByKey.value,
+    [directRunArgsKey(nodeId, methodName)]: error
+  }
+}
+
+function clearDirectRunArgsError(nodeId: string, methodName: string): void {
+  const key = directRunArgsKey(nodeId, methodName)
+  const { [key]: _removed, ...nextArgsErrorState } = directRunArgsErrorByKey.value
+  directRunArgsErrorByKey.value = nextArgsErrorState
+}
+
+function parseDirectRunArgs(
+  method: DirectRunProviderMethod,
+  input: string
+): { ok: true, args: unknown[] | undefined } | { ok: false, error: string } {
+  const parameterCount = getDirectRunParameterCount(method)
+  if (parameterCount === 0) {
+    return { ok: true, args: undefined }
+  }
+
+  const trimmedInput = input.trim()
+  if (!trimmedInput) {
+    return {
+      ok: false,
+      error: `Enter JSON arguments for ${method.name}().`
+    }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmedInput)
+  } catch {
+    return {
+      ok: false,
+      error: 'Arguments must be valid JSON.'
+    }
+  }
+
+  if (parameterCount === 1) {
+    const validationError = validateDirectRunParsedArgs(method, [parsed])
+    if (validationError) {
+      return { ok: false, error: validationError }
+    }
+
+    return { ok: true, args: [parsed] }
+  }
+
+  if (!Array.isArray(parsed)) {
+    return {
+      ok: false,
+      error: `${method.name}() expects ${parameterCount} arguments. Use a JSON array.`
+    }
+  }
+
+  const validationError = validateDirectRunParsedArgs(method, parsed)
+  if (validationError) {
+    return { ok: false, error: validationError }
+  }
+
+  return { ok: true, args: parsed }
+}
+
+function validateDirectRunParsedArgs(
+  method: DirectRunProviderMethod,
+  args: unknown[]
+): string {
+  const parameters = getDirectRunParameterInfos(method)
+  const parameterCount = parameters.length
+  if (args.length !== parameterCount) {
+    return `${method.name}() expects ${parameterCount} arguments.`
+  }
+
+  for (let index = 0; index < parameterCount; index += 1) {
+    const parameter = parameters[index]
+    const error = validateJsonSchemaValue(
+      args[index],
+      parameter?.schema || {},
+      parameter?.name || `arg${index + 1}`
+    )
+    if (error) {
+      return error
+    }
+  }
+
+  return ''
+}
+
+function validateJsonSchemaValue(
+  value: unknown,
+  schema: DirectRunArgsJsonSchema,
+  label: string
+): string {
+  if (schema.enum && Array.isArray(schema.enum)) {
+    const matchesEnum = schema.enum.some(candidate =>
+      JSON.stringify(candidate) === JSON.stringify(value)
+    )
+    if (!matchesEnum) {
+      return `${label} must be one of ${schema.enum.map(String).join(', ')}.`
+    }
+  }
+
+  const unionSchemas = Array.isArray(schema.anyOf)
+    ? schema.anyOf
+    : Array.isArray(schema.oneOf)
+      ? schema.oneOf
+      : null
+  if (unionSchemas) {
+    const hasMatch = unionSchemas.some(candidate =>
+      !validateJsonSchemaValue(value, candidate as DirectRunArgsJsonSchema, label)
+    )
+    return hasMatch ? '' : `${label} does not match the expected type.`
+  }
+
+  const typeError = validateJsonSchemaType(value, schema, label)
+  if (typeError) {
+    return typeError
+  }
+
+  if (Array.isArray(value)) {
+    return validateJsonSchemaArray(value, schema, label)
+  }
+
+  if (value && typeof value === 'object') {
+    return validateJsonSchemaObject(
+      value as Record<string, unknown>,
+      schema,
+      label
+    )
+  }
+
+  return ''
+}
+
+function validateJsonSchemaType(
+  value: unknown,
+  schema: DirectRunArgsJsonSchema,
+  label: string
+): string {
+  const schemaType = schema.type
+  const allowedTypes = Array.isArray(schemaType)
+    ? schemaType
+    : typeof schemaType === 'string'
+      ? [schemaType]
+      : []
+
+  if (allowedTypes.length === 0) {
+    return ''
+  }
+
+  const isValid = allowedTypes.some((type) => {
+    if (type === 'string') {
+      return typeof value === 'string'
+    }
+    if (type === 'number') {
+      return typeof value === 'number' && Number.isFinite(value)
+    }
+    if (type === 'integer') {
+      return Number.isInteger(value)
+    }
+    if (type === 'boolean') {
+      return typeof value === 'boolean'
+    }
+    if (type === 'array') {
+      return Array.isArray(value)
+    }
+    if (type === 'object') {
+      return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    }
+    if (type === 'null') {
+      return value === null
+    }
+    return true
+  })
+
+  return isValid ? '' : `${label} must be ${allowedTypes.join(' or ')}.`
+}
+
+function validateJsonSchemaArray(
+  value: unknown[],
+  schema: DirectRunArgsJsonSchema,
+  label: string
+): string {
+  if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
+    return `${label} must contain at least ${schema.minItems} items.`
+  }
+
+  if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
+    return `${label} must contain at most ${schema.maxItems} items.`
+  }
+
+  if (Array.isArray(schema.items)) {
+    for (let index = 0; index < schema.items.length; index += 1) {
+      const error = validateJsonSchemaValue(
+        value[index],
+        schema.items[index] as DirectRunArgsJsonSchema,
+        `${label}[${index}]`
+      )
+      if (error) {
+        return error
+      }
+    }
+    return ''
+  }
+
+  if (schema.items && typeof schema.items === 'object') {
+    for (let index = 0; index < value.length; index += 1) {
+      const error = validateJsonSchemaValue(
+        value[index],
+        schema.items as DirectRunArgsJsonSchema,
+        `${label}[${index}]`
+      )
+      if (error) {
+        return error
+      }
+    }
+  }
+
+  return ''
+}
+
+function validateJsonSchemaObject(
+  value: Record<string, unknown>,
+  schema: DirectRunArgsJsonSchema,
+  label: string
+): string {
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((key): key is string => typeof key === 'string')
+    : []
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      return `${label}.${key} is required.`
+    }
+  }
+
+  const properties = schema.properties
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return ''
+  }
+
+  for (const [key, propertySchema] of Object.entries(properties)) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      continue
+    }
+
+    const error = validateJsonSchemaValue(
+      value[key],
+      propertySchema as DirectRunArgsJsonSchema,
+      `${label}.${key}`
+    )
+    if (error) {
+      return error
+    }
+  }
+
+  return ''
+}
+
+async function emitDirectRun(request: DirectRunActionRequest): Promise<void> {
+  const nodeId = `provider-${request.moduleName}-${request.providerName}`
+  directRunPendingMethodByNodeId.value = {
+    ...directRunPendingMethodByNodeId.value,
+    [nodeId]: request.methodName
+  }
+  clearDirectRunError(nodeId)
+
+  try {
+    await Promise.resolve()
+    emit('directRun', request)
+  } catch (error) {
+    clearDirectRunPending(nodeId)
+    setDirectRunError(nodeId, error instanceof Error ? error.message : 'Direct run failed.')
+  }
+}
+
+function applyDirectRunResult(payload: {
+  moduleName: string
+  providerName: string
+  snapshot: DirectRunExecutionSnapshot
+}): void {
+  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  directRunStateByNodeId.value = {
+    ...directRunStateByNodeId.value,
+    [nodeId]: payload.snapshot
+  }
+  clearDirectRunPending(nodeId)
+  clearDirectRunError(nodeId)
+}
+
+function applyDirectRunFailure(payload: {
+  moduleName: string
+  providerName: string
+  error: string
+}): void {
+  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  clearDirectRunPending(nodeId)
+  setDirectRunError(nodeId, payload.error)
+}
+
+function requestDirectRun(method: DirectRunProviderMethod): void {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return
+  }
+
+  const parsedArgs = parseDirectRunArgs(method, getDirectRunArgsInput(method.name))
+  if (!parsedArgs.ok) {
+    setDirectRunArgsError(context.nodeId, method.name, parsedArgs.error)
+    return
+  }
+
+  clearDirectRunArgsError(context.nodeId, method.name)
+  void emitDirectRun({
+    moduleName: context.moduleName,
+    providerName: context.provider.name,
+    methodName: method.name,
+    args: parsedArgs.args
+  })
+}
+
+watch(
+  () => ({
+    nodeId: selectedProviderContext.value?.nodeId || '',
+    tabs: directRunMethodTabs.value.map(tab => tab.value)
+  }),
+  ({ tabs }) => {
+    if (tabs.length === 0) {
+      directRunActiveTab.value = ''
+      return
+    }
+
+    if (!tabs.includes(directRunActiveTab.value)) {
+      directRunActiveTab.value = tabs[0] || ''
+    }
+  },
+  { immediate: true }
+)
+
 function openCircularTooltip(edgeId: string): void {
   activeCircularTooltipEdgeId.value = edgeId
 }
@@ -1558,6 +2652,9 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
 
   activeCircularTooltipEdgeId.value = null
   activeBrightLineNodeId.value = null
+  if (selectedProviderNodeId.value && !flowNodes.value.some(node => node.id === selectedProviderNodeId.value)) {
+    selectedProviderNodeId.value = null
+  }
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
   const graph = buildGraph(graphData.value, collapsedModuleNames.value, {
@@ -1654,6 +2751,30 @@ watch(
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
     void centerGraph()
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.directRunResult,
+  (payload) => {
+    if (!payload) {
+      return
+    }
+
+    applyDirectRunResult(payload)
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.directRunError,
+  (payload) => {
+    if (!payload) {
+      return
+    }
+
+    applyDirectRunFailure(payload)
   },
   { deep: true }
 )
@@ -1816,6 +2937,8 @@ useResizeObserver(graphViewerRef, () => {
       class="graph-flow"
       @node-mouse-enter="setActiveBrightLineNode"
       @node-mouse-leave="clearActiveBrightLineNode"
+      @node-click="handleNodeClick"
+      @pane-click="selectProviderNode(null)"
     >
       <template #edge-warning="edgeProps">
         <BaseEdge
@@ -2029,6 +3152,162 @@ useResizeObserver(graphViewerRef, () => {
     </VueFlow>
 
     <UDrawer
+      v-model:open="showDirectRunDrawer"
+      direction="right"
+      :ui="{ content: 'w-screen max-w-md' }"
+    >
+      <template #header>
+        <div class="direct-run-drawer__header">
+          <div class="min-w-0">
+            <p class="direct-run-drawer__eyebrow">
+              Provider Action
+            </p>
+            <p class="direct-run-drawer__title">
+              {{ selectedProviderContext?.provider.name }}
+            </p>
+            <p class="direct-run-drawer__subtitle">
+              {{ selectedProviderContext?.moduleName }}
+            </p>
+          </div>
+
+          <div class="direct-run-drawer__header-actions">
+            <UBadge
+              v-if="selectedProviderStatusBadge"
+              :label="selectedProviderStatusBadge.label"
+              :color="selectedProviderStatusBadge.color"
+              :variant="selectedProviderStatusBadge.variant"
+            />
+            <UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              square
+              aria-label="Close direct run drawer"
+              @click="showDirectRunDrawer = false"
+            />
+          </div>
+        </div>
+      </template>
+
+      <template #body>
+        <div class="direct-run-drawer__body">
+          <p
+            v-if="selectedProviderDirectRunState && !selectedProviderDirectRunState.runnable"
+            class="direct-run-drawer__message"
+          >
+            {{ selectedProviderDirectRunState.reason }}
+          </p>
+
+          <UTabs
+            v-else-if="directRunMethodTabs.length"
+            v-model="directRunActiveTab"
+            :items="directRunMethodTabs"
+            color="primary"
+            variant="pill"
+            :ui="{
+              root: 'gap-4',
+              list: 'w-full overflow-x-auto',
+              trigger: 'shrink-0',
+              content: 'outline-none'
+            }"
+          >
+            <template #content="{ item }">
+              <div class="direct-run-drawer__method">
+                <div class="direct-run-drawer__method-header">
+                  <div class="min-w-0">
+                    <p class="direct-run-drawer__method-name">
+                      {{ getDirectRunMethodSignature(item.method) }}
+                    </p>
+                    <p
+                      v-if="getDirectRunParameterCount(item.method)"
+                      class="direct-run-drawer__method-subtitle"
+                    >
+                      JSON arguments
+                    </p>
+                  </div>
+                  <UBadge
+                    v-if="getDirectRunParameterCount(item.method)"
+                    :label="`${getDirectRunParameterCount(item.method)} ${getDirectRunParameterCount(item.method) === 1 ? 'arg' : 'args'}`"
+                    color="neutral"
+                    variant="soft"
+                  />
+                </div>
+
+                <ClientOnly v-if="getDirectRunParameterCount(item.method)">
+                  <JsonMonacoEditor
+                    :model-value="getDirectRunArgsInput(item.method.name)"
+                    :path="getDirectRunEditorPath(item.method.name)"
+                    :schema="getDirectRunArgsSchema(item.method)"
+                    :readonly="Boolean(selectedProviderPendingMethod)"
+                    height="240px"
+                    @update:model-value="value => setDirectRunArgsInput(item.method.name, value)"
+                    @validate="markers => setDirectRunArgsValidation(item.method.name, markers)"
+                  />
+
+                  <template #fallback>
+                    <div class="direct-run-drawer__editor-placeholder">
+                      Loading editor...
+                    </div>
+                  </template>
+                </ClientOnly>
+
+                <p
+                  v-if="getDirectRunArgsError(item.method)"
+                  class="direct-run-drawer__message direct-run-drawer__message--error"
+                >
+                  {{ getDirectRunArgsError(item.method) }}
+                </p>
+
+                <UButton
+                  type="button"
+                  :label="`Direct Run ${item.method.name}()`"
+                  icon="i-lucide-play"
+                  color="primary"
+                  block
+                  :loading="selectedProviderPendingMethod === item.method.name"
+                  :disabled="isDirectRunActionDisabled(item.method)"
+                  @click="requestDirectRun(item.method)"
+                />
+              </div>
+            </template>
+          </UTabs>
+
+          <p
+            v-if="selectedProviderPendingMethod"
+            class="direct-run-drawer__message"
+          >
+            Running {{ selectedProviderPendingMethod }}()...
+          </p>
+
+          <p
+            v-else-if="selectedProviderError"
+            class="direct-run-drawer__message direct-run-drawer__message--error"
+          >
+            {{ selectedProviderError }}
+          </p>
+
+          <div
+            v-if="selectedProviderSnapshot"
+            class="direct-run-drawer__result"
+          >
+            <p class="direct-run-drawer__result-title">
+              Last run · {{ selectedProviderSnapshot.method }}()
+            </p>
+            <p class="direct-run-drawer__message">
+              {{ selectedProviderSnapshot.summary }}
+            </p>
+            <p
+              v-if="selectedProviderLastRunLabel"
+              class="direct-run-drawer__timestamp"
+            >
+              {{ selectedProviderLastRunLabel }}
+            </p>
+          </div>
+        </div>
+      </template>
+    </UDrawer>
+
+    <UDrawer
       v-model:open="showCircularDetailDialog"
       side="right"
       :ui="{ content: 'w-screen max-w-none' }"
@@ -2212,6 +3491,108 @@ useResizeObserver(graphViewerRef, () => {
   gap: 8px;
   font-family: 'Public Sans', system-ui, sans-serif;
   pointer-events: none;
+}
+
+.direct-run-drawer__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.direct-run-drawer__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.direct-run-drawer__body,
+.direct-run-drawer__method,
+.direct-run-drawer__result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.direct-run-drawer__eyebrow,
+.direct-run-drawer__method-name,
+.direct-run-drawer__method-subtitle,
+.direct-run-drawer__subtitle,
+.direct-run-drawer__timestamp,
+.direct-run-drawer__message,
+.direct-run-drawer__result-title,
+.direct-run-drawer__title {
+  margin: 0;
+}
+
+.direct-run-drawer__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-drawer__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ui-text-highlighted);
+  overflow-wrap: anywhere;
+}
+
+.direct-run-drawer__subtitle,
+.direct-run-drawer__method-subtitle,
+.direct-run-drawer__timestamp {
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-drawer__method-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.direct-run-drawer__method-name {
+  min-width: 0;
+  color: var(--ui-text-highlighted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.direct-run-drawer__editor-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  color: var(--ui-text-muted);
+  font-size: 13px;
+}
+
+.direct-run-drawer__message {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ui-text);
+  overflow-wrap: anywhere;
+}
+
+.direct-run-drawer__message--error {
+  color: var(--ui-error);
+}
+
+.direct-run-drawer__result {
+  width: 100%;
+}
+
+.direct-run-drawer__result-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
 }
 
 .graph-viewer-legends__title {

@@ -1,5 +1,16 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import {
+  createGraphViewerEventProperties,
+  resolveGraphViewerLoadSource,
+  type LoadSource
+} from '~/utils/graph-viewer-analytics'
+import {
+  buildDirectRunRequest,
+  buildDirectRunSnapshot,
+  type DirectRunExecutionSnapshot,
+  type DirectRunResultPayload
+} from '~/utils/direct-run-provider'
 
 definePageMeta({
   layout: 'viewer'
@@ -16,6 +27,18 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
+const directRunResult = ref<{
+  moduleName: string
+  providerName: string
+  snapshot: DirectRunExecutionSnapshot
+} | null>(null)
+const directRunError = ref<{
+  moduleName: string
+  providerName: string
+  error: string
+} | null>(null)
+
+let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
   const param = route.params.url
@@ -37,12 +60,35 @@ useSeoMeta({
   description: 'Viewing NestJS dependency graph data.'
 })
 
+function trackGraphViewerEvent(event: string, options: {
+  loadSource: LoadSource
+  isRetry?: boolean
+  errorMessage?: string
+}) {
+  posthog?.capture(event, createGraphViewerEventProperties({
+    graphUrl: decodedUrl.value,
+    viewerRoute: route.path,
+    loadSource: options.loadSource,
+    isRetry: options.isRetry,
+    errorMessage: options.errorMessage
+  }))
+}
+
 // Redirect to /view if no valid URL
-async function loadGraphResources(value: string) {
+async function loadGraphResources(
+  value: string,
+  loadSource: 'initial_mount' | 'route_change' | 'manual_refresh',
+  isRetry = false
+) {
   if (!value) {
     navigateTo('/view')
     return
   }
+
+  trackGraphViewerEvent('graph_viewer_load_started', {
+    loadSource,
+    isRetry
+  })
 
   const graphLoaded = await graphStore.setEncodedUrl(value)
   if (graphLoaded) {
@@ -50,13 +96,15 @@ async function loadGraphResources(value: string) {
   }
 
   if (graphLoaded) {
-    posthog?.capture('Graph Loaded', {
-      url: decodedUrl.value
+    trackGraphViewerEvent('graph_viewer_load_succeeded', {
+      loadSource,
+      isRetry
     })
   } else {
-    posthog?.capture('Graph Load Failed', {
-      url: decodedUrl.value,
-      error_message: errorMessage.value || 'Unknown error'
+    trackGraphViewerEvent('graph_viewer_load_failed', {
+      loadSource,
+      isRetry,
+      errorMessage: errorMessage.value || 'Unknown error'
     })
   }
 
@@ -65,16 +113,77 @@ async function loadGraphResources(value: string) {
   }
 }
 
-onMounted(() => {
-  loadGraphResources(encodedUrl.value)
-})
-
 watch(encodedUrl, (value) => {
-  loadGraphResources(value)
-})
+  const loadSource = resolveGraphViewerLoadSource(hasTrackedInitialMount)
+  hasTrackedInitialMount = true
+  loadGraphResources(value, loadSource)
+}, { immediate: true })
 
 function handleRefresh() {
-  graphStore.fetchGraph()
+  loadGraphResources(encodedUrl.value, 'manual_refresh', true)
+}
+
+function resolveDirectRunUrl(): string {
+  const sourceUrl = decodedUrl.value
+  if (!sourceUrl) {
+    return ''
+  }
+
+  try {
+    const url = new URL(sourceUrl)
+    url.pathname = '/direct-run'
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+async function handleDirectRun(request: {
+  moduleName: string
+  providerName: string
+  methodName: string
+  args?: unknown[]
+}) {
+  directRunResult.value = null
+  directRunError.value = null
+
+  const directRunUrl = resolveDirectRunUrl()
+  if (!directRunUrl) {
+    directRunError.value = {
+      moduleName: request.moduleName,
+      providerName: request.providerName,
+      error: 'Direct run endpoint is unavailable for this graph URL.'
+    }
+    return
+  }
+
+  try {
+    const response = await $fetch<DirectRunResultPayload>(directRunUrl, {
+      method: 'POST',
+      body: buildDirectRunRequest(request)
+    })
+
+    directRunResult.value = {
+      moduleName: request.moduleName,
+      providerName: request.providerName,
+      snapshot: buildDirectRunSnapshot({
+        response,
+        requestedMethod: request.methodName
+      })
+    }
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Direct run failed.'
+
+    directRunError.value = {
+      moduleName: request.moduleName,
+      providerName: request.providerName,
+      error: message
+    }
+  }
 }
 </script>
 
@@ -148,8 +257,11 @@ function handleRefresh() {
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
+      :direct-run-result="directRunResult"
+      :direct-run-error="directRunError"
       height="100%"
       flush
+      @direct-run="handleDirectRun"
     />
   </ClientOnly>
 

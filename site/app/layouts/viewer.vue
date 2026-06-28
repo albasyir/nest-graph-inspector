@@ -2,7 +2,6 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
 
-const posthog = usePostHog()
 const route = useRoute()
 const router = useRouter()
 const graphStore = useGraphInspectorStore()
@@ -20,9 +19,6 @@ const issuesPath = computed(() => `${navigatorPath.value}/issues`)
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
-  posthog?.capture('Graph Refreshed', {
-    url: decodedUrl.value
-  })
   graphStore.fetchGraph()
 }
 

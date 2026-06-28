@@ -12,7 +12,7 @@ export class UserController {
   @Post()
   createUser(@Body() body: { name: string; email: string }) {
     this.userSchedule.reward();
-    return this.userService.createUser(body.name, body.email);
+    return this.userService.createUser(body);
   }
 
   @Get()
