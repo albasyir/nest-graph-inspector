@@ -1,11 +1,6 @@
-type DirectRunJsonSchema = Record<string, unknown>
-
 export type DirectRunProviderMethod = {
   name: string
-  parameterCount?: number
-  parameterNames?: string[]
-  parameterTypes?: string[]
-  parameterSchemas?: DirectRunJsonSchema[]
+  parameterTypes: string
 }
 
 export type DirectRunProviderState = {

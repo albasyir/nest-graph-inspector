@@ -86,6 +86,11 @@ type DirectRunMethodTab = {
 
 type DirectRunArgsJsonSchema = Monaco.json.JSONSchema
 type DirectRunEditorMarker = Monaco.editor.IMarker
+type DirectRunParameterInfo = {
+  name: string
+  type: string
+  schema: DirectRunArgsJsonSchema
+}
 type DirectRunArgsSchemaCacheEntry = {
   fingerprint: string
   schema: DirectRunArgsJsonSchema
@@ -1504,14 +1509,18 @@ const showDirectRunDrawer = computed({
   }
 })
 const directRunMethodTabs = computed<DirectRunMethodTab[]>(() =>
-  (selectedProviderDirectRunState.value?.methods || []).map(method => ({
-    label: method.name,
-    value: method.name,
-    method,
-    badge: method.parameterCount
-      ? `${method.parameterCount} ${method.parameterCount === 1 ? 'arg' : 'args'}`
-      : undefined
-  }))
+  (selectedProviderDirectRunState.value?.methods || []).map((method) => {
+    const parameterCount = getDirectRunParameterCount(method)
+
+    return {
+      label: method.name,
+      value: method.name,
+      method,
+      badge: parameterCount
+        ? `${parameterCount} ${parameterCount === 1 ? 'arg' : 'args'}`
+        : undefined
+    }
+  })
 )
 const selectedProviderSnapshot = computed(() => {
   const nodeId = selectedProviderContext.value?.nodeId
@@ -1743,53 +1752,64 @@ function directRunArgsKey(nodeId: string, methodName: string): string {
 }
 
 function getDirectRunMethodSignature(method: DirectRunProviderMethod): string {
-  const parameterCount = method.parameterCount || 0
-  if (parameterCount === 0) {
+  const parameters = getDirectRunParameterInfos(method)
+  if (parameters.length === 0) {
     return `${method.name}()`
   }
 
-  const args = getDirectRunParameterNames(method).join(', ')
+  const args = parameters.map(parameter => parameter.name).join(', ')
 
   return `${method.name}(${args})`
 }
 
-function getDirectRunParameterNames(method: DirectRunProviderMethod): string[] {
-  const parameterCount = method.parameterCount || 0
-  if (
-    method.parameterNames
-    && method.parameterNames.length === parameterCount
-  ) {
-    return method.parameterNames
-  }
-
-  return Array.from(
-    { length: parameterCount },
-    (_, index) => `arg${index + 1}`
-  )
+function getDirectRunParameterCount(method: DirectRunProviderMethod): number {
+  return getDirectRunParameterInfos(method).length
 }
 
-function getDirectRunParameterTypes(method: DirectRunProviderMethod): string[] {
-  const parameterCount = method.parameterCount || 0
-  if (
-    method.parameterTypes
-    && method.parameterTypes.length === parameterCount
-  ) {
-    return method.parameterTypes
+function getDirectRunParameterInfos(
+  method: DirectRunProviderMethod
+): DirectRunParameterInfo[] {
+  const parameterTypes = method.parameterTypes?.trim() || '[]'
+  const tupleBody = parseDirectRunTupleBody(parameterTypes)
+  if (!tupleBody) {
+    return []
   }
 
-  return Array.from({ length: parameterCount }, () => 'unknown')
+  return splitTopLevel(tupleBody, ',')
+    .map((parameter, index): DirectRunParameterInfo => {
+      const separatorIndex = findTopLevelSeparator(parameter, ':')
+      const rawName = separatorIndex >= 0
+        ? parameter.slice(0, separatorIndex).trim()
+        : `arg${index + 1}`
+      const type = separatorIndex >= 0
+        ? parameter.slice(separatorIndex + 1).trim() || 'unknown'
+        : parameter.trim() || 'unknown'
+      const name = sanitizeDirectRunParameterName(rawName) || `arg${index + 1}`
+
+      return {
+        name,
+        type,
+        schema: typeScriptTypeToJsonSchema(type)
+      }
+    })
 }
 
-function getDirectRunParameterSchemas(method: DirectRunProviderMethod): DirectRunArgsJsonSchema[] {
-  const parameterCount = method.parameterCount || 0
-  if (
-    method.parameterSchemas
-    && method.parameterSchemas.length === parameterCount
-  ) {
-    return method.parameterSchemas as DirectRunArgsJsonSchema[]
+function parseDirectRunTupleBody(parameterTypes: string): string {
+  const trimmed = stripOuterParens(parameterTypes.trim())
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return ''
   }
 
-  return Array.from({ length: parameterCount }, () => ({}))
+  return trimmed.slice(1, -1).trim()
+}
+
+function sanitizeDirectRunParameterName(name: string): string {
+  return name
+    .replace(/^\.\.\./, '')
+    .replace(/^readonly\s+/, '')
+    .replace(/\?$/, '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
 }
 
 function getDirectRunEditorPath(methodName: string): string {
@@ -1806,12 +1826,7 @@ function getDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJ
   const cacheKey = context
     ? directRunArgsKey(context.nodeId, method.name)
     : method.name
-  const fingerprint = JSON.stringify({
-    parameterCount: method.parameterCount || 0,
-    parameterNames: method.parameterNames || [],
-    parameterTypes: method.parameterTypes || [],
-    parameterSchemas: method.parameterSchemas || []
-  })
+  const fingerprint = method.parameterTypes || '[]'
   const cachedSchema = directRunArgsSchemaCache.get(cacheKey)
   if (cachedSchema?.fingerprint === fingerprint) {
     return cachedSchema.schema
@@ -1827,15 +1842,14 @@ function getDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJ
 }
 
 function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJsonSchema {
-  const parameterCount = method.parameterCount || 0
-  const parameterNames = getDirectRunParameterNames(method)
-  const parameterTypes = getDirectRunParameterTypes(method)
-  const parameterSchemas = getDirectRunParameterSchemas(method)
+  const parameters = getDirectRunParameterInfos(method)
+  const parameterCount = parameters.length
 
   if (parameterCount <= 1) {
-    const parameterName = parameterNames[0] || 'argument'
-    const parameterType = parameterTypes[0] || 'unknown'
-    const parameterSchema = parameterSchemas[0] || {}
+    const parameter = parameters[0]
+    const parameterName = parameter?.name || 'argument'
+    const parameterType = parameter?.type || 'unknown'
+    const parameterSchema = parameter?.schema || {}
 
     return {
       $schema: 'http://json-schema.org/draft-07/schema#',
@@ -1852,15 +1866,328 @@ function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArg
     type: 'array',
     minItems: parameterCount,
     maxItems: parameterCount,
-    items: Array.from(
-      { length: parameterCount },
-      (_, index): DirectRunArgsJsonSchema => ({
-        title: parameterNames[index] || `arg${index + 1}`,
-        description: parameterTypes[index] || 'unknown',
-        ...(parameterSchemas[index] || {})
-      })
-    )
+    items: parameters.map((parameter): DirectRunArgsJsonSchema => ({
+      title: parameter.name,
+      description: parameter.type,
+      ...parameter.schema
+    }))
   }
+}
+
+function typeScriptTypeToJsonSchema(typeText: string): DirectRunArgsJsonSchema {
+  const type = stripOuterParens(typeText.trim())
+  if (!type || type === 'unknown' || type === 'any') {
+    return {}
+  }
+
+  if (type === 'string') {
+    return { type: 'string' }
+  }
+  if (type === 'number') {
+    return { type: 'number' }
+  }
+  if (type === 'boolean') {
+    return { type: 'boolean' }
+  }
+  if (type === 'null') {
+    return { type: 'null' }
+  }
+  if (type === 'object') {
+    return { type: 'object' }
+  }
+
+  const literal = parseTypeScriptLiteral(type)
+  if (literal.matched) {
+    return { enum: [literal.value] }
+  }
+
+  const rawUnionTypes = splitTopLevel(type, '|')
+  const unionTypes = rawUnionTypes
+    .map(candidate => candidate.trim())
+    .filter(candidate => candidate && candidate !== 'undefined' && candidate !== 'void')
+  if (rawUnionTypes.length > 1) {
+    if (unionTypes.length === 1) {
+      return typeScriptTypeToJsonSchema(unionTypes[0] || 'unknown')
+    }
+
+    const literals = unionTypes.map(parseTypeScriptLiteral)
+    if (literals.every(candidate => candidate.matched)) {
+      return { enum: literals.map(candidate => candidate.value) }
+    }
+
+    return {
+      anyOf: unionTypes.map(candidate => typeScriptTypeToJsonSchema(candidate))
+    }
+  }
+
+  if (isArrayType(type)) {
+    return {
+      type: 'array',
+      items: typeScriptTypeToJsonSchema(type.slice(0, -2))
+    }
+  }
+
+  if (type.startsWith('[') && type.endsWith(']')) {
+    const tupleItems = splitTopLevel(type.slice(1, -1), ',')
+      .map(item => typeScriptTypeToJsonSchema(item))
+
+    return {
+      type: 'array',
+      minItems: tupleItems.length,
+      maxItems: tupleItems.length,
+      items: tupleItems
+    }
+  }
+
+  if (type.startsWith('{') && type.endsWith('}')) {
+    return objectTypeToJsonSchema(type.slice(1, -1))
+  }
+
+  return {}
+}
+
+function objectTypeToJsonSchema(typeBody: string): DirectRunArgsJsonSchema {
+  const properties: Record<string, DirectRunArgsJsonSchema> = {}
+  const required: string[] = []
+
+  for (const member of splitTopLevelAny(typeBody, [';', ','])) {
+    const separatorIndex = findTopLevelSeparator(member, ':')
+    if (separatorIndex <= 0) {
+      continue
+    }
+
+    const rawName = member.slice(0, separatorIndex).trim()
+    const propertyType = member.slice(separatorIndex + 1).trim()
+    const optional = rawName.endsWith('?')
+    const name = sanitizeDirectRunParameterName(rawName)
+    if (!name) {
+      continue
+    }
+
+    properties[name] = typeScriptTypeToJsonSchema(propertyType)
+    if (!optional && !typeIncludesUndefined(propertyType)) {
+      required.push(name)
+    }
+  }
+
+  return {
+    type: 'object',
+    additionalProperties: true,
+    properties,
+    required
+  }
+}
+
+function stripOuterParens(value: string): string {
+  let next = value.trim()
+  while (next.startsWith('(') && next.endsWith(')') && enclosesWholeValue(next)) {
+    next = next.slice(1, -1).trim()
+  }
+
+  return next
+}
+
+function enclosesWholeValue(value: string): boolean {
+  let depth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+    if (character === '(') {
+      depth += 1
+    } else if (character === ')') {
+      depth -= 1
+      if (depth === 0 && index < value.length - 1) {
+        return false
+      }
+    }
+  }
+
+  return depth === 0
+}
+
+function splitTopLevel(value: string, separator: string): string[] {
+  return splitTopLevelAny(value, [separator])
+}
+
+function splitTopLevelAny(value: string, separators: string[]): string[] {
+  const parts: string[] = []
+  let start = 0
+  let angleDepth = 0
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+
+    if (character === '{') {
+      braceDepth += 1
+    } else if (character === '}') {
+      braceDepth -= 1
+    } else if (character === '[') {
+      bracketDepth += 1
+    } else if (character === ']') {
+      bracketDepth -= 1
+    } else if (character === '(') {
+      parenDepth += 1
+    } else if (character === ')') {
+      parenDepth -= 1
+    } else if (character === '<') {
+      angleDepth += 1
+    } else if (character === '>') {
+      angleDepth -= 1
+    } else if (
+      separators.includes(character)
+      && angleDepth === 0
+      && braceDepth === 0
+      && bracketDepth === 0
+      && parenDepth === 0
+    ) {
+      const part = value.slice(start, index).trim()
+      if (part) {
+        parts.push(part)
+      }
+      start = index + 1
+    }
+  }
+
+  const part = value.slice(start).trim()
+  if (part) {
+    parts.push(part)
+  }
+
+  return parts
+}
+
+function findTopLevelSeparator(value: string, separator: string): number {
+  let angleDepth = 0
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let quote: string | null = null
+  let escaped = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+
+    if (character === '{') {
+      braceDepth += 1
+    } else if (character === '}') {
+      braceDepth -= 1
+    } else if (character === '[') {
+      bracketDepth += 1
+    } else if (character === ']') {
+      bracketDepth -= 1
+    } else if (character === '(') {
+      parenDepth += 1
+    } else if (character === ')') {
+      parenDepth -= 1
+    } else if (character === '<') {
+      angleDepth += 1
+    } else if (character === '>') {
+      angleDepth -= 1
+    } else if (
+      character === separator
+      && angleDepth === 0
+      && braceDepth === 0
+      && bracketDepth === 0
+      && parenDepth === 0
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function parseTypeScriptLiteral(
+  value: string
+): { matched: true, value: unknown } | { matched: false } {
+  if (/^'(?:\\.|[^'\\])*'$/.test(value) || /^"(?:\\.|[^"\\])*"$/.test(value)) {
+    try {
+      const normalizedValue = value.startsWith("'")
+        ? `"${value.slice(1, -1).replace(/"/g, '\\"')}"`
+        : value
+
+      return { matched: true, value: JSON.parse(normalizedValue) }
+    } catch {
+      return { matched: true, value: value.slice(1, -1) }
+    }
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return { matched: true, value: Number(value) }
+  }
+  if (value === 'true') {
+    return { matched: true, value: true }
+  }
+  if (value === 'false') {
+    return { matched: true, value: false }
+  }
+  if (value === 'null') {
+    return { matched: true, value: null }
+  }
+
+  return { matched: false }
+}
+
+function isArrayType(type: string): boolean {
+  return type.endsWith('[]') && stripOuterParens(type.slice(0, -2)).length > 0
+}
+
+function typeIncludesUndefined(type: string): boolean {
+  return splitTopLevel(type, '|').some(candidate =>
+    candidate.trim() === 'undefined'
+  )
 }
 
 function getDirectRunArgsInput(methodName: string): string {
@@ -1915,7 +2242,7 @@ function isDirectRunActionDisabled(method: DirectRunProviderMethod): boolean {
     return true
   }
 
-  if (!method.parameterCount) {
+  if (getDirectRunParameterCount(method) === 0) {
     return false
   }
 
@@ -1959,7 +2286,7 @@ function parseDirectRunArgs(
   method: DirectRunProviderMethod,
   input: string
 ): { ok: true, args: unknown[] | undefined } | { ok: false, error: string } {
-  const parameterCount = method.parameterCount || 0
+  const parameterCount = getDirectRunParameterCount(method)
   if (parameterCount === 0) {
     return { ok: true, args: undefined }
   }
@@ -2010,19 +2337,18 @@ function validateDirectRunParsedArgs(
   method: DirectRunProviderMethod,
   args: unknown[]
 ): string {
-  const parameterCount = method.parameterCount || 0
+  const parameters = getDirectRunParameterInfos(method)
+  const parameterCount = parameters.length
   if (args.length !== parameterCount) {
     return `${method.name}() expects ${parameterCount} arguments.`
   }
 
-  const parameterNames = getDirectRunParameterNames(method)
-  const parameterSchemas = getDirectRunParameterSchemas(method)
-
   for (let index = 0; index < parameterCount; index += 1) {
+    const parameter = parameters[index]
     const error = validateJsonSchemaValue(
       args[index],
-      parameterSchemas[index] || {},
-      parameterNames[index] || `arg${index + 1}`
+      parameter?.schema || {},
+      parameter?.name || `arg${index + 1}`
     )
     if (error) {
       return error
@@ -2893,21 +3219,21 @@ useResizeObserver(graphViewerRef, () => {
                       {{ getDirectRunMethodSignature(item.method) }}
                     </p>
                     <p
-                      v-if="item.method.parameterCount"
+                      v-if="getDirectRunParameterCount(item.method)"
                       class="direct-run-drawer__method-subtitle"
                     >
                       JSON arguments
                     </p>
                   </div>
                   <UBadge
-                    v-if="item.method.parameterCount"
-                    :label="`${item.method.parameterCount} ${item.method.parameterCount === 1 ? 'arg' : 'args'}`"
+                    v-if="getDirectRunParameterCount(item.method)"
+                    :label="`${getDirectRunParameterCount(item.method)} ${getDirectRunParameterCount(item.method) === 1 ? 'arg' : 'args'}`"
                     color="neutral"
                     variant="soft"
                   />
                 </div>
 
-                <ClientOnly v-if="item.method.parameterCount">
+                <ClientOnly v-if="getDirectRunParameterCount(item.method)">
                   <JsonMonacoEditor
                     :model-value="getDirectRunArgsInput(item.method.name)"
                     :path="getDirectRunEditorPath(item.method.name)"

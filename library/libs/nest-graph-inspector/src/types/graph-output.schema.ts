@@ -73,33 +73,13 @@ export const GRAPH_OUTPUT_JSON_SCHEMA = {
     directRunProviderMethod: {
       type: 'object',
       additionalProperties: false,
-      required: ['name', 'parameterCount'],
+      required: ['name', 'parameterTypes'],
       properties: {
         name: {
           type: 'string',
         },
-        parameterCount: {
-          type: 'number',
-          minimum: 0,
-        },
-        parameterNames: {
-          type: 'array',
-          items: {
-            type: 'string',
-          },
-        },
         parameterTypes: {
-          type: 'array',
-          items: {
-            type: 'string',
-          },
-        },
-        parameterSchemas: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: true,
-          },
+          type: 'string',
         },
       },
     },

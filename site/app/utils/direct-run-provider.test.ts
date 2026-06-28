@@ -15,12 +15,12 @@ assert.equal(parseProviderNodeId('controller-UserModule-UserController'), null)
 
 assert.deepEqual(
   getDirectRunProviderState({
-    directRun: { methods: [{ name: 'ping', parameterCount: 0 }] }
+    directRun: { methods: [{ name: 'ping', parameterTypes: '[]' }] }
   }),
   {
     runnable: true,
     reason: '',
-    methods: [{ name: 'ping', parameterCount: 0 }]
+    methods: [{ name: 'ping', parameterTypes: '[]' }]
   }
 )
 assert.deepEqual(

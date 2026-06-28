@@ -393,13 +393,10 @@ describe(NestGraphInspectorSetup.name, () => {
         dependencies: [],
         directRun: {
           methods: [
-            { name: 'ping', parameterCount: 0 },
+            { name: 'ping', parameterTypes: '[]' },
             {
               name: 'withArgs',
-              parameterCount: 1,
-              parameterNames: ['value'],
-              parameterTypes: ['string'],
-              parameterSchemas: [{ type: 'string' }],
+              parameterTypes: '[value: string]',
             },
           ],
         },
