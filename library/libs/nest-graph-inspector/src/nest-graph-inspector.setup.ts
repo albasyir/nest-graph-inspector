@@ -21,6 +21,7 @@ import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
 import { Modules } from './types/module.type';
 import { ModuleMap } from './types/module-map.type';
+import type { DirectRunProviderMeta } from './types/direct-run.type';
 import type {
   GraphOutput,
   GraphOutputCycle,
@@ -30,6 +31,7 @@ import type {
   GraphOutputModule,
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
+  GraphOutputProvider,
 } from './types/graph-output.type';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { FileOutputAdapter } from './adapters/file-output.adapter';
@@ -37,6 +39,7 @@ import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
 import { Project } from 'ts-morph';
+import type { NestGraphInspectorViewerDirectRunOptions } from './nest-graph-inspector.type';
 
 type DependencyNodeKind = 'provider' | 'controller';
 type DependencyNode = {
@@ -219,6 +222,26 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         ...defaultViewerOutput.ollama,
         ...output.ollama,
       },
+      directRun: this.mergeViewerDirectRunOptions(
+        defaultViewerOutput.directRun,
+        output.directRun,
+      ),
+    };
+  }
+
+  private mergeViewerDirectRunOptions(
+    defaultOptions?: NestGraphInspectorViewerDirectRunOptions,
+    outputOptions?: NestGraphInspectorViewerDirectRunOptions,
+  ) {
+    const path = outputOptions?.path ?? defaultOptions?.path;
+    if (!path) {
+      return undefined;
+    }
+
+    return {
+      path,
+      instanceLookup: (moduleName: string, providerName: string) =>
+        this.findDirectRunProviderInstance(moduleName, providerName),
     };
   }
 
@@ -814,6 +837,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           dependencies: provider.dependencies.map((dep) =>
             this.enrichDependency(dep, moduleName),
           ),
+          directRun: this.resolveDirectRunProviderMeta(provider.name, moduleName),
         })),
         controllers: moduleData.controllers.map((controller) => ({
           ...controller,
@@ -829,6 +853,74 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       modules: enrichedModules,
       cycles: this.findGraphCycles(enrichedModules),
     };
+  }
+
+  private resolveDirectRunProviderMeta(
+    providerName: string,
+    moduleName: string,
+  ): DirectRunProviderMeta | undefined {
+    const instance = this.findDirectRunProviderInstance(moduleName, providerName);
+    if (!instance) {
+      return undefined;
+    }
+
+    const methods = this.getDirectRunMethodNames(instance);
+    if (!methods.length) {
+      return undefined;
+    }
+
+    return {
+      methods: methods.map(name => ({ name })),
+    };
+  }
+
+  private findDirectRunProviderInstance(
+    moduleName: string,
+    providerName: string,
+  ): unknown {
+    const moduleRef = [...this.modulesContainer.values()].find(
+      candidate => this.moduleName(candidate) === moduleName,
+    );
+    if (!moduleRef) {
+      return undefined;
+    }
+
+    const providerWrapper = [...moduleRef.providers.values()].find((wrapper) => {
+      const instance =
+        wrapper.instance &&
+        (typeof wrapper.instance === 'object' || typeof wrapper.instance === 'function')
+          ? (wrapper.instance as { constructor?: { name?: string } })
+          : null;
+      const resolvedName =
+        wrapper.metatype?.name ||
+        instance?.constructor?.name ||
+        this.tokenName(wrapper.token);
+
+      return resolvedName === providerName;
+    });
+
+    return providerWrapper?.instance;
+  }
+
+  private getDirectRunMethodNames(instance: unknown): string[] {
+    if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) {
+      return [];
+    }
+
+    const prototype = Object.getPrototypeOf(instance) as Record<string, unknown> | null;
+    if (!prototype || prototype === Object.prototype) {
+      return [];
+    }
+
+    const methodNames = Object.getOwnPropertyNames(prototype)
+      .filter(name => name !== 'constructor')
+      .filter((name) => {
+        const candidate = prototype[name];
+        return typeof candidate === 'function' && candidate.length === 0;
+      })
+      .sort((left, right) => left.localeCompare(right));
+
+    return [...new Set(methodNames)];
   }
 
   private findGraphCycles(

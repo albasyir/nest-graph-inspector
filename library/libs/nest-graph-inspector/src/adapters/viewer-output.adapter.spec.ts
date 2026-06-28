@@ -5,6 +5,7 @@ import { HttpOutputAdapter } from './http-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { ViewerOutputAdapter } from './viewer-output.adapter';
+import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 
 describe(ViewerOutputAdapter.name, () => {
   let moduleRef: TestingModule;
@@ -31,6 +32,7 @@ describe(ViewerOutputAdapter.name, () => {
       providers: [
         ViewerOutputAdapter,
         HttpServeAdapter,
+        DirectRunOutputAdapter,
         {
           provide: HttpOutputAdapter,
           useValue: httpOutputAdapter,
@@ -146,7 +148,7 @@ describe(ViewerOutputAdapter.name, () => {
 
     expect(proxyAdapter.serve).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: 'http://localhost:53371',
+        from: 'http://0.0.0.0:53371',
         to: 'http://localhost:11435',
       }),
       expect.objectContaining({
@@ -176,6 +178,36 @@ describe(ViewerOutputAdapter.name, () => {
         httpAdapter: httpServeAdapter,
         pathPrefix: '/ollama',
       }),
+    );
+  });
+
+  it('registers the direct-run route when configured', async () => {
+    const registerSpy = jest.spyOn(httpServeAdapter, 'register');
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      path: 'graph',
+      ollama: {
+        origin: 'http://localhost:11434',
+        path: '/ollama',
+      },
+      directRun: {
+        path: '/direct-run',
+        instanceLookup: () => ({ ping: () => 'pong' }),
+      },
+    } as never);
+
+    expect(registerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: undefined,
+        port: undefined,
+      }),
+      [
+        expect.objectContaining({
+          path: '/direct-run',
+          type: 'POST',
+        }),
+      ],
     );
   });
 });

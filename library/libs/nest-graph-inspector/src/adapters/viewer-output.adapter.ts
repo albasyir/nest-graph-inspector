@@ -6,8 +6,15 @@ import type { ProxyCorsOptions } from '../ports/proxy.gateway';
 import { HttpOutputAdapter } from './http-output.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
+import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
+type ViewerOutputInternalConfig = ViewerOutputConfig & {
+  directRun?: {
+    path: string;
+    instanceLookup: (moduleName: string, providerName: string) => unknown;
+  };
+};
 
 @Injectable()
 export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
@@ -19,12 +26,14 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     private readonly httpOutputAdapter: HttpOutputAdapter,
     private readonly proxyAdapter: ProxyAdapter,
     private readonly httpServeAdapter: HttpServeAdapter,
+    private readonly directRunOutputAdapter: DirectRunOutputAdapter,
   ) {}
 
   async execute(
     graphOutput: GraphOutput,
     config: ViewerOutputConfig,
   ): Promise<{ message: string }> {
+    const internalConfig = config as ViewerOutputInternalConfig;
     const path = this.httpOutputAdapter.normalizePath(
       config.path ?? '/__graph-inspector',
     );
@@ -49,6 +58,20 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
         pathPrefix: ollama.path,
       },
     );
+
+    if (internalConfig.directRun?.path) {
+      this.httpServeAdapter.register(
+        {
+          origin: this.httpOrigin(config),
+          host: config.host,
+          port: config.port,
+        },
+        [this.directRunOutputAdapter.createRoute(
+          internalConfig.directRun.path,
+          (moduleName, providerName) => internalConfig.directRun?.instanceLookup(moduleName, providerName),
+        )],
+      );
+    }
 
     try {
       await this.httpServeAdapter.serve();

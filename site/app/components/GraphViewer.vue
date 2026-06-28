@@ -22,11 +22,17 @@ import type {
   GraphOutputDependencyRef,
   GraphOutputCycle,
   GraphOutputProviderCycle,
-  GraphOutputCycles
+  GraphOutputCycles,
+  GraphOutputProvider
 } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
+import {
+  getDirectRunProviderState,
+  parseProviderNodeId,
+  type DirectRunExecutionSnapshot
+} from '~/utils/direct-run-provider'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -48,6 +54,24 @@ type ItemNodeData = {
   label: string
   kind: 'controller' | 'provider'
   isExported: boolean
+}
+
+type DirectRunActionRequest = {
+  moduleName: string
+  providerName: string
+  methodName: string
+}
+
+type DirectRunProviderContext = {
+  nodeId: string
+  moduleName: string
+  provider: GraphOutputProvider
+}
+
+type DirectRunStatusBadge = {
+  label: string
+  color: 'neutral' | 'primary' | 'success' | 'error'
+  variant: 'soft' | 'solid' | 'outline'
 }
 
 type ModuleItemLayout = ItemNodeData & {
@@ -100,6 +124,10 @@ type FlowEdge = Edge<
 type WarningEdgeProps = EdgeProps<CircularEdgeData>
 type NodePosition = { x: number, y: number }
 
+const emit = defineEmits<{
+  directRun: [request: DirectRunActionRequest]
+}>()
+
 const props = withDefaults(
   defineProps<{
     data: GraphOutput
@@ -112,6 +140,16 @@ const props = withDefaults(
     excludeModules?: string[] | string
     enableBrightLine?: boolean
     collapsedModules?: string[] | string
+    directRunResult?: {
+      moduleName: string
+      providerName: string
+      snapshot: DirectRunExecutionSnapshot
+    } | null
+    directRunError?: {
+      moduleName: string
+      providerName: string
+      error: string
+    } | null
   }>(),
   {
     height: '75vh',
@@ -1314,6 +1352,10 @@ const hasInitialFixedBrightLine = props.enableBrightLine
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderAcrossModule = ref(false)
+const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>({})
+const selectedProviderNodeId = ref<string | null>(null)
+const directRunPendingMethodByNodeId = ref<Record<string, string>>({})
+const directRunErrorByNodeId = ref<Record<string, string>>({})
 const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
@@ -1402,6 +1444,103 @@ const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
   }
 
   return 'indeterminate'
+})
+const selectedProviderContext = computed<DirectRunProviderContext | null>(() => {
+  const nodeId = selectedProviderNodeId.value
+  if (!nodeId) {
+    return null
+  }
+
+  const parsed = parseProviderNodeId(nodeId)
+  if (!parsed) {
+    return null
+  }
+
+  const provider = graphData.value.modules[parsed.moduleName]?.providers
+    .find(item => item.name === parsed.providerName)
+
+  if (!provider) {
+    return null
+  }
+
+  return {
+    nodeId,
+    moduleName: parsed.moduleName,
+    provider
+  }
+})
+const selectedProviderDirectRunState = computed(() => {
+  const context = selectedProviderContext.value
+  return context ? getDirectRunProviderState(context.provider) : null
+})
+const selectedProviderSnapshot = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunStateByNodeId.value[nodeId] || null : null
+})
+const selectedProviderPendingMethod = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunPendingMethodByNodeId.value[nodeId] || '' : ''
+})
+const selectedProviderError = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunErrorByNodeId.value[nodeId] || '' : ''
+})
+const selectedProviderLastRunLabel = computed(() => {
+  const value = selectedProviderSnapshot.value?.updatedAt
+  if (!value) {
+    return ''
+  }
+
+  return new Date(value).toLocaleString()
+})
+const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return null
+  }
+
+  const directRunState = selectedProviderDirectRunState.value
+  if (!directRunState) {
+    return null
+  }
+
+  if (!directRunState.runnable) {
+    return {
+      label: 'Not runnable',
+      color: 'neutral',
+      variant: 'outline'
+    }
+  }
+
+  const pendingMethod = selectedProviderPendingMethod.value
+  if (pendingMethod) {
+    return {
+      label: 'Running',
+      color: 'primary',
+      variant: 'solid'
+    }
+  }
+
+  const snapshot = selectedProviderSnapshot.value
+  if (!snapshot) {
+    return {
+      label: 'Idle',
+      color: 'neutral',
+      variant: 'soft'
+    }
+  }
+
+  return snapshot.state === 'success'
+    ? {
+        label: 'Success',
+        color: 'success',
+        variant: 'solid'
+      }
+    : {
+        label: 'Failed',
+        color: 'error',
+        variant: 'solid'
+      }
 })
 
 function resolveBrightLineNodeId(target: string): string | null {
@@ -1514,6 +1653,90 @@ function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
   }
 }
 
+function selectProviderNode(nodeId: string | null): void {
+  if (nodeId && parseProviderNodeId(nodeId)) {
+    selectedProviderNodeId.value = nodeId
+    return
+  }
+
+  selectedProviderNodeId.value = null
+}
+
+function handleNodeClick(event: NodeMouseEvent): void {
+  selectProviderNode(event.node.id)
+}
+
+function clearDirectRunPending(nodeId: string): void {
+  const { [nodeId]: _removed, ...nextPendingState } = directRunPendingMethodByNodeId.value
+  directRunPendingMethodByNodeId.value = nextPendingState
+}
+
+function setDirectRunError(nodeId: string, error: string): void {
+  directRunErrorByNodeId.value = {
+    ...directRunErrorByNodeId.value,
+    [nodeId]: error
+  }
+}
+
+function clearDirectRunError(nodeId: string): void {
+  const { [nodeId]: _removed, ...nextErrorState } = directRunErrorByNodeId.value
+  directRunErrorByNodeId.value = nextErrorState
+}
+
+async function emitDirectRun(request: DirectRunActionRequest): Promise<void> {
+  const nodeId = `provider-${request.moduleName}-${request.providerName}`
+  directRunPendingMethodByNodeId.value = {
+    ...directRunPendingMethodByNodeId.value,
+    [nodeId]: request.methodName
+  }
+  clearDirectRunError(nodeId)
+
+  try {
+    await Promise.resolve()
+    emit('directRun', request)
+  } catch (error) {
+    clearDirectRunPending(nodeId)
+    setDirectRunError(nodeId, error instanceof Error ? error.message : 'Direct run failed.')
+  }
+}
+
+function applyDirectRunResult(payload: {
+  moduleName: string
+  providerName: string
+  snapshot: DirectRunExecutionSnapshot
+}): void {
+  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  directRunStateByNodeId.value = {
+    ...directRunStateByNodeId.value,
+    [nodeId]: payload.snapshot
+  }
+  clearDirectRunPending(nodeId)
+  clearDirectRunError(nodeId)
+}
+
+function applyDirectRunFailure(payload: {
+  moduleName: string
+  providerName: string
+  error: string
+}): void {
+  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  clearDirectRunPending(nodeId)
+  setDirectRunError(nodeId, payload.error)
+}
+
+function requestDirectRun(methodName: string): void {
+  const context = selectedProviderContext.value
+  if (!context) {
+    return
+  }
+
+  void emitDirectRun({
+    moduleName: context.moduleName,
+    providerName: context.provider.name,
+    methodName
+  })
+}
+
 function openCircularTooltip(edgeId: string): void {
   activeCircularTooltipEdgeId.value = edgeId
 }
@@ -1558,6 +1781,9 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
 
   activeCircularTooltipEdgeId.value = null
   activeBrightLineNodeId.value = null
+  if (selectedProviderNodeId.value && !flowNodes.value.some(node => node.id === selectedProviderNodeId.value)) {
+    selectedProviderNodeId.value = null
+  }
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
   const graph = buildGraph(graphData.value, collapsedModuleNames.value, {
@@ -1654,6 +1880,30 @@ watch(
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
     void centerGraph()
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.directRunResult,
+  (payload) => {
+    if (!payload) {
+      return
+    }
+
+    applyDirectRunResult(payload)
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.directRunError,
+  (payload) => {
+    if (!payload) {
+      return
+    }
+
+    applyDirectRunFailure(payload)
   },
   { deep: true }
 )
@@ -1816,6 +2066,8 @@ useResizeObserver(graphViewerRef, () => {
       class="graph-flow"
       @node-mouse-enter="setActiveBrightLineNode"
       @node-mouse-leave="clearActiveBrightLineNode"
+      @node-click="handleNodeClick"
+      @pane-click="selectProviderNode(null)"
     >
       <template #edge-warning="edgeProps">
         <BaseEdge
@@ -2028,6 +2280,88 @@ useResizeObserver(graphViewerRef, () => {
       <MiniMap v-if="props.interactive" />
     </VueFlow>
 
+    <div
+      v-if="selectedProviderContext"
+      class="direct-run-panel nodrag nopan"
+      aria-label="Direct run provider panel"
+    >
+      <div class="direct-run-panel__header">
+        <div class="min-w-0">
+          <p class="direct-run-panel__eyebrow">
+            Provider Action
+          </p>
+          <p class="direct-run-panel__title">
+            {{ selectedProviderContext.provider.name }}
+          </p>
+          <p class="direct-run-panel__subtitle">
+            {{ selectedProviderContext.moduleName }}
+          </p>
+        </div>
+        <UBadge
+          v-if="selectedProviderStatusBadge"
+          :label="selectedProviderStatusBadge.label"
+          :color="selectedProviderStatusBadge.color"
+          :variant="selectedProviderStatusBadge.variant"
+        />
+      </div>
+
+      <p
+        v-if="selectedProviderDirectRunState && !selectedProviderDirectRunState.runnable"
+        class="direct-run-panel__message"
+      >
+        {{ selectedProviderDirectRunState.reason }}
+      </p>
+
+      <div
+        v-else-if="selectedProviderDirectRunState"
+        class="direct-run-panel__actions"
+      >
+        <UButton
+          v-for="method in selectedProviderDirectRunState.methods"
+          :key="method.name"
+          type="button"
+          :label="`Direct Run ${method.name}()`"
+          icon="i-lucide-play"
+          color="primary"
+          :loading="selectedProviderPendingMethod === method.name"
+          :disabled="Boolean(selectedProviderPendingMethod)"
+          @click="requestDirectRun(method.name)"
+        />
+      </div>
+
+      <p
+        v-if="selectedProviderPendingMethod"
+        class="direct-run-panel__message"
+      >
+        Running {{ selectedProviderPendingMethod }}()…
+      </p>
+
+      <p
+        v-else-if="selectedProviderError"
+        class="direct-run-panel__message direct-run-panel__message--error"
+      >
+        {{ selectedProviderError }}
+      </p>
+
+      <div
+        v-if="selectedProviderSnapshot"
+        class="direct-run-panel__result"
+      >
+        <p class="direct-run-panel__result-title">
+          Last run · {{ selectedProviderSnapshot.method }}()
+        </p>
+        <p class="direct-run-panel__message">
+          {{ selectedProviderSnapshot.summary }}
+        </p>
+        <p
+          v-if="selectedProviderLastRunLabel"
+          class="direct-run-panel__timestamp"
+        >
+          {{ selectedProviderLastRunLabel }}
+        </p>
+      </div>
+    </div>
+
     <UDrawer
       v-model:open="showCircularDetailDialog"
       side="right"
@@ -2212,6 +2546,90 @@ useResizeObserver(graphViewerRef, () => {
   gap: 8px;
   font-family: 'Public Sans', system-ui, sans-serif;
   pointer-events: none;
+}
+
+.direct-run-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 10;
+  width: min(360px, calc(100% - 24px));
+  padding: 12px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ui-bg) 96%, transparent);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Public Sans', system-ui, sans-serif;
+}
+
+.direct-run-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.direct-run-panel__eyebrow,
+.direct-run-panel__subtitle,
+.direct-run-panel__timestamp,
+.direct-run-panel__message,
+.direct-run-panel__result-title,
+.direct-run-panel__title {
+  margin: 0;
+}
+
+.direct-run-panel__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-panel__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ui-text-highlighted);
+}
+
+.direct-run-panel__subtitle,
+.direct-run-panel__timestamp {
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.direct-run-panel__message {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ui-text);
+  overflow-wrap: anywhere;
+}
+
+.direct-run-panel__message--error {
+  color: var(--ui-error);
+}
+
+.direct-run-panel__result {
+  padding-top: 2px;
+  border-top: 1px solid var(--mg-subgraph-title-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.direct-run-panel__result-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
 }
 
 .graph-viewer-legends__title {

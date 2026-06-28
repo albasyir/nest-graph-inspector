@@ -280,7 +280,7 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Object),
-      {
+      expect.objectContaining({
         type: 'viewer',
         host: '127.0.0.1',
         port: 3998,
@@ -288,7 +288,11 @@ describe(NestGraphInspectorSetup.name, () => {
           origin: 'http://localhost:11434',
           path: '/ollama',
         },
-      },
+        directRun: expect.objectContaining({
+          path: '/direct-run',
+          instanceLookup: expect.any(Function),
+        }),
+      }),
     );
   });
 
@@ -309,7 +313,7 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Object),
-      {
+      expect.objectContaining({
         type: 'viewer',
         host: '127.0.0.1',
         port: 3998,
@@ -317,7 +321,11 @@ describe(NestGraphInspectorSetup.name, () => {
           origin: 'http://localhost:11435',
           path: '/llm',
         },
-      },
+        directRun: expect.objectContaining({
+          path: '/direct-run',
+          instanceLookup: expect.any(Function),
+        }),
+      }),
     );
   });
 
@@ -354,6 +362,38 @@ describe(NestGraphInspectorSetup.name, () => {
         name: DocumentedProvider.name,
         jsdoc: 'Provides documented app behavior.',
         dependencies: [],
+      },
+    ]);
+  });
+
+  it('should include direct-run metadata for zero-argument providers', () => {
+    class RunnableProvider {
+      ping() {
+        return 'pong';
+      }
+
+      withArgs(value: string) {
+        return value;
+      }
+    }
+
+    appModuleRef.providers.set(RunnableProvider.name, {
+      metatype: RunnableProvider,
+      instance: new RunnableProvider(),
+      token: RunnableProvider,
+    });
+
+    const graphOutput = (
+      service as unknown as SetupWithPrivateMethods
+    ).enrichModuleMap(service.buildModuleMap(TestRootModule));
+
+    expect(graphOutput.modules[TestRootModule.name].providers).toEqual([
+      {
+        name: RunnableProvider.name,
+        dependencies: [],
+        directRun: {
+          methods: [{ name: 'ping' }],
+        },
       },
     ]);
   });

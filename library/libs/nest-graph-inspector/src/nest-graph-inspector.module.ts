@@ -11,6 +11,7 @@ import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 import { ProxyAdapter } from './adapters/proxy.adapter';
 import { HttpServeAdapter } from './adapters/http-serve.adapter';
+import { DirectRunOutputAdapter } from './adapters/direct-run-output.adapter';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [
@@ -20,6 +21,9 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
       ollama: {
         origin: 'http://localhost:11434',
         path: '/ollama',
+      },
+      directRun: {
+        path: '/direct-run',
       },
     },
   ],
@@ -47,6 +51,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     HttpServeAdapter,
     HttpOutputAdapter,
     ProxyAdapter,
+    DirectRunOutputAdapter,
     ViewerOutputAdapter,
   ],
 })

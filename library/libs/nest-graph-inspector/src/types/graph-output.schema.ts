@@ -65,6 +65,32 @@ export const GRAPH_OUTPUT_JSON_SCHEMA = {
             $ref: '#/$defs/dependencyRef',
           },
         },
+        directRun: {
+          $ref: '#/$defs/directRunProviderMeta',
+        },
+      },
+    },
+    directRunProviderMethod: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name'],
+      properties: {
+        name: {
+          type: 'string',
+        },
+      },
+    },
+    directRunProviderMeta: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['methods'],
+      properties: {
+        methods: {
+          type: 'array',
+          items: {
+            $ref: '#/$defs/directRunProviderMethod',
+          },
+        },
       },
     },
     controller: {
