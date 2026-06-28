@@ -3,6 +3,10 @@ import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { DirectRunResult } from '../types/direct-run.type';
 
+type DirectRunArgsResult =
+  | { ok: true; args: unknown[] }
+  | { ok: false; response: HttpServeResponse };
+
 @Injectable()
 export class DirectRunOutputAdapter {
   constructor(
@@ -30,12 +34,13 @@ export class DirectRunOutputAdapter {
         return this.badRequest(`Method ${methodName} is unavailable for direct run.`);
       }
 
-      if (method.length > 0) {
-        return this.badRequest(`Method ${methodName} requires arguments and cannot be direct-run.`);
+      const argsResult = this.resolveArgs(body, methodName, method.length);
+      if (!argsResult.ok) {
+        return argsResult.response;
       }
 
       try {
-        const result = await method.call(instance);
+        const result = await method.call(instance, ...argsResult.args);
         const payload: DirectRunResult = {
           ok: true,
           method: methodName,
@@ -62,9 +67,6 @@ export class DirectRunOutputAdapter {
       responseHeaders: {
         'content-type': 'application/json; charset=utf-8',
       },
-      requestHeaders: {
-        'content-type': 'application/json',
-      },
     });
   }
 
@@ -84,6 +86,45 @@ export class DirectRunOutputAdapter {
     } catch {
       return {};
     }
+  }
+
+  private resolveArgs(
+    body: Record<string, unknown>,
+    methodName: string,
+    parameterCount: number,
+  ): DirectRunArgsResult {
+    if (!Object.prototype.hasOwnProperty.call(body, 'args')) {
+      if (parameterCount > 0) {
+        return {
+          ok: false,
+          response: this.badRequest(
+            `Method ${methodName} requires arguments. Send args as JSON in the request body.`,
+          ),
+        };
+      }
+
+      return { ok: true, args: [] };
+    }
+
+    const input = body.args;
+    if (parameterCount > 1 && !Array.isArray(input)) {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} expects ${parameterCount} arguments. Send args as a JSON array.`,
+        ),
+      };
+    }
+
+    return {
+      ok: true,
+      args:
+        parameterCount === 1
+          ? [input]
+          : Array.isArray(input)
+            ? input
+            : [input],
+    };
   }
 
   private badRequest(message: string): HttpServeResponse {

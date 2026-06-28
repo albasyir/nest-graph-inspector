@@ -366,7 +366,7 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
-  it('should include direct-run metadata for zero-argument providers', () => {
+  it('should include direct-run metadata for provider methods', () => {
     class RunnableProvider {
       ping() {
         return 'pong';
@@ -392,7 +392,16 @@ describe(NestGraphInspectorSetup.name, () => {
         name: RunnableProvider.name,
         dependencies: [],
         directRun: {
-          methods: [{ name: 'ping' }],
+          methods: [
+            { name: 'ping', parameterCount: 0 },
+            {
+              name: 'withArgs',
+              parameterCount: 1,
+              parameterNames: ['value'],
+              parameterTypes: ['string'],
+              parameterSchemas: [{ type: 'string' }],
+            },
+          ],
         },
       },
     ]);

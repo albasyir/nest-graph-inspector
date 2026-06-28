@@ -15,12 +15,12 @@ assert.equal(parseProviderNodeId('controller-UserModule-UserController'), null)
 
 assert.deepEqual(
   getDirectRunProviderState({
-    directRun: { methods: [{ name: 'ping' }] }
+    directRun: { methods: [{ name: 'ping', parameterCount: 0 }] }
   }),
   {
     runnable: true,
     reason: '',
-    methods: [{ name: 'ping' }]
+    methods: [{ name: 'ping', parameterCount: 0 }]
   }
 )
 assert.deepEqual(
@@ -29,7 +29,7 @@ assert.deepEqual(
   }),
   {
     runnable: false,
-    reason: 'No zero-argument public methods available for direct run.',
+    reason: 'No public methods available for direct run.',
     methods: []
   }
 )
@@ -42,6 +42,28 @@ assert.deepEqual(buildDirectRunRequest({
   module: 'UserModule',
   provider: 'UserService',
   method: 'ping'
+})
+assert.deepEqual(buildDirectRunRequest({
+  moduleName: 'UserModule',
+  providerName: 'UserService',
+  methodName: 'find',
+  args: [{ id: 1 }]
+}), {
+  module: 'UserModule',
+  provider: 'UserService',
+  method: 'find',
+  args: { id: 1 }
+})
+assert.deepEqual(buildDirectRunRequest({
+  moduleName: 'UserModule',
+  providerName: 'UserService',
+  methodName: 'range',
+  args: [1, 10]
+}), {
+  module: 'UserModule',
+  provider: 'UserService',
+  method: 'range',
+  args: [1, 10]
 })
 
 assert.equal(summarizeDirectRunResult({ ok: true, result: { pong: true } }), '{"pong":true}')

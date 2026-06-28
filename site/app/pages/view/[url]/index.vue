@@ -144,6 +144,7 @@ async function handleDirectRun(request: {
   moduleName: string
   providerName: string
   methodName: string
+  args?: unknown[]
 }) {
   directRunResult.value = null
   directRunError.value = null

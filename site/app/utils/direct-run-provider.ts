@@ -1,5 +1,11 @@
+type DirectRunJsonSchema = Record<string, unknown>
+
 export type DirectRunProviderMethod = {
   name: string
+  parameterCount?: number
+  parameterNames?: string[]
+  parameterTypes?: string[]
+  parameterSchemas?: DirectRunJsonSchema[]
 }
 
 export type DirectRunProviderState = {
@@ -25,6 +31,7 @@ export type DirectRunRequestPayload = {
   module: string
   provider: string
   method: string
+  args?: unknown
 }
 
 export type DirectRunExecutionState = 'idle' | 'running' | 'success' | 'failed'
@@ -36,7 +43,7 @@ export type DirectRunExecutionSnapshot = {
   updatedAt: string
 }
 
-const DIRECT_RUN_EMPTY_REASON = 'No zero-argument public methods available for direct run.'
+const DIRECT_RUN_EMPTY_REASON = 'No public methods available for direct run.'
 const DIRECT_RUN_SUMMARY_CHAR_LIMIT = 240
 
 export function parseProviderNodeId(nodeId: string): {
@@ -81,12 +88,19 @@ export function buildDirectRunRequest(payload: {
   moduleName: string
   providerName: string
   methodName: string
+  args?: unknown[]
 }): DirectRunRequestPayload {
-  return {
+  const request: DirectRunRequestPayload = {
     module: payload.moduleName,
     provider: payload.providerName,
     method: payload.methodName
   }
+
+  if (payload.args !== undefined) {
+    request.args = payload.args.length === 1 ? payload.args[0] : payload.args
+  }
+
+  return request
 }
 
 export function summarizeDirectRunResult(payload: DirectRunResultPayload): string {

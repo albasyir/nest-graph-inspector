@@ -10,6 +10,7 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
+    "@guolao/vue-monaco-editor": "^1.6.0",
     "@iconify-json/lucide": "^1.2.113",
     "@iconify-json/simple-icons": "^1.2.86",
     "@iconify-json/vscode-icons": "^1.2.58",
@@ -33,6 +34,7 @@
     "langchain": "^1.4.5",
     "mermaid": "^11.15.0",
     "minimark": "^0.2.0",
+    "monaco-editor": "^0.55.1",
     "nuxt": "^4.4.8",
     "nuxt-llms": "0.2.0",
     "nuxt-og-image": "^5.1.13",

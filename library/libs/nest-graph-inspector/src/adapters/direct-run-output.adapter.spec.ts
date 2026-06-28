@@ -55,7 +55,7 @@ describe(DirectRunOutputAdapter.name, () => {
     });
   });
 
-  it('rejects methods that require arguments', async () => {
+  it('responds to browser preflight requests for direct run', async () => {
     const port = await availablePort();
     const httpServeAdapter = moduleRef.get(HttpServeAdapter);
 
@@ -66,7 +66,77 @@ describe(DirectRunOutputAdapter.name, () => {
       },
       [
         adapter.createRoute('/direct-run', () => ({
-          ping: (_value: string) => 'pong',
+          ping: () => 'pong',
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(`http://127.0.0.1:${port}/direct-run`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://viewer.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.body).toBe('');
+    expect(response.headers['access-control-allow-origin']).toBe('*');
+    expect(response.headers['access-control-allow-methods']).toContain('POST');
+    expect(response.headers['access-control-allow-headers']).toBe('*');
+  });
+
+  it('accepts JSON content types with charset parameters', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: () => 'pong',
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(
+      `http://127.0.0.1:${port}/direct-run`,
+      {
+        module: 'AppModule',
+        provider: 'PingProvider',
+        method: 'ping',
+      },
+      {
+        'content-type': 'application/json; charset=utf-8',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'ping',
+      result: 'pong',
+    });
+  });
+
+  it('passes JSON args to provider methods', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: (value: { message: string }) => `pong:${value.message}`,
         })),
       ],
     );
@@ -76,34 +146,85 @@ describe(DirectRunOutputAdapter.name, () => {
       module: 'AppModule',
       provider: 'PingProvider',
       method: 'ping',
+      args: {
+        message: 'hello',
+      },
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(200);
     expect(JSON.parse(response.body)).toEqual({
-      ok: false,
-      error: 'Method ping requires arguments and cannot be direct-run.',
+      ok: true,
+      method: 'ping',
+      result: 'pong:hello',
+    });
+  });
+
+  it('passes JSON arrays to multi-argument provider methods', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          add: (left: number, right: number) => left + right,
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'MathProvider',
+      method: 'add',
+      args: [2, 3],
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      method: 'add',
+      result: 5,
     });
   });
 });
 
 type HttpResponse = {
   statusCode?: number;
+  headers: http.IncomingHttpHeaders;
   body: string;
 };
 
-function post(url: string, payload: unknown): Promise<HttpResponse> {
+function post(
+  url: string,
+  payload: unknown,
+  headers: http.OutgoingHttpHeaders = {},
+): Promise<HttpResponse> {
+  const body = JSON.stringify(payload);
+
+  return request(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+      ...headers,
+    },
+    body,
+  });
+}
+
+function request(
+  url: string,
+  options: http.RequestOptions & { body?: string } = {},
+): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
-    const body = JSON.stringify(payload);
     const req = http.request(
       target,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body),
-        },
-      },
+      options,
       (res) => {
         let responseBody = '';
 
@@ -114,6 +235,7 @@ function post(url: string, payload: unknown): Promise<HttpResponse> {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode,
+            headers: res.headers,
             body: responseBody,
           });
         });
@@ -121,7 +243,9 @@ function post(url: string, payload: unknown): Promise<HttpResponse> {
     );
 
     req.on('error', reject);
-    req.write(body);
+    if (options.body) {
+      req.write(options.body);
+    }
     req.end();
   });
 }

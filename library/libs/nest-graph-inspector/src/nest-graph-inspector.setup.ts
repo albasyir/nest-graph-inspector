@@ -21,7 +21,11 @@ import { ModuleController } from './types/module-controller.type';
 import { ModuleProvider } from './types/module-provider.type';
 import { Modules } from './types/module.type';
 import { ModuleMap } from './types/module-map.type';
-import type { DirectRunProviderMeta } from './types/direct-run.type';
+import type {
+  DirectRunJsonSchema,
+  DirectRunProviderMeta,
+  DirectRunProviderMethod,
+} from './types/direct-run.type';
 import type {
   GraphOutput,
   GraphOutputCycle,
@@ -38,7 +42,7 @@ import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
-import { Project } from 'ts-morph';
+import { Node, Project, SyntaxKind, Type as TsMorphType } from 'ts-morph';
 import type { NestGraphInspectorViewerDirectRunOptions } from './nest-graph-inspector.type';
 
 type DependencyNodeKind = 'provider' | 'controller';
@@ -49,6 +53,11 @@ type DependencyNode = {
   name: string;
 };
 type NextCycleId = () => number;
+type DirectRunMethodParameterMetadata = {
+  parameterNames?: string[];
+  parameterTypes?: string[];
+  parameterSchemas?: DirectRunJsonSchema[];
+};
 type ModuleTree = {
   name: string;
   jsdoc?: string;
@@ -864,13 +873,13 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return undefined;
     }
 
-    const methods = this.getDirectRunMethodNames(instance);
+    const methods = this.getDirectRunMethods(instance);
     if (!methods.length) {
       return undefined;
     }
 
     return {
-      methods: methods.map(name => ({ name })),
+      methods,
     };
   }
 
@@ -902,7 +911,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return providerWrapper?.instance;
   }
 
-  private getDirectRunMethodNames(instance: unknown): string[] {
+  private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
     if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) {
       return [];
     }
@@ -912,15 +921,301 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return [];
     }
 
-    const methodNames = Object.getOwnPropertyNames(prototype)
+    const methods = Object.getOwnPropertyNames(prototype)
       .filter(name => name !== 'constructor')
-      .filter((name) => {
+      .map((name) => {
         const candidate = prototype[name];
-        return typeof candidate === 'function' && candidate.length === 0;
-      })
-      .sort((left, right) => left.localeCompare(right));
+        if (typeof candidate !== 'function') {
+          return null;
+        }
 
-    return [...new Set(methodNames)];
+        const method = candidate as (...args: unknown[]) => unknown;
+        const parameterCount = method.length;
+        const parameterMetadata = this.getDirectRunMethodParameterMetadata({
+          instance,
+          method,
+          methodName: name,
+          parameterCount,
+        });
+
+        return {
+          name,
+          parameterCount,
+          ...(parameterMetadata.parameterNames
+            ? { parameterNames: parameterMetadata.parameterNames }
+            : {}),
+          ...(parameterMetadata.parameterTypes
+            ? { parameterTypes: parameterMetadata.parameterTypes }
+            : {}),
+          ...(parameterMetadata.parameterSchemas
+            ? { parameterSchemas: parameterMetadata.parameterSchemas }
+            : {}),
+        };
+      })
+      .filter((method): method is DirectRunProviderMethod => method !== null)
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return [...new Map(methods.map(method => [method.name, method])).values()];
+  }
+
+  private getDirectRunMethodParameterMetadata(param: {
+    instance: object | ((...args: unknown[]) => unknown);
+    method: (...args: unknown[]) => unknown;
+    methodName: string;
+    parameterCount: number;
+  }): DirectRunMethodParameterMetadata {
+    const { instance, method, methodName, parameterCount } = param;
+    if (parameterCount === 0) {
+      return {};
+    }
+
+    const className =
+      typeof instance === 'function'
+        ? instance.name
+        : instance.constructor?.name;
+    const sourceMetadata = className
+      ? this.extractMethodParameterMetadataFromProject(className, methodName)
+      : undefined;
+    if (
+      sourceMetadata?.parameterNames?.length === parameterCount
+      && sourceMetadata.parameterTypes?.length === parameterCount
+      && sourceMetadata.parameterSchemas?.length === parameterCount
+    ) {
+      return sourceMetadata;
+    }
+
+    const runtimeNames = this.extractMethodParameterNamesFromFunctionSource(
+      methodName,
+      method,
+    );
+    return runtimeNames && runtimeNames.length === parameterCount
+      ? { parameterNames: runtimeNames }
+      : {};
+  }
+
+  private extractMethodParameterMetadataFromProject(
+    className: string,
+    methodName: string,
+  ): DirectRunMethodParameterMetadata | undefined {
+    const targetClass = this.tsMorphProject
+      .getSourceFiles()
+      .flatMap(sourceFile =>
+        sourceFile.getDescendantsOfKind(SyntaxKind.ClassDeclaration),
+      )
+      .find(classDeclaration => classDeclaration.getName() === className);
+
+    const method = targetClass?.getInstanceMethod(methodName);
+    if (!method) {
+      return undefined;
+    }
+
+    const parameters = method.getParameters();
+    return {
+      parameterNames: parameters.map(parameter => parameter.getName()),
+      parameterTypes: parameters.map(parameter =>
+        parameter.getType().getText(parameter),
+      ),
+      parameterSchemas: parameters.map(parameter =>
+        this.typeToJsonSchema(parameter.getType(), parameter),
+      ),
+    };
+  }
+
+  private extractMethodParameterNamesFromFunctionSource(
+    methodName: string,
+    method: (...args: unknown[]) => unknown,
+  ): string[] | undefined {
+    const methodSource = method.toString().trim();
+    const project = new Project({ useInMemoryFileSystem: true });
+
+    try {
+      const sourceFile = project.createSourceFile(
+        'direct-run-method.ts',
+        `class DirectRunMethodSource { ${methodSource} }`,
+      );
+
+      const names = sourceFile
+        .getClassOrThrow('DirectRunMethodSource')
+        .getInstanceMethod(methodName)
+        ?.getParameters()
+        .map(parameter => parameter.getName());
+      if (names) {
+        return names;
+      }
+    } catch {
+      // Runtime function strings are best-effort metadata only.
+    }
+
+    try {
+      const sourceFile = project.createSourceFile(
+        'direct-run-function.ts',
+        `const directRunMethod = ${methodSource};`,
+      );
+      const initializer = sourceFile
+        .getVariableDeclarationOrThrow('directRunMethod')
+        .getInitializer();
+      const callable =
+        initializer?.asKind(SyntaxKind.FunctionExpression) ??
+        initializer?.asKind(SyntaxKind.ArrowFunction);
+
+      return callable?.getParameters().map(parameter => parameter.getName());
+    } catch {
+      return undefined;
+    }
+  }
+
+  private typeToJsonSchema(
+    type: TsMorphType,
+    enclosingNode: Node,
+    seenTypeTexts = new Set<string>(),
+  ): DirectRunJsonSchema {
+    if (
+      type.isAny()
+      || type.isUnknown()
+      || type.isNever()
+      || type.isUndefined()
+      || type.isVoid()
+    ) {
+      return {};
+    }
+
+    if (type.isString()) {
+      return { type: 'string' };
+    }
+
+    if (type.isNumber()) {
+      return { type: 'number' };
+    }
+
+    if (type.isBoolean()) {
+      return { type: 'boolean' };
+    }
+
+    if (type.isNull()) {
+      return { type: 'null' };
+    }
+
+    if (type.isStringLiteral() || type.isNumberLiteral()) {
+      return { enum: [type.getLiteralValue()] };
+    }
+
+    if (type.isBooleanLiteral()) {
+      return { enum: [type.getText(enclosingNode) === 'true'] };
+    }
+
+    if (type.isUnion()) {
+      const unionTypes = type
+        .getUnionTypes()
+        .filter(unionType => !unionType.isUndefined());
+      const literalValues = unionTypes
+        .filter(unionType =>
+          unionType.isStringLiteral()
+          || unionType.isNumberLiteral()
+          || unionType.isBooleanLiteral(),
+        )
+        .map((unionType) => {
+          if (unionType.isBooleanLiteral()) {
+            return unionType.getText(enclosingNode) === 'true';
+          }
+
+          return unionType.getLiteralValue();
+        });
+
+      if (literalValues.length === unionTypes.length && literalValues.length > 0) {
+        return { enum: literalValues };
+      }
+
+      const schemas = unionTypes
+        .map(unionType =>
+          this.typeToJsonSchema(unionType, enclosingNode, new Set(seenTypeTexts)),
+        )
+        .filter(schema => Object.keys(schema).length > 0);
+
+      if (schemas.length === 0) {
+        return {};
+      }
+
+      return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
+    }
+
+    if (type.isTuple()) {
+      const tupleElements = type.getTupleElements();
+      return {
+        type: 'array',
+        minItems: tupleElements.length,
+        maxItems: tupleElements.length,
+        items: tupleElements.map(tupleType =>
+          this.typeToJsonSchema(
+            tupleType,
+            enclosingNode,
+            new Set(seenTypeTexts),
+          ),
+        ),
+      };
+    }
+
+    if (type.isArray() || type.isReadonlyArray()) {
+      return {
+        type: 'array',
+        items: this.typeToJsonSchema(
+          type.getArrayElementType() ?? type,
+          enclosingNode,
+          new Set(seenTypeTexts),
+        ),
+      };
+    }
+
+    if (!type.isObject() || type.getCallSignatures().length > 0) {
+      return {};
+    }
+
+    const typeText = type.getText(enclosingNode);
+    if (seenTypeTexts.has(typeText)) {
+      return {};
+    }
+
+    seenTypeTexts.add(typeText);
+
+    const properties: Record<string, DirectRunJsonSchema> = {};
+    const required: string[] = [];
+    for (const property of type.getProperties()) {
+      const propertyName = property.getName();
+      const propertyNode =
+        property.getValueDeclaration() ?? property.getDeclarations()[0];
+      const propertyType = property.getTypeAtLocation(
+        propertyNode ?? enclosingNode,
+      );
+
+      properties[propertyName] = this.typeToJsonSchema(
+        propertyType,
+        propertyNode ?? enclosingNode,
+        new Set(seenTypeTexts),
+      );
+
+      if (
+        !property.isOptional()
+        && !this.typeAllowsUndefined(propertyType)
+      ) {
+        required.push(propertyName);
+      }
+    }
+
+    if (Object.keys(properties).length === 0) {
+      return {};
+    }
+
+    return {
+      type: 'object',
+      additionalProperties: true,
+      properties,
+      ...(required.length ? { required } : {}),
+    };
+  }
+
+  private typeAllowsUndefined(type: TsMorphType): boolean {
+    return type.isUndefined()
+      || (type.isUnion()
+        && type.getUnionTypes().some(unionType => unionType.isUndefined()));
   }
 
   private findGraphCycles(
