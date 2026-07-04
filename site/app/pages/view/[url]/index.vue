@@ -36,6 +36,7 @@ const directRunError = ref<{
   moduleName: string
   providerName: string
   error: string
+  snapshot?: DirectRunExecutionSnapshot
 } | null>(null)
 
 let hasTrackedInitialMount = false
@@ -178,10 +179,22 @@ async function handleDirectRun(request: {
       ? error.message
       : 'Direct run failed.'
 
+    const errorPayload = error as {
+      data?: DirectRunResultPayload
+      message?: string
+    }
+    const responsePayload = errorPayload?.data
+
     directRunError.value = {
       moduleName: request.moduleName,
       providerName: request.providerName,
-      error: message
+      error: responsePayload?.error || message,
+      snapshot: responsePayload
+        ? buildDirectRunSnapshot({
+            response: responsePayload,
+            requestedMethod: request.methodName
+          })
+        : undefined
     }
   }
 }

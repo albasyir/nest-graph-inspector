@@ -9,11 +9,73 @@ export type DirectRunProviderState = {
   methods: DirectRunProviderMethod[]
 }
 
+export type RuntimeTraceStatus = 'success' | 'error' | 'partial'
+
+export type RuntimeTraceSpanStatus =
+  | 'success'
+  | 'error'
+  | 'cancelled'
+  | 'partial'
+  | 'unknown'
+
+export type RuntimeTraceSpanType =
+  | 'controller'
+  | 'provider'
+  | 'repository'
+  | 'database'
+  | 'external-http'
+  | 'external-queue'
+  | 'framework'
+  | 'unknown'
+
+export type RuntimeTraceSpan = {
+  spanId: string
+  parentSpanId?: string
+  traceId: string
+  runId: string
+  order: number
+  name: string
+  type: RuntimeTraceSpanType
+  moduleName?: string
+  className?: string
+  methodName?: string
+  resource?: string
+  startedAt: string
+  endedAt?: string
+  durationMs: number
+  status: RuntimeTraceSpanStatus
+  errorName?: string
+  errorMessage?: string
+  metadata?: Record<string, string | number | boolean | null>
+}
+
+export type RuntimeTrace = {
+  traceId: string
+  runId: string
+  entrypoint: {
+    module?: string
+    className?: string
+    methodName: string
+    signature?: string
+  }
+  startedAt: string
+  endedAt: string
+  totalDurationMs: number
+  status: RuntimeTraceStatus
+  totalSpans: number
+  failedSpanId?: string
+  slowestSpanId?: string
+  spans: RuntimeTraceSpan[]
+}
+
 export type DirectRunResultPayload = {
   ok: boolean
   method?: string
   result?: unknown
   error?: string
+  runId?: string
+  traceId?: string
+  runtimeTrace?: RuntimeTrace
 }
 
 export type DirectRunCapableProvider = {
@@ -36,6 +98,9 @@ export type DirectRunExecutionSnapshot = {
   summary: string
   method: string
   updatedAt: string
+  runId?: string
+  traceId?: string
+  runtimeTrace?: RuntimeTrace
 }
 
 const DIRECT_RUN_EMPTY_REASON = 'No public methods available for direct run.'
@@ -122,7 +187,10 @@ export function buildDirectRunSnapshot(payload: {
     state: payload.response.ok ? 'success' : 'failed',
     summary: summarizeDirectRunResult(payload.response),
     method: payload.response.method || payload.requestedMethod,
-    updatedAt: (payload.updatedAt || new Date()).toISOString()
+    updatedAt: (payload.updatedAt || new Date()).toISOString(),
+    runId: payload.response.runId,
+    traceId: payload.response.traceId,
+    runtimeTrace: payload.response.runtimeTrace
   }
 }
 

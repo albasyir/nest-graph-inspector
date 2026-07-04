@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { DirectRunResult } from '../types/direct-run.type';
+import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 
 type DirectRunArgsResult =
   | { ok: true; args: unknown[] }
@@ -11,6 +12,7 @@ type DirectRunArgsResult =
 export class DirectRunOutputAdapter {
   constructor(
     private readonly httpServeAdapter: HttpServeAdapter,
+    private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
   ) {}
 
   createRoute(path: string, instanceLookup: (moduleName: string, providerName: string) => unknown) {
@@ -39,12 +41,23 @@ export class DirectRunOutputAdapter {
         return argsResult.response;
       }
 
+      const traceIdentity = this.runtimeTraceRecorder.start({
+        moduleName,
+        providerName,
+        methodName,
+        args: argsResult.args,
+      });
+
       try {
         const result = await method.call(instance, ...argsResult.args);
+        const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(result);
         const payload: DirectRunResult = {
           ok: true,
           method: methodName,
           result,
+          runId: traceIdentity.runId,
+          traceId: traceIdentity.traceId,
+          runtimeTrace,
         };
 
         return {
@@ -52,10 +65,14 @@ export class DirectRunOutputAdapter {
           body: payload,
         } satisfies HttpServeResponse;
       } catch (error) {
+        const runtimeTrace = this.runtimeTraceRecorder.finishError(error);
         const payload: DirectRunResult = {
           ok: false,
           method: methodName,
           error: error instanceof Error ? error.message : 'Direct run failed.',
+          runId: traceIdentity.runId,
+          traceId: traceIdentity.traceId,
+          runtimeTrace,
         };
 
         return {

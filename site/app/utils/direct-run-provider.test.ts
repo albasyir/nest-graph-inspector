@@ -70,14 +70,68 @@ assert.equal(summarizeDirectRunResult({ ok: true, result: { pong: true } }), '{"
 assert.equal(summarizeDirectRunResult({ ok: true, result: undefined }), 'Completed with no return value.')
 assert.equal(summarizeDirectRunResult({ ok: false, error: 'boom' }), 'boom')
 assert.deepEqual(buildDirectRunSnapshot({
-  response: { ok: true, method: 'ping', result: { pong: true } },
+  response: {
+    ok: true,
+    method: 'ping',
+    result: { pong: true },
+    runId: 'run-1',
+    traceId: 'trace-1',
+    runtimeTrace: {
+      traceId: 'trace-1',
+      runId: 'run-1',
+      entrypoint: { methodName: 'ping' },
+      startedAt: '2026-06-28T10:00:00.000Z',
+      endedAt: '2026-06-28T10:00:01.000Z',
+      totalDurationMs: 1000,
+      status: 'success',
+      totalSpans: 1,
+      slowestSpanId: 'span-1',
+      spans: [{
+        spanId: 'span-1',
+        traceId: 'trace-1',
+        runId: 'run-1',
+        order: 0,
+        name: 'UserService.ping',
+        type: 'provider',
+        startedAt: '2026-06-28T10:00:00.000Z',
+        endedAt: '2026-06-28T10:00:01.000Z',
+        durationMs: 1000,
+        status: 'success'
+      }]
+    }
+  },
   requestedMethod: 'ping',
   updatedAt: new Date('2026-06-28T10:00:00.000Z')
 }), {
   state: 'success',
   summary: '{"pong":true}',
   method: 'ping',
-  updatedAt: '2026-06-28T10:00:00.000Z'
+  updatedAt: '2026-06-28T10:00:00.000Z',
+  runId: 'run-1',
+  traceId: 'trace-1',
+  runtimeTrace: {
+    traceId: 'trace-1',
+    runId: 'run-1',
+    entrypoint: { methodName: 'ping' },
+    startedAt: '2026-06-28T10:00:00.000Z',
+    endedAt: '2026-06-28T10:00:01.000Z',
+    totalDurationMs: 1000,
+    status: 'success',
+    totalSpans: 1,
+    slowestSpanId: 'span-1',
+    spans: [{
+      spanId: 'span-1',
+      traceId: 'trace-1',
+      runId: 'run-1',
+      order: 0,
+      name: 'UserService.ping',
+      type: 'provider',
+      startedAt: '2026-06-28T10:00:00.000Z',
+      endedAt: '2026-06-28T10:00:01.000Z',
+      durationMs: 1000,
+      status: 'success'
+    }]
+  }
 })
 
 console.log('direct-run-provider.test.ts ok')

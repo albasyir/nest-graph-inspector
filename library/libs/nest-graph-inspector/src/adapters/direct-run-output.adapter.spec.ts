@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
+import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 
 describe(DirectRunOutputAdapter.name, () => {
   let moduleRef: TestingModule;
@@ -10,7 +11,7 @@ describe(DirectRunOutputAdapter.name, () => {
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
-      providers: [HttpServeAdapter, DirectRunOutputAdapter],
+      providers: [HttpServeAdapter, RuntimeTraceRecorder, DirectRunOutputAdapter],
     }).compile();
 
     adapter = moduleRef.get(DirectRunOutputAdapter);
@@ -46,13 +47,21 @@ describe(DirectRunOutputAdapter.name, () => {
       provider: 'PingProvider',
       method: 'ping',
     });
+    const payload = JSON.parse(response.body);
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({
+    expect(payload).toMatchObject({
       ok: true,
       method: 'ping',
       result: 'pong',
+      runId: expect.any(String),
+      traceId: expect.any(String),
+      runtimeTrace: {
+        status: 'success',
+        totalSpans: 1,
+      },
     });
+    expect(payload.runtimeTrace.spans).toHaveLength(1);
   });
 
   it('responds to browser preflight requests for direct run', async () => {
@@ -116,13 +125,21 @@ describe(DirectRunOutputAdapter.name, () => {
         'content-type': 'application/json; charset=utf-8',
       },
     );
+    const payload = JSON.parse(response.body);
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({
+    expect(payload).toMatchObject({
       ok: true,
       method: 'ping',
       result: 'pong',
+      runId: expect.any(String),
+      traceId: expect.any(String),
+      runtimeTrace: {
+        status: 'success',
+        totalSpans: 1,
+      },
     });
+    expect(payload.runtimeTrace.spans).toHaveLength(1);
   });
 
   it('passes JSON args to provider methods', async () => {
@@ -152,10 +169,12 @@ describe(DirectRunOutputAdapter.name, () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({
+    expect(JSON.parse(response.body)).toMatchObject({
       ok: true,
       method: 'ping',
       result: 'pong:hello',
+      runId: expect.any(String),
+      traceId: expect.any(String),
     });
   });
 
@@ -184,10 +203,59 @@ describe(DirectRunOutputAdapter.name, () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({
+    expect(JSON.parse(response.body)).toMatchObject({
       ok: true,
       method: 'add',
       result: 5,
+      runId: expect.any(String),
+      traceId: expect.any(String),
+    });
+  });
+
+  it('returns runtime trace metadata for provider errors', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          fail: () => {
+            throw new Error('boom');
+          },
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'FailProvider',
+      method: 'fail',
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(JSON.parse(response.body)).toMatchObject({
+      ok: false,
+      method: 'fail',
+      error: 'boom',
+      runId: expect.any(String),
+      traceId: expect.any(String),
+      runtimeTrace: {
+        status: 'error',
+        totalSpans: 1,
+        failedSpanId: expect.any(String),
+        spans: [
+          expect.objectContaining({
+            name: 'FailProvider.fail',
+            status: 'error',
+            errorMessage: 'boom',
+          }),
+        ],
+      },
     });
   });
 });

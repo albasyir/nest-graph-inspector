@@ -171,6 +171,7 @@ const props = withDefaults(
       moduleName: string
       providerName: string
       error: string
+      snapshot?: DirectRunExecutionSnapshot
     } | null
   }>(),
   {
@@ -1557,6 +1558,52 @@ const selectedProviderLastRunLabel = computed(() => {
 
   return new Date(value).toLocaleString()
 })
+const selectedRuntimeTrace = computed(() => selectedProviderSnapshot.value?.runtimeTrace || null)
+const selectedRuntimeTraceNodes = computed(() => {
+  const trace = selectedRuntimeTrace.value
+  if (!trace) {
+    return []
+  }
+
+  return trace.spans.map(span => ({
+    ...span,
+    label: span.className && span.methodName
+      ? `${span.className}.${span.methodName}`
+      : span.name,
+    isSlowest: span.spanId === trace.slowestSpanId,
+    isFailed: span.spanId === trace.failedSpanId,
+    parentLabel: trace.spans.find(candidate => candidate.spanId === span.parentSpanId)?.name || ''
+  }))
+})
+const selectedRuntimeTraceSummary = computed(() => {
+  const trace = selectedRuntimeTrace.value
+  if (!trace) {
+    return []
+  }
+
+  return [
+    {
+      label: 'Total duration',
+      value: `${trace.totalDurationMs} ms`
+    },
+    {
+      label: 'Total spans',
+      value: String(trace.totalSpans)
+    },
+    {
+      label: 'Status',
+      value: trace.status
+    },
+    {
+      label: 'Slowest step',
+      value: selectedRuntimeTraceNodes.value.find(span => span.isSlowest)?.label || '—'
+    },
+    {
+      label: 'Failed step',
+      value: selectedRuntimeTraceNodes.value.find(span => span.isFailed)?.label || '—'
+    }
+  ]
+})
 const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => {
   const context = selectedProviderContext.value
   if (!context) {
@@ -2563,10 +2610,18 @@ function applyDirectRunFailure(payload: {
   moduleName: string
   providerName: string
   error: string
+  snapshot?: DirectRunExecutionSnapshot
 }): void {
   const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
   clearDirectRunPending(nodeId)
   setDirectRunError(nodeId, payload.error)
+
+  if (payload.snapshot) {
+    directRunStateByNodeId.value = {
+      ...directRunStateByNodeId.value,
+      [nodeId]: payload.snapshot
+    }
+  }
 }
 
 function requestDirectRun(method: DirectRunProviderMethod): void {
@@ -3303,6 +3358,78 @@ useResizeObserver(graphViewerRef, () => {
               {{ selectedProviderLastRunLabel }}
             </p>
           </div>
+
+          <div
+            v-if="selectedRuntimeTrace"
+            class="direct-run-drawer__trace"
+          >
+            <div class="direct-run-drawer__trace-header">
+              <div>
+                <p class="direct-run-drawer__result-title">
+                  Execution Sequence
+                </p>
+                <p class="direct-run-drawer__timestamp">
+                  Runtime Trace · run {{ selectedRuntimeTrace.runId }}
+                </p>
+              </div>
+              <UBadge
+                :label="selectedRuntimeTrace.status"
+                :color="selectedRuntimeTrace.status === 'error' ? 'error' : 'success'"
+                variant="soft"
+              />
+            </div>
+
+            <div class="direct-run-drawer__trace-summary-grid">
+              <div
+                v-for="item in selectedRuntimeTraceSummary"
+                :key="item.label"
+                class="direct-run-drawer__trace-summary-card"
+              >
+                <p class="direct-run-drawer__trace-summary-label">
+                  {{ item.label }}
+                </p>
+                <p class="direct-run-drawer__trace-summary-value">
+                  {{ item.value }}
+                </p>
+              </div>
+            </div>
+
+            <div class="direct-run-drawer__trace-list">
+              <div
+                v-for="span in selectedRuntimeTraceNodes"
+                :key="span.spanId"
+                class="direct-run-drawer__trace-item"
+                :class="{
+                  'direct-run-drawer__trace-item--error': span.isFailed,
+                  'direct-run-drawer__trace-item--slow': span.isSlowest
+                }"
+              >
+                <div class="direct-run-drawer__trace-item-header">
+                  <div>
+                    <p class="direct-run-drawer__trace-item-title">
+                      {{ span.label }}
+                    </p>
+                    <p class="direct-run-drawer__trace-item-meta">
+                      {{ span.type }} · {{ span.status }}
+                    </p>
+                  </div>
+                  <span class="direct-run-drawer__trace-item-duration">
+                    {{ span.durationMs }} ms
+                  </span>
+                </div>
+
+                <p class="direct-run-drawer__trace-item-meta">
+                  Parent: {{ span.parentLabel || 'root' }}
+                </p>
+                <p
+                  v-if="span.errorMessage"
+                  class="direct-run-drawer__message direct-run-drawer__message--error"
+                >
+                  {{ span.errorMessage }}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
     </UDrawer>
@@ -3390,6 +3517,11 @@ useResizeObserver(graphViewerRef, () => {
     var(--ui-text-highlighted)
   );
   --mg-toggle-text: var(--ui-bg);
+  --mg-trace-border: rgba(148, 163, 184, 0.35);
+  --mg-trace-bg: rgba(15, 23, 42, 0.04);
+  --mg-trace-card-bg: rgba(15, 23, 42, 0.03);
+  --mg-trace-error-border: rgba(239, 68, 68, 0.45);
+  --mg-trace-slow-border: rgba(245, 158, 11, 0.45);
 }
 
 .dark {
@@ -3411,6 +3543,11 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-bg: rgba(248, 113, 113, 0.08);
   --mg-root-title-bg: rgba(248, 113, 113, 0.1);
   --mg-node-resizer-color: #a78bfa;
+  --mg-trace-border: rgba(148, 163, 184, 0.4);
+  --mg-trace-bg: rgba(15, 23, 42, 0.36);
+  --mg-trace-card-bg: rgba(15, 23, 42, 0.48);
+  --mg-trace-error-border: rgba(248, 113, 113, 0.55);
+  --mg-trace-slow-border: rgba(251, 191, 36, 0.55);
 }
 
 .graph-viewer {
@@ -3587,6 +3724,76 @@ useResizeObserver(graphViewerRef, () => {
 
 .direct-run-drawer__result {
   width: 100%;
+}
+
+.direct-run-drawer__trace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--mg-trace-border);
+  border-radius: 12px;
+  background: var(--mg-trace-bg);
+}
+
+.direct-run-drawer__trace-header,
+.direct-run-drawer__trace-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.direct-run-drawer__trace-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.direct-run-drawer__trace-summary-card,
+.direct-run-drawer__trace-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--mg-trace-border);
+  border-radius: 10px;
+  background: var(--mg-trace-card-bg);
+}
+
+.direct-run-drawer__trace-item--error {
+  border-color: var(--mg-trace-error-border);
+}
+
+.direct-run-drawer__trace-item--slow {
+  border-color: var(--mg-trace-slow-border);
+}
+
+.direct-run-drawer__trace-summary-label,
+.direct-run-drawer__trace-item-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-drawer__trace-summary-value,
+.direct-run-drawer__trace-item-title,
+.direct-run-drawer__trace-item-duration {
+  margin: 0;
+  color: var(--ui-text-highlighted);
+}
+
+.direct-run-drawer__trace-summary-value,
+.direct-run-drawer__trace-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.direct-run-drawer__trace-item-duration {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .direct-run-drawer__result-title {

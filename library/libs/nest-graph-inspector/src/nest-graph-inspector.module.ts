@@ -12,6 +12,7 @@ import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 import { ProxyAdapter } from './adapters/proxy.adapter';
 import { HttpServeAdapter } from './adapters/http-serve.adapter';
 import { DirectRunOutputAdapter } from './adapters/direct-run-output.adapter';
+import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [
@@ -51,6 +52,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     HttpServeAdapter,
     HttpOutputAdapter,
     ProxyAdapter,
+    RuntimeTraceRecorder,
     DirectRunOutputAdapter,
     ViewerOutputAdapter,
   ],
