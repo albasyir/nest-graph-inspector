@@ -87,4 +87,5 @@ export type DirectRunTraceRecorder = {
   }): { runId: string; traceId: string };
   finishSuccess(result: unknown): RuntimeTrace;
   finishError(error: unknown): RuntimeTrace;
+  getCompletedTrace(traceId: string): RuntimeTrace | undefined;
 };

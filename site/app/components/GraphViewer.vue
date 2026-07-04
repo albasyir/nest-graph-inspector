@@ -35,6 +35,7 @@ import {
   type DirectRunExecutionSnapshot,
   type DirectRunProviderMethod
 } from '~/utils/direct-run-provider'
+import DirectRunSequenceDiagram from '~/components/DirectRunSequenceDiagram.vue'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -1559,22 +1560,6 @@ const selectedProviderLastRunLabel = computed(() => {
   return new Date(value).toLocaleString()
 })
 const selectedRuntimeTrace = computed(() => selectedProviderSnapshot.value?.runtimeTrace || null)
-const selectedRuntimeTraceNodes = computed(() => {
-  const trace = selectedRuntimeTrace.value
-  if (!trace) {
-    return []
-  }
-
-  return trace.spans.map(span => ({
-    ...span,
-    label: span.className && span.methodName
-      ? `${span.className}.${span.methodName}`
-      : span.name,
-    isSlowest: span.spanId === trace.slowestSpanId,
-    isFailed: span.spanId === trace.failedSpanId,
-    parentLabel: trace.spans.find(candidate => candidate.spanId === span.parentSpanId)?.name || ''
-  }))
-})
 const selectedRuntimeTraceSummary = computed(() => {
   const trace = selectedRuntimeTrace.value
   if (!trace) {
@@ -1596,11 +1581,11 @@ const selectedRuntimeTraceSummary = computed(() => {
     },
     {
       label: 'Slowest step',
-      value: selectedRuntimeTraceNodes.value.find(span => span.isSlowest)?.label || '—'
+      value: trace.spans.find(span => span.spanId === trace.slowestSpanId)?.name || '—'
     },
     {
       label: 'Failed step',
-      value: selectedRuntimeTraceNodes.value.find(span => span.isFailed)?.label || '—'
+      value: trace.spans.find(span => span.spanId === trace.failedSpanId)?.name || '—'
     }
   ]
 })
@@ -2084,7 +2069,7 @@ function splitTopLevelAny(value: string, separators: string[]): string[] {
   let escaped = false
 
   for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]
+    const character = value[index] || ''
     if (quote) {
       if (escaped) {
         escaped = false
@@ -2805,6 +2790,9 @@ watch(
     nodePositionOverrides.clear()
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
+    if (props.directRunResult) {
+      selectProviderNode(`provider-${props.directRunResult.moduleName}-${props.directRunResult.providerName}`)
+    }
     void centerGraph()
   },
   { deep: true }
@@ -2818,8 +2806,11 @@ watch(
     }
 
     applyDirectRunResult(payload)
+    if (!selectedProviderNodeId.value) {
+      selectProviderNode(`provider-${payload.moduleName}-${payload.providerName}`)
+    }
   },
-  { deep: true }
+  { deep: true, immediate: true }
 )
 
 watch(
@@ -3394,41 +3385,7 @@ useResizeObserver(graphViewerRef, () => {
               </div>
             </div>
 
-            <div class="direct-run-drawer__trace-list">
-              <div
-                v-for="span in selectedRuntimeTraceNodes"
-                :key="span.spanId"
-                class="direct-run-drawer__trace-item"
-                :class="{
-                  'direct-run-drawer__trace-item--error': span.isFailed,
-                  'direct-run-drawer__trace-item--slow': span.isSlowest
-                }"
-              >
-                <div class="direct-run-drawer__trace-item-header">
-                  <div>
-                    <p class="direct-run-drawer__trace-item-title">
-                      {{ span.label }}
-                    </p>
-                    <p class="direct-run-drawer__trace-item-meta">
-                      {{ span.type }} · {{ span.status }}
-                    </p>
-                  </div>
-                  <span class="direct-run-drawer__trace-item-duration">
-                    {{ span.durationMs }} ms
-                  </span>
-                </div>
-
-                <p class="direct-run-drawer__trace-item-meta">
-                  Parent: {{ span.parentLabel || 'root' }}
-                </p>
-                <p
-                  v-if="span.errorMessage"
-                  class="direct-run-drawer__message direct-run-drawer__message--error"
-                >
-                  {{ span.errorMessage }}
-                </p>
-              </div>
-            </div>
+            <DirectRunSequenceDiagram :trace="selectedRuntimeTrace" />
           </div>
         </div>
       </template>

@@ -258,6 +258,46 @@ describe(DirectRunOutputAdapter.name, () => {
       },
     });
   });
+
+  it('keeps completed traces available in recorder storage after direct run finishes', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+    const runtimeTraceRecorder = moduleRef.get(RuntimeTraceRecorder);
+
+    httpServeAdapter.register(
+      {
+        host: '127.0.0.1',
+        port,
+      },
+      [
+        adapter.createRoute('/direct-run', () => ({
+          ping: async () => {
+            await Promise.resolve();
+            return { ok: true };
+          },
+        })),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'PingProvider',
+      method: 'ping',
+    });
+    const payload = JSON.parse(response.body) as {
+      traceId: string;
+      runtimeTrace: { traceId: string; runId: string; totalSpans: number };
+    };
+
+    expect(response.statusCode).toBe(200);
+    expect(payload.runtimeTrace.traceId).toBe(payload.traceId);
+    expect(runtimeTraceRecorder.getCompletedTrace(payload.traceId)).toMatchObject({
+      traceId: payload.traceId,
+      runId: payload.runtimeTrace.runId,
+      totalSpans: 1,
+    });
+  });
 });
 
 type HttpResponse = {

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type {
@@ -16,9 +17,12 @@ type ActiveTraceContext = {
   startedAtMs: number;
 };
 
+const COMPLETED_TRACE_TTL_MS = 5 * 60 * 1000;
+
 @Injectable()
 export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
-  private activeContext: ActiveTraceContext | null = null;
+  private readonly activeContextStorage = new AsyncLocalStorage<ActiveTraceContext>();
+  private readonly completedTraces = new Map<string, RuntimeTrace>();
 
   start(context: {
     moduleName: string;
@@ -28,8 +32,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   }): { runId: string; traceId: string } {
     const traceId = randomUUID();
     const runId = randomUUID();
-
-    this.activeContext = {
+    const activeContext: ActiveTraceContext = {
       traceId,
       runId,
       moduleName: context.moduleName,
@@ -37,6 +40,8 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       methodName: context.methodName,
       startedAtMs: Date.now(),
     };
+
+    this.activeContextStorage.enterWith(activeContext);
 
     return { runId, traceId };
   }
@@ -49,33 +54,20 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     return this.finishTrace({ ok: false, error });
   }
 
+  getCompletedTrace(traceId: string): RuntimeTrace | undefined {
+    this.pruneCompletedTraces();
+    return this.completedTraces.get(traceId);
+  }
+
   private finishTrace(param: {
     ok: boolean;
     result?: unknown;
     error?: unknown;
   }): RuntimeTrace {
-    const context = this.activeContext;
+    const context = this.activeContextStorage.getStore();
     if (!context) {
-      const now = new Date().toISOString();
-      const traceId = randomUUID();
-      const runId = randomUUID();
-
-      return {
-        traceId,
-        runId,
-        entrypoint: {
-          methodName: 'unknown',
-        },
-        startedAt: now,
-        endedAt: now,
-        totalDurationMs: 0,
-        status: 'partial',
-        totalSpans: 0,
-        spans: [],
-      };
+      return this.persistCompletedTrace(this.buildFallbackTrace());
     }
-
-    this.activeContext = null;
 
     const endedAtMs = Date.now();
     const startedAt = new Date(context.startedAtMs).toISOString();
@@ -105,7 +97,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       },
     };
 
-    return {
+    return this.persistCompletedTrace({
       traceId: context.traceId,
       runId: context.runId,
       entrypoint: {
@@ -122,7 +114,42 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       failedSpanId: param.ok ? undefined : rootSpanId,
       slowestSpanId: rootSpanId,
       spans: [rootSpan],
+    });
+  }
+
+  private buildFallbackTrace(): RuntimeTrace {
+    const now = new Date().toISOString();
+    const traceId = randomUUID();
+    const runId = randomUUID();
+
+    return {
+      traceId,
+      runId,
+      entrypoint: {
+        methodName: 'unknown',
+      },
+      startedAt: now,
+      endedAt: now,
+      totalDurationMs: 0,
+      status: 'partial',
+      totalSpans: 0,
+      spans: [],
     };
+  }
+
+  private persistCompletedTrace(trace: RuntimeTrace): RuntimeTrace {
+    this.pruneCompletedTraces();
+    this.completedTraces.set(trace.traceId, trace);
+    return trace;
+  }
+
+  private pruneCompletedTraces() {
+    const cutoffMs = Date.now() - COMPLETED_TRACE_TTL_MS;
+    for (const [traceId, trace] of this.completedTraces.entries()) {
+      if (Date.parse(trace.endedAt) < cutoffMs) {
+        this.completedTraces.delete(traceId);
+      }
+    }
   }
 
   private classifyProviderType(providerName: string): RuntimeTraceSpanType {
