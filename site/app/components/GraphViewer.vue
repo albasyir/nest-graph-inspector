@@ -1617,6 +1617,14 @@ const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => 
     }
   }
 
+  if (selectedProviderError.value) {
+    return {
+      label: 'Failed',
+      color: 'error',
+      variant: 'solid'
+    }
+  }
+
   const snapshot = selectedProviderSnapshot.value
   if (!snapshot) {
     return {
@@ -2601,12 +2609,13 @@ function applyDirectRunFailure(payload: {
   clearDirectRunPending(nodeId)
   setDirectRunError(nodeId, payload.error)
 
-  if (payload.snapshot) {
-    directRunStateByNodeId.value = {
-      ...directRunStateByNodeId.value,
-      [nodeId]: payload.snapshot
-    }
-  }
+  const { [nodeId]: _removed, ...rest } = directRunStateByNodeId.value
+  directRunStateByNodeId.value = payload.snapshot
+    ? {
+        ...rest,
+        [nodeId]: payload.snapshot
+      }
+    : rest
 }
 
 function requestDirectRun(method: DirectRunProviderMethod): void {
@@ -3365,7 +3374,11 @@ useResizeObserver(graphViewerRef, () => {
               </div>
               <UBadge
                 :label="selectedRuntimeTrace.status"
-                :color="selectedRuntimeTrace.status === 'error' ? 'error' : 'success'"
+                :color="selectedRuntimeTrace.status === 'error'
+                  ? 'error'
+                  : selectedRuntimeTrace.status === 'partial'
+                    ? 'warning'
+                    : 'success'"
                 variant="soft"
               />
             </div>

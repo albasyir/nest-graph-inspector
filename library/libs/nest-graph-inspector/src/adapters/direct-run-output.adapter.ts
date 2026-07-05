@@ -15,79 +15,107 @@ export class DirectRunOutputAdapter {
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
   ) {}
 
-  createRoute(path: string, instanceLookup: (moduleName: string, providerName: string) => unknown) {
-    return this.httpServeAdapter.post(path, async ({ request }) => {
-      const body = await this.readJsonBody(request);
-      const moduleName = typeof body.module === 'string' ? body.module : '';
-      const providerName = typeof body.provider === 'string' ? body.provider : '';
-      const methodName = typeof body.method === 'string' ? body.method : '';
+  createRoute(
+    path: string,
+    instanceLookup: (moduleName: string, providerName: string) => unknown,
+  ) {
+    return this.httpServeAdapter.post(
+      path,
+      async ({ request }) => {
+        const body = await this.readJsonBody(request);
+        const moduleName = typeof body.module === 'string' ? body.module : '';
+        const providerName =
+          typeof body.provider === 'string' ? body.provider : '';
+        const methodName = typeof body.method === 'string' ? body.method : '';
 
-      if (!moduleName || !providerName || !methodName) {
-        return this.badRequest('module, provider, and method are required.');
-      }
+        if (!moduleName || !providerName || !methodName) {
+          return this.badRequest('module, provider, and method are required.');
+        }
 
-      const instance = instanceLookup(moduleName, providerName) as Record<string, unknown> | undefined;
-      if (!instance) {
-        return this.notFound(`Provider ${moduleName}:${providerName} is unavailable.`);
-      }
+        const instance = instanceLookup(moduleName, providerName) as
+          | Record<string, unknown>
+          | undefined;
+        if (!instance) {
+          return this.notFound(
+            `Provider ${moduleName}:${providerName} is unavailable.`,
+          );
+        }
 
-      const method = instance[methodName];
-      if (typeof method !== 'function') {
-        return this.badRequest(`Method ${methodName} is unavailable for direct run.`);
-      }
+        const method = instance[methodName];
+        if (typeof method !== 'function') {
+          return this.badRequest(
+            `Method ${methodName} is unavailable for direct run.`,
+          );
+        }
 
-      const argsResult = this.resolveArgs(body, methodName, method.length);
-      if (!argsResult.ok) {
-        return argsResult.response;
-      }
+        const argsResult = this.resolveArgs(body, methodName, method.length);
+        if (!argsResult.ok) {
+          return argsResult.response;
+        }
 
-      const traceIdentity = this.runtimeTraceRecorder.start({
-        moduleName,
-        providerName,
-        methodName,
-        args: argsResult.args,
-      });
+        const traceIdentity = this.runtimeTraceRecorder.start({
+          moduleName,
+          providerName,
+          methodName,
+          args: argsResult.args,
+        });
 
-      try {
-        const result = await method.call(instance, ...argsResult.args);
-        const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(result);
-        const payload: DirectRunResult = {
-          ok: true,
-          method: methodName,
-          result,
-          runId: traceIdentity.runId,
-          traceId: traceIdentity.traceId,
-          runtimeTrace,
-        };
+        try {
+          const result = this.runtimeTraceRecorder.runWithContext
+            ? await this.runtimeTraceRecorder.runWithContext(
+                traceIdentity,
+                async () => await method.call(instance, ...argsResult.args),
+              )
+            : await method.call(instance, ...argsResult.args);
+          const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(
+            traceIdentity,
+            result,
+          );
+          const payload: DirectRunResult = {
+            ok: true,
+            method: methodName,
+            result,
+            runId: traceIdentity.runId,
+            traceId: traceIdentity.traceId,
+            runtimeTrace,
+          };
 
-        return {
-          statusCode: 200,
-          body: payload,
-        } satisfies HttpServeResponse;
-      } catch (error) {
-        const runtimeTrace = this.runtimeTraceRecorder.finishError(error);
-        const payload: DirectRunResult = {
-          ok: false,
-          method: methodName,
-          error: error instanceof Error ? error.message : 'Direct run failed.',
-          runId: traceIdentity.runId,
-          traceId: traceIdentity.traceId,
-          runtimeTrace,
-        };
+          return {
+            statusCode: 200,
+            body: payload,
+          } satisfies HttpServeResponse;
+        } catch (error) {
+          const runtimeTrace = this.runtimeTraceRecorder.finishError(
+            traceIdentity,
+            error,
+          );
+          const payload: DirectRunResult = {
+            ok: false,
+            method: methodName,
+            error:
+              error instanceof Error ? error.message : 'Direct run failed.',
+            runId: traceIdentity.runId,
+            traceId: traceIdentity.traceId,
+            runtimeTrace,
+          };
 
-        return {
-          statusCode: 500,
-          body: payload,
-        } satisfies HttpServeResponse;
-      }
-    }, {
-      responseHeaders: {
-        'content-type': 'application/json; charset=utf-8',
+          return {
+            statusCode: 500,
+            body: payload,
+          } satisfies HttpServeResponse;
+        }
       },
-    });
+      {
+        responseHeaders: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+      },
+    );
   }
 
-  private async readJsonBody(request: NodeJS.ReadableStream): Promise<Record<string, unknown>> {
+  private async readJsonBody(
+    request: NodeJS.ReadableStream,
+  ): Promise<Record<string, unknown>> {
     let body = '';
 
     for await (const chunk of request) {
@@ -136,11 +164,7 @@ export class DirectRunOutputAdapter {
     return {
       ok: true,
       args:
-        parameterCount === 1
-          ? [input]
-          : Array.isArray(input)
-            ? input
-            : [input],
+        parameterCount === 1 ? [input] : Array.isArray(input) ? input : [input],
     };
   }
 

@@ -1,71 +1,17 @@
-export type DirectRunProviderMethod = {
-  name: string
-  parameterTypes: string
-}
+export type {
+  DirectRunProviderMethod,
+  RuntimeTrace,
+} from '@library/libs/nest-graph-inspector/src/types/direct-run.type'
+
+import type {
+  DirectRunProviderMethod,
+  RuntimeTrace,
+} from '@library/libs/nest-graph-inspector/src/types/direct-run.type'
 
 export type DirectRunProviderState = {
   runnable: boolean
   reason: string
   methods: DirectRunProviderMethod[]
-}
-
-export type RuntimeTraceStatus = 'success' | 'error' | 'partial'
-
-export type RuntimeTraceSpanStatus =
-  | 'success'
-  | 'error'
-  | 'cancelled'
-  | 'partial'
-  | 'unknown'
-
-export type RuntimeTraceSpanType =
-  | 'controller'
-  | 'provider'
-  | 'repository'
-  | 'database'
-  | 'external-http'
-  | 'external-queue'
-  | 'framework'
-  | 'unknown'
-
-export type RuntimeTraceSpan = {
-  spanId: string
-  parentSpanId?: string
-  traceId: string
-  runId: string
-  order: number
-  name: string
-  type: RuntimeTraceSpanType
-  moduleName?: string
-  className?: string
-  methodName?: string
-  resource?: string
-  startedAt: string
-  endedAt?: string
-  durationMs: number
-  status: RuntimeTraceSpanStatus
-  errorName?: string
-  errorMessage?: string
-  metadata?: Record<string, string | number | boolean | null>
-}
-
-export type RuntimeTrace = {
-  traceId: string
-  runId: string
-  entrypoint: {
-    module?: string
-    className?: string
-    methodName: string
-    signature?: string
-  }
-  startedAt: string
-  endedAt: string
-  totalDurationMs: number
-  status: RuntimeTraceStatus
-  totalSpans: number
-  failedSpanId?: string
-  slowestSpanId?: string
-  spans: RuntimeTraceSpan[]
 }
 
 export type DirectRunResultPayload = {

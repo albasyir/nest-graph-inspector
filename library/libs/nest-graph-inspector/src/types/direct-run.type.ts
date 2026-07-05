@@ -17,6 +17,19 @@ export type RuntimeTraceSpanType =
   | 'framework'
   | 'unknown';
 
+export type RuntimeTraceStartContext = {
+  moduleName: string;
+  providerName: string;
+  methodName: string;
+  args: unknown[];
+};
+
+export type RuntimeTraceHandle = {
+  traceId: string;
+  runId: string;
+  startedAtMs: number;
+} & RuntimeTraceStartContext;
+
 export type DirectRunProviderMethod = {
   name: string;
   parameterTypes: string;
@@ -79,13 +92,12 @@ export type DirectRunResult = {
 };
 
 export type DirectRunTraceRecorder = {
-  start(context: {
-    moduleName: string;
-    providerName: string;
-    methodName: string;
-    args: unknown[];
-  }): { runId: string; traceId: string };
-  finishSuccess(result: unknown): RuntimeTrace;
-  finishError(error: unknown): RuntimeTrace;
+  start(context: RuntimeTraceStartContext): RuntimeTraceHandle;
+  runWithContext?<T>(
+    handle: RuntimeTraceHandle,
+    callback: () => Promise<T>,
+  ): Promise<T>;
+  finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace;
+  finishError(handle: RuntimeTraceHandle, error: unknown): RuntimeTrace;
   getCompletedTrace(traceId: string): RuntimeTrace | undefined;
 };

@@ -5,13 +5,38 @@ import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 
+type DirectRunResponseBody = {
+  ok: boolean;
+  method?: string;
+  result?: unknown;
+  error?: string;
+  runId?: string;
+  traceId?: string;
+  runtimeTrace?: {
+    traceId?: string;
+    runId?: string;
+    status: string;
+    totalSpans: number;
+    failedSpanId?: string;
+    spans: unknown[];
+  };
+};
+
+function parseJson(body: string): DirectRunResponseBody {
+  return JSON.parse(body) as DirectRunResponseBody;
+}
+
 describe(DirectRunOutputAdapter.name, () => {
   let moduleRef: TestingModule;
   let adapter: DirectRunOutputAdapter;
 
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
-      providers: [HttpServeAdapter, RuntimeTraceRecorder, DirectRunOutputAdapter],
+      providers: [
+        HttpServeAdapter,
+        RuntimeTraceRecorder,
+        DirectRunOutputAdapter,
+      ],
     }).compile();
 
     adapter = moduleRef.get(DirectRunOutputAdapter);
@@ -47,7 +72,7 @@ describe(DirectRunOutputAdapter.name, () => {
       provider: 'PingProvider',
       method: 'ping',
     });
-    const payload = JSON.parse(response.body);
+    const payload = parseJson(response.body);
 
     expect(response.statusCode).toBe(200);
     expect(payload).toMatchObject({
@@ -125,7 +150,7 @@ describe(DirectRunOutputAdapter.name, () => {
         'content-type': 'application/json; charset=utf-8',
       },
     );
-    const payload = JSON.parse(response.body);
+    const payload = parseJson(response.body);
 
     expect(response.statusCode).toBe(200);
     expect(payload).toMatchObject({
@@ -169,7 +194,7 @@ describe(DirectRunOutputAdapter.name, () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toMatchObject({
+    expect(parseJson(response.body)).toMatchObject({
       ok: true,
       method: 'ping',
       result: 'pong:hello',
@@ -203,7 +228,7 @@ describe(DirectRunOutputAdapter.name, () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toMatchObject({
+    expect(parseJson(response.body)).toMatchObject({
       ok: true,
       method: 'add',
       result: 5,
@@ -238,7 +263,7 @@ describe(DirectRunOutputAdapter.name, () => {
     });
 
     expect(response.statusCode).toBe(500);
-    expect(JSON.parse(response.body)).toMatchObject({
+    expect(parseJson(response.body)).toMatchObject({
       ok: false,
       method: 'fail',
       error: 'boom',
@@ -285,14 +310,22 @@ describe(DirectRunOutputAdapter.name, () => {
       provider: 'PingProvider',
       method: 'ping',
     });
-    const payload = JSON.parse(response.body) as {
+    const payload = parseJson(response.body) as DirectRunResponseBody & {
       traceId: string;
-      runtimeTrace: { traceId: string; runId: string; totalSpans: number };
+      runtimeTrace: {
+        traceId: string;
+        runId: string;
+        totalSpans: number;
+        spans: unknown[];
+        status: string;
+      };
     };
 
     expect(response.statusCode).toBe(200);
     expect(payload.runtimeTrace.traceId).toBe(payload.traceId);
-    expect(runtimeTraceRecorder.getCompletedTrace(payload.traceId)).toMatchObject({
+    expect(
+      runtimeTraceRecorder.getCompletedTrace(payload.traceId),
+    ).toMatchObject({
       traceId: payload.traceId,
       runId: payload.runtimeTrace.runId,
       totalSpans: 1,
@@ -330,25 +363,21 @@ function request(
 ): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
-    const req = http.request(
-      target,
-      options,
-      (res) => {
-        let responseBody = '';
+    const req = http.request(target, options, (res) => {
+      let responseBody = '';
 
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => {
-          responseBody += chunk;
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body: responseBody,
         });
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode,
-            headers: res.headers,
-            body: responseBody,
-          });
-        });
-      },
-    );
+      });
+    });
 
     req.on('error', reject);
     if (options.body) {

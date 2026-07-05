@@ -4,54 +4,35 @@ import { Injectable } from '@nestjs/common';
 import type {
   DirectRunTraceRecorder,
   RuntimeTrace,
+  RuntimeTraceHandle,
   RuntimeTraceSpan,
   RuntimeTraceSpanType,
+  RuntimeTraceStartContext,
 } from './types/direct-run.type';
 
-type ActiveTraceContext = {
-  traceId: string;
-  runId: string;
-  moduleName: string;
-  providerName: string;
-  methodName: string;
-  startedAtMs: number;
-};
-
-const COMPLETED_TRACE_TTL_MS = 5 * 60 * 1000;
+const COMPLETED_TRACE_TTL_MS = 10 * 1000;
 
 @Injectable()
 export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
-  private readonly activeContextStorage = new AsyncLocalStorage<ActiveTraceContext>();
+  private readonly activeContextStorage =
+    new AsyncLocalStorage<RuntimeTraceHandle>();
   private readonly completedTraces = new Map<string, RuntimeTrace>();
 
-  start(context: {
-    moduleName: string;
-    providerName: string;
-    methodName: string;
-    args: unknown[];
-  }): { runId: string; traceId: string } {
-    const traceId = randomUUID();
-    const runId = randomUUID();
-    const activeContext: ActiveTraceContext = {
-      traceId,
-      runId,
-      moduleName: context.moduleName,
-      providerName: context.providerName,
-      methodName: context.methodName,
+  start(context: RuntimeTraceStartContext): RuntimeTraceHandle {
+    return {
+      traceId: randomUUID(),
+      runId: randomUUID(),
       startedAtMs: Date.now(),
+      ...context,
     };
-
-    this.activeContextStorage.enterWith(activeContext);
-
-    return { runId, traceId };
   }
 
-  finishSuccess(result: unknown): RuntimeTrace {
-    return this.finishTrace({ ok: true, result });
+  finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace {
+    return this.finishTrace(handle, { ok: true, result });
   }
 
-  finishError(error: unknown): RuntimeTrace {
-    return this.finishTrace({ ok: false, error });
+  finishError(handle: RuntimeTraceHandle, error: unknown): RuntimeTrace {
+    return this.finishTrace(handle, { ok: false, error });
   }
 
   getCompletedTrace(traceId: string): RuntimeTrace | undefined {
@@ -59,12 +40,22 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     return this.completedTraces.get(traceId);
   }
 
-  private finishTrace(param: {
-    ok: boolean;
-    result?: unknown;
-    error?: unknown;
-  }): RuntimeTrace {
-    const context = this.activeContextStorage.getStore();
+  async runWithContext<T>(
+    handle: RuntimeTraceHandle,
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    return await this.activeContextStorage.run(handle, callback);
+  }
+
+  private finishTrace(
+    handle: RuntimeTraceHandle,
+    param: {
+      ok: boolean;
+      result?: unknown;
+      error?: unknown;
+    },
+  ): RuntimeTrace {
+    const context = handle || this.activeContextStorage.getStore();
     if (!context) {
       return this.persistCompletedTrace(this.buildFallbackTrace());
     }
@@ -90,9 +81,12 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       durationMs,
       status,
       errorName: !param.ok ? this.resolveErrorName(param.error) : undefined,
-      errorMessage: !param.ok ? this.resolveErrorMessage(param.error) : undefined,
+      errorMessage: !param.ok
+        ? this.resolveErrorMessage(param.error)
+        : undefined,
       metadata: {
-        ponytail: 'MVP root-only runtime trace; upgrade by adding nested span instrumentation around provider/dependency boundaries.',
+        implementationNote:
+          'MVP root-only runtime trace; upgrade by adding nested span instrumentation around provider/dependency boundaries.',
         resultPreview: param.ok ? this.summarizeValue(param.result) : null,
       },
     };
@@ -187,12 +181,12 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     try {
       const json = JSON.stringify(value);
       if (json === undefined) {
-        return String(value);
+        return null;
       }
 
       return json.length > 160 ? `${json.slice(0, 159)}…` : json;
     } catch {
-      return String(value);
+      return '[unserializable]';
     }
   }
 }
