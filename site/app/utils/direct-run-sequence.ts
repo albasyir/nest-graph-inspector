@@ -58,10 +58,11 @@ function getStepLabel(span: RuntimeTrace['spans'][number]): string {
 export function buildRuntimeTraceSequenceDiagram(
   trace: RuntimeTrace
 ): RuntimeTraceSequenceDiagram {
+  const orderedSpans = [...trace.spans].sort((left, right) => left.order - right.order)
   const participants = new Map<string, SequenceParticipant>()
-  const spanById = new Map(trace.spans.map(span => [span.spanId, span]))
+  const spanById = new Map(orderedSpans.map(span => [span.spanId, span]))
 
-  for (const span of trace.spans) {
+  for (const span of orderedSpans) {
     const key = getParticipantKey(span)
     if (!participants.has(key)) {
       participants.set(key, {
@@ -95,7 +96,7 @@ export function buildRuntimeTraceSequenceDiagram(
 
   const edges: RuntimeTraceSequenceEdge[] = []
 
-  for (const [index, span] of trace.spans.entries()) {
+  for (const [index, span] of orderedSpans.entries()) {
     const participant = participants.get(getParticipantKey(span))
     if (!participant) {
       continue

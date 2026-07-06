@@ -2585,12 +2585,16 @@ async function emitDirectRun(request: DirectRunActionRequest): Promise<void> {
   }
 }
 
+function getProviderNodeId(moduleName: string, providerName: string): string {
+  return `provider-${moduleName}-${providerName}`
+}
+
 function applyDirectRunResult(payload: {
   moduleName: string
   providerName: string
   snapshot: DirectRunExecutionSnapshot
 }): void {
-  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  const nodeId = getProviderNodeId(payload.moduleName, payload.providerName)
   directRunStateByNodeId.value = {
     ...directRunStateByNodeId.value,
     [nodeId]: payload.snapshot
@@ -2605,7 +2609,7 @@ function applyDirectRunFailure(payload: {
   error: string
   snapshot?: DirectRunExecutionSnapshot
 }): void {
-  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  const nodeId = getProviderNodeId(payload.moduleName, payload.providerName)
   clearDirectRunPending(nodeId)
   setDirectRunError(nodeId, payload.error)
 
@@ -2799,8 +2803,11 @@ watch(
     nodePositionOverrides.clear()
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
-    if (props.directRunResult) {
-      selectProviderNode(`provider-${props.directRunResult.moduleName}-${props.directRunResult.providerName}`)
+    if (!selectedProviderNodeId.value && props.directRunResult) {
+      selectProviderNode(getProviderNodeId(
+        props.directRunResult.moduleName,
+        props.directRunResult.providerName
+      ))
     }
     void centerGraph()
   },
@@ -2816,7 +2823,7 @@ watch(
 
     applyDirectRunResult(payload)
     if (!selectedProviderNodeId.value) {
-      selectProviderNode(`provider-${payload.moduleName}-${payload.providerName}`)
+      selectProviderNode(getProviderNodeId(payload.moduleName, payload.providerName))
     }
   },
   { deep: true, immediate: true }
