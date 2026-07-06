@@ -62,7 +62,7 @@ export class DirectRunOutputAdapter {
 
         try {
           const invokeMethod = async (): Promise<unknown> =>
-            await method.call(instance, ...argsResult.args) as unknown;
+            (await method.call(instance, ...argsResult.args)) as unknown;
           const result = this.runtimeTraceRecorder.runWithContext
             ? await this.runtimeTraceRecorder.runWithContext(
                 traceIdentity,

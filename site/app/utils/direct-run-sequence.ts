@@ -1,5 +1,5 @@
 import { MarkerType, type Edge, type Node } from '@vue-flow/core'
-import type { RuntimeTrace } from './direct-run-provider'
+import type { RuntimeTrace, RuntimeTraceSpanStatus } from './direct-run-provider'
 
 type SequenceParticipant = {
   id: string
@@ -12,13 +12,13 @@ type SequenceNodeData = {
   label: string
   subtitle: string
   kind: 'participant' | 'step'
-  status?: string
+  status?: RuntimeTraceSpanStatus
   durationMs?: number
 }
 
 type SequenceEdgeData = {
   durationMs: number
-  status: string
+  status: RuntimeTraceSpanStatus
 }
 
 export type RuntimeTraceSequenceNode = Node<SequenceNodeData>
