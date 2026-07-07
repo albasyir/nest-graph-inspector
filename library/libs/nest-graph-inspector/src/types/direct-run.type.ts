@@ -43,17 +43,14 @@ export type RuntimeTraceEntrypoint = {
   module?: string;
   className?: string;
   methodName: string;
-  signature?: string;
 };
 
 export type RuntimeTraceSpan = {
   spanId: string;
   parentSpanId?: string;
-  traceId: string;
   runId: string;
   order: number;
   name: string;
-  type: RuntimeTraceSpanType;
   moduleName?: string;
   className?: string;
   methodName?: string;
@@ -77,7 +74,6 @@ export type RuntimeTrace = {
   status: RuntimeTraceStatus;
   totalSpans: number;
   failedSpanId?: string;
-  slowestSpanId?: string;
   spans: RuntimeTraceSpan[];
 };
 
@@ -100,4 +96,5 @@ export type DirectRunTraceRecorder = {
   finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace;
   finishError(handle: RuntimeTraceHandle, error: unknown): RuntimeTrace;
   getCompletedTrace(traceId: string): RuntimeTrace | undefined;
+  getCompletedTraces(): RuntimeTrace[];
 };

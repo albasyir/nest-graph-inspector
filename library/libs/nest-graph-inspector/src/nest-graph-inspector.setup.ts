@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
 import type {
   InjectionToken,
@@ -248,9 +248,20 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     return {
       path,
+      historyDirPath: this.getDirectRunHistoryDirPath(),
       instanceLookup: (moduleName: string, providerName: string) =>
         this.findDirectRunProviderInstance(moduleName, providerName),
     };
+  }
+
+  private getDirectRunHistoryDirPath(): string | undefined {
+    const jsonOutput = this.options.outputs?.find(
+      (output) => output.type === 'json',
+    );
+
+    return jsonOutput?.type === 'json'
+      ? join(process.cwd(), dirname(jsonOutput.path), 'direct-run', 'history')
+      : undefined;
   }
 
   buildModuleMapFromAutoDetect(): ModuleMap {
@@ -437,6 +448,9 @@ export class NestGraphInspectorSetup implements OnModuleInit {
               moduleName: param.moduleName,
               className: param.className,
               methodName,
+              metadata: {
+                argsPreview: this.runtimeTraceRecorder.summarizeValue(args),
+              },
             },
             () => method.apply(param.instance, args),
           ),
@@ -938,7 +952,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           dependencies: provider.dependencies.map((dep) =>
             this.enrichDependency(dep, moduleName),
           ),
-          directRun: this.resolveDirectRunProviderMeta(provider.name, moduleName),
+          directRun: this.resolveDirectRunProviderMeta(
+            provider.name,
+            moduleName,
+          ),
         })),
         controllers: moduleData.controllers.map((controller) => ({
           ...controller,
@@ -960,7 +977,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     providerName: string,
     moduleName: string,
   ): DirectRunProviderMeta | undefined {
-    const instance = this.findDirectRunProviderInstance(moduleName, providerName);
+    const instance = this.findDirectRunProviderInstance(
+      moduleName,
+      providerName,
+    );
     if (!instance) {
       return undefined;
     }
@@ -980,41 +1000,50 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     providerName: string,
   ): unknown {
     const moduleRef = [...this.modulesContainer.values()].find(
-      candidate => this.moduleName(candidate) === moduleName,
+      (candidate) => this.moduleName(candidate) === moduleName,
     );
     if (!moduleRef) {
       return undefined;
     }
 
-    const providerWrapper = [...moduleRef.providers.values()].find((wrapper) => {
-      const instance =
-        wrapper.instance &&
-        (typeof wrapper.instance === 'object' || typeof wrapper.instance === 'function')
-          ? (wrapper.instance as { constructor?: { name?: string } })
-          : null;
-      const resolvedName =
-        wrapper.metatype?.name ||
-        instance?.constructor?.name ||
-        this.tokenName(wrapper.token);
+    const providerWrapper = [...moduleRef.providers.values()].find(
+      (wrapper) => {
+        const instance =
+          wrapper.instance &&
+          (typeof wrapper.instance === 'object' ||
+            typeof wrapper.instance === 'function')
+            ? (wrapper.instance as { constructor?: { name?: string } })
+            : null;
+        const resolvedName =
+          wrapper.metatype?.name ||
+          instance?.constructor?.name ||
+          this.tokenName(wrapper.token);
 
-      return resolvedName === providerName;
-    });
+        return resolvedName === providerName;
+      },
+    );
 
     return providerWrapper?.instance;
   }
 
   private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
-    if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) {
+    if (
+      !instance ||
+      (typeof instance !== 'object' && typeof instance !== 'function')
+    ) {
       return [];
     }
 
-    const prototype = Object.getPrototypeOf(instance) as Record<string, unknown> | null;
+    const prototype = Object.getPrototypeOf(instance) as Record<
+      string,
+      unknown
+    > | null;
     if (!prototype || prototype === Object.prototype) {
       return [];
     }
 
     const methods = Object.getOwnPropertyNames(prototype)
-      .filter(name => name !== 'constructor')
+      .filter((name) => name !== 'constructor')
       .map((name) => {
         const candidate = prototype[name];
         if (typeof candidate !== 'function') {
@@ -1036,7 +1065,9 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       .filter((method): method is DirectRunProviderMethod => method !== null)
       .sort((left, right) => left.name.localeCompare(right.name));
 
-    return [...new Map(methods.map(method => [method.name, method])).values()];
+    return [
+      ...new Map(methods.map((method) => [method.name, method])).values(),
+    ];
   }
 
   private getDirectRunMethodParameterTypes(param: {
@@ -1064,7 +1095,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return '[]';
     }
 
-    return `[${runtimeNames.map(name => `${name}: unknown`).join(', ')}]`;
+    return `[${runtimeNames.map((name) => `${name}: unknown`).join(', ')}]`;
   }
 
   private extractMethodParameterTypesFromProject(
@@ -1073,10 +1104,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   ): string | undefined {
     const targetClass = this.tsMorphProject
       .getSourceFiles()
-      .flatMap(sourceFile =>
+      .flatMap((sourceFile) =>
         sourceFile.getDescendantsOfKind(SyntaxKind.ClassDeclaration),
       )
-      .find(classDeclaration => classDeclaration.getName() === className);
+      .find((classDeclaration) => classDeclaration.getName() === className);
 
     const method = targetClass?.getInstanceMethod(methodName);
     if (!method) {
@@ -1085,8 +1116,9 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     const parameters = method.getParameters();
     return `[${parameters
-      .map(parameter =>
-        `${parameter.getName()}: ${this.typeToTypeScriptCode(parameter.getType(), parameter)}`,
+      .map(
+        (parameter) =>
+          `${parameter.getName()}: ${this.typeToTypeScriptCode(parameter.getType(), parameter)}`,
       )
       .join(', ')}]`;
   }
@@ -1108,7 +1140,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         .getClassOrThrow('DirectRunMethodSource')
         .getInstanceMethod(methodName)
         ?.getParameters()
-        .map(parameter => parameter.getName());
+        .map((parameter) => parameter.getName());
       if (names) {
         return names;
       }
@@ -1128,7 +1160,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         initializer?.asKind(SyntaxKind.FunctionExpression) ??
         initializer?.asKind(SyntaxKind.ArrowFunction);
 
-      return callable?.getParameters().map(parameter => parameter.getName());
+      return callable?.getParameters().map((parameter) => parameter.getName());
     } catch {
       return undefined;
     }
@@ -1139,10 +1171,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     enclosingNode: Node,
     seenTypeTexts = new Set<string>(),
   ): string {
-    if (
-      type.isAny()
-      || type.isUnknown()
-    ) {
+    if (type.isAny() || type.isUnknown()) {
       return 'unknown';
     }
 
@@ -1189,7 +1218,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     if (type.isUnion()) {
       return type
         .getUnionTypes()
-        .map(unionType =>
+        .map((unionType) =>
           this.typeToTypeScriptCode(
             unionType,
             enclosingNode,
@@ -1202,7 +1231,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     if (type.isTuple()) {
       return `[${type
         .getTupleElements()
-        .map(tupleType =>
+        .map((tupleType) =>
           this.typeToTypeScriptCode(
             tupleType,
             enclosingNode,
@@ -1245,8 +1274,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         const propertyType = property.getTypeAtLocation(
           propertyNode ?? enclosingNode,
         );
-        const optional = property.isOptional()
-          || this.typeAllowsUndefined(propertyType);
+        const optional =
+          property.isOptional() || this.typeAllowsUndefined(propertyType);
 
         return `${this.propertyNameToTypeScriptCode(property.getName())}${optional ? '?' : ''}: ${this.typeToTypeScriptCode(
           propertyType,
@@ -1268,9 +1297,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private typeAllowsUndefined(type: TsMorphType): boolean {
-    return type.isUndefined()
-      || (type.isUnion()
-        && type.getUnionTypes().some(unionType => unionType.isUndefined()));
+    return (
+      type.isUndefined() ||
+      (type.isUnion() &&
+        type.getUnionTypes().some((unionType) => unionType.isUndefined()))
+    );
   }
 
   private findGraphCycles(

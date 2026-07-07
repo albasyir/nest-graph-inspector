@@ -3,6 +3,7 @@ import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { DirectRunResult } from '../types/direct-run.type';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
+import type { RuntimeTrace } from '../types/direct-run.type';
 
 type DirectRunArgsResult =
   | { ok: true; args: unknown[] }
@@ -18,6 +19,7 @@ export class DirectRunOutputAdapter {
   createRoute(
     path: string,
     instanceLookup: (moduleName: string, providerName: string) => unknown,
+    onComplete?: (trace: RuntimeTrace) => void | Promise<void>,
   ) {
     return this.httpServeAdapter.post(
       path,
@@ -73,6 +75,9 @@ export class DirectRunOutputAdapter {
             traceIdentity,
             result,
           );
+          if (onComplete) {
+            await onComplete(runtimeTrace);
+          }
           const payload: DirectRunResult = {
             ok: true,
             method: methodName,
@@ -91,6 +96,9 @@ export class DirectRunOutputAdapter {
             traceIdentity,
             error,
           );
+          if (onComplete) {
+            await onComplete(runtimeTrace);
+          }
           const payload: DirectRunResult = {
             ok: false,
             method: methodName,
@@ -106,6 +114,52 @@ export class DirectRunOutputAdapter {
             body: payload,
           } satisfies HttpServeResponse;
         }
+      },
+      {
+        responseHeaders: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+      },
+    );
+  }
+
+  createHistoriesRoute(path: string) {
+    return this.httpServeAdapter.get(
+      path,
+      () => this.runtimeTraceRecorder.getCompletedTraces(),
+      {
+        responseHeaders: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+      },
+    );
+  }
+
+  createHistoryIndexRoute(path: string) {
+    return this.httpServeAdapter.get(
+      path,
+      () =>
+        this.runtimeTraceRecorder
+          .getCompletedTraces()
+          .map((trace) => trace.traceId),
+      {
+        responseHeaders: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+      },
+    );
+  }
+
+  createHistoryTraceRoute(path: string) {
+    return this.httpServeAdapter.get(
+      `${path}/*`,
+      ({ request }) => {
+        const traceId = this.traceIdFromPath(request.url ?? '', path);
+        const trace = traceId
+          ? this.runtimeTraceRecorder.getCompletedTrace(traceId)
+          : undefined;
+
+        return trace ?? this.notFound(`Trace ${traceId || ''} is unavailable.`);
       },
       {
         responseHeaders: {
@@ -188,5 +242,12 @@ export class DirectRunOutputAdapter {
         error: message,
       } satisfies DirectRunResult,
     };
+  }
+
+  private traceIdFromPath(url: string, basePath: string): string {
+    const path = new URL(url, 'http://localhost').pathname;
+    return decodeURIComponent(
+      path.slice(`${basePath.replace(/\/$/, '')}/`.length),
+    );
   }
 }

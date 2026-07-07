@@ -7,12 +7,17 @@ import { HttpOutputAdapter } from './http-output.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
+import type { RuntimeTrace } from '../types/direct-run.type';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 type ViewerOutputInternalConfig = ViewerOutputConfig & {
   directRun?: {
     path: string;
     instanceLookup: (moduleName: string, providerName: string) => unknown;
+    historyDirPath?: string;
   };
 };
 
@@ -27,6 +32,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     private readonly proxyAdapter: ProxyAdapter,
     private readonly httpServeAdapter: HttpServeAdapter,
     private readonly directRunOutputAdapter: DirectRunOutputAdapter,
+    private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
   ) {}
 
   async execute(
@@ -66,10 +72,32 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
           host: config.host,
           port: config.port,
         },
-        [this.directRunOutputAdapter.createRoute(
-          internalConfig.directRun.path,
-          (moduleName, providerName) => internalConfig.directRun?.instanceLookup(moduleName, providerName),
-        )],
+        [
+          this.directRunOutputAdapter.createRoute(
+            internalConfig.directRun.path,
+            (moduleName, providerName) =>
+              internalConfig.directRun?.instanceLookup(
+                moduleName,
+                providerName,
+              ),
+            internalConfig.directRun.historyDirPath
+              ? (trace) =>
+                  this.writeHistoryFiles(
+                    internalConfig.directRun!.historyDirPath!,
+                    trace,
+                  )
+              : undefined,
+          ),
+          this.directRunOutputAdapter.createHistoriesRoute(
+            `${internalConfig.directRun.path}/histories`,
+          ),
+          this.directRunOutputAdapter.createHistoryIndexRoute(
+            `${internalConfig.directRun.path}/history/index`,
+          ),
+          this.directRunOutputAdapter.createHistoryTraceRoute(
+            `${internalConfig.directRun.path}/history`,
+          ),
+        ],
       );
     }
 
@@ -115,5 +143,24 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     return {
       origins: [new URL(this.viewerBaseUrl).origin],
     };
+  }
+
+  private async writeHistoryFiles(
+    dirPath: string,
+    trace: RuntimeTrace,
+  ): Promise<void> {
+    const traceIds = this.runtimeTraceRecorder
+      .getCompletedTraces()
+      .map((item) => item.traceId);
+
+    await mkdir(dirPath, { recursive: true });
+    await writeFile(
+      join(dirPath, `${trace.traceId}.json`),
+      JSON.stringify(trace, null, 2),
+    );
+    await writeFile(
+      join(dirPath, 'index.json'),
+      JSON.stringify(traceIds, null, 2),
+    );
   }
 }

@@ -54,6 +54,11 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     return this.completedTraces.get(traceId);
   }
 
+  getCompletedTraces(): RuntimeTrace[] {
+    this.pruneCompletedTraces();
+    return [...this.completedTraces.values()];
+  }
+
   async runWithContext<T>(
     handle: RuntimeTraceHandle,
     callback: () => Promise<T>,
@@ -77,7 +82,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
 
     const startedAtMs = Date.now();
     const spanId = randomUUID();
-    const stack = this.activeSpanStackStorage.getStore() ?? [context.rootSpanId];
+    const stack = this.activeSpanStackStorage.getStore() ?? [
+      context.rootSpanId,
+    ];
     stack.push(spanId);
     const parentSpanId = stack.at(-2);
     let isPendingPromise = false;
@@ -88,22 +95,56 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
         isPendingPromise = true;
         return result.then(
           (value) => {
-            this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, true);
+            this.pushSpan(
+              context,
+              span,
+              spanId,
+              parentSpanId,
+              startedAtMs,
+              true,
+              undefined,
+              value,
+            );
             stack.pop();
             return value;
           },
           (error) => {
-            this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, false, error);
+            this.pushSpan(
+              context,
+              span,
+              spanId,
+              parentSpanId,
+              startedAtMs,
+              false,
+              error,
+            );
             stack.pop();
             throw error;
           },
         ) as T;
       }
 
-      this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, true);
+      this.pushSpan(
+        context,
+        span,
+        spanId,
+        parentSpanId,
+        startedAtMs,
+        true,
+        undefined,
+        result,
+      );
       return result;
     } catch (error) {
-      this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, false, error);
+      this.pushSpan(
+        context,
+        span,
+        spanId,
+        parentSpanId,
+        startedAtMs,
+        false,
+        error,
+      );
       throw error;
     } finally {
       if (!isPendingPromise && stack.at(-1) === spanId) {
@@ -120,7 +161,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       error?: unknown;
     },
   ): RuntimeTrace {
-    const context = (handle as ActiveRuntimeTraceHandle) || this.activeContextStorage.getStore();
+    const context =
+      (handle as ActiveRuntimeTraceHandle) ||
+      this.activeContextStorage.getStore();
     if (!context) {
       return this.persistCompletedTrace(this.buildFallbackTrace());
     }
@@ -132,11 +175,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     const status = param.ok ? 'success' : 'error';
     const rootSpan: RuntimeTraceSpan = {
       spanId: context.rootSpanId,
-      traceId: context.traceId,
       runId: context.runId,
       order: 0,
       name: `${context.providerName}.${context.methodName}`,
-      type: this.classifyProviderType(context.providerName),
       moduleName: context.moduleName,
       className: context.providerName,
       methodName: context.methodName,
@@ -149,16 +190,16 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
         ? this.resolveErrorMessage(param.error)
         : undefined,
       metadata: {
+        argsPreview: this.summarizeValue(context.args),
         resultPreview: param.ok ? this.summarizeValue(param.result) : null,
       },
     };
 
-    const spans = [rootSpan, ...(this.activeSpans.get(context.traceId) || [])]
-      .sort((left, right) => left.order - right.order);
+    const spans = [
+      rootSpan,
+      ...(this.activeSpans.get(context.traceId) || []),
+    ].sort((left, right) => left.order - right.order);
     const failedSpan = spans.find((span) => span.status === 'error');
-    const slowestSpan = spans.reduce((slowest, span) =>
-      span.durationMs > slowest.durationMs ? span : slowest,
-    rootSpan);
 
     this.activeSpans.delete(context.traceId);
 
@@ -169,7 +210,6 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
         module: context.moduleName,
         className: context.providerName,
         methodName: context.methodName,
-        signature: `${context.providerName}.${context.methodName}()`,
       },
       startedAt,
       endedAt,
@@ -177,7 +217,6 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       status,
       totalSpans: spans.length,
       failedSpanId: failedSpan?.spanId,
-      slowestSpanId: slowestSpan.spanId,
       spans,
     });
   }
@@ -190,17 +229,16 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     startedAtMs: number,
     ok: boolean,
     error?: unknown,
+    result?: unknown,
   ) {
     const endedAtMs = Date.now();
     const spans = this.activeSpans.get(context.traceId) || [];
     spans.push({
       spanId,
       parentSpanId,
-      traceId: context.traceId,
       runId: context.runId,
       order: spans.length + 1,
       name: input.name,
-      type: input.type,
       moduleName: input.moduleName,
       className: input.className,
       methodName: input.methodName,
@@ -211,7 +249,10 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       status: ok ? 'success' : 'error',
       errorName: ok ? undefined : this.resolveErrorName(error),
       errorMessage: ok ? undefined : this.resolveErrorMessage(error),
-      metadata: input.metadata,
+      metadata: {
+        ...input.metadata,
+        resultPreview: ok ? this.summarizeValue(result) : null,
+      },
     });
     this.activeSpans.set(context.traceId, spans);
   }
@@ -256,9 +297,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   private isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
     return Boolean(
       value &&
-        (typeof value === 'object' || typeof value === 'function') &&
-        'then' in value &&
-        typeof (value as { then?: unknown }).then === 'function',
+      (typeof value === 'object' || typeof value === 'function') &&
+      'then' in value &&
+      typeof (value as { then?: unknown }).then === 'function',
     );
   }
 
@@ -298,7 +339,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     return typeof error === 'string' ? error : undefined;
   }
 
-  private summarizeValue(value: unknown): string | null {
+  summarizeValue(value: unknown): string | null {
     if (value === undefined) {
       return null;
     }
