@@ -1,6 +1,8 @@
 export type {
   DirectRunProviderMethod,
   RuntimeTrace,
+  RuntimeTraceSpan,
+  RuntimeTraceSpanStatus,
 } from '@library/libs/nest-graph-inspector/src/types/direct-run.type'
 
 import type {

@@ -22,7 +22,8 @@ export class ProductRepository {
     return this.products.find((p) => p.id === id);
   }
 
-  findAll(): Product[] {
+  async findAll(): Promise<Product[]> {
+    await new Promise(resolve => setTimeout(resolve, 200));
     return [...this.products];
   }
 

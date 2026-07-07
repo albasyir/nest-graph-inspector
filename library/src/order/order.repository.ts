@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 
 export interface Order {
   id: number;
@@ -37,11 +37,20 @@ export class OrderRepository {
     return this.orders.find((o) => o.id === id);
   }
 
-  findAll(): Order[] {
+  async findAll(): Promise<Order[]> {
+    await new Promise(resolve => setTimeout(resolve, 100));
     return [...this.orders];
   }
 
-  findByUserId(userId: number): Order[] {
+  async findByUserId(userId: number): Promise<Order[]> {
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    await this.findAll();
+
+    await this.findAll();
+
+    if(userId === 0) throw new NotFoundException('User not found');
+
     return this.orders.filter((o) => o.userId === userId);
   }
 

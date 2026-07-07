@@ -24,6 +24,7 @@ import { ModuleMap } from './types/module-map.type';
 import type {
   DirectRunProviderMeta,
   DirectRunProviderMethod,
+  RuntimeTraceSpanType,
 } from './types/direct-run.type';
 import type {
   GraphOutput,
@@ -43,6 +44,7 @@ import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { OutputAdapter } from './ports/output.adapter';
 import { Node, Project, SyntaxKind, Type as TsMorphType } from 'ts-morph';
 import type { NestGraphInspectorViewerDirectRunOptions } from './nest-graph-inspector.type';
+import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 
 type DependencyNodeKind = 'provider' | 'controller';
 type DependencyNode = {
@@ -75,6 +77,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
   private readonly tsMorphProject = this.createTsMorphProject();
+  private readonly runtimeTraceInstrumentedInstances = new WeakSet<object>();
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -84,6 +87,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     private readonly fileOutputAdapter: FileOutputAdapter,
     private readonly jsonOutputAdapter: JsonOutputAdapter,
     private readonly viewerOutputAdapter: ViewerOutputAdapter,
+    private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
   ) {
     this.outputAdapters = {
       http: this.httpOutputAdapter,
@@ -150,6 +154,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private getModuleTree(rootModule: Module): ModuleTree {
     const moduleTree = this.resolveModuleTree(rootModule);
     this.resolveModuleMembers(moduleTree);
+    this.instrumentRuntimeTrace(moduleTree);
     this.appendNestCoreModule(moduleTree);
 
     return moduleTree;
@@ -344,6 +349,99 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       node.providers = this.extractProviders(node.moduleRef, node.name);
       node.controllers = this.extractControllers(node.moduleRef, node.name);
     });
+  }
+
+  private instrumentRuntimeTrace(moduleTree: ModuleTree): void {
+    this.walkModuleTree(moduleTree, (node) => {
+      if (!node.moduleRef) {
+        return;
+      }
+
+      this.instrumentRuntimeTraceWrappers({
+        moduleName: node.name,
+        type: 'provider',
+        wrappers: node.moduleRef.providers.values(),
+        shouldIgnore: (name) =>
+          name === node.name || this.ignoreProvider.includes(name),
+      });
+      this.instrumentRuntimeTraceWrappers({
+        moduleName: node.name,
+        type: 'controller',
+        wrappers: node.moduleRef.controllers.values(),
+      });
+    });
+  }
+
+  private instrumentRuntimeTraceWrappers(param: {
+    moduleName: string;
+    type: RuntimeTraceSpanType;
+    wrappers: Iterable<InstanceWrapper<unknown>>;
+    shouldIgnore?: (name: string) => boolean;
+  }): void {
+    for (const wrapper of param.wrappers) {
+      const instance = wrapper.instance;
+      if (!instance || typeof instance !== 'object') {
+        continue;
+      }
+
+      const className = this.wrapperClassName(wrapper);
+      if (!className || param.shouldIgnore?.(className)) {
+        continue;
+      }
+
+      this.instrumentRuntimeTraceInstance({
+        instance,
+        moduleName: param.moduleName,
+        className,
+        type: param.type,
+      });
+    }
+  }
+
+  private instrumentRuntimeTraceInstance(param: {
+    instance: object;
+    moduleName: string;
+    className: string;
+    type: RuntimeTraceSpanType;
+  }): void {
+    if (this.runtimeTraceInstrumentedInstances.has(param.instance)) {
+      return;
+    }
+
+    this.runtimeTraceInstrumentedInstances.add(param.instance);
+
+    const prototype = Object.getPrototypeOf(param.instance) as object | null;
+    if (!prototype) {
+      return;
+    }
+
+    for (const methodName of Object.getOwnPropertyNames(prototype)) {
+      if (methodName === 'constructor') {
+        continue;
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName);
+      const method = descriptor?.value;
+      if (typeof method !== 'function') {
+        continue;
+      }
+
+      Object.defineProperty(param.instance, methodName, {
+        configurable: true,
+        writable: true,
+        value: (...args: unknown[]) =>
+          this.runtimeTraceRecorder.recordSpan(
+            {
+              name: `${param.className}.${methodName}`,
+              type: param.type,
+              moduleName: param.moduleName,
+              className: param.className,
+              methodName,
+            },
+            () => method.apply(param.instance, args),
+          ),
+      });
+    }
   }
 
   private appendNestCoreModule(moduleTree: ModuleTree): void {

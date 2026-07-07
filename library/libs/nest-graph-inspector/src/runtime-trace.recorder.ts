@@ -12,19 +12,33 @@ import type {
 
 const COMPLETED_TRACE_TTL_MS = 10 * 1000;
 
+type ActiveRuntimeTraceHandle = RuntimeTraceHandle & { rootSpanId: string };
+type RuntimeTraceSpanInput = {
+  name: string;
+  type: RuntimeTraceSpanType;
+  moduleName?: string;
+  className?: string;
+  methodName?: string;
+  resource?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+};
+
 @Injectable()
 export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   private readonly activeContextStorage =
-    new AsyncLocalStorage<RuntimeTraceHandle>();
+    new AsyncLocalStorage<ActiveRuntimeTraceHandle>();
+  private readonly activeSpanStackStorage = new AsyncLocalStorage<string[]>();
   private readonly completedTraces = new Map<string, RuntimeTrace>();
+  private readonly activeSpans = new Map<string, RuntimeTraceSpan[]>();
 
   start(context: RuntimeTraceStartContext): RuntimeTraceHandle {
     return {
       traceId: randomUUID(),
       runId: randomUUID(),
+      rootSpanId: randomUUID(),
       startedAtMs: Date.now(),
       ...context,
-    };
+    } as RuntimeTraceHandle;
   }
 
   finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace {
@@ -44,7 +58,58 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     handle: RuntimeTraceHandle,
     callback: () => Promise<T>,
   ): Promise<T> {
-    return await this.activeContextStorage.run(handle, callback);
+    const activeHandle = handle as ActiveRuntimeTraceHandle;
+    this.activeSpans.set(activeHandle.traceId, []);
+    return await this.activeContextStorage.run(activeHandle, async () =>
+      this.activeSpanStackStorage.run([activeHandle.rootSpanId], callback),
+    );
+  }
+
+  recordSpan<T>(span: RuntimeTraceSpanInput, callback: () => T): T {
+    const context = this.activeContextStorage.getStore();
+    if (!context) {
+      return callback();
+    }
+
+    if (this.isRootSpan(context, span)) {
+      return callback();
+    }
+
+    const startedAtMs = Date.now();
+    const spanId = randomUUID();
+    const stack = this.activeSpanStackStorage.getStore() ?? [context.rootSpanId];
+    stack.push(spanId);
+    const parentSpanId = stack.at(-2);
+    let isPendingPromise = false;
+
+    try {
+      const result = callback();
+      if (this.isPromiseLike(result)) {
+        isPendingPromise = true;
+        return result.then(
+          (value) => {
+            this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, true);
+            stack.pop();
+            return value;
+          },
+          (error) => {
+            this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, false, error);
+            stack.pop();
+            throw error;
+          },
+        ) as T;
+      }
+
+      this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, true);
+      return result;
+    } catch (error) {
+      this.pushSpan(context, span, spanId, parentSpanId, startedAtMs, false, error);
+      throw error;
+    } finally {
+      if (!isPendingPromise && stack.at(-1) === spanId) {
+        stack.pop();
+      }
+    }
   }
 
   private finishTrace(
@@ -55,7 +120,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       error?: unknown;
     },
   ): RuntimeTrace {
-    const context = handle || this.activeContextStorage.getStore();
+    const context = (handle as ActiveRuntimeTraceHandle) || this.activeContextStorage.getStore();
     if (!context) {
       return this.persistCompletedTrace(this.buildFallbackTrace());
     }
@@ -64,10 +129,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     const startedAt = new Date(context.startedAtMs).toISOString();
     const endedAt = new Date(endedAtMs).toISOString();
     const durationMs = Math.max(endedAtMs - context.startedAtMs, 0);
-    const rootSpanId = randomUUID();
     const status = param.ok ? 'success' : 'error';
     const rootSpan: RuntimeTraceSpan = {
-      spanId: rootSpanId,
+      spanId: context.rootSpanId,
       traceId: context.traceId,
       runId: context.runId,
       order: 0,
@@ -85,11 +149,18 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
         ? this.resolveErrorMessage(param.error)
         : undefined,
       metadata: {
-        implementationNote:
-          'MVP root-only runtime trace; upgrade by adding nested span instrumentation around provider/dependency boundaries.',
         resultPreview: param.ok ? this.summarizeValue(param.result) : null,
       },
     };
+
+    const spans = [rootSpan, ...(this.activeSpans.get(context.traceId) || [])]
+      .sort((left, right) => left.order - right.order);
+    const failedSpan = spans.find((span) => span.status === 'error');
+    const slowestSpan = spans.reduce((slowest, span) =>
+      span.durationMs > slowest.durationMs ? span : slowest,
+    rootSpan);
+
+    this.activeSpans.delete(context.traceId);
 
     return this.persistCompletedTrace({
       traceId: context.traceId,
@@ -104,11 +175,56 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       endedAt,
       totalDurationMs: durationMs,
       status,
-      totalSpans: 1,
-      failedSpanId: param.ok ? undefined : rootSpanId,
-      slowestSpanId: rootSpanId,
-      spans: [rootSpan],
+      totalSpans: spans.length,
+      failedSpanId: failedSpan?.spanId,
+      slowestSpanId: slowestSpan.spanId,
+      spans,
     });
+  }
+
+  private pushSpan(
+    context: RuntimeTraceHandle,
+    input: RuntimeTraceSpanInput,
+    spanId: string,
+    parentSpanId: string | undefined,
+    startedAtMs: number,
+    ok: boolean,
+    error?: unknown,
+  ) {
+    const endedAtMs = Date.now();
+    const spans = this.activeSpans.get(context.traceId) || [];
+    spans.push({
+      spanId,
+      parentSpanId,
+      traceId: context.traceId,
+      runId: context.runId,
+      order: spans.length + 1,
+      name: input.name,
+      type: input.type,
+      moduleName: input.moduleName,
+      className: input.className,
+      methodName: input.methodName,
+      resource: input.resource,
+      startedAt: new Date(startedAtMs).toISOString(),
+      endedAt: new Date(endedAtMs).toISOString(),
+      durationMs: Math.max(endedAtMs - startedAtMs, 0),
+      status: ok ? 'success' : 'error',
+      errorName: ok ? undefined : this.resolveErrorName(error),
+      errorMessage: ok ? undefined : this.resolveErrorMessage(error),
+      metadata: input.metadata,
+    });
+    this.activeSpans.set(context.traceId, spans);
+  }
+
+  private isRootSpan(
+    context: RuntimeTraceHandle,
+    span: RuntimeTraceSpanInput,
+  ): boolean {
+    return (
+      span.moduleName === context.moduleName &&
+      span.className === context.providerName &&
+      span.methodName === context.methodName
+    );
   }
 
   private buildFallbackTrace(): RuntimeTrace {
@@ -135,6 +251,15 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     this.pruneCompletedTraces();
     this.completedTraces.set(trace.traceId, trace);
     return trace;
+  }
+
+  private isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+    return Boolean(
+      value &&
+        (typeof value === 'object' || typeof value === 'function') &&
+        'then' in value &&
+        typeof (value as { then?: unknown }).then === 'function',
+    );
   }
 
   private pruneCompletedTraces() {

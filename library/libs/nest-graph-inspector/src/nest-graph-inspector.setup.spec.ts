@@ -8,6 +8,7 @@ import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
+import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 import type { GraphOutput } from './types/graph-output.type';
 import type { ModuleMap } from './types/module-map.type';
 
@@ -45,6 +46,7 @@ describe(NestGraphInspectorSetup.name, () => {
   let httpOutputAdapter: { execute: jest.Mock };
   let jsonOutputAdapter: { execute: jest.Mock };
   let viewerOutputAdapter: { execute: jest.Mock };
+  let runtimeTraceRecorder: RuntimeTraceRecorder;
 
   beforeEach(async () => {
     options = {
@@ -71,6 +73,7 @@ describe(NestGraphInspectorSetup.name, () => {
         message: 'Graph inspector viewer output installed',
       }),
     };
+    runtimeTraceRecorder = new RuntimeTraceRecorder();
 
     appModuleRef = {
       metatype: TestRootModule,
@@ -106,6 +109,10 @@ describe(NestGraphInspectorSetup.name, () => {
         {
           provide: ViewerOutputAdapter,
           useValue: viewerOutputAdapter,
+        },
+        {
+          provide: RuntimeTraceRecorder,
+          useValue: runtimeTraceRecorder,
         },
       ],
     }).compile();
@@ -404,6 +411,65 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
+  it('should instrument nested provider calls for runtime traces from setup', async () => {
+    class ProductService {
+      getAllProducts() {
+        return [];
+      }
+    }
+
+    class OrderService {
+      constructor(private readonly productService: ProductService) {}
+
+      getAllOrders() {
+        this.productService.getAllProducts();
+        return [];
+      }
+    }
+
+    const productService = new ProductService();
+    const orderService = new OrderService(productService);
+    appModuleRef.providers.set(ProductService.name, {
+      metatype: ProductService,
+      instance: productService,
+      token: ProductService,
+    });
+    appModuleRef.providers.set(OrderService.name, {
+      metatype: OrderService,
+      instance: orderService,
+      token: OrderService,
+    });
+
+    service.buildModuleMap(TestRootModule);
+
+    const handle = runtimeTraceRecorder.start({
+      moduleName: TestRootModule.name,
+      providerName: OrderService.name,
+      methodName: 'getAllOrders',
+      args: [],
+    });
+    const result = await runtimeTraceRecorder.runWithContext(handle, async () =>
+      orderService.getAllOrders(),
+    );
+    const trace = runtimeTraceRecorder.finishSuccess(handle, result);
+
+    expect(trace).toMatchObject({
+      status: 'success',
+      totalSpans: 2,
+      spans: [
+        expect.objectContaining({
+          name: 'OrderService.getAllOrders',
+          methodName: 'getAllOrders',
+        }),
+        expect.objectContaining({
+          name: 'ProductService.getAllProducts',
+          methodName: 'getAllProducts',
+          parentSpanId: expect.any(String),
+        }),
+      ],
+    });
+  });
+
   it('should include class JSDoc on documented modules', () => {
     const documentedModuleRef = {
       metatype: DocumentedAppModule,
@@ -422,6 +488,7 @@ describe(NestGraphInspectorSetup.name, () => {
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
+      runtimeTraceRecorder,
     );
 
     const moduleMap = customService.buildModuleMap(DocumentedAppModule);
@@ -447,6 +514,7 @@ describe(NestGraphInspectorSetup.name, () => {
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
+      runtimeTraceRecorder,
     );
 
     const moduleMap = customService.buildModuleMap(TestRootModule);
@@ -497,6 +565,7 @@ describe(NestGraphInspectorSetup.name, () => {
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
+      runtimeTraceRecorder,
     );
 
     const moduleMap = customService.buildModuleMap(TestRootModule);

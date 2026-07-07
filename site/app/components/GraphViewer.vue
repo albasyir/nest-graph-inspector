@@ -33,9 +33,12 @@ import {
   getDirectRunProviderState,
   parseProviderNodeId,
   type DirectRunExecutionSnapshot,
-  type DirectRunProviderMethod
+  type DirectRunProviderMethod,
+  type DirectRunResultPayload,
+  buildDirectRunRequest,
+  buildDirectRunSnapshot
 } from '~/utils/direct-run-provider'
-import DirectRunSequenceDiagram from '~/components/DirectRunSequenceDiagram.vue'
+import ExecutionSequence from '~/components/ExecutionSequence.vue'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -65,6 +68,8 @@ type DirectRunActionRequest = {
   methodName: string
   args?: unknown[]
 }
+
+type DirectRunMode = 'run' | 'inspect'
 
 type DirectRunProviderContext = {
   nodeId: string
@@ -147,10 +152,6 @@ type FlowEdge = Edge<
 type WarningEdgeProps = EdgeProps<CircularEdgeData>
 type NodePosition = { x: number, y: number }
 
-const emit = defineEmits<{
-  directRun: [request: DirectRunActionRequest]
-}>()
-
 const props = withDefaults(
   defineProps<{
     data: GraphOutput
@@ -163,23 +164,14 @@ const props = withDefaults(
     excludeModules?: string[] | string
     enableBrightLine?: boolean
     collapsedModules?: string[] | string
-    directRunResult?: {
-      moduleName: string
-      providerName: string
-      snapshot: DirectRunExecutionSnapshot
-    } | null
-    directRunError?: {
-      moduleName: string
-      providerName: string
-      error: string
-      snapshot?: DirectRunExecutionSnapshot
-    } | null
+    directRunUrl?: string
   }>(),
   {
     height: '75vh',
     interactive: true,
     flush: false,
     flowId: undefined,
+    directRunUrl: undefined,
     defaultOpenModuleDetail: false,
     fixBightline: false,
     excludeModules: () => [],
@@ -1379,11 +1371,15 @@ const showProviderToProviderAcrossModule = ref(false)
 const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>({})
 const selectedProviderNodeId = ref<string | null>(null)
 const directRunPendingMethodByNodeId = ref<Record<string, string>>({})
+const directRunPendingModeByNodeId = ref<Record<string, DirectRunMode>>({})
 const directRunErrorByNodeId = ref<Record<string, string>>({})
 const directRunArgsInputByKey = ref<Record<string, string>>({})
 const directRunArgsErrorByKey = ref<Record<string, string>>({})
 const directRunArgsInvalidByKey = ref<Record<string, boolean>>({})
 const directRunActiveTab = ref<string>('')
+const showExecutionSequenceDialog = ref(false)
+const executionSequenceTrace = ref<DirectRunExecutionSnapshot['runtimeTrace'] | null>(null)
+const executionSequenceRequest = ref<DirectRunActionRequest | null>(null)
 const directRunArgsSchemaCache = new Map<string, DirectRunArgsSchemaCacheEntry>()
 const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
@@ -1532,6 +1528,10 @@ const selectedProviderPendingMethod = computed(() => {
   const nodeId = selectedProviderContext.value?.nodeId
   return nodeId ? directRunPendingMethodByNodeId.value[nodeId] || '' : ''
 })
+const selectedProviderPendingMode = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId
+  return nodeId ? directRunPendingModeByNodeId.value[nodeId] || '' : ''
+})
 const selectedProviderError = computed(() => {
   const nodeId = selectedProviderContext.value?.nodeId
   return nodeId ? directRunErrorByNodeId.value[nodeId] || '' : ''
@@ -1558,36 +1558,6 @@ const selectedProviderLastRunLabel = computed(() => {
   }
 
   return new Date(value).toLocaleString()
-})
-const selectedRuntimeTrace = computed(() => selectedProviderSnapshot.value?.runtimeTrace || null)
-const selectedRuntimeTraceSummary = computed(() => {
-  const trace = selectedRuntimeTrace.value
-  if (!trace) {
-    return []
-  }
-
-  return [
-    {
-      label: 'Total duration',
-      value: `${trace.totalDurationMs} ms`
-    },
-    {
-      label: 'Total spans',
-      value: String(trace.totalSpans)
-    },
-    {
-      label: 'Status',
-      value: trace.status
-    },
-    {
-      label: 'Slowest step',
-      value: trace.spans.find(span => span.spanId === trace.slowestSpanId)?.name || '—'
-    },
-    {
-      label: 'Failed step',
-      value: trace.spans.find(span => span.spanId === trace.failedSpanId)?.name || '—'
-    }
-  ]
 })
 const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => {
   const context = selectedProviderContext.value
@@ -1772,7 +1742,9 @@ function handleNodeClick(event: NodeMouseEvent): void {
 
 function clearDirectRunPending(nodeId: string): void {
   const { [nodeId]: _removed, ...nextPendingState } = directRunPendingMethodByNodeId.value
+  const { [nodeId]: _removedMode, ...nextPendingModeState } = directRunPendingModeByNodeId.value
   directRunPendingMethodByNodeId.value = nextPendingState
+  directRunPendingModeByNodeId.value = nextPendingModeState
 }
 
 function setDirectRunError(nodeId: string, error: string): void {
@@ -1885,7 +1857,19 @@ function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArg
   const parameters = getDirectRunParameterInfos(method)
   const parameterCount = parameters.length
 
-  if (parameterCount <= 1) {
+  if (parameterCount === 0) {
+    return {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: `${method.name}() arguments`,
+      description: 'JSON array passed as method arguments.',
+      type: 'array',
+      minItems: 0,
+      maxItems: 0,
+      items: []
+    }
+  }
+
+  if (parameterCount === 1) {
     const parameter = parameters[0]
     const parameterName = parameter?.name || 'argument'
     const parameterType = parameter?.type || 'unknown'
@@ -1893,9 +1877,16 @@ function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArg
 
     return {
       $schema: 'http://json-schema.org/draft-07/schema#',
-      title: `${method.name}() ${parameterName}`,
-      description: `JSON value passed as ${parameterName}: ${parameterType}.`,
-      ...parameterSchema
+      title: `${method.name}() arguments`,
+      description: `JSON array passed as ${parameterName}: ${parameterType}.`,
+      type: 'array',
+      minItems: 1,
+      maxItems: 1,
+      items: [{
+        title: parameterName,
+        description: parameterType,
+        ...parameterSchema
+      }]
     }
   }
 
@@ -2349,15 +2340,6 @@ function parseDirectRunArgs(
     }
   }
 
-  if (parameterCount === 1) {
-    const validationError = validateDirectRunParsedArgs(method, [parsed])
-    if (validationError) {
-      return { ok: false, error: validationError }
-    }
-
-    return { ok: true, args: [parsed] }
-  }
-
   if (!Array.isArray(parsed)) {
     return {
       ok: false,
@@ -2568,21 +2550,87 @@ function validateJsonSchemaObject(
   return ''
 }
 
-async function emitDirectRun(request: DirectRunActionRequest): Promise<void> {
+async function executeDirectRun(request: DirectRunActionRequest, mode: DirectRunMode): Promise<void> {
   const nodeId = `provider-${request.moduleName}-${request.providerName}`
+  if (mode === 'inspect') {
+    executionSequenceTrace.value = null
+    executionSequenceRequest.value = request
+    showExecutionSequenceDialog.value = true
+  }
+
   directRunPendingMethodByNodeId.value = {
     ...directRunPendingMethodByNodeId.value,
     [nodeId]: request.methodName
   }
+  directRunPendingModeByNodeId.value = {
+    ...directRunPendingModeByNodeId.value,
+    [nodeId]: mode
+  }
   clearDirectRunError(nodeId)
 
   try {
-    await Promise.resolve()
-    emit('directRun', request)
-  } catch (error) {
+    if (!props.directRunUrl) {
+      throw new Error('Direct run endpoint is unavailable for this graph URL.')
+    }
+    const response = await $fetch<DirectRunResultPayload>(props.directRunUrl, {
+      method: 'POST',
+      body: buildDirectRunRequest(request)
+    })
+    const snapshot = buildDirectRunSnapshot({ response, requestedMethod: request.methodName })
+    applyDirectRunResult({
+      moduleName: request.moduleName,
+      providerName: request.providerName,
+      snapshot
+    })
+    if (mode === 'inspect' && snapshot.runtimeTrace) {
+      executionSequenceTrace.value = snapshot.runtimeTrace
+    }
     clearDirectRunPending(nodeId)
-    setDirectRunError(nodeId, error instanceof Error ? error.message : 'Direct run failed.')
+  } catch (err) {
+    clearDirectRunPending(nodeId)
+    const errorPayload = err as { data?: DirectRunResultPayload; message?: string }
+    const responsePayload = errorPayload?.data
+    setDirectRunError(nodeId, responsePayload?.error || (err instanceof Error ? err.message : 'Direct run failed.'))
+    if (responsePayload) {
+      const snapshot = buildDirectRunSnapshot({ response: responsePayload, requestedMethod: request.methodName })
+      applyDirectRunResult({
+        moduleName: request.moduleName,
+        providerName: request.providerName,
+        snapshot
+      })
+      if (mode === 'inspect' && snapshot.runtimeTrace) {
+        executionSequenceTrace.value = snapshot.runtimeTrace
+      }
+    }
   }
+}
+
+function rerunExecutionSequence(): void {
+  if (!executionSequenceRequest.value) {
+    return
+  }
+
+  void executeDirectRun(executionSequenceRequest.value, 'inspect')
+}
+
+function isExecutionSequenceRerunning(): boolean {
+  const request = executionSequenceRequest.value
+  if (!request) {
+    return false
+  }
+
+  const nodeId = getProviderNodeId(request.moduleName, request.providerName)
+  return directRunPendingMethodByNodeId.value[nodeId] === request.methodName
+    && directRunPendingModeByNodeId.value[nodeId] === 'inspect'
+}
+
+function getExecutionSequenceError(): string {
+  const request = executionSequenceRequest.value
+  if (!request || isExecutionSequenceRerunning()) {
+    return ''
+  }
+
+  return directRunErrorByNodeId.value[getProviderNodeId(request.moduleName, request.providerName)] || ''
 }
 
 function getProviderNodeId(moduleName: string, providerName: string): string {
@@ -2603,26 +2651,7 @@ function applyDirectRunResult(payload: {
   clearDirectRunError(nodeId)
 }
 
-function applyDirectRunFailure(payload: {
-  moduleName: string
-  providerName: string
-  error: string
-  snapshot?: DirectRunExecutionSnapshot
-}): void {
-  const nodeId = getProviderNodeId(payload.moduleName, payload.providerName)
-  clearDirectRunPending(nodeId)
-  setDirectRunError(nodeId, payload.error)
-
-  const { [nodeId]: _removed, ...rest } = directRunStateByNodeId.value
-  directRunStateByNodeId.value = payload.snapshot
-    ? {
-        ...rest,
-        [nodeId]: payload.snapshot
-      }
-    : rest
-}
-
-function requestDirectRun(method: DirectRunProviderMethod): void {
+function requestDirectRun(method: DirectRunProviderMethod, mode: DirectRunMode): void {
   const context = selectedProviderContext.value
   if (!context) {
     return
@@ -2635,12 +2664,12 @@ function requestDirectRun(method: DirectRunProviderMethod): void {
   }
 
   clearDirectRunArgsError(context.nodeId, method.name)
-  void emitDirectRun({
+  void executeDirectRun({
     moduleName: context.moduleName,
     providerName: context.provider.name,
     methodName: method.name,
     args: parsedArgs.args
-  })
+  }, mode)
 }
 
 watch(
@@ -2803,40 +2832,7 @@ watch(
     nodePositionOverrides.clear()
     collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
     refreshGraph({ preservePositions: false })
-    if (!selectedProviderNodeId.value && props.directRunResult) {
-      selectProviderNode(getProviderNodeId(
-        props.directRunResult.moduleName,
-        props.directRunResult.providerName
-      ))
-    }
     void centerGraph()
-  },
-  { deep: true }
-)
-
-watch(
-  () => props.directRunResult,
-  (payload) => {
-    if (!payload) {
-      return
-    }
-
-    applyDirectRunResult(payload)
-    if (!selectedProviderNodeId.value) {
-      selectProviderNode(getProviderNodeId(payload.moduleName, payload.providerName))
-    }
-  },
-  { deep: true, immediate: true }
-)
-
-watch(
-  () => props.directRunError,
-  (payload) => {
-    if (!payload) {
-      return
-    }
-
-    applyDirectRunFailure(payload)
   },
   { deep: true }
 )
@@ -3320,16 +3316,34 @@ useResizeObserver(graphViewerRef, () => {
                   {{ getDirectRunArgsError(item.method) }}
                 </p>
 
-                <UButton
-                  type="button"
-                  :label="`Direct Run ${item.method.name}()`"
-                  icon="i-lucide-play"
-                  color="primary"
-                  block
-                  :loading="selectedProviderPendingMethod === item.method.name"
-                  :disabled="isDirectRunActionDisabled(item.method)"
-                  @click="requestDirectRun(item.method)"
-                />
+                <div class="direct-run-drawer__actions">
+                  <p class="direct-run-drawer__action-label">
+                    Direct Run this with
+                  </p>
+                  <div class="direct-run-drawer__action-buttons">
+                    <UButton
+                      type="button"
+                      label="Run"
+                      icon="i-lucide-play"
+                      color="primary"
+                      class="flex-1"
+                      :loading="selectedProviderPendingMethod === item.method.name && selectedProviderPendingMode === 'run'"
+                      :disabled="isDirectRunActionDisabled(item.method)"
+                      @click="requestDirectRun(item.method, 'run')"
+                    />
+                    <UButton
+                      type="button"
+                      label="Run Inspection"
+                      icon="i-lucide-chart-gantt"
+                      color="neutral"
+                      variant="soft"
+                      class="flex-1"
+                      :loading="selectedProviderPendingMethod === item.method.name && selectedProviderPendingMode === 'inspect'"
+                      :disabled="isDirectRunActionDisabled(item.method)"
+                      @click="requestDirectRun(item.method, 'inspect')"
+                    />
+                  </div>
+                </div>
               </div>
             </template>
           </UTabs>
@@ -3365,51 +3379,67 @@ useResizeObserver(graphViewerRef, () => {
               {{ selectedProviderLastRunLabel }}
             </p>
           </div>
-
-          <div
-            v-if="selectedRuntimeTrace"
-            class="direct-run-drawer__trace"
-          >
-            <div class="direct-run-drawer__trace-header">
-              <div>
-                <p class="direct-run-drawer__result-title">
-                  Execution Sequence
-                </p>
-                <p class="direct-run-drawer__timestamp">
-                  Runtime Trace · run {{ selectedRuntimeTrace.runId }}
-                </p>
-              </div>
-              <UBadge
-                :label="selectedRuntimeTrace.status"
-                :color="selectedRuntimeTrace.status === 'error'
-                  ? 'error'
-                  : selectedRuntimeTrace.status === 'partial'
-                    ? 'warning'
-                    : 'success'"
-                variant="soft"
-              />
-            </div>
-
-            <div class="direct-run-drawer__trace-summary-grid">
-              <div
-                v-for="item in selectedRuntimeTraceSummary"
-                :key="item.label"
-                class="direct-run-drawer__trace-summary-card"
-              >
-                <p class="direct-run-drawer__trace-summary-label">
-                  {{ item.label }}
-                </p>
-                <p class="direct-run-drawer__trace-summary-value">
-                  {{ item.value }}
-                </p>
-              </div>
-            </div>
-
-            <DirectRunSequenceDiagram :trace="selectedRuntimeTrace" />
-          </div>
         </div>
       </template>
     </UDrawer>
+
+    <UModal
+      v-model:open="showExecutionSequenceDialog"
+      title="Execution Sequence"
+      :description="executionSequenceTrace ? `Runtime Trace · run ${executionSequenceTrace.runId}` : undefined"
+      fullscreen
+    >
+      <template #body>
+        <ExecutionSequence
+          v-if="executionSequenceTrace"
+          :trace="executionSequenceTrace"
+        />
+        <div
+          v-else
+          class="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center"
+        >
+          <UIcon
+            v-if="isExecutionSequenceRerunning()"
+            name="i-lucide-loader-circle"
+            class="size-8 animate-spin text-primary"
+          />
+          <UIcon
+            v-else
+            name="i-lucide-circle-alert"
+            class="size-8 text-error"
+          />
+          <p class="text-sm font-medium text-highlighted">
+            {{ isExecutionSequenceRerunning() ? 'Running inspection...' : 'Inspection failed' }}
+          </p>
+          <p
+            v-if="getExecutionSequenceError()"
+            class="max-w-xl text-sm text-muted"
+          >
+            {{ getExecutionSequenceError() }}
+          </p>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton
+            label="Re-run"
+            icon="i-lucide-refresh-cw"
+            color="primary"
+            variant="soft"
+            :loading="isExecutionSequenceRerunning()"
+            :disabled="!executionSequenceRequest"
+            @click="rerunExecutionSequence"
+          />
+          <UButton
+            label="Close"
+            color="neutral"
+            variant="outline"
+            @click="showExecutionSequenceDialog = false"
+          />
+        </div>
+      </template>
+    </UModal>
 
     <UDrawer
       v-model:open="showCircularDetailDialog"
@@ -3669,6 +3699,24 @@ useResizeObserver(graphViewerRef, () => {
   gap: 12px;
 }
 
+.direct-run-drawer__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.direct-run-drawer__action-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-drawer__action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .direct-run-drawer__method-name {
   min-width: 0;
   color: var(--ui-text-highlighted);
@@ -3701,76 +3749,6 @@ useResizeObserver(graphViewerRef, () => {
 
 .direct-run-drawer__result {
   width: 100%;
-}
-
-.direct-run-drawer__trace {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--mg-trace-border);
-  border-radius: 12px;
-  background: var(--mg-trace-bg);
-}
-
-.direct-run-drawer__trace-header,
-.direct-run-drawer__trace-item-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.direct-run-drawer__trace-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.direct-run-drawer__trace-summary-card,
-.direct-run-drawer__trace-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--mg-trace-border);
-  border-radius: 10px;
-  background: var(--mg-trace-card-bg);
-}
-
-.direct-run-drawer__trace-item--error {
-  border-color: var(--mg-trace-error-border);
-}
-
-.direct-run-drawer__trace-item--slow {
-  border-color: var(--mg-trace-slow-border);
-}
-
-.direct-run-drawer__trace-summary-label,
-.direct-run-drawer__trace-item-meta {
-  margin: 0;
-  font-size: 11px;
-  color: var(--ui-text-muted);
-}
-
-.direct-run-drawer__trace-summary-value,
-.direct-run-drawer__trace-item-title,
-.direct-run-drawer__trace-item-duration {
-  margin: 0;
-  color: var(--ui-text-highlighted);
-}
-
-.direct-run-drawer__trace-summary-value,
-.direct-run-drawer__trace-item-title {
-  font-size: 13px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.direct-run-drawer__trace-item-duration {
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .direct-run-drawer__result-title {

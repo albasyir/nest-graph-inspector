@@ -5,7 +5,7 @@ import { ProductRepository, Product } from './product.repository';
 @Injectable()
 export class ProductService {
   @Inject(forwardRef(() => MobileService))
-  private readonly mobileService: MobileService;
+  private readonly mobileService!: MobileService;
 
   constructor(private readonly productRepository: ProductRepository) {}
 
@@ -17,7 +17,8 @@ export class ProductService {
     return this.productRepository.findById(id);
   }
 
-  getAllProducts(): Product[] {
+  async getAllProducts(): Promise<Product[]> {
+    await new Promise(resolve => setTimeout(resolve, 200));
     return this.productRepository.findAll();
   }
 

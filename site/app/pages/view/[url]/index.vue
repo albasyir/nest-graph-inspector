@@ -5,13 +5,6 @@ import {
   resolveGraphViewerLoadSource,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
-import {
-  buildDirectRunRequest,
-  buildDirectRunSnapshot,
-  type DirectRunExecutionSnapshot,
-  type DirectRunResultPayload
-} from '~/utils/direct-run-provider'
-
 definePageMeta({
   layout: 'viewer'
 })
@@ -27,18 +20,6 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
-const directRunResult = ref<{
-  moduleName: string
-  providerName: string
-  snapshot: DirectRunExecutionSnapshot
-} | null>(null)
-const directRunError = ref<{
-  moduleName: string
-  providerName: string
-  error: string
-  snapshot?: DirectRunExecutionSnapshot
-} | null>(null)
-
 let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
@@ -124,80 +105,18 @@ function handleRefresh() {
   loadGraphResources(encodedUrl.value, 'manual_refresh', true)
 }
 
-function resolveDirectRunUrl(): string {
-  const sourceUrl = decodedUrl.value
-  if (!sourceUrl) {
-    return ''
-  }
-
+const directRunUrl = computed(() => {
+  if (!decodedUrl.value) return undefined
   try {
-    const url = new URL(sourceUrl)
+    const url = new URL(decodedUrl.value)
     url.pathname = '/direct-run'
     url.search = ''
     url.hash = ''
     return url.toString()
   } catch {
-    return ''
+    return undefined
   }
-}
-
-async function handleDirectRun(request: {
-  moduleName: string
-  providerName: string
-  methodName: string
-  args?: unknown[]
-}) {
-  directRunResult.value = null
-  directRunError.value = null
-
-  const directRunUrl = resolveDirectRunUrl()
-  if (!directRunUrl) {
-    directRunError.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      error: 'Direct run endpoint is unavailable for this graph URL.'
-    }
-    return
-  }
-
-  try {
-    const response = await $fetch<DirectRunResultPayload>(directRunUrl, {
-      method: 'POST',
-      body: buildDirectRunRequest(request)
-    })
-
-    directRunResult.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      snapshot: buildDirectRunSnapshot({
-        response,
-        requestedMethod: request.methodName
-      })
-    }
-  } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : 'Direct run failed.'
-
-    const errorPayload = error as {
-      data?: DirectRunResultPayload
-      message?: string
-    }
-    const responsePayload = errorPayload?.data
-
-    directRunError.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      error: responsePayload?.error || message,
-      snapshot: responsePayload
-        ? buildDirectRunSnapshot({
-            response: responsePayload,
-            requestedMethod: request.methodName
-          })
-        : undefined
-    }
-  }
-}
+})
 </script>
 
 <template>
@@ -270,11 +189,9 @@ async function handleDirectRun(request: {
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
-      :direct-run-result="directRunResult"
-      :direct-run-error="directRunError"
+      :direct-run-url="directRunUrl"
       height="100%"
       flush
-      @direct-run="handleDirectRun"
     />
   </ClientOnly>
 

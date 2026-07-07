@@ -47,11 +47,13 @@ export class OrderService {
     return this.orderRepository.findById(id);
   }
 
-  getAllOrders(): Order[] {
+  async getAllOrders(): Promise<Order[]> {
+    await this.productService.getAllProducts();
+
     return this.orderRepository.findAll();
   }
 
-  getOrdersByUser(userId: number): Order[] {
+  async getOrdersByUser(userId: number): Promise<Order[]> {
     return this.orderRepository.findByUserId(userId);
   }
 
