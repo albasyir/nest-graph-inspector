@@ -13,6 +13,10 @@ const props = defineProps<{
   running?: boolean;
 }>();
 
+const emit = defineEmits<{
+  navigatorOpen: [];
+}>();
+
 const LABEL_COL = 180;
 const BAR_MIN_W = 4;
 const ROW_COLORS = [
@@ -24,8 +28,14 @@ const ROW_COLORS = [
   "#ec4899",
   "#8b5cf6",
 ];
+
+type RuntimeTraceHistoryItem = Pick<
+  RuntimeTrace,
+  "traceId" | "entrypoint" | "status" | "startedAt" | "totalDurationMs"
+>;
+
 const activeTooltipSpanId = ref<string | null>(null);
-const historyTraceIds = ref<string[]>([]);
+const historyIndex = ref<RuntimeTraceHistoryItem[]>([]);
 const historyTraces = ref<Record<string, RuntimeTrace>>({});
 const historyError = ref("");
 const historyIndexLoading = ref(false);
@@ -34,15 +44,15 @@ const activeHistoryTraceId = ref<string>();
 
 const selectedTraceId = computed(() => props.trace?.traceId ?? "");
 const historyItems = computed<AccordionItem[]>(() =>
-  historyTraceIds.value.map((traceId) => {
-    const trace = historyTraces.value[traceId];
+  historyIndex.value.map((summary) => {
+    const trace = historyTraces.value[summary.traceId];
 
     return {
-      label: trace ? entrypointLabel(trace) : traceId,
-      value: traceId,
-      icon: isTraceLoading(traceId)
+      label: entrypointLabel(trace ?? summary),
+      value: summary.traceId,
+      icon: isTraceLoading(summary.traceId)
         ? "i-lucide-loader-circle"
-        : traceId === selectedTraceId.value
+        : summary.traceId === selectedTraceId.value
           ? "i-lucide-circle-check"
           : "i-lucide-history",
     };
@@ -55,10 +65,10 @@ watch(
     if (!trace) return;
 
     historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace };
-    if (historyTraceIds.value[0] !== trace.traceId) {
-      historyTraceIds.value = [
-        trace.traceId,
-        ...historyTraceIds.value.filter((traceId) => traceId !== trace.traceId),
+    if (historyIndex.value[0]?.traceId !== trace.traceId) {
+      historyIndex.value = [
+        historySummary(trace),
+        ...historyIndex.value.filter((item) => item.traceId !== trace.traceId),
       ];
     }
     activeHistoryTraceId.value = trace.traceId;
@@ -110,18 +120,62 @@ function accordionTraceTicks(item: AccordionItem) {
   return trace ? traceTicks(trace) : [];
 }
 
-function entrypointLabel(trace: RuntimeTrace): string {
+function entrypointLabel(trace: Pick<RuntimeTrace, "entrypoint">): string {
   const className = trace.entrypoint.className;
   const methodName = trace.entrypoint.methodName;
   return className ? `${className}.${methodName}()` : `${methodName}()`;
 }
 
-function startedAtLabel(trace: RuntimeTrace): string {
+function startedAtLabel(trace: Pick<RuntimeTrace, "startedAt">): string {
   return new Date(trace.startedAt).toLocaleString();
 }
 
-function durationLabel(trace: RuntimeTrace): string {
+function hasStartedAt(trace: Pick<RuntimeTrace, "startedAt">): boolean {
+  return Boolean(trace.startedAt);
+}
+
+function durationLabel(trace: Pick<RuntimeTrace, "totalDurationMs">): string {
   return `${trace.totalDurationMs} ms`;
+}
+
+function historySummary(trace: RuntimeTrace): RuntimeTraceHistoryItem {
+  return {
+    traceId: trace.traceId,
+    entrypoint: trace.entrypoint,
+    startedAt: trace.startedAt,
+    status: trace.status,
+    totalDurationMs: trace.totalDurationMs,
+  };
+}
+
+function normalizeHistoryItem(
+  item: string | RuntimeTraceHistoryItem,
+): RuntimeTraceHistoryItem {
+  if (typeof item !== "string") return item;
+
+  return {
+    traceId: item,
+    entrypoint: { methodName: item },
+    startedAt: "",
+    status: "success",
+    totalDurationMs: 0,
+  };
+}
+
+function statusLabel(trace: Pick<RuntimeTrace, "status">): string {
+  return trace.status === "error" ? "Fail" : "Success";
+}
+
+function statusColor(trace: Pick<RuntimeTrace, "status">) {
+  return trace.status === "error" ? "error" : "success";
+}
+
+function historyItem(value: unknown): RuntimeTraceHistoryItem | undefined {
+  const traceId = String(value);
+  const trace = historyTraces.value[traceId];
+  return trace
+    ? historySummary(trace)
+    : historyIndex.value.find((item) => item.traceId === traceId);
 }
 
 function shortTraceId(traceId: string): string {
@@ -145,6 +199,17 @@ function spanLabel(span: RuntimeTraceSpan): string {
     : span.name;
 }
 
+function previewLabel(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function toggleTooltip(spanId: string): void {
   activeTooltipSpanId.value =
     activeTooltipSpanId.value === spanId ? null : spanId;
@@ -152,7 +217,7 @@ function toggleTooltip(spanId: string): void {
 
 function historyUrl(path: string): string {
   if (!props.directRunUrl) return "";
-  return `${props.directRunUrl.replace(/\/$/, "")}/history/${path}`;
+  return `${props.directRunUrl.replace(/\/$/, "")}/history/${path}.json`;
 }
 
 async function fetchHistoryIndex(): Promise<void> {
@@ -161,18 +226,21 @@ async function fetchHistoryIndex(): Promise<void> {
 
   historyIndexLoading.value = true;
   try {
-    const ids = await $fetch<string[]>(url);
-    const latestFirstIds = [...ids].reverse();
-    historyTraceIds.value = selectedTraceId.value
+    const items = await $fetch<Array<string | RuntimeTraceHistoryItem>>(url);
+    const latestFirstItems = [...items].map(normalizeHistoryItem).reverse();
+    const selectedTrace = historyTraces.value[selectedTraceId.value];
+    historyIndex.value = selectedTraceId.value
       ? [
-          selectedTraceId.value,
-          ...latestFirstIds.filter(
-            (traceId) => traceId !== selectedTraceId.value,
+          selectedTrace
+            ? historySummary(selectedTrace)
+            : normalizeHistoryItem(selectedTraceId.value),
+          ...latestFirstItems.filter(
+            (item) => item.traceId !== selectedTraceId.value,
           ),
         ]
-      : latestFirstIds;
+      : latestFirstItems;
     activeHistoryTraceId.value ||=
-      selectedTraceId.value || historyTraceIds.value[0];
+      selectedTraceId.value || historyIndex.value[0]?.traceId;
     historyError.value = "";
   } catch (err) {
     historyError.value =
@@ -218,11 +286,6 @@ watch(activeHistoryTraceId, (traceId) => {
   }
 });
 
-watch(historyTraceIds, (traceIds) => {
-  for (const traceId of traceIds) {
-    void fetchHistoryTrace(traceId);
-  }
-});
 </script>
 
 <template>
@@ -235,7 +298,7 @@ watch(historyTraceIds, (traceIds) => {
       Running inspection…
     </div>
     <section
-      v-if="historyIndexLoading || historyTraceIds.length || historyError"
+      v-if="historyIndexLoading || historyIndex.length || historyError"
       class="space-y-2"
     >
       <div
@@ -249,18 +312,33 @@ watch(historyTraceIds, (traceIds) => {
         v-if="historyItems.length"
         v-model="activeHistoryTraceId"
         :items="historyItems"
+        :ui="{
+          trigger:
+            'px-3 transition-colors hover:bg-elevated/50 data-[state=open]:bg-elevated/70',
+        }"
       >
         <template #trailing="{ item }">
-          <div class="ms-auto flex flex-wrap justify-end gap-2">
-            <template v-if="accordionTrace(item)">
+          <div class="ms-auto flex flex-wrap items-center justify-end gap-2">
+            <template v-if="historyItem(item.value)">
               <UBadge variant="soft" color="neutral">
                 {{ shortTraceId(String(item.value)) }}
               </UBadge>
-              <UBadge variant="soft" color="neutral">
-                {{ startedAtLabel(accordionTrace(item)!) }}
+              <UBadge variant="soft" :color="statusColor(historyItem(item.value)!)">
+                {{ statusLabel(historyItem(item.value)!) }}
               </UBadge>
-              <UBadge variant="soft" color="neutral">
-                {{ durationLabel(accordionTrace(item)!) }}
+              <UBadge
+                v-if="hasStartedAt(historyItem(item.value)!)"
+                variant="soft"
+                color="neutral"
+              >
+                {{ startedAtLabel(historyItem(item.value)!) }}
+              </UBadge>
+              <UBadge
+                v-if="historyItem(item.value)!.totalDurationMs"
+                variant="soft"
+                color="neutral"
+              >
+                {{ durationLabel(historyItem(item.value)!) }}
               </UBadge>
             </template>
             <UBadge v-else variant="soft" color="neutral">
@@ -273,6 +351,13 @@ watch(historyTraceIds, (traceIds) => {
             >
               Loading
             </UBadge>
+            <UIcon
+              name="i-lucide-chevron-down"
+              class="size-5 shrink-0 text-muted transition-transform duration-200"
+              :class="{
+                'rotate-180': activeHistoryTraceId === String(item.value),
+              }"
+            />
           </div>
         </template>
 
@@ -383,15 +468,11 @@ watch(historyTraceIds, (traceIds) => {
                         </div>
                         <div class="exec-seq__tooltip-card">
                           <span class="exec-seq__card-label">Parameters</span>
-                          <pre>{{ span.metadata?.argsPreview ?? "—" }}</pre>
+                          <pre>{{ previewLabel(span.args) }}</pre>
                         </div>
                         <div class="exec-seq__tooltip-card">
                           <span class="exec-seq__card-label">Return</span>
-                          <pre>{{
-                            span.metadata?.resultPreview ??
-                            span.errorMessage ??
-                            "—"
-                          }}</pre>
+                          <pre>{{ previewLabel(span.result ?? span.errorMessage) }}</pre>
                         </div>
                       </div>
                     </template>
@@ -408,6 +489,25 @@ watch(historyTraceIds, (traceIds) => {
       </UAccordion>
       <p v-if="historyError" class="text-sm text-error">{{ historyError }}</p>
     </section>
+    <div
+      v-else
+      class="flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-default p-8 text-center"
+    >
+      <div class="flex size-16 items-center justify-center rounded-2xl bg-primary/10">
+        <UIcon name="i-lucide-route" class="size-8 text-primary" />
+      </div>
+      <div class="space-y-2">
+        <p class="text-lg font-medium">No execution data yet</p>
+        <p class="max-w-md text-sm text-muted">
+          Run an inspection from Navigator to show the execution sequence history here.
+        </p>
+      </div>
+      <UButton
+        icon="i-lucide-navigation"
+        label="Open Navigator"
+        @click="emit('navigatorOpen')"
+      />
+    </div>
   </div>
 </template>
 

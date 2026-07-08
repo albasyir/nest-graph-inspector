@@ -1,0 +1,24 @@
+[
+  {
+    "traceId": "2d8370ed-5a74-4805-9948-4408046b7961",
+    "entrypoint": {
+      "module": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getOrdersByUser"
+    },
+    "startedAt": "2026-07-08T14:44:06.877Z",
+    "status": "success",
+    "totalDurationMs": 306
+  },
+  {
+    "traceId": "1c9057bd-9c05-4af9-9475-19778ad0cc14",
+    "entrypoint": {
+      "module": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getOrdersByUser"
+    },
+    "startedAt": "2026-07-08T14:44:14.690Z",
+    "status": "error",
+    "totalDurationMs": 305
+  }
+]

@@ -19,6 +19,11 @@ type ImportWarnings = Map<string, Map<string, string[]>>;
 
 @Injectable()
 export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
+  private static readonly inspectorEndpointInfo = {
+    for: 'nest-graph-inspector',
+    'is-static': true,
+  };
+
   private readonly markdownTitle = 'NestJS Dependency Graph';
   private readonly arrowDirectionDescription =
     'Arrow direction: `A --> B` means `A` depends on `B`.';
@@ -29,9 +34,15 @@ export class FileOutputAdapter implements OutputAdapter<FileOutputConfig> {
     config: FileOutputConfig,
   ): Promise<{ message: string }> {
     const filePath = join(process.cwd(), config.path);
+    const informationFilePath = join(dirname(filePath), 'information.json');
     const markdownText = this.buildMarkdownText(graphOutput);
 
     await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(
+      informationFilePath,
+      JSON.stringify(FileOutputAdapter.inspectorEndpointInfo, null, 2),
+      'utf8',
+    );
     await writeFile(filePath, markdownText, 'utf8');
 
     return {

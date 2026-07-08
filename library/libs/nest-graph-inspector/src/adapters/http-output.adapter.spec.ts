@@ -99,6 +99,7 @@ describe(HttpOutputAdapter.name, () => {
     );
     expect(JSON.parse(informationResponse.body)).toEqual({
       for: 'nest-graph-inspector',
+      'is-static': false,
     });
 
     const jsonResponse = await get(jsonOutputUrl);

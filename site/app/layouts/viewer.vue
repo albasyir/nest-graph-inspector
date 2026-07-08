@@ -8,6 +8,7 @@ const graphStore = useGraphInspectorStore()
 const {
   encodedUrl,
   decodedUrl,
+  graphIsStatic,
   status
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
@@ -41,6 +42,7 @@ const navigatorPath = computed(() =>
   currentEncodedUrl.value ? `/view/${currentEncodedUrl.value}` : '/view'
 )
 const issuesPath = computed(() => `${navigatorPath.value}/issues`)
+const executionSequencePath = computed(() => `${navigatorPath.value}/execution-sequence`)
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -81,6 +83,13 @@ const viewerMenuItems = computed(() => [
     icon: 'i-lucide-bug',
     to: issuesPath.value,
     active: route.path === issuesPath.value,
+    disabled: !currentEncodedUrl.value
+  },
+  {
+    label: 'Execution Sequence',
+    icon: 'i-lucide-history',
+    to: executionSequencePath.value,
+    active: route.path === executionSequencePath.value,
     disabled: !currentEncodedUrl.value
   }
 ] satisfies NavigationMenuItem[])
@@ -172,6 +181,9 @@ const viewerMenuItems = computed(() => [
       </div>
     </UDashboardPanel>
 
-    <AiChatDrawer v-model:open="aiChatOpen" />
+    <AiChatDrawer
+      v-model:open="aiChatOpen"
+      :disabled="graphIsStatic"
+    />
   </UDashboardGroup>
 </template>

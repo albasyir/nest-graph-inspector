@@ -6,6 +6,7 @@ import { HttpServeAdapter } from './http-serve.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { ViewerOutputAdapter } from './viewer-output.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
+import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 
 describe(ViewerOutputAdapter.name, () => {
   let moduleRef: TestingModule;
@@ -33,6 +34,7 @@ describe(ViewerOutputAdapter.name, () => {
         ViewerOutputAdapter,
         HttpServeAdapter,
         DirectRunOutputAdapter,
+        RuntimeTraceRecorder,
         {
           provide: HttpOutputAdapter,
           useValue: httpOutputAdapter,
@@ -206,6 +208,18 @@ describe(ViewerOutputAdapter.name, () => {
         expect.objectContaining({
           path: '/direct-run',
           type: 'POST',
+        }),
+        expect.objectContaining({
+          path: '/direct-run/histories',
+          type: 'GET',
+        }),
+        expect.objectContaining({
+          path: '/direct-run/history/index.json',
+          type: 'GET',
+        }),
+        expect.objectContaining({
+          path: '/direct-run/history/*',
+          type: 'GET',
         }),
       ],
     );

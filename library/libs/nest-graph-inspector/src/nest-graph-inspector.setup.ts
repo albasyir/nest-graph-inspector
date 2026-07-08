@@ -448,9 +448,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
               moduleName: param.moduleName,
               className: param.className,
               methodName,
-              metadata: {
-                argsPreview: this.runtimeTraceRecorder.summarizeValue(args),
-              },
+              args: this.runtimeTraceRecorder.previewValue(args),
             },
             () => method.apply(param.instance, args),
           ),

@@ -10,11 +10,13 @@ definePageMeta({
 })
 
 const route = useRoute()
+const router = useRouter()
 const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const {
   decodedUrl,
   graphData,
+  graphIsStatic,
   status,
   errorMessage,
   showCircularDependencies,
@@ -109,7 +111,9 @@ const directRunUrl = computed(() => {
   if (!decodedUrl.value) return undefined
   try {
     const url = new URL(decodedUrl.value)
-    url.pathname = '/direct-run'
+    url.pathname = graphIsStatic.value
+      ? `${url.pathname.replace(/\/$/, '')}/direct-run`
+      : '/direct-run'
     url.search = ''
     url.hash = ''
     return url.toString()
@@ -117,6 +121,34 @@ const directRunUrl = computed(() => {
     return undefined
   }
 })
+
+const directRunOn = computed(() => {
+  const value = route.query['direct-run-on']
+  const providerName = Array.isArray(value) ? value[0] : value
+  return providerName || undefined
+})
+
+function handleDirectRunDrawerOpen(providerName: string) {
+  if (route.query['direct-run-on'] === providerName) return
+
+  router.push({
+    query: {
+      ...route.query,
+      'direct-run-on': providerName
+    }
+  })
+}
+
+function handleDirectRunDrawerClose() {
+  const { 'direct-run-on': _directRunOn, ...query } = route.query
+  router.push({ query })
+}
+
+function handleExecutionSequenceOpen() {
+  router.push({
+    path: `/view/${encodedUrl.value}/execution-sequence`
+  })
+}
 </script>
 
 <template>
@@ -189,9 +221,14 @@ const directRunUrl = computed(() => {
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
+      :direct-run-disabled="graphIsStatic"
+      :direct-run-on="directRunOn"
       :direct-run-url="directRunUrl"
       height="100%"
       flush
+      @direct-run-drawer-open="handleDirectRunDrawerOpen"
+      @direct-run-drawer-close="handleDirectRunDrawerClose"
+      @execution-sequence-open="handleExecutionSequenceOpen"
     />
   </ClientOnly>
 

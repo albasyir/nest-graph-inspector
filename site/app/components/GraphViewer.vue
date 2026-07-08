@@ -38,7 +38,6 @@ import {
   buildDirectRunRequest,
   buildDirectRunSnapshot,
 } from "~/utils/direct-run-provider";
-import ExecutionSequence from "~/components/ExecutionSequence.vue";
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string;
@@ -165,6 +164,8 @@ const props = withDefaults(
     enableBrightLine?: boolean;
     collapsedModules?: string[] | string;
     directRunUrl?: string;
+    directRunDisabled?: boolean;
+    directRunOn?: string;
   }>(),
   {
     height: "75vh",
@@ -172,6 +173,8 @@ const props = withDefaults(
     flush: false,
     flowId: undefined,
     directRunUrl: undefined,
+    directRunDisabled: false,
+    directRunOn: undefined,
     defaultOpenModuleDetail: false,
     fixBightline: false,
     excludeModules: () => [],
@@ -179,6 +182,12 @@ const props = withDefaults(
     collapsedModules: () => [],
   },
 );
+
+const emit = defineEmits<{
+  directRunDrawerOpen: [providerName: string];
+  directRunDrawerClose: [];
+  executionSequenceOpen: [];
+}>();
 
 const showCircularDependencies = defineModel<boolean>(
   "showCircularDependencies",
@@ -1394,13 +1403,7 @@ const directRunArgsInputByKey = ref<Record<string, string>>({});
 const directRunArgsErrorByKey = ref<Record<string, string>>({});
 const directRunArgsInvalidByKey = ref<Record<string, boolean>>({});
 const directRunActiveTab = ref<string>("");
-const showExecutionSequenceDialog = ref(false);
-const executionSequenceTrace = ref<
-  DirectRunExecutionSnapshot["runtimeTrace"] | null
->(null);
-const executionSequenceRequest = ref<DirectRunActionRequest | null>(null);
-const executionSequenceResult = ref("");
-const executionSequenceResultType = ref("");
+const showStaticDirectRunDialog = ref(false);
 const directRunArgsSchemaCache = new Map<
   string,
   DirectRunArgsSchemaCacheEntry
@@ -1529,10 +1532,32 @@ const showDirectRunDrawer = computed({
   get: () => Boolean(selectedProviderContext.value),
   set: (value: boolean) => {
     if (!value) {
+      const hadSelectedProvider = Boolean(selectedProviderNodeId.value);
       selectedProviderNodeId.value = null;
+      if (hadSelectedProvider || !props.directRunOn) {
+        emit("directRunDrawerClose");
+      }
     }
   },
 });
+
+function findProviderNodeId(providerName: string): string | null {
+  for (const [moduleName, moduleData] of Object.entries(graphData.value.modules)) {
+    if (moduleData.providers.some((provider) => provider.name === providerName)) {
+      return getProviderNodeId(moduleName, providerName);
+    }
+  }
+
+  return null;
+}
+
+function syncDirectRunOn(): void {
+  const nodeId = props.directRunOn ? findProviderNodeId(props.directRunOn) : null;
+  if (nodeId && selectedProviderNodeId.value !== nodeId) {
+    selectedProviderNodeId.value = nodeId;
+  }
+}
+
 const directRunMethodTabs = computed<DirectRunMethodTab[]>(() =>
   (selectedProviderDirectRunState.value?.methods || []).map((method) => {
     const parameterCount = getDirectRunParameterCount(method);
@@ -1759,12 +1784,16 @@ function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
 }
 
 function selectProviderNode(nodeId: string | null): void {
-  if (nodeId && parseProviderNodeId(nodeId)) {
+  const providerNode = nodeId ? parseProviderNodeId(nodeId) : null;
+
+  if (nodeId && providerNode) {
     selectedProviderNodeId.value = nodeId;
+    emit("directRunDrawerOpen", providerNode.providerName);
     return;
   }
 
   selectedProviderNodeId.value = null;
+  emit("directRunDrawerClose");
 }
 
 function handleNodeClick(event: NodeMouseEvent): void {
@@ -2327,6 +2356,14 @@ function hasDirectRunArgsValidationError(methodName: string): boolean {
 }
 
 function isDirectRunActionDisabled(method: DirectRunProviderMethod): boolean {
+  if (!props.directRunUrl) {
+    return true;
+  }
+
+  if (props.directRunDisabled) {
+    return false;
+  }
+
   if (selectedProviderPendingMethod.value) {
     return true;
   }
@@ -2339,6 +2376,27 @@ function isDirectRunActionDisabled(method: DirectRunProviderMethod): boolean {
     !parseDirectRunArgs(method, getDirectRunArgsInput(method.name)).ok ||
     hasDirectRunArgsValidationError(method.name)
   );
+}
+
+function openStaticDirectRunDialog(): void {
+  showStaticDirectRunDialog.value = true;
+}
+
+function openExecutionSequenceHistory(): void {
+  showStaticDirectRunDialog.value = false;
+  emit("executionSequenceOpen");
+}
+
+function handleDirectRunAction(
+  method: DirectRunProviderMethod,
+  mode: DirectRunMode,
+): void {
+  if (props.directRunDisabled) {
+    openStaticDirectRunDialog();
+    return;
+  }
+
+  void requestDirectRun(method, mode);
 }
 
 function getDirectRunArgsError(method: DirectRunProviderMethod): string {
@@ -2627,13 +2685,6 @@ async function executeDirectRun(
   mode: DirectRunMode,
 ): Promise<void> {
   const nodeId = `provider-${request.moduleName}-${request.providerName}`;
-  if (mode === "inspect") {
-    executionSequenceTrace.value = null;
-    executionSequenceResult.value = "";
-    executionSequenceResultType.value = "";
-    executionSequenceRequest.value = request;
-    showExecutionSequenceDialog.value = true;
-  }
 
   directRunPendingMethodByNodeId.value = {
     ...directRunPendingMethodByNodeId.value,
@@ -2663,11 +2714,7 @@ async function executeDirectRun(
       snapshot,
     });
     if (mode === "inspect" && snapshot.runtimeTrace) {
-      executionSequenceTrace.value = snapshot.runtimeTrace;
-      executionSequenceResult.value = snapshot.summary;
-      executionSequenceResultType.value = getDirectRunResultType(
-        response.result,
-      );
+      emit("executionSequenceOpen");
     }
     clearDirectRunPending(nodeId);
   } catch (err) {
@@ -2693,48 +2740,10 @@ async function executeDirectRun(
         snapshot,
       });
       if (mode === "inspect" && snapshot.runtimeTrace) {
-        executionSequenceTrace.value = snapshot.runtimeTrace;
-        executionSequenceResult.value = snapshot.summary;
-        executionSequenceResultType.value = responsePayload.ok
-          ? getDirectRunResultType(responsePayload.result)
-          : getRuntimeTraceErrorName(snapshot.runtimeTrace);
+        emit("executionSequenceOpen");
       }
     }
   }
-}
-
-function rerunExecutionSequence(): void {
-  if (!executionSequenceRequest.value) {
-    return;
-  }
-
-  void executeDirectRun(executionSequenceRequest.value, "inspect");
-}
-
-function isExecutionSequenceRerunning(): boolean {
-  const request = executionSequenceRequest.value;
-  if (!request) {
-    return false;
-  }
-
-  const nodeId = getProviderNodeId(request.moduleName, request.providerName);
-  return (
-    directRunPendingMethodByNodeId.value[nodeId] === request.methodName &&
-    directRunPendingModeByNodeId.value[nodeId] === "inspect"
-  );
-}
-
-function getExecutionSequenceError(): string {
-  const request = executionSequenceRequest.value;
-  if (!request || isExecutionSequenceRerunning()) {
-    return "";
-  }
-
-  return (
-    directRunErrorByNodeId.value[
-      getProviderNodeId(request.moduleName, request.providerName)
-    ] || ""
-  );
 }
 
 function getDirectRunResultType(value: unknown): string {
@@ -2971,10 +2980,13 @@ watch(
       graphData.value,
     );
     refreshGraph({ preservePositions: false });
+    syncDirectRunOn();
     void centerGraph();
   },
   { deep: true },
 );
+
+watch(() => props.directRunOn, syncDirectRunOn, { immediate: true });
 
 watch(
   [() => props.defaultOpenModuleDetail, () => props.collapsedModules],
@@ -2989,6 +3001,7 @@ watch(
 );
 
 onMounted(() => {
+  syncDirectRunOn();
   setTimeout(() => {
     void centerGraph(0);
   }, 200);
@@ -3396,7 +3409,7 @@ useResizeObserver(graphViewerRef, () => {
                         selectedProviderPendingMode === 'run'
                       "
                       :disabled="isDirectRunActionDisabled(item.method)"
-                      @click="requestDirectRun(item.method, 'run')"
+                      @click="handleDirectRunAction(item.method, 'run')"
                     />
                     <UButton
                       type="button"
@@ -3410,7 +3423,7 @@ useResizeObserver(graphViewerRef, () => {
                         selectedProviderPendingMode === 'inspect'
                       "
                       :disabled="isDirectRunActionDisabled(item.method)"
-                      @click="requestDirectRun(item.method, 'inspect')"
+                      @click="handleDirectRunAction(item.method, 'inspect')"
                     />
                   </div>
                 </div>
@@ -3454,41 +3467,23 @@ useResizeObserver(graphViewerRef, () => {
     </UDrawer>
 
     <UModal
-      v-model:open="showExecutionSequenceDialog"
-      title="Execution Sequence"
-      :description="
-        executionSequenceTrace
-          ? `Runtime Trace · run ${executionSequenceTrace.runId}`
-          : undefined
-      "
-      fullscreen
+      v-model:open="showStaticDirectRunDialog"
+      title="Direct Run is unavailable"
+      description="This static graph cannot run provider methods, but you can open saved execution history."
     >
-      <template #body>
-        <ExecutionSequence
-          :trace="executionSequenceTrace"
-          :result="executionSequenceResult"
-          :result-type="executionSequenceResultType"
-          :direct-run-url="directRunUrl"
-          :running="isExecutionSequenceRerunning()"
-        />
-      </template>
-
       <template #footer>
         <div class="flex w-full justify-end gap-2">
           <UButton
-            label="Re-run"
-            icon="i-lucide-refresh-cw"
-            color="primary"
-            variant="soft"
-            :loading="isExecutionSequenceRerunning()"
-            :disabled="!executionSequenceRequest"
-            @click="rerunExecutionSequence"
-          />
-          <UButton
-            label="Close"
+            label="Cancel"
             color="neutral"
             variant="outline"
-            @click="showExecutionSequenceDialog = false"
+            @click="showStaticDirectRunDialog = false"
+          />
+          <UButton
+            label="Open Execution Sequence"
+            icon="i-lucide-history"
+            color="primary"
+            @click="openExecutionSequenceHistory"
           />
         </div>
       </template>

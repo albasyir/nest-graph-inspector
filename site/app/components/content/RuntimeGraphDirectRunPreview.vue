@@ -50,6 +50,8 @@ const methods = computed(() => {
   const provider = previewData.value?.modules.UserModule?.providers[0]
   return provider?.directRun?.methods.slice(0, 3) || []
 })
+
+const directRunUrl = computed(() => `${base}mock-graph/direct-run`)
 </script>
 
 <template>
@@ -61,7 +63,8 @@ const methods = computed(() => {
             :data="previewData"
             flow-id="runtime-graph-preview-direct-run"
             height="clamp(18rem, 58vh, 34rem)"
-            :interactive="false"
+            :direct-run-disabled="true"
+            :direct-run-url="directRunUrl"
             :show-circular-dependencies="false"
             :enable-bright-line="false"
             default-open-module-detail

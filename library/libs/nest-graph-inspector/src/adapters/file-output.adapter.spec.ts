@@ -63,6 +63,11 @@ describe(FileOutputAdapter.name, () => {
       recursive: true,
     });
     expect(mockedWriteFile).toHaveBeenCalledWith(
+      join(dirname(filePath), 'information.json'),
+      JSON.stringify({ for: 'nest-graph-inspector', 'is-static': true }, null, 2),
+      'utf8',
+    );
+    expect(mockedWriteFile).toHaveBeenCalledWith(
       filePath,
       expect.stringContaining('# NestJS Dependency Graph'),
       'utf8',

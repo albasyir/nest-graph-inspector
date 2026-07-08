@@ -262,7 +262,7 @@ describe(DirectRunOutputAdapter.name, () => {
       method: 'fail',
     });
 
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(200);
     expect(parseJson(response.body)).toMatchObject({
       ok: false,
       method: 'fail',
@@ -278,6 +278,10 @@ describe(DirectRunOutputAdapter.name, () => {
             name: 'FailProvider.fail',
             status: 'error',
             errorMessage: 'boom',
+            result: {
+              name: 'Error',
+              message: 'boom',
+            },
           }),
         ],
       },
@@ -316,7 +320,11 @@ describe(DirectRunOutputAdapter.name, () => {
         traceId: string;
         runId: string;
         totalSpans: number;
-        spans: unknown[];
+        spans: Array<{
+          args?: unknown;
+          result?: unknown;
+          metadata?: Record<string, unknown>;
+        }>;
         status: string;
       };
     };
@@ -330,6 +338,11 @@ describe(DirectRunOutputAdapter.name, () => {
       runId: payload.runtimeTrace.runId,
       totalSpans: 1,
     });
+    expect(payload.runtimeTrace.spans[0]).toMatchObject({
+      args: [],
+      result: { ok: true },
+    });
+    expect(payload.runtimeTrace.spans[0]?.metadata).toBeUndefined();
   });
 });
 

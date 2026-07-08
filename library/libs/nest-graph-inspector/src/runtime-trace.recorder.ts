@@ -10,8 +10,6 @@ import type {
   RuntimeTraceStartContext,
 } from './types/direct-run.type';
 
-const COMPLETED_TRACE_TTL_MS = 10 * 1000;
-
 type ActiveRuntimeTraceHandle = RuntimeTraceHandle & { rootSpanId: string };
 type RuntimeTraceSpanInput = {
   name: string;
@@ -20,6 +18,7 @@ type RuntimeTraceSpanInput = {
   className?: string;
   methodName?: string;
   resource?: string;
+  args?: unknown;
   metadata?: Record<string, string | number | boolean | null>;
 };
 
@@ -50,12 +49,10 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   }
 
   getCompletedTrace(traceId: string): RuntimeTrace | undefined {
-    this.pruneCompletedTraces();
     return this.completedTraces.get(traceId);
   }
 
   getCompletedTraces(): RuntimeTrace[] {
-    this.pruneCompletedTraces();
     return [...this.completedTraces.values()];
   }
 
@@ -189,10 +186,10 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       errorMessage: !param.ok
         ? this.resolveErrorMessage(param.error)
         : undefined,
-      metadata: {
-        argsPreview: this.summarizeValue(context.args),
-        resultPreview: param.ok ? this.summarizeValue(param.result) : null,
-      },
+      args: this.previewValue(context.args),
+      result: param.ok
+        ? this.previewValue(param.result)
+        : this.errorResult(param.error),
     };
 
     const spans = [
@@ -249,10 +246,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       status: ok ? 'success' : 'error',
       errorName: ok ? undefined : this.resolveErrorName(error),
       errorMessage: ok ? undefined : this.resolveErrorMessage(error),
-      metadata: {
-        ...input.metadata,
-        resultPreview: ok ? this.summarizeValue(result) : null,
-      },
+      args: input.args,
+      result: ok ? this.previewValue(result) : this.errorResult(error),
+      metadata: input.metadata,
     });
     this.activeSpans.set(context.traceId, spans);
   }
@@ -289,7 +285,6 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   }
 
   private persistCompletedTrace(trace: RuntimeTrace): RuntimeTrace {
-    this.pruneCompletedTraces();
     this.completedTraces.set(trace.traceId, trace);
     return trace;
   }
@@ -301,15 +296,6 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       'then' in value &&
       typeof (value as { then?: unknown }).then === 'function',
     );
-  }
-
-  private pruneCompletedTraces() {
-    const cutoffMs = Date.now() - COMPLETED_TRACE_TTL_MS;
-    for (const [traceId, trace] of this.completedTraces.entries()) {
-      if (Date.parse(trace.endedAt) < cutoffMs) {
-        this.completedTraces.delete(traceId);
-      }
-    }
   }
 
   private classifyProviderType(providerName: string): RuntimeTraceSpanType {
@@ -354,5 +340,25 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     } catch {
       return '[unserializable]';
     }
+  }
+
+  previewValue(value: unknown): unknown {
+    if (value === undefined) {
+      return null;
+    }
+
+    try {
+      JSON.stringify(value);
+      return value;
+    } catch {
+      return '[unserializable]';
+    }
+  }
+
+  private errorResult(error: unknown): { name?: string; message?: string } {
+    return {
+      name: this.resolveErrorName(error),
+      message: this.resolveErrorMessage(error),
+    };
   }
 }

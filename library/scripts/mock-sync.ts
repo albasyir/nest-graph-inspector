@@ -3,10 +3,8 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  statSync,
-  writeFileSync,
 } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 
 function findRepoDir(startDir: string): string {
   let currentDir = resolve(startDir);
@@ -38,6 +36,13 @@ const graphDir = existsSync(cwdGraphDir)
   : resolve(repoDir, 'library/tmp/graph');
 const mockGraphDir = resolve(repoDir, 'site/public/mock-graph');
 
+function listFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(dir, entry.name);
+    return entry.isDirectory() ? listFiles(path) : [path];
+  });
+}
+
 function main(): void {
   if (!existsSync(graphDir)) {
     throw new Error(`Graph output directory not found: ${graphDir}`);
@@ -45,24 +50,18 @@ function main(): void {
 
   mkdirSync(mockGraphDir, { recursive: true });
 
-  const graphFiles = readdirSync(graphDir)
-    .map((fileName) => resolve(graphDir, fileName))
-    .filter((filePath) => statSync(filePath).isFile())
-    .sort();
+  const graphFiles = listFiles(graphDir).sort();
 
   if (graphFiles.length === 0) {
     throw new Error(`No graph output files found in: ${graphDir}`);
   }
 
   for (const sourcePath of graphFiles) {
-    const destinationPath = resolve(mockGraphDir, basename(sourcePath));
+    const destinationPath = resolve(mockGraphDir, relative(graphDir, sourcePath));
+    mkdirSync(dirname(destinationPath), { recursive: true });
     copyFileSync(sourcePath, destinationPath);
     console.log(`Copied ${sourcePath} to ${destinationPath}`);
   }
-
-  const informationPath = resolve(mockGraphDir, 'information.json');
-  writeFileSync(informationPath, JSON.stringify({ for: 'nest-graph-inspector' }, null, 2));
-  console.log(`Written ${informationPath}`);
 }
 
 main();

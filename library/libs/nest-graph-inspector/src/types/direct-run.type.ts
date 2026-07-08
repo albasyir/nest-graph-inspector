@@ -61,6 +61,8 @@ export type RuntimeTraceSpan = {
   status: RuntimeTraceSpanStatus;
   errorName?: string;
   errorMessage?: string;
+  args?: unknown;
+  result?: unknown;
   metadata?: Record<string, string | number | boolean | null>;
 };
 

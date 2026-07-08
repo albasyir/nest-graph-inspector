@@ -24,6 +24,7 @@ interface HttpOutputInternalOptions {
 export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
   private static readonly inspectorEndpointInfo = {
     for: 'nest-graph-inspector',
+    'is-static': false,
   };
 
   static readonly defaultConfig: Readonly<

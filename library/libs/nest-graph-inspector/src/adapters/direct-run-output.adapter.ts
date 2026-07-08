@@ -62,58 +62,56 @@ export class DirectRunOutputAdapter {
           args: argsResult.args,
         });
 
-        try {
-          const invokeMethod = async (): Promise<unknown> =>
-            (await method.call(instance, ...argsResult.args)) as unknown;
-          const result = this.runtimeTraceRecorder.runWithContext
-            ? await this.runtimeTraceRecorder.runWithContext(
-                traceIdentity,
-                invokeMethod,
-              )
-            : await invokeMethod();
-          const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(
-            traceIdentity,
-            result,
-          );
-          if (onComplete) {
-            await onComplete(runtimeTrace);
-          }
-          const payload: DirectRunResult = {
-            ok: true,
-            method: methodName,
-            result,
-            runId: traceIdentity.runId,
-            traceId: traceIdentity.traceId,
-            runtimeTrace,
-          };
+        const invokeMethod = async (): Promise<unknown> =>
+          (await method.call(instance, ...argsResult.args)) as unknown;
 
-          return {
-            statusCode: 200,
-            body: payload,
-          } satisfies HttpServeResponse;
-        } catch (error) {
-          const runtimeTrace = this.runtimeTraceRecorder.finishError(
-            traceIdentity,
-            error,
-          );
-          if (onComplete) {
-            await onComplete(runtimeTrace);
-          }
-          const payload: DirectRunResult = {
-            ok: false,
-            method: methodName,
-            error:
-              error instanceof Error ? error.message : 'Direct run failed.',
-            runId: traceIdentity.runId,
-            traceId: traceIdentity.traceId,
-            runtimeTrace,
-          };
+        const payload: DirectRunResult = await (async () => {
+          try {
+            const result = this.runtimeTraceRecorder.runWithContext
+              ? await this.runtimeTraceRecorder.runWithContext(
+                  traceIdentity,
+                  invokeMethod,
+                )
+              : await invokeMethod();
+            const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(
+              traceIdentity,
+              result,
+            );
 
-          return {
-            statusCode: 500,
-            body: payload,
-          } satisfies HttpServeResponse;
+            return {
+              ok: true,
+              method: methodName,
+              result,
+              runId: traceIdentity.runId,
+              traceId: traceIdentity.traceId,
+              runtimeTrace,
+            };
+          } catch (error) {
+            const runtimeTrace = this.runtimeTraceRecorder.finishError(
+              traceIdentity,
+              error,
+            );
+
+            return {
+              ok: false,
+              method: methodName,
+              error:
+                error instanceof Error ? error.message : 'Direct run failed.',
+              runId: traceIdentity.runId,
+              traceId: traceIdentity.traceId,
+              runtimeTrace,
+            };
+          }
+        })();
+
+        if (payload.runtimeTrace && onComplete) {
+          await onComplete(payload.runtimeTrace);
         }
+
+        return {
+          statusCode: 200,
+          body: payload,
+        } satisfies HttpServeResponse;
       },
       {
         responseHeaders: {
@@ -141,7 +139,7 @@ export class DirectRunOutputAdapter {
       () =>
         this.runtimeTraceRecorder
           .getCompletedTraces()
-          .map((trace) => trace.traceId),
+          .map((trace) => this.historyIndexItem(trace)),
       {
         responseHeaders: {
           'content-type': 'application/json; charset=utf-8',
@@ -246,8 +244,19 @@ export class DirectRunOutputAdapter {
 
   private traceIdFromPath(url: string, basePath: string): string {
     const path = new URL(url, 'http://localhost').pathname;
-    return decodeURIComponent(
+    const traceId = decodeURIComponent(
       path.slice(`${basePath.replace(/\/$/, '')}/`.length),
     );
+    return traceId.replace(/\.json$/, '');
+  }
+
+  private historyIndexItem(trace: RuntimeTrace) {
+    return {
+      traceId: trace.traceId,
+      entrypoint: trace.entrypoint,
+      startedAt: trace.startedAt,
+      status: trace.status,
+      totalDurationMs: trace.totalDurationMs,
+    };
   }
 }

@@ -92,7 +92,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
             `${internalConfig.directRun.path}/histories`,
           ),
           this.directRunOutputAdapter.createHistoryIndexRoute(
-            `${internalConfig.directRun.path}/history/index`,
+            `${internalConfig.directRun.path}/history/index.json`,
           ),
           this.directRunOutputAdapter.createHistoryTraceRoute(
             `${internalConfig.directRun.path}/history`,
@@ -149,9 +149,15 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     dirPath: string,
     trace: RuntimeTrace,
   ): Promise<void> {
-    const traceIds = this.runtimeTraceRecorder
+    const traceIndex = this.runtimeTraceRecorder
       .getCompletedTraces()
-      .map((item) => item.traceId);
+      .map((item) => ({
+        traceId: item.traceId,
+        entrypoint: item.entrypoint,
+        startedAt: item.startedAt,
+        status: item.status,
+        totalDurationMs: item.totalDurationMs,
+      }));
 
     await mkdir(dirPath, { recursive: true });
     await writeFile(
@@ -160,7 +166,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     );
     await writeFile(
       join(dirPath, 'index.json'),
-      JSON.stringify(traceIds, null, 2),
+      JSON.stringify(traceIndex, null, 2),
     );
   }
 }
