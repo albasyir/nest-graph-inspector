@@ -451,7 +451,7 @@ describe(NestGraphInspectorSetup.name, () => {
     const result = await runtimeTraceRecorder.runWithContext(handle, async () =>
       orderService.getAllOrders(),
     );
-    const trace = runtimeTraceRecorder.finishSuccess(handle, result);
+    const trace = await runtimeTraceRecorder.finishSuccess(handle, result);
 
     expect(trace).toMatchObject({
       status: 'success',
@@ -468,6 +468,79 @@ describe(NestGraphInspectorSetup.name, () => {
         }),
       ],
     });
+  });
+
+  it('should mark not-awaited promise spans with measured duration', async () => {
+    class ProductService {
+      async getAllProducts() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return [];
+      }
+    }
+
+    class OrderRepository {
+      updateStatus() {
+        return { id: 1 };
+      }
+    }
+
+    class OrderService {
+      constructor(
+        private readonly productService: ProductService,
+        private readonly orderRepository: OrderRepository,
+      ) {}
+
+      async confirmOrder() {
+        this.productService.getAllProducts();
+        return this.orderRepository.updateStatus();
+      }
+    }
+
+    const productService = new ProductService();
+    const orderRepository = new OrderRepository();
+    const orderService = new OrderService(productService, orderRepository);
+    appModuleRef.providers.set(ProductService.name, {
+      metatype: ProductService,
+      instance: productService,
+      token: ProductService,
+    });
+    appModuleRef.providers.set(OrderService.name, {
+      metatype: OrderService,
+      instance: orderService,
+      token: OrderService,
+    });
+    appModuleRef.providers.set(OrderRepository.name, {
+      metatype: OrderRepository,
+      instance: orderRepository,
+      token: OrderRepository,
+    });
+
+    service.buildModuleMap(TestRootModule);
+
+    const handle = runtimeTraceRecorder.start({
+      moduleName: TestRootModule.name,
+      providerName: OrderService.name,
+      methodName: 'confirmOrder',
+      args: [],
+    });
+    const result = await runtimeTraceRecorder.runWithContext(handle, async () =>
+      orderService.confirmOrder(),
+    );
+    const trace = await runtimeTraceRecorder.finishSuccess(handle, result);
+
+    const productSpan = trace.spans.find(
+      (span) => span.name === 'ProductService.getAllProducts',
+    );
+    const updateSpan = trace.spans.find(
+      (span) => span.name === 'OrderRepository.updateStatus',
+    );
+
+    expect(productSpan).toMatchObject({
+      status: 'success',
+      metadata: expect.objectContaining({ awaited: false }),
+    });
+    expect(productSpan?.durationMs).toBeGreaterThanOrEqual(5);
+    expect(updateSpan?.parentSpanId).toBe(trace.spans[0]?.spanId);
   });
 
   it('should include class JSDoc on documented modules', () => {

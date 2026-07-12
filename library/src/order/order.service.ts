@@ -57,7 +57,8 @@ export class OrderService {
     return this.orderRepository.findByUserId(userId);
   }
 
-  confirmOrder(id: number): Order | undefined {
+  async confirmOrder(id: number): Promise<Order | undefined> {
+    this.getAllOrders();
     return this.orderRepository.updateStatus(id, 'confirmed');
   }
 }

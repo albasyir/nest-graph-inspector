@@ -6,6 +6,7 @@ import type {
   RuntimeTrace,
   RuntimeTraceHandle,
   RuntimeTraceSpan,
+  RuntimeTraceSpanStatus,
   RuntimeTraceSpanType,
   RuntimeTraceStartContext,
 } from './types/direct-run.type';
@@ -29,6 +30,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   private readonly activeSpanStackStorage = new AsyncLocalStorage<string[]>();
   private readonly completedTraces = new Map<string, RuntimeTrace>();
   private readonly activeSpans = new Map<string, RuntimeTraceSpan[]>();
+  private readonly pendingSpans = new Map<string, Set<Promise<void>>>();
 
   start(context: RuntimeTraceStartContext): RuntimeTraceHandle {
     return {
@@ -40,12 +42,18 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     } as RuntimeTraceHandle;
   }
 
-  finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace {
-    return this.finishTrace(handle, { ok: true, result });
+  async finishSuccess(
+    handle: RuntimeTraceHandle,
+    result: unknown,
+  ): Promise<RuntimeTrace> {
+    return await this.finishTrace(handle, { ok: true, result });
   }
 
-  finishError(handle: RuntimeTraceHandle, error: unknown): RuntimeTrace {
-    return this.finishTrace(handle, { ok: false, error });
+  async finishError(
+    handle: RuntimeTraceHandle,
+    error: unknown,
+  ): Promise<RuntimeTrace> {
+    return await this.finishTrace(handle, { ok: false, error });
   }
 
   getCompletedTrace(traceId: string): RuntimeTrace | undefined {
@@ -62,6 +70,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   ): Promise<T> {
     const activeHandle = handle as ActiveRuntimeTraceHandle;
     this.activeSpans.set(activeHandle.traceId, []);
+    this.pendingSpans.set(activeHandle.traceId, new Set());
     return await this.activeContextStorage.run(activeHandle, async () =>
       this.activeSpanStackStorage.run([activeHandle.rootSpanId], callback),
     );
@@ -79,46 +88,59 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
 
     const startedAtMs = Date.now();
     const spanId = randomUUID();
-    const stack = this.activeSpanStackStorage.getStore() ?? [
+    const parentStack = this.activeSpanStackStorage.getStore() ?? [
       context.rootSpanId,
     ];
-    stack.push(spanId);
-    const parentSpanId = stack.at(-2);
-    let isPendingPromise = false;
+    const stack = [...parentStack, spanId];
+    const parentSpanId = parentStack.at(-1);
 
-    try {
+    return this.activeSpanStackStorage.run(stack, () => {
+      try {
       const result = callback();
       if (this.isPromiseLike(result)) {
-        isPendingPromise = true;
-        return result.then(
+        this.pushSpan(
+          context,
+          span,
+          spanId,
+          parentSpanId,
+          startedAtMs,
+          'partial',
+          undefined,
+          undefined,
+          { async: true },
+        );
+        const pendingSpan = result.then(
           (value) => {
-            this.pushSpan(
+            this.updateSpan(
               context,
-              span,
               spanId,
-              parentSpanId,
               startedAtMs,
-              true,
+              'success',
               undefined,
               value,
+              { async: true },
             );
-            stack.pop();
             return value;
           },
           (error) => {
-            this.pushSpan(
+            this.updateSpan(
               context,
-              span,
               spanId,
-              parentSpanId,
               startedAtMs,
-              false,
+              'error',
               error,
+              undefined,
+              { async: true },
             );
-            stack.pop();
             throw error;
           },
-        ) as T;
+        );
+        const trackedPendingSpan = Promise.resolve(pendingSpan).then(
+          () => undefined,
+          () => undefined,
+        );
+        this.trackPendingSpan(context.traceId, trackedPendingSpan);
+        return pendingSpan as T;
       }
 
       this.pushSpan(
@@ -127,37 +149,34 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
         spanId,
         parentSpanId,
         startedAtMs,
-        true,
+        'success',
         undefined,
         result,
       );
       return result;
-    } catch (error) {
+      } catch (error) {
       this.pushSpan(
         context,
         span,
         spanId,
         parentSpanId,
         startedAtMs,
-        false,
+        'error',
         error,
       );
       throw error;
-    } finally {
-      if (!isPendingPromise && stack.at(-1) === spanId) {
-        stack.pop();
       }
-    }
+    });
   }
 
-  private finishTrace(
+  private async finishTrace(
     handle: RuntimeTraceHandle,
     param: {
       ok: boolean;
       result?: unknown;
       error?: unknown;
     },
-  ): RuntimeTrace {
+  ): Promise<RuntimeTrace> {
     const context =
       (handle as ActiveRuntimeTraceHandle) ||
       this.activeContextStorage.getStore();
@@ -165,11 +184,13 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       return this.persistCompletedTrace(this.buildFallbackTrace());
     }
 
-    const endedAtMs = Date.now();
     const startedAt = new Date(context.startedAtMs).toISOString();
+    const status = param.ok ? 'success' : 'error';
+    this.markPendingSpansNotAwaited(context.traceId);
+    await this.waitForPendingSpans(context.traceId);
+    const endedAtMs = Date.now();
     const endedAt = new Date(endedAtMs).toISOString();
     const durationMs = Math.max(endedAtMs - context.startedAtMs, 0);
-    const status = param.ok ? 'success' : 'error';
     const rootSpan: RuntimeTraceSpan = {
       spanId: context.rootSpanId,
       runId: context.runId,
@@ -199,6 +220,7 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     const failedSpan = spans.find((span) => span.status === 'error');
 
     this.activeSpans.delete(context.traceId);
+    this.pendingSpans.delete(context.traceId);
 
     return this.persistCompletedTrace({
       traceId: context.traceId,
@@ -224,9 +246,10 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     spanId: string,
     parentSpanId: string | undefined,
     startedAtMs: number,
-    ok: boolean,
+    status: RuntimeTraceSpanStatus,
     error?: unknown,
     result?: unknown,
+    metadata?: Record<string, string | number | boolean | null>,
   ) {
     const endedAtMs = Date.now();
     const spans = this.activeSpans.get(context.traceId) || [];
@@ -243,14 +266,66 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
       startedAt: new Date(startedAtMs).toISOString(),
       endedAt: new Date(endedAtMs).toISOString(),
       durationMs: Math.max(endedAtMs - startedAtMs, 0),
-      status: ok ? 'success' : 'error',
-      errorName: ok ? undefined : this.resolveErrorName(error),
-      errorMessage: ok ? undefined : this.resolveErrorMessage(error),
+      status,
+      errorName: status === 'error' ? this.resolveErrorName(error) : undefined,
+      errorMessage:
+        status === 'error' ? this.resolveErrorMessage(error) : undefined,
       args: input.args,
-      result: ok ? this.previewValue(result) : this.errorResult(error),
-      metadata: input.metadata,
+      result:
+        status === 'error' ? this.errorResult(error) : this.previewValue(result),
+      metadata: { ...input.metadata, ...metadata },
     });
     this.activeSpans.set(context.traceId, spans);
+  }
+
+  private updateSpan(
+    context: RuntimeTraceHandle,
+    spanId: string,
+    startedAtMs: number,
+    status: RuntimeTraceSpanStatus,
+    error?: unknown,
+    result?: unknown,
+    metadata?: Record<string, string | number | boolean | null>,
+  ) {
+    const spans = this.activeSpans.get(context.traceId);
+    const span = spans?.find((item) => item.spanId === spanId);
+    if (!span) return;
+
+    const endedAtMs = Date.now();
+    span.endedAt = new Date(endedAtMs).toISOString();
+    span.durationMs = Math.max(endedAtMs - startedAtMs, 0);
+    span.status = status;
+    span.errorName =
+      status === 'error' ? this.resolveErrorName(error) : undefined;
+    span.errorMessage =
+      status === 'error' ? this.resolveErrorMessage(error) : undefined;
+    span.result =
+      status === 'error' ? this.errorResult(error) : this.previewValue(result);
+    span.metadata = { ...span.metadata, ...metadata };
+  }
+
+  private trackPendingSpan(traceId: string, promise: Promise<void>) {
+    const promises = this.pendingSpans.get(traceId);
+    if (!promises) return;
+
+    promises.add(promise);
+    promise.finally(() => promises.delete(promise));
+  }
+
+  private async waitForPendingSpans(traceId: string) {
+    const promises = this.pendingSpans.get(traceId);
+    if (!promises?.size) return;
+
+    await Promise.all([...promises]);
+  }
+
+  private markPendingSpansNotAwaited(traceId: string) {
+    const spans = this.activeSpans.get(traceId) || [];
+    for (const span of spans) {
+      if (span.status === 'partial' && span.metadata?.async) {
+        span.metadata = { ...span.metadata, awaited: false };
+      }
+    }
   }
 
   private isRootSpan(

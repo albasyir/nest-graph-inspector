@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type {
+  DirectRunResultPayload,
   RuntimeTrace,
   RuntimeTraceSpan,
 } from "~/utils/direct-run-provider";
+import { buildDirectRunRequest } from "~/utils/direct-run-provider";
 import type { AccordionItem } from "@nuxt/ui";
 
 const props = defineProps<{
@@ -17,17 +19,11 @@ const emit = defineEmits<{
   navigatorOpen: [];
 }>();
 
-const LABEL_COL = 180;
+const LABEL_COL_MIN = 180;
+const LABEL_CHAR_W = 9;
+const LABEL_INDENT_W = 16;
+const LABEL_PAD_W = 28;
 const BAR_MIN_W = 4;
-const ROW_COLORS = [
-  "#6366f1",
-  "#06b6d4",
-  "#10b981",
-  "#f59e0b",
-  "#f97316",
-  "#ec4899",
-  "#8b5cf6",
-];
 
 type RuntimeTraceHistoryItem = Pick<
   RuntimeTrace,
@@ -40,6 +36,7 @@ const historyTraces = ref<Record<string, RuntimeTrace>>({});
 const historyError = ref("");
 const historyIndexLoading = ref(false);
 const loadingTraceIds = ref<Set<string>>(new Set());
+const rerunningSpanIds = ref<Set<string>>(new Set());
 const activeHistoryTraceId = ref<string>();
 
 const selectedTraceId = computed(() => props.trace?.traceId ?? "");
@@ -79,13 +76,32 @@ watch(
 function traceSpans(trace: RuntimeTrace) {
   const traceStart = new Date(trace.startedAt).getTime();
   const total = trace.totalDurationMs || 1;
-  return [...trace.spans]
-    .sort((a, b) => {
-      const startedDiff =
-        new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
-      return startedDiff || a.order - b.order;
-    })
-    .map((span) => {
+  const sortedSpans = [...trace.spans].sort(compareSpans);
+  const childrenByParentId = new Map<string, RuntimeTraceSpan[]>();
+  const rootSpans: RuntimeTraceSpan[] = [];
+  const spanIds = new Set(sortedSpans.map((span) => span.spanId));
+
+  for (const span of sortedSpans) {
+    if (span.parentSpanId && spanIds.has(span.parentSpanId)) {
+      const children = childrenByParentId.get(span.parentSpanId) ?? [];
+      children.push(span);
+      childrenByParentId.set(span.parentSpanId, children);
+    } else {
+      rootSpans.push(span);
+    }
+  }
+
+  const rows: Array<{ span: RuntimeTraceSpan; depth: number }> = [];
+  const appendSpan = (span: RuntimeTraceSpan, depth: number) => {
+    rows.push({ span, depth });
+    for (const child of childrenByParentId.get(span.spanId) ?? []) {
+      appendSpan(child, depth + 1);
+    }
+  };
+
+  for (const span of rootSpans) appendSpan(span, 0);
+
+  return rows.map(({ span, depth }) => {
       const spanStart = new Date(span.startedAt).getTime();
       const offsetMs = Math.max(0, spanStart - traceStart);
       const left = (offsetMs / total) * 100;
@@ -93,17 +109,29 @@ function traceSpans(trace: RuntimeTrace) {
         (BAR_MIN_W / total) * 100,
         (span.durationMs / total) * 100,
       );
-      return { span, left, width };
+      return { span, depth, left, width };
     });
+}
+
+function compareSpans(a: RuntimeTraceSpan, b: RuntimeTraceSpan): number {
+  const startedDiff =
+    new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+  return startedDiff || a.order - b.order;
 }
 
 const TICK_COUNT = 5;
 function traceTicks(trace: RuntimeTrace) {
   const total = trace.totalDurationMs || 1;
-  return Array.from({ length: TICK_COUNT + 1 }, (_, i) => ({
-    pct: (i / TICK_COUNT) * 100,
-    label: `${Math.round((i / TICK_COUNT) * total)} ms`,
-  }));
+  const labels = new Set<number>();
+  return Array.from({ length: TICK_COUNT + 1 }, (_, i) => {
+    const value = Math.round((i / TICK_COUNT) * total);
+    if (labels.has(value)) return null;
+    labels.add(value);
+    return {
+      pct: (value / total) * 100,
+      label: `${value} ms`,
+    };
+  }).filter((tick): tick is { pct: number; label: string } => Boolean(tick));
 }
 
 function accordionTrace(item: AccordionItem): RuntimeTrace | undefined {
@@ -118,6 +146,17 @@ function accordionTraceSpans(item: AccordionItem) {
 function accordionTraceTicks(item: AccordionItem) {
   const trace = accordionTrace(item);
   return trace ? traceTicks(trace) : [];
+}
+
+function accordionLabelCol(item: AccordionItem): number {
+  const rows = accordionTraceSpans(item);
+  return Math.max(
+    LABEL_COL_MIN,
+    ...rows.map(
+      ({ span, depth }) =>
+        spanLabel(span).length * LABEL_CHAR_W + depth * LABEL_INDENT_W + LABEL_PAD_W,
+    ),
+  );
 }
 
 function entrypointLabel(trace: Pick<RuntimeTrace, "entrypoint">): string {
@@ -166,6 +205,13 @@ function statusLabel(trace: Pick<RuntimeTrace, "status">): string {
   return trace.status === "error" ? "Fail" : "Success";
 }
 
+function spanStatusLabel(span: RuntimeTraceSpan): string {
+  if (isNotAwaitedSpan(span)) return "Not awaited";
+  if (span.status === "error") return "Fail";
+  if (span.status === "partial") return "Partial";
+  return "Success";
+}
+
 function statusColor(trace: Pick<RuntimeTrace, "status">) {
   return trace.status === "error" ? "error" : "success";
 }
@@ -186,11 +232,26 @@ function isTraceLoading(traceId: string): boolean {
   return loadingTraceIds.value.has(traceId);
 }
 
-function barColor(span: RuntimeTraceSpan, index: number): string {
-  if (span.status === "error") return "var(--mg-trace-error-border)";
+function isSpanRerunning(spanId: string): boolean {
+  return rerunningSpanIds.value.has(spanId);
+}
+
+function canRerunSpan(span: RuntimeTraceSpan): boolean {
+  return Boolean(
+    props.directRunUrl && span.moduleName && span.className && span.methodName,
+  );
+}
+
+function barColor(span: RuntimeTraceSpan): string {
+  if (span.status === "error" || isNotAwaitedSpan(span))
+    return "var(--ui-color-error-500)";
   if (span.status === "cancelled" || span.status === "partial")
-    return "var(--mg-trace-slow-border)";
-  return ROW_COLORS[index % ROW_COLORS.length] ?? "#94a3b8";
+    return "var(--ui-color-neutral-500)";
+  return "var(--ui-color-success-500)";
+}
+
+function isNotAwaitedSpan(span: RuntimeTraceSpan): boolean {
+  return span.metadata?.awaited === false;
 }
 
 function spanLabel(span: RuntimeTraceSpan): string {
@@ -272,6 +333,46 @@ async function fetchHistoryTrace(traceId: string): Promise<void> {
   }
 }
 
+async function rerunSpan(span: RuntimeTraceSpan): Promise<void> {
+  if (!canRerunSpan(span) || isSpanRerunning(span.spanId)) return;
+
+  rerunningSpanIds.value = new Set([...rerunningSpanIds.value, span.spanId]);
+  try {
+    const response = await $fetch<DirectRunResultPayload>(props.directRunUrl!, {
+      method: "POST",
+      body: buildDirectRunRequest({
+        moduleName: span.moduleName!,
+        providerName: span.className!,
+        methodName: span.methodName!,
+        args: Array.isArray(span.args) ? span.args : [],
+      }),
+    });
+    if (response.runtimeTrace) {
+      historyTraces.value = {
+        ...historyTraces.value,
+        [response.runtimeTrace.traceId]: response.runtimeTrace,
+      };
+      historyIndex.value = [
+        historySummary(response.runtimeTrace),
+        ...historyIndex.value.filter(
+          (item) => item.traceId !== response.runtimeTrace?.traceId,
+        ),
+      ];
+      activeHistoryTraceId.value = response.runtimeTrace.traceId;
+    } else {
+      await fetchHistoryIndex();
+    }
+    historyError.value = "";
+  } catch (err) {
+    historyError.value =
+      err instanceof Error ? err.message : "Failed to rerun span.";
+  } finally {
+    const nextRerunningSpanIds = new Set(rerunningSpanIds.value);
+    nextRerunningSpanIds.delete(span.spanId);
+    rerunningSpanIds.value = nextRerunningSpanIds;
+  }
+}
+
 watch(
   () => props.directRunUrl,
   () => {
@@ -334,7 +435,7 @@ watch(activeHistoryTraceId, (traceId) => {
                 {{ startedAtLabel(historyItem(item.value)!) }}
               </UBadge>
               <UBadge
-                v-if="historyItem(item.value)!.totalDurationMs"
+                v-if="historyItem(item.value)!.totalDurationMs !== undefined"
                 variant="soft"
                 color="neutral"
               >
@@ -367,22 +468,27 @@ watch(activeHistoryTraceId, (traceId) => {
             <!-- Tick axis -->
             <div
               class="exec-seq__axis"
-              :style="{ paddingLeft: LABEL_COL + 'px' }"
+              :style="{
+                gridTemplateColumns: `${accordionLabelCol(item)}px minmax(0, 1fr)`,
+              }"
             >
-              <div
-                v-for="tick in accordionTraceTicks(item)"
-                :key="tick.pct"
-                class="exec-seq__tick"
-                :style="{ left: tick.pct + '%' }"
-              >
-                {{ tick.label }}
+              <div class="exec-seq__axis-label">Timeline</div>
+              <div class="exec-seq__axis-track">
+                <div
+                  v-for="tick in accordionTraceTicks(item)"
+                  :key="tick.pct"
+                  class="exec-seq__tick"
+                  :style="{ left: tick.pct + '%' }"
+                >
+                  {{ tick.label }}
+                </div>
               </div>
             </div>
 
             <!-- Rows -->
             <div class="exec-seq__rows">
               <div
-                v-for="({ span, left, width }, i) in accordionTraceSpans(item)"
+                v-for="{ span, depth, left, width } in accordionTraceSpans(item)"
                 :key="span.spanId"
                 class="exec-seq__row"
                 :class="{ 'exec-seq__row--error': span.status === 'error' }"
@@ -390,7 +496,10 @@ watch(activeHistoryTraceId, (traceId) => {
                 <!-- Label column -->
                 <div
                   class="exec-seq__row-label"
-                  :style="{ width: LABEL_COL + 'px' }"
+                  :style="{
+                    width: accordionLabelCol(item) + 'px',
+                    paddingLeft: 12 + depth * LABEL_INDENT_W + 'px',
+                  }"
                 >
                   <span class="exec-seq__row-name" :title="spanLabel(span)">{{
                     spanLabel(span)
@@ -430,7 +539,7 @@ watch(activeHistoryTraceId, (traceId) => {
                       :style="{
                         left: left + '%',
                         width: width + '%',
-                        background: barColor(span, i),
+                        background: barColor(span),
                       }"
                       role="button"
                       tabindex="0"
@@ -441,6 +550,30 @@ watch(activeHistoryTraceId, (traceId) => {
                       <span v-if="width > 8" class="exec-seq__bar-label"
                         >{{ span.durationMs }} ms</span
                       >
+                    </div>
+                    <div
+                      class="absolute top-1/2 right-2 z-1 flex -translate-y-1/2 items-center gap-1.5"
+                    >
+                      <UBadge
+                        v-if="isNotAwaitedSpan(span)"
+                        size="sm"
+                        variant="subtle"
+                        color="error"
+                        icon="i-lucide-alert-triangle"
+                        :ui="{ base: 'font-semibold shadow-sm bg-default' }"
+                      >
+                        Not awaited
+                      </UBadge>
+                      <UButton
+                        size="xs"
+                        variant="soft"
+                        color="neutral"
+                        icon="i-lucide-refresh-cw"
+                        label="Rerun"
+                        :loading="isSpanRerunning(span.spanId)"
+                        :disabled="!canRerunSpan(span)"
+                        @click.stop="rerunSpan(span)"
+                      />
                     </div>
 
                     <template #content>
@@ -459,10 +592,12 @@ watch(activeHistoryTraceId, (traceId) => {
                               :class="
                                 span.status === 'error'
                                   ? 'exec-seq__card-value--fail'
+                                  : isNotAwaitedSpan(span)
+                                    ? 'exec-seq__card-value--fail'
                                   : 'exec-seq__card-value--success'
                               "
                             >
-                              {{ span.status === "error" ? "Fail" : "Success" }}
+                              {{ spanStatusLabel(span) }}
                             </span>
                           </div>
                         </div>
@@ -552,18 +687,35 @@ watch(activeHistoryTraceId, (traceId) => {
 .exec-seq__gantt {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--mg-trace-border);
+  margin-block: 8px;
+  border: 1px solid color-mix(in srgb, var(--mg-trace-border) 70%, white);
   border-radius: 8px;
   overflow: hidden;
 }
 
 /* Tick axis */
 .exec-seq__axis {
-  position: relative;
+  display: grid;
   height: 24px;
   border-bottom: 1px solid var(--mg-trace-border);
   background: var(--mg-trace-card-bg);
   flex-shrink: 0;
+}
+
+.exec-seq__axis-label {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-right: 1px solid var(--mg-trace-border);
+  color: var(--ui-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exec-seq__axis-track {
+  position: relative;
 }
 
 .exec-seq__tick {
@@ -616,8 +768,6 @@ watch(activeHistoryTraceId, (traceId) => {
   font-weight: 600;
   font-family: ui-monospace, "SF Mono", monospace;
   color: var(--ui-text-highlighted);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

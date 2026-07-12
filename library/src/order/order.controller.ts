@@ -32,8 +32,8 @@ export class OrderController {
   }
 
   @Get(':id/confirm')
-  confirmOrder(@Param('id') id: string) {
-    const order = this.orderService.confirmOrder(Number(id));
+  async  confirmOrder(@Param('id') id: string) {
+    const order = await this.orderService.confirmOrder(Number(id));
     if (order) {
       this.notificationService.notifyOrderShipped(order.id);
     }

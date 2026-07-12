@@ -95,8 +95,8 @@ export type DirectRunTraceRecorder = {
     handle: RuntimeTraceHandle,
     callback: () => Promise<T>,
   ): Promise<T>;
-  finishSuccess(handle: RuntimeTraceHandle, result: unknown): RuntimeTrace;
-  finishError(handle: RuntimeTraceHandle, error: unknown): RuntimeTrace;
+  finishSuccess(handle: RuntimeTraceHandle, result: unknown): Promise<RuntimeTrace>;
+  finishError(handle: RuntimeTraceHandle, error: unknown): Promise<RuntimeTrace>;
   getCompletedTrace(traceId: string): RuntimeTrace | undefined;
   getCompletedTraces(): RuntimeTrace[];
 };

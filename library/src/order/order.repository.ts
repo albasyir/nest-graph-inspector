@@ -54,7 +54,8 @@ export class OrderRepository {
     return this.orders.filter((o) => o.userId === userId);
   }
 
-  updateStatus(id: number, status: Order['status']): Order | undefined {
+  async updateStatus(id: number, status: Order['status']): Promise<Order | undefined> {
+    await new Promise(resolve => setTimeout(resolve, 100));
     const order = this.orders.find((o) => o.id === id);
     if (order) {
       order.status = status;

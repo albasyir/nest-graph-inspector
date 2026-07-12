@@ -73,7 +73,7 @@ export class DirectRunOutputAdapter {
                   invokeMethod,
                 )
               : await invokeMethod();
-            const runtimeTrace = this.runtimeTraceRecorder.finishSuccess(
+            const runtimeTrace = await this.runtimeTraceRecorder.finishSuccess(
               traceIdentity,
               result,
             );
@@ -87,7 +87,7 @@ export class DirectRunOutputAdapter {
               runtimeTrace,
             };
           } catch (error) {
-            const runtimeTrace = this.runtimeTraceRecorder.finishError(
+            const runtimeTrace = await this.runtimeTraceRecorder.finishError(
               traceIdentity,
               error,
             );
