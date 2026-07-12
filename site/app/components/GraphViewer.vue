@@ -2270,7 +2270,7 @@ function parseTypeScriptLiteral(
   if (/^'(?:\\.|[^'\\])*'$/.test(value) || /^"(?:\\.|[^"\\])*"$/.test(value)) {
     try {
       const normalizedValue = value.startsWith("'")
-        ? `"${value.slice(1, -1).replace(/"/g, '\\"')}"`
+        ? JSON.stringify(value.slice(1, -1).replace(/\\'/g, "'"))
         : value;
 
       return { matched: true, value: JSON.parse(normalizedValue) };
