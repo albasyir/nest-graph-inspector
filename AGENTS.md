@@ -1,17 +1,18 @@
 # Repository instructions
 
-This repository has two primary ownership areas:
+This repository has three primary ownership areas:
 
 - `site/**`: frontend application
-- `library/**`: reusable library workspace
+- `demo/**`: NestJS demo and development host
+- `lib/**`: reusable npm library
 
 ## Delegation
 
 - Delegate frontend UI, UX, visualization, browser behavior, and files under
   `site/**` to the `frontend` agent.
 - Delegate reusable library, NestJS integration, public API, types, tests,
-  documentation, and files under `library/**` to the `library` agent.
-- For work touching both areas, use both agents.
+  documentation, and files under `lib/**` or `demo/**` to the `library` agent.
+- For work touching `site/**` and `lib/**`, use both agents.
 - For cross-area work, define or verify the library API/data contract first,
   then integrate it in the frontend.
 - The parent agent coordinates final integration and resolves contract mismatch.
@@ -26,8 +27,8 @@ This repository has two primary ownership areas:
 
 ## Library structure
 
-- `library/libs/**`: reusable implementation
-- `library/src/**`: demo/showcase and development application
-- `library/test/**`: tests
-- `library/docs/**`: documentation
-- `library/scripts/**`: build and development tooling
+- `lib/src/**`: reusable implementation
+- `demo/src/**`: demo/showcase and development application
+- `demo/test/**`: demo integration tests
+- `demo/docs/**`: legacy demo documentation
+- `demo/scripts/**`: demo development tooling

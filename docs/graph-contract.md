@@ -1,8 +1,8 @@
 # Graph JSON Contract — `GraphOutput` v3
 
 This document describes the JSON contract as implemented in
-`library/libs/nest-graph-inspector/src/types/graph-output.type.ts` and
-`library/libs/nest-graph-inspector/src/types/graph-output.schema.ts`.
+`lib/src/types/graph-output.type.ts` and
+`lib/src/types/graph-output.schema.ts`.
 
 The normative source of truth is the JSON Schema published at:
 `https://albasyir.github.io/nest-graph-inspector/schemas/graph-output-v3.schema.json`
@@ -269,7 +269,7 @@ programmatically.
 ## Public exported TypeScript types
 
 All of the following are re-exported from the library's public entry point
-`library/libs/nest-graph-inspector/src/index.ts`:
+`lib/src/index.ts`:
 
 From `graph-output.type.ts`:
 - `GraphOutput`

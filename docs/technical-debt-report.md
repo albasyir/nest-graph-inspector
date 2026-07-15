@@ -18,7 +18,7 @@
 | Medium | CORS/preflight and URL/path normalization are implemented independently in multiple adapters | Duplicated implementation |
 | Medium | Graph cycle serialization is inconsistent between provider and controller cycles | Inconsistent contract / naming |
 | Medium | Documentation gives conflicting status and shape descriptions for implemented features | Missing / stale documentation |
-| Medium | `library/docs/` and `site/content/` overlap as documentation surfaces | Overlapping directories / unclear ownership |
+| Medium | `demo/docs/` and `site/content/` overlap as documentation surfaces | Overlapping directories / unclear ownership |
 | Low | Root contains both pnpm and npm lockfiles | Tooling ambiguity |
 | Low | `site/README.md` remains the Nuxt Docs Template README | Stale documentation |
 | Low | `site/app/composables/` exists but is empty | Unclear directory responsibility |
@@ -31,19 +31,19 @@
 
 **Evidence**
 
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.module.ts` makes
+- `lib/src/nest-graph-inspector.module.ts` makes
   `viewer` the default output, and its default viewer configuration includes
   `directRun: { path: '/direct-run' }`.
 - The same default viewer configuration spreads `HttpOutputAdapter.defaultConfig`,
   whose host is `0.0.0.0` and port is `53371`.
-- `library/libs/nest-graph-inspector/src/adapters/viewer-output.adapter.ts` registers
+- `lib/src/adapters/viewer-output.adapter.ts` registers
   Direct Run routes whenever the internal `directRun.path` is set.
-- `library/libs/nest-graph-inspector/src/adapters/direct-run-output.adapter.ts`
+- `lib/src/adapters/direct-run-output.adapter.ts`
   accepts a request body containing `module`, `provider`, `method`, and `args`,
   resolves the provider instance, then calls `method.call(instance, ...args)`.
   Its checks validate only required fields, provider availability, method existence,
   and argument count/shape.
-- `library/libs/nest-graph-inspector/src/adapters/http-serve.adapter.ts` applies
+- `lib/src/adapters/http-serve.adapter.ts` applies
   `Access-Control-Allow-Origin: *`, broad methods, and `Access-Control-Allow-Headers: *`
   to every request before routing. The Direct Run route has no separate access
   control.
@@ -65,10 +65,10 @@ soon,” so the behavior is not clearly communicated to users.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.module.ts`
-- `library/libs/nest-graph-inspector/src/adapters/viewer-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/direct-run-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/http-serve.adapter.ts`
+- `lib/src/nest-graph-inspector.module.ts`
+- `lib/src/adapters/viewer-output.adapter.ts`
+- `lib/src/adapters/direct-run-output.adapter.ts`
+- `lib/src/adapters/http-serve.adapter.ts`
 
 ---
 
@@ -78,7 +78,7 @@ soon,” so the behavior is not clearly communicated to users.
 
 **Evidence**
 
-`library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts` is 1,619
+`lib/src/nest-graph-inspector.setup.ts` is 1,619
 lines and currently performs all of the following:
 
 1. NestJS root-module discovery through `ModulesContainer`.
@@ -108,8 +108,8 @@ The file is already substantially larger than any other library source module.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.spec.ts`
+- `lib/src/nest-graph-inspector.setup.ts`
+- `lib/src/nest-graph-inspector.setup.spec.ts`
 
 ---
 
@@ -121,8 +121,8 @@ The file is already substantially larger than any other library source module.
 files import types with paths such as:
 
 ```ts
-@library/libs/nest-graph-inspector/src/types/graph-output.type
-@library/libs/nest-graph-inspector/src/types/direct-run.type
+@lib/src/types/graph-output.type
+@lib/src/types/direct-run.type
 ```
 
 Current uses include:
@@ -153,8 +153,8 @@ public API; current imports do not do that.
 **Related code**
 
 - `site/nuxt.config.ts`
-- `library/libs/nest-graph-inspector/package.json`
-- `library/libs/nest-graph-inspector/src/index.ts`
+- `lib/package.json`
+- `lib/src/index.ts`
 - Site files listed above
 
 ---
@@ -163,11 +163,11 @@ public API; current imports do not do that.
 
 **Evidence**
 
-`library/test/app.e2e-spec.ts` imports `AppModule`, starts a Nest app, then
+`demo/test/app.e2e-spec.ts` imports `AppModule`, starts a Nest app, then
 expects `GET /` to return `200` and `"Hello World!"`.
 
 A repository-wide search finds `"Hello World!"` only in that test. The demo app
-under `library/src/` contains no root controller or endpoint that returns this
+under `demo/src/` contains no root controller or endpoint that returns this
 response.
 
 **Impact**
@@ -178,9 +178,9 @@ validation command unreliable.
 
 **Related code**
 
-- `library/test/app.e2e-spec.ts`
-- `library/test/jest-e2e.json`
-- `library/src/app.module.ts`
+- `demo/test/app.e2e-spec.ts`
+- `demo/test/jest-e2e.json`
+- `demo/src/app.module.ts`
 
 ---
 
@@ -191,9 +191,10 @@ validation command unreliable.
 `.github/workflows/deploy-site.yml` is the only workflow. It installs dependencies
 and runs `pnpm exec nuxt generate` in `site/`, then deploys GitHub Pages.
 
-The repository provides library commands for `pnpm build`, `pnpm lint`, `pnpm test`,
-and `pnpm test:e2e` in `library/package.json`, but no GitHub Actions workflow runs
-them. The workflow also does not run `site` linting or type checking.
+The reusable package provides `pnpm build` and `pnpm test` in `lib/package.json`.
+The demo host provides `pnpm build`, `pnpm lint`, `pnpm test`, and
+`pnpm test:e2e` in `demo/package.json`. No GitHub Actions workflow runs them.
+The workflow also does not run `site` linting or type checking.
 
 **Impact**
 
@@ -204,7 +205,8 @@ by CI.
 **Related files**
 
 - `.github/workflows/deploy-site.yml`
-- `library/package.json`
+- `lib/package.json`
+- `demo/package.json`
 - `site/package.json`
 
 ---
@@ -238,10 +240,10 @@ output types. Every extension changes central library code and public union type
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.type.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.module.ts`
-- `library/libs/nest-graph-inspector/src/ports/output.adapter.ts`
+- `lib/src/nest-graph-inspector.type.ts`
+- `lib/src/nest-graph-inspector.setup.ts`
+- `lib/src/nest-graph-inspector.module.ts`
+- `lib/src/ports/output.adapter.ts`
 
 ---
 
@@ -276,10 +278,10 @@ for an external adapter or alternate Direct Run implementation to extend.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
-- `library/libs/nest-graph-inspector/src/adapters/viewer-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/http-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.type.ts`
+- `lib/src/nest-graph-inspector.setup.ts`
+- `lib/src/adapters/viewer-output.adapter.ts`
+- `lib/src/adapters/http-output.adapter.ts`
+- `lib/src/nest-graph-inspector.type.ts`
 
 ---
 
@@ -287,9 +289,9 @@ for an external adapter or alternate Direct Run implementation to extend.
 
 **Evidence**
 
-- `library/libs/nest-graph-inspector/src/types/graph-output.schema.ts` exports
+- `lib/src/types/graph-output.schema.ts` exports
   `GRAPH_OUTPUT_SCHEMA_VERSION = '3'`.
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts` returns
+- `lib/src/nest-graph-inspector.setup.ts` returns
   `version: '3'` directly in `createModuleMapFromModuleTree()`.
 
 **Impact**
@@ -300,8 +302,8 @@ values remain aligned.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/types/graph-output.schema.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
+- `lib/src/types/graph-output.schema.ts`
+- `lib/src/nest-graph-inspector.setup.ts`
 
 ---
 
@@ -335,9 +337,9 @@ behavior differences. The split CORS policy is also relevant to TD-01.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/adapters/http-serve.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/proxy.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/http-output.adapter.ts`
+- `lib/src/adapters/http-serve.adapter.ts`
+- `lib/src/adapters/proxy.adapter.ts`
+- `lib/src/adapters/http-output.adapter.ts`
 
 ---
 
@@ -373,8 +375,8 @@ an open question in `docs/graph-contract.md`.
 
 **Related code**
 
-- `library/libs/nest-graph-inspector/src/types/graph-output.type.ts`
-- `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
+- `lib/src/types/graph-output.type.ts`
+- `lib/src/nest-graph-inspector.setup.ts`
 - `site/app/utils/circular-dependency-issues.ts`
 
 ---
@@ -410,13 +412,13 @@ does not describe what the package currently does or writes.
 
 - `README.md`
 - `site/content/2.configuration/2.outputs.md`
-- `library/libs/nest-graph-inspector/src/adapters/json-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/adapters/direct-run-output.adapter.ts`
-- `library/libs/nest-graph-inspector/src/types/direct-run.type.ts`
+- `lib/src/adapters/json-output.adapter.ts`
+- `lib/src/adapters/direct-run-output.adapter.ts`
+- `lib/src/types/direct-run.type.ts`
 
 ---
 
-### TD-12 — Documentation ownership overlaps across `docs/`, `site/content/`, and `library/docs/`
+### TD-12 — Documentation ownership overlaps across `docs/`, `site/content/`, and `demo/docs/`
 
 **Evidence**
 
@@ -425,7 +427,7 @@ does not describe what the package currently does or writes.
   report.
 - `site/content/` contains user-facing MDC docs for installation, configuration,
   and internals; it is rendered and deployed through Nuxt.
-- `library/docs/` contains standalone static HTML files (`index.html`,
+- `demo/docs/` contains standalone static HTML files (`index.html`,
   `diagram.html`, `logo.png`) that describe the same project. No current script
   was found that generates or deploys those files.
 
@@ -439,7 +441,7 @@ obvious documentation source of truth.
 
 - `docs/`
 - `site/content/`
-- `library/docs/`
+- `demo/docs/`
 
 ---
 
@@ -450,7 +452,7 @@ obvious documentation source of truth.
 **Evidence**
 
 - Root `package.json` declares `packageManager: "pnpm@10.33.0"`.
-- `pnpm-workspace.yaml` defines the `library` and `site` workspace packages.
+- `pnpm-workspace.yaml` defines the `lib`, `demo`, and `site` workspace packages.
 - Both `pnpm-lock.yaml` and `package-lock.json` exist at the repository root.
 
 **Impact**
@@ -518,9 +520,9 @@ functional defect.
 The following were inspected but are not reported as problems because the current
 repository provides a clear implementation-backed role:
 
-- `library/src/` is a demo/development application and intentionally contains
+- `demo/src/` is a demo/development application and intentionally contains
   circular dependency examples used for graph inspection.
-- `library/tmp/graph/` is generated runtime output and `library/scripts/mock-sync.ts`
+- `demo/tmp/graph/` is generated runtime output and `demo/scripts/mock-sync.ts`
   clearly copies it to the static site fixture.
 - `OutputAdapter` and `ProxyGateway` are useful internal seams even though custom
   extension is not currently public; the debt is the absence of a public

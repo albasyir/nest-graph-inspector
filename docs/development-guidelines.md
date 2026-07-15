@@ -6,14 +6,14 @@ Use this decision tree before opening a file:
 
 ```
 Does the change affect what end-users install (the npm package)?
-  YES → library/libs/nest-graph-inspector/src/**
+  YES → lib/src/**
   NO  → Does it affect the interactive viewer or documentation site?
           YES → site/**
           NO  → Is it a demo scenario for manual / exploratory testing?
-                  YES → library/src/**   (demo app only)
+                  YES → demo/src/**   (demo app only)
 ```
 
-### `library/libs/nest-graph-inspector/**` — the library
+### `lib/**` — the library
 
 Use this area when you are:
 - Adding or modifying graph extraction logic.
@@ -26,7 +26,7 @@ Use this area when you are:
 Do **not** import frontend packages (`vue`, `nuxt`, browser globals) here.  
 Do **not** use Express or Fastify; the HTTP layer uses plain `node:http`.
 
-### `library/src/**` — demo application
+### `demo/src/**` — demo application
 
 Use this area only to:
 - Add, modify, or remove modules/providers that demonstrate library capabilities.
@@ -53,7 +53,7 @@ but **never import library runtime code** (services, decorators, DI containers).
 
 ### Library (public npm package)
 
-- All exports listed in `library/libs/nest-graph-inspector/src/index.ts` are
+- All exports listed in `lib/src/index.ts` are
   considered public API.  Do not remove or rename them without a major version
   bump.
 - `NestGraphInspectorModuleOptions` fields must remain optional-compatible.
@@ -80,7 +80,7 @@ but **never import library runtime code** (services, decorators, DI containers).
 The library entry point is:
 
 ```
-library/libs/nest-graph-inspector/src/index.ts
+lib/src/index.ts
 ```
 
 Rules:
@@ -106,8 +106,7 @@ pnpm test:cov        # coverage report
 ```
 
 Test files live alongside the source they test (`*.spec.ts` co-located in
-`library/libs/nest-graph-inspector/src/adapters/` and at
-`library/libs/nest-graph-inspector/src/`).
+`lib/src/adapters/` and at `lib/src/`).
 
 ### Library e2e tests
 
@@ -116,9 +115,9 @@ cd library
 pnpm test:e2e        # Jest with test/jest-e2e.json config
 ```
 
-> **Note:** `library/test/app.e2e-spec.ts` appears to be a leftover NestJS
+> **Note:** `demo/test/app.e2e-spec.ts` appears to be a leftover NestJS
 > scaffold (`GET /` expects `"Hello World!"`).  No controller serving that
-> route exists in `library/src`.  This test may fail without modification.
+> route exists in `demo/src`.  This test may fail without modification.
 
 ### Library linting and formatting
 
@@ -175,7 +174,7 @@ separated.
 Add or extend types in:
 
 ```
-library/libs/nest-graph-inspector/src/types/
+lib/src/types/
 ```
 
 Update the JSON Schema in `graph-output.schema.ts` if the `GraphOutput` shape
@@ -196,10 +195,10 @@ adapter dispatch in `NestGraphInspectorSetup`.
 
 ### 3. Update the demo application
 
-Add a representative module, provider, or scenario to `library/src/` that
+Add a representative module, provider, or scenario to `demo/src/` that
 exercises the new capability.
 
-Run `pnpm dev` in `library/` and confirm the new data appears in
+Run `pnpm dev` in `demo/` and confirm the new data appears in
 `/output.json`.
 
 ### 4. Regenerate the mock fixture (if the `GraphOutput` shape changes)
@@ -231,9 +230,9 @@ Update `docs/graph-contract.md` if the contract changed.
 ## Open questions
 
 - There is no monorepo-level `pnpm-workspace.yaml`; workspace membership is
-  inferred by convention.  Confirm whether `library/` and `site/` are
+  inferred by convention. Confirm whether `lib/`, `demo/`, and `site/` are
   officially in the same pnpm workspace.
-- The `library/test/app.e2e-spec.ts` e2e test appears to be a scaffold
+- The `demo/test/app.e2e-spec.ts` e2e test appears to be a scaffold
   remnant.  It should either be updated to test the real demo app behaviour or
   removed.
 - No CI pipeline runs the library unit tests automatically (`.github/workflows/`

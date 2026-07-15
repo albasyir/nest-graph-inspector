@@ -18,18 +18,17 @@ Related reading:
 | `.codex/` | AI-agent config | Maintainer |
 | `.github/` | CI and community files | Maintainer |
 | `docs/` | Contributor and maintainer docs | Anyone |
-| `library/` | NestJS library workspace | Library agent / maintainer |
-| `library/libs/nest-graph-inspector/` | Published npm package | Library agent |
-| `library/libs/nest-graph-inspector/src/` | All library source code | Library agent |
-| `library/libs/.../src/adapters/` | Output channel implementations | Library agent |
-| `library/libs/.../src/ports/` | Port interfaces (contracts) | Library agent |
-| `library/libs/.../src/types/` | Public TypeScript types + JSON Schema | Library agent |
-| `library/src/` | Demo / development app | Library agent |
-| `library/test/` | E2E tests for the demo app | Library agent |
-| `library/scripts/` | Release and mock-sync tooling | Maintainer |
-| `library/docs/` | Static HTML docs (legacy) | Maintainer |
-| `library/dist/` | Build output — never edit | Tooling |
-| `library/tmp/` | Runtime graph output — never commit | Dev only |
+| `lib/` | Published npm package | Library agent |
+| `lib/src/` | All library source code | Library agent |
+| `lib/src/adapters/` | Output channel implementations | Library agent |
+| `lib/src/ports/` | Port interfaces (contracts) | Library agent |
+| `lib/src/types/` | Public TypeScript types + JSON Schema | Library agent |
+| `demo/src/` | Demo / development app | Library agent |
+| `demo/test/` | E2E tests for the demo app | Library agent |
+| `demo/scripts/` | Mock-fixture tooling | Maintainer |
+| `demo/docs/` | Static HTML docs (legacy) | Maintainer |
+| `lib/dist/` | Published package build output — never edit | Tooling |
+| `demo/tmp/` | Runtime graph output — never commit | Dev only |
 | `site/` | Nuxt 4 documentation + viewer | Frontend agent / maintainer |
 | `site/app/` | Nuxt app directory | Frontend agent |
 | `site/app/assets/` | Global CSS | Frontend agent |
@@ -72,7 +71,7 @@ Related reading:
 
 **Important dependencies:** None beyond pnpm itself.
 
-**Related:** `library/`, `site/`, `.github/`.
+**Related:** `lib/`, `demo/`, `site/`, `.github/`.
 
 ---
 
@@ -83,14 +82,14 @@ Related reading:
 **What belongs here:**
 - `config.toml` — top-level agent settings (`max_threads = 4`, `max_depth = 1`).
 - `agents/frontend.toml` — definition for the `frontend` sub-agent; scoped to `site/**`.
-- `agents/library.toml` — definition for the `library` sub-agent; scoped to `library/**`.
+- `agents/library.toml` — definition for the `library` sub-agent; scoped to `lib/**` and `demo/**`.
 
 **What does NOT belong here:**
 - Application code, tests, or scripts.
 
 **Important dependencies:** Codex CLI.
 
-**Related:** `AGENTS.md`, `library/AGENTS.md`, `site/AGENTS.md`.
+**Related:** `AGENTS.md`, `demo/AGENTS.md`, `site/AGENTS.md`.
 
 ---
 
@@ -109,16 +108,16 @@ The only CI pipeline. Triggers on push to `main` or manual dispatch:
 
 ### `.github/dependabot.yml`
 
-Watches `npm` packages at `/` (root) on a weekly schedule. Does not separately watch `library/` or `site/` subdirectories.
+Watches `npm` packages at `/` (root) on a weekly schedule. Does not separately watch `lib/`, `demo/`, or `site/` subdirectories.
 
-**Uncertain:** Whether Dependabot picks up `library/package.json` and `site/package.json` through the root config is not confirmed from config inspection alone.
+**Uncertain:** Whether Dependabot picks up `demo/package.json` and `site/package.json` through the root config is not confirmed from config inspection alone.
 
 ### `.github/FUNDING.yml`
 
 Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 **What does NOT belong here:**
-- Library builds or npm publish steps (those are manual via `library/scripts/release.ts`).
+- Library builds or npm publish steps (those are manual via `demo/scripts/release.ts`).
 
 ---
 
@@ -144,23 +143,17 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ---
 
-## `library/`
+## `lib/` and `demo/`
 
-**Purpose:** The NestJS library workspace. Contains the published npm package, the demo app, tests, build scripts, and legacy docs.
+**Purpose:** `lib/` is the published NestJS package. `demo/` is its NestJS demo and development host, including e2e tests, mock-fixture tooling, and legacy static docs.
 
-**Owner:** `library` agent (see `library/AGENTS.md`).
+**Owner:** `library` agent (see `demo/AGENTS.md`).
 
-**Important workspace files:**
-- `package.json` — declares `nest-graph-inspector-library`; holds all runtime and dev dependencies; configures Jest roots as `src/` and `libs/`.
-- `nest-cli.json` — NestJS CLI monorepo config; registers `nest-graph-inspector` as a library project with entry at `libs/nest-graph-inspector/src/index.ts`.
-- `tsconfig.json` — root TypeScript config; sets path aliases so `import 'nest-graph-inspector/nest-graph-inspector'` resolves to `libs/nest-graph-inspector/src`.
-- `tsconfig.build.json` — extends root config; excludes `*.spec.ts` for production builds.
-- `eslint.config.mjs` — TypeScript-strict ESLint + Prettier; applies to all `{src,libs,test}/**`.
-- `.prettierrc` — `singleQuote: true`, `trailingComma: "all"`.
+**Important workspace files:** `lib/package.json` and `lib/tsconfig.lib.json` define the published package. `demo/package.json`, `demo/nest-cli.json`, `demo/tsconfig.json`, and `demo/tsconfig.build.json` define the Nest demo host.
 
 ---
 
-### `library/libs/nest-graph-inspector/`
+### `lib/`
 
 **Purpose:** The single publishable package (`nest-graph-inspector` on npm). Everything inside is part of the public contract.
 
@@ -174,7 +167,7 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ---
 
-### `library/libs/nest-graph-inspector/src/`
+### `lib/src/`
 
 **Purpose:** All library source code. This is the only directory that gets compiled and published.
 
@@ -194,7 +187,7 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/index.ts`
+#### `lib/src/index.ts`
 
 **Purpose:** The single public entry point. Only symbols re-exported here are part of the public API.
 
@@ -202,7 +195,7 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/nest-graph-inspector.module.ts`
+#### `lib/src/nest-graph-inspector.module.ts`
 
 **Purpose:** The NestJS `@Module` consumers import. Holds `defaultOptions` and registers all providers.
 
@@ -212,7 +205,7 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/nest-graph-inspector.setup.ts`
+#### `lib/src/nest-graph-inspector.setup.ts`
 
 **Purpose:** The `OnModuleInit` service that drives all graph extraction. The largest single file in the library.
 
@@ -229,7 +222,7 @@ Responsibilities:
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/nest-graph-inspector.type.ts`
+#### `lib/src/nest-graph-inspector.type.ts`
 
 **Purpose:** Public configuration types for consumers.
 
@@ -239,7 +232,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/nest-graph-inspector.config.ts`
+#### `lib/src/nest-graph-inspector.config.ts`
 
 **Purpose:** Wires `ConfigurableModuleBuilder` so consumers can call `NestGraphInspectorModule.forRoot()` and `forRootAsync()`.
 
@@ -247,7 +240,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/adapters/`
+#### `lib/src/adapters/`
 
 **Purpose:** One file per output channel. Each adapter implements `OutputAdapter<Config>` from `ports/output.adapter.ts`.
 
@@ -269,7 +262,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/ports/`
+#### `lib/src/ports/`
 
 **Purpose:** Port interfaces — the stable contracts that adapters implement.
 
@@ -282,7 +275,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/types/`
+#### `lib/src/types/`
 
 **Purpose:** All type definitions that cross the library–site boundary or form the public contract.
 
@@ -302,7 +295,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-#### `library/libs/nest-graph-inspector/src/runtime-trace.recorder.ts`
+#### `lib/src/runtime-trace.recorder.ts`
 
 **Purpose:** Implements `DirectRunTraceRecorder` using `AsyncLocalStorage` to record in-process call spans during Direct Run execution.
 
@@ -312,7 +305,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 ---
 
-### `library/src/`
+### `demo/src/`
 
 **Purpose:** Demo / development application. Simulates a realistic consumer of the library.
 
@@ -342,13 +335,13 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 - Reusable library implementation. If logic could be used by a real consumer, it belongs in `libs/`.
 - Production code.
 
-**Important:** `library/src/app.module.ts` uses the path alias `nest-graph-inspector/nest-graph-inspector` which maps to `libs/nest-graph-inspector/src` via `tsconfig.json` paths.
+**Important:** `demo/src/app.module.ts` uses the path alias `nest-graph-inspector/nest-graph-inspector` which maps to `libs/nest-graph-inspector/src` via `tsconfig.json` paths.
 
-**Related:** `library/tmp/graph/` (runtime output), `library/scripts/mock-sync.ts` (syncs output to site fixture).
+**Related:** `demo/tmp/graph/` (runtime output), `demo/scripts/mock-sync.ts` (syncs output to site fixture).
 
 ---
 
-### `library/test/`
+### `demo/test/`
 
 **Purpose:** E2E tests for the demo application.
 
@@ -356,7 +349,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 - `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"` and maps the `nest-graph-inspector/nest-graph-inspector` alias.
 
-**⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `library/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
+**⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `demo/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
 
 **What belongs here:** Integration tests that boot the full demo app via `AppModule`.
 
@@ -364,22 +357,22 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 ---
 
-### `library/scripts/`
+### `demo/scripts/`
 
 **Purpose:** Development and release tooling. These are run manually by the maintainer; they are not part of CI.
 
 | File | What it does |
 |---|---|
-| `mock-sync.ts` | Copies `library/tmp/graph/**` to `site/public/mock-graph/`; run after `pnpm dev` to refresh the "Load Example" fixture |
+| `mock-sync.ts` | Copies `demo/tmp/graph/**` to `site/public/mock-graph/`; run after `pnpm dev` to refresh the "Load Example" fixture |
 | `release.ts` | Builds the library, copies `README.md` + `package.json` into `dist/`, stamps the version, and runs `npm publish` |
 
-**Running scripts:** Both use ts-node-style execution. The `release.ts` script must be run from `library/` and accepts `--version X.Y.Z`.
+**Running scripts:** `mock-sync.ts` uses ts-node-style execution from `demo/`.
 
-**What belongs here:** Scripts that touch both `library/` and `site/` internals (mock-sync) or that handle the release process. Not application logic.
+**What belongs here:** Scripts that touch `demo/`, `lib/`, or `site/` internals (mock-sync). Not application logic.
 
 ---
 
-### `library/docs/`
+### `demo/docs/`
 
 **Purpose:** Static HTML documentation site (appears to be a legacy or parallel docs artifact).
 
@@ -389,7 +382,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 ---
 
-### `library/dist/`
+### `lib/dist/`
 
 **Purpose:** Build output from `pnpm build` (i.e., `nest build`).
 
@@ -399,13 +392,13 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 ---
 
-### `library/tmp/`
+### `demo/tmp/`
 
 **Purpose:** Runtime output directory. When `pnpm dev` is run, the demo app writes the graph here.
 
 **Contents at inspection time:** `tmp/graph/` containing `information.json`, `output.json`, `output.md`, and `direct-run/` history files.
 
-**Never commit this directory.** It is gitignored. Use `library/scripts/mock-sync.ts` to promote outputs to the site fixture when they need to be updated.
+**Never commit this directory.** It is gitignored. Use `demo/scripts/mock-sync.ts` to promote outputs to the site fixture when they need to be updated.
 
 ---
 
@@ -622,7 +615,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `direct-run/history/index.json` | Index of mock trace history entries |
 | `direct-run/history/<uuid>.json` | Individual mock runtime trace files |
 
-**How it's generated:** Run the library demo app (`pnpm dev` in `library/`), then run `library/scripts/mock-sync.ts` to copy `library/tmp/graph/**` here.
+**How it's generated:** Run the Nest demo app (`pnpm dev` in `demo/`), then run `demo/scripts/mock-sync.ts` to copy `demo/tmp/graph/**` here.
 
 **Never edit these files by hand.** They must reflect actual library output. Always regenerate from the demo app.
 
@@ -676,26 +669,26 @@ Tools use `@nuxt/content` server utilities and `defineMcpTool` from `@nuxtjs/mcp
 ## Dependency relationships between directories
 
 ```
-library/libs/nest-graph-inspector/src/types/
+lib/src/types/
     ↑ imported as types (via @library alias)
 site/app/utils/
 site/app/stores/
 
-library/src/ (demo app)
+demo/src/ (demo app)
     ↑ generates runtime graph output
-library/tmp/graph/
+demo/tmp/graph/
     ↑ copied by
-library/scripts/mock-sync.ts
+demo/scripts/mock-sync.ts
     ↑ produces
 site/public/mock-graph/
     ↑ served to
 site/app/stores/graph-inspector.ts  (via "Load Example" URL)
 
-library/libs/.../src/
+lib/src/
     ↑ compiled by nest build into
-library/dist/libs/nest-graph-inspector/
+lib/dist/
     ↑ published to npm by
-library/scripts/release.ts
+demo/scripts/release.ts
 
 site/content/
     ↑ queried by
@@ -710,7 +703,7 @@ site/app/pages/[...slug].vue  (for docs rendering)
 
 1. **`package-lock.json` at root** — A `package-lock.json` exists alongside `pnpm-lock.yaml`. This is atypical for a pure-pnpm workspace. Its origin (possibly from an `npm install` run accidentally) and whether it should be removed is unclear.
 
-2. **`library/docs/`** — The static HTML files (`index.html`, `diagram.html`) appear to predate the Nuxt docs site. It's unclear whether they are still maintained, regenerated by a script, or obsolete.
+2. **`demo/docs/`** — The static HTML files (`index.html`, `diagram.html`) appear to predate the Nuxt docs site. It's unclear whether they are still maintained, regenerated by a script, or obsolete.
 
 3. **Root `node_modules/`** — 1,212 packages are hoisted to the root (due to `shamefully-hoist=true`). This is expected for pnpm with hoisting, but the presence of a `package-lock.json` suggests npm may also have been run against the root at some point.
 
@@ -718,6 +711,6 @@ site/app/pages/[...slug].vue  (for docs rendering)
 
 5. **`site/app/composables/`** — Directory exists but was empty at inspection time. Whether composables are expected to be added here or the directory is a placeholder is not documented.
 
-6. **Dependabot scope** — The `dependabot.yml` watches `directory: "/"` with `package-ecosystem: "npm"`. Whether this covers `library/package.json` and `site/package.json` in a pnpm workspace is not confirmed from config alone.
+6. **Dependabot scope** — The `dependabot.yml` watches `directory: "/"` with `package-ecosystem: "npm"`. Whether this covers `demo/package.json` and `site/package.json` in a pnpm workspace is not confirmed from config alone.
 
 7. **No library CI** — Library unit tests and linting have no CI pipeline. Contributors must run `cd library && pnpm test && pnpm lint` locally before opening a PR.

@@ -1,5 +1,6 @@
 packages:
-  - library
+  - demo
+  - lib
   - site
 ignoredBuiltDependencies:
   - '@parcel/watcher'

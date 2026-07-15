@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
+import type { GraphOutput } from 'nest-graph-inspector'
 
 type BooleanProp = boolean | string
 type ModuleListProp = string[] | string

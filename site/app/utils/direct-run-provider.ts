@@ -3,12 +3,12 @@ export type {
   RuntimeTrace,
   RuntimeTraceSpan,
   RuntimeTraceSpanStatus,
-} from '@library/libs/nest-graph-inspector/src/types/direct-run.type'
+} from 'nest-graph-inspector'
 
 import type {
   DirectRunProviderMethod,
   RuntimeTrace,
-} from '@library/libs/nest-graph-inspector/src/types/direct-run.type'
+} from 'nest-graph-inspector'
 
 export type DirectRunProviderState = {
   runnable: boolean

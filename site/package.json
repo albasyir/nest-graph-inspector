@@ -36,6 +36,7 @@
     "mermaid": "^11.15.0",
     "minimark": "^0.2.0",
     "monaco-editor": "^0.55.1",
+    "nest-graph-inspector": "workspace:*",
     "nuxt": "^4.4.8",
     "nuxt-llms": "0.2.0",
     "nuxt-og-image": "^5.1.13",

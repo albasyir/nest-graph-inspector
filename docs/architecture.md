@@ -4,10 +4,10 @@
 
 ```
 nestjs-devtool/           ← monorepo root (pnpm workspaces)
-├── library/              ← NestJS library workspace
-│   ├── libs/nest-graph-inspector/   ← published npm package
-│   │   └── src/                     ← all library implementation
-│   ├── src/              ← demo / development application
+├── lib/                  ← published NestJS package
+│   └── src/              ← all reusable library implementation
+├── demo/                 ← Nest demo / development host
+│   ├── src/              ← demo application
 │   └── test/             ← e2e tests for the demo app
 └── site/                 ← Nuxt 4 documentation + interactive viewer
     ├── app/              ← Nuxt app directory
@@ -20,9 +20,9 @@ pnpm workspace and `packageManager` field.
 
 ---
 
-## `library/**`
+## `lib/**`
 
-### `library/libs/nest-graph-inspector` — the published package
+### `lib` — the published package
 
 This is the only artifact that ships to npm as `nest-graph-inspector`.
 
@@ -62,7 +62,9 @@ Type definitions under `src/types/`:
   `module-controller.type.ts` — intermediate internal representation used
   during extraction before enrichment.
 
-### `library/src` — demo / development application
+## `demo/**`
+
+### `demo/src` — demo / development application
 
 A plain NestJS application (`AppModule`) that imports
 `NestGraphInspectorModule.forRoot()` with multiple outputs configured.  Its
@@ -84,22 +86,8 @@ functions:
    from a live NestJS endpoint and visualises it with Vue Flow.
 
 The viewer fetches data from a user-supplied URL at runtime; it never calls the
-library directly.  The only coupling to the library is a path alias:
-
-```ts
-// site/nuxt.config.ts
-alias: { '@library': fileURLToPath(new URL('../library', import.meta.url)) }
-```
-
-This alias lets the site import TypeScript types from the library source
-without going through the npm package:
-
-```ts
-import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
-```
-
-**Important:** the site imports library types only — never runtime code.  All
-graph behaviour at runtime goes through the HTTP contract.
+library directly. The site has no direct source alias to the package; all graph
+behaviour goes through the HTTP contract.
 
 Key site modules:
 
@@ -165,14 +153,14 @@ generated; the library must not assume how the data will be rendered.
 ## Architectural boundaries contributors must preserve
 
 1. **The library has no UI dependency.** Do not import frontend packages into
-   `library/libs/**`.
-2. **The site has no NestJS runtime dependency.** Only TypeScript types may be
-   imported via `@library` alias; never injectable services or decorators.
-3. **`library/src` is not the library.** Changes to `library/src` are
-   demo-only and must not alter the public API in `library/libs/**`.
+   `lib/**`.
+2. **The site has no NestJS runtime dependency.** It must consume graph data
+   through the HTTP contract, never injectable services or decorators.
+3. **`demo/src` is not the library.** Changes to `demo/src` are
+   demo-only and must not alter the public API in `lib/**`.
 4. **`GraphOutput` is a versioned contract.** Any breaking change to the shape
    must increment `GRAPH_OUTPUT_SCHEMA_VERSION` in
-   `library/libs/nest-graph-inspector/src/types/graph-output.schema.ts` and
+   `lib/src/types/graph-output.schema.ts` and
    update the corresponding JSON Schema.  The viewer enforces
    `MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION = 3`.
 5. **Output adapters are pluggable via `OutputAdapter<Config>`.** New output
@@ -185,9 +173,9 @@ generated; the library must not assume how the data will be rendered.
 ## Open questions
 
 - No monorepo-level `pnpm-workspace.yaml` was found during inspection; the
-  workspace membership of `library/` and `site/` is inferred from `.npmrc` and
+  workspace membership of `lib/`, `demo/`, and `site/` is inferred from `.npmrc` and
   directory convention.  Clarify whether a workspace file exists or is
   intentionally absent.
-- The `library/test/app.e2e-spec.ts` test calls `GET /` and expects `"Hello
-  World!"`, but no controller serving that route exists in `library/src`.  This
+- The `demo/test/app.e2e-spec.ts` test calls `GET /` and expects `"Hello
+  World!"`, but no controller serving that route exists in `demo/src`.  This
   test appears to be a leftover scaffold and may always fail.
