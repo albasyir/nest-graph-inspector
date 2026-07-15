@@ -1,0 +1,61 @@
+{
+  "name": "nest-graph-inspector",
+  "version": "0.3.0",
+  "description": "NestJS module graph inspector for discovery and dependency analysis",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.lib.json",
+    "test": "jest --config jest.config.cjs",
+    "prepack": "pnpm run build"
+  },
+  "keywords": [
+    "nestjs",
+    "nest",
+    "graph",
+    "inspector",
+    "dependency-graph",
+    "module-graph",
+    "testing",
+    "developer-tools",
+    "devtool"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/albasyir/nest-graph-inspector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/albasyir/nest-graph-inspector/issues"
+  },
+  "homepage": "https://albasyir.github.io/nest-graph-inspector",
+  "dependencies": {
+    "ts-morph": "^28.0.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.9.0"
+  }
+}

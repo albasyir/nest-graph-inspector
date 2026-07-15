@@ -5,39 +5,23 @@ import {
   resolveGraphViewerLoadSource,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
-import {
-  buildDirectRunRequest,
-  buildDirectRunSnapshot,
-  type DirectRunExecutionSnapshot,
-  type DirectRunResultPayload
-} from '~/utils/direct-run-provider'
-
 definePageMeta({
   layout: 'viewer'
 })
 
 const route = useRoute()
+const router = useRouter()
 const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const {
   decodedUrl,
   graphData,
+  graphIsStatic,
   status,
   errorMessage,
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
-const directRunResult = ref<{
-  moduleName: string
-  providerName: string
-  snapshot: DirectRunExecutionSnapshot
-} | null>(null)
-const directRunError = ref<{
-  moduleName: string
-  providerName: string
-  error: string
-} | null>(null)
-
 let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
@@ -123,67 +107,47 @@ function handleRefresh() {
   loadGraphResources(encodedUrl.value, 'manual_refresh', true)
 }
 
-function resolveDirectRunUrl(): string {
-  const sourceUrl = decodedUrl.value
-  if (!sourceUrl) {
-    return ''
-  }
-
+const directRunUrl = computed(() => {
+  if (!decodedUrl.value) return undefined
   try {
-    const url = new URL(sourceUrl)
-    url.pathname = '/direct-run'
+    const url = new URL(decodedUrl.value)
+    url.pathname = graphIsStatic.value
+      ? `${url.pathname.replace(/\/$/, '')}/direct-run`
+      : '/direct-run'
     url.search = ''
     url.hash = ''
     return url.toString()
   } catch {
-    return ''
+    return undefined
   }
+})
+
+const directRunOn = computed(() => {
+  const value = route.query['direct-run-on']
+  const providerName = Array.isArray(value) ? value[0] : value
+  return providerName || undefined
+})
+
+function handleDirectRunDrawerOpen(providerName: string) {
+  if (route.query['direct-run-on'] === providerName) return
+
+  router.push({
+    query: {
+      ...route.query,
+      'direct-run-on': providerName
+    }
+  })
 }
 
-async function handleDirectRun(request: {
-  moduleName: string
-  providerName: string
-  methodName: string
-  args?: unknown[]
-}) {
-  directRunResult.value = null
-  directRunError.value = null
+function handleDirectRunDrawerClose() {
+  const { 'direct-run-on': _directRunOn, ...query } = route.query
+  router.push({ query })
+}
 
-  const directRunUrl = resolveDirectRunUrl()
-  if (!directRunUrl) {
-    directRunError.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      error: 'Direct run endpoint is unavailable for this graph URL.'
-    }
-    return
-  }
-
-  try {
-    const response = await $fetch<DirectRunResultPayload>(directRunUrl, {
-      method: 'POST',
-      body: buildDirectRunRequest(request)
-    })
-
-    directRunResult.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      snapshot: buildDirectRunSnapshot({
-        response,
-        requestedMethod: request.methodName
-      })
-    }
-  } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : 'Direct run failed.'
-
-    directRunError.value = {
-      moduleName: request.moduleName,
-      providerName: request.providerName,
-      error: message
-    }
-  }
+function handleExecutionSequenceOpen() {
+  router.push({
+    path: `/view/${encodedUrl.value}/execution-sequence`
+  })
 }
 </script>
 
@@ -257,11 +221,14 @@ async function handleDirectRun(request: {
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
-      :direct-run-result="directRunResult"
-      :direct-run-error="directRunError"
+      :direct-run-disabled="graphIsStatic"
+      :direct-run-on="directRunOn"
+      :direct-run-url="directRunUrl"
       height="100%"
       flush
-      @direct-run="handleDirectRun"
+      @direct-run-drawer-open="handleDirectRunDrawerOpen"
+      @direct-run-drawer-close="handleDirectRunDrawerClose"
+      @execution-sequence-open="handleExecutionSequenceOpen"
     />
   </ClientOnly>
 

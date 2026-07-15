@@ -3,7 +3,7 @@ import type {
   GraphOutputCycle,
   GraphOutputCycleType,
   GraphOutputProviderCycle
-} from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
+} from 'nest-graph-inspector'
 
 export type CircularDependencyIssueCategory
   = | 'module'

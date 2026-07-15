@@ -1,8 +1,9 @@
-import type { GraphOutput } from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
+import type { GraphOutput } from 'nest-graph-inspector'
 import { defineStore } from 'pinia'
 
 type InspectorEndpointInfo = {
   for?: string
+  'is-static'?: boolean
 }
 
 type LegacyGraphOutput = Partial<GraphOutput>
@@ -164,6 +165,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   })
 
   const errorMessage = computed(() => error.value?.message || '')
+  const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
 
   function toggleDependencyTrace() {
     dependencyTraceEnabled.value = !dependencyTraceEnabled.value
@@ -269,6 +271,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     ollamaUrl,
     graphData,
     graphMarkdown,
+    graphIsStatic,
     status,
     error,
     errorMessage,

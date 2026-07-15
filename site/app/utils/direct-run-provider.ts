@@ -1,7 +1,14 @@
-export type DirectRunProviderMethod = {
-  name: string
-  parameterTypes: string
-}
+export type {
+  DirectRunProviderMethod,
+  RuntimeTrace,
+  RuntimeTraceSpan,
+  RuntimeTraceSpanStatus,
+} from 'nest-graph-inspector'
+
+import type {
+  DirectRunProviderMethod,
+  RuntimeTrace,
+} from 'nest-graph-inspector'
 
 export type DirectRunProviderState = {
   runnable: boolean
@@ -14,6 +21,9 @@ export type DirectRunResultPayload = {
   method?: string
   result?: unknown
   error?: string
+  runId?: string
+  traceId?: string
+  runtimeTrace?: RuntimeTrace
 }
 
 export type DirectRunCapableProvider = {
@@ -36,6 +46,9 @@ export type DirectRunExecutionSnapshot = {
   summary: string
   method: string
   updatedAt: string
+  runId?: string
+  traceId?: string
+  runtimeTrace?: RuntimeTrace
 }
 
 const DIRECT_RUN_EMPTY_REASON = 'No public methods available for direct run.'
@@ -122,7 +135,10 @@ export function buildDirectRunSnapshot(payload: {
     state: payload.response.ok ? 'success' : 'failed',
     summary: summarizeDirectRunResult(payload.response),
     method: payload.response.method || payload.requestedMethod,
-    updatedAt: (payload.updatedAt || new Date()).toISOString()
+    updatedAt: (payload.updatedAt || new Date()).toISOString(),
+    runId: payload.response.runId,
+    traceId: payload.response.traceId,
+    runtimeTrace: payload.response.runtimeTrace
   }
 }
 

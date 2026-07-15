@@ -3,5 +3,8 @@
   "private": true,
   "description": "Nest Graph Inspector monorepo is a collection of packages for the Nest Graph Inspector project",
   "license": "MIT",
+  "scripts": {
+    "dev": "pnpm --filter nest-graph-inspector run build && pnpm --parallel --filter nest-graph-inspector-demo --filter nest-graph-inspector-site run dev"
+  },
   "packageManager": "pnpm@10.33.0"
 }

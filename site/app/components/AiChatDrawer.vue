@@ -1,6 +1,10 @@
 <script setup lang="ts">
 const open = defineModel<boolean>('open', { default: false })
 
+defineProps<{
+  disabled?: boolean
+}>()
+
 function closePanel() {
   open.value = false
 }
@@ -18,6 +22,7 @@ function closePanel() {
   >
     <AiChatPanel
       :active="open"
+      :disabled="disabled"
       @close="closePanel"
     />
 

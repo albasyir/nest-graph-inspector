@@ -8,14 +8,41 @@ const graphStore = useGraphInspectorStore()
 const {
   encodedUrl,
   decodedUrl,
+  graphIsStatic,
   status
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
 
+const routeEncodedUrl = computed(() => {
+  const param = route.params.url
+  const value = Array.isArray(param) ? param[0] : param
+
+  if (!value) return ''
+
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return ''
+  }
+})
+
+const currentEncodedUrl = computed(() => encodedUrl.value || routeEncodedUrl.value)
+const currentDecodedUrl = computed(() => {
+  if (decodedUrl.value) return decodedUrl.value
+  if (!currentEncodedUrl.value) return ''
+
+  try {
+    return atob(currentEncodedUrl.value)
+  } catch {
+    return ''
+  }
+})
+
 const navigatorPath = computed(() =>
-  encodedUrl.value ? `/view/${encodedUrl.value}` : '/view'
+  currentEncodedUrl.value ? `/view/${currentEncodedUrl.value}` : '/view'
 )
 const issuesPath = computed(() => `${navigatorPath.value}/issues`)
+const executionSequencePath = computed(() => `${navigatorPath.value}/execution-sequence`)
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -49,19 +76,21 @@ const viewerMenuItems = computed(() => [
     icon: 'i-lucide-map',
     to: navigatorPath.value,
     active: route.path === navigatorPath.value,
-    disabled: !encodedUrl.value
-  },
-  {
-    label: 'Direct Run',
-    icon: 'i-lucide-terminal',
-    disabled: true
+    disabled: !currentEncodedUrl.value
   },
   {
     label: 'Issues',
     icon: 'i-lucide-bug',
     to: issuesPath.value,
     active: route.path === issuesPath.value,
-    disabled: !encodedUrl.value
+    disabled: !currentEncodedUrl.value
+  },
+  {
+    label: 'Execution Sequence',
+    icon: 'i-lucide-history',
+    to: executionSequencePath.value,
+    active: route.path === executionSequencePath.value,
+    disabled: !currentEncodedUrl.value
   }
 ] satisfies NavigationMenuItem[])
 </script>
@@ -104,7 +133,7 @@ const viewerMenuItems = computed(() => [
                 </NuxtLink>
 
                 <p class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl">
-                  {{ decodedUrl || 'No graph endpoint selected' }}
+                  {{ currentDecodedUrl || 'No graph endpoint selected' }}
                 </p>
               </div>
             </div>
@@ -125,7 +154,7 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-label="Reload graph"
-                  :disabled="!decodedUrl || status === 'pending'"
+                  :disabled="!currentDecodedUrl || status === 'pending'"
                   :loading="status === 'pending'"
                   @click="handleRefresh"
                 />
@@ -136,7 +165,7 @@ const viewerMenuItems = computed(() => [
                 label="Ask AI"
                 color="neutral"
                 variant="ghost"
-                :disabled="!decodedUrl"
+                :disabled="!currentDecodedUrl"
                 @click="handleAskAi"
               />
             </div>
@@ -152,6 +181,9 @@ const viewerMenuItems = computed(() => [
       </div>
     </UDashboardPanel>
 
-    <AiChatDrawer v-model:open="aiChatOpen" />
+    <AiChatDrawer
+      v-model:open="aiChatOpen"
+      :disabled="graphIsStatic"
+    />
   </UDashboardGroup>
 </template>
