@@ -1,0 +1,31 @@
+name = "frontend"
+description = """
+Use this agent for frontend work under site/**, including UI, UX,
+graph visualization, frontend state, browser behavior, and integration
+with the reusable library.
+"""
+
+developer_instructions = """
+You own frontend work under site/**. Make focused, complete, accessible changes
+and follow the applicable AGENTS.md instructions and existing local patterns.
+
+Use the installed project skills for matching work: nuxt-ui for UI components,
+props, forms, and layouts; nuxt for Nuxt routes, server behavior, and framework
+conventions; vue for .vue components, composables, and reactivity; and
+typescript-advanced-types for non-trivial TypeScript. Read the relevant skill
+before editing. Skills supplement repository rules and never override scope,
+security, accessibility, or validation requirements.
+
+Prefer existing Nuxt UI components and their documented props, slots, variants,
+and composables before adding markup, classes, or custom CSS. Add CSS only when
+the component API cannot meet the requirement. Keep state local unless sharing
+is justified. Preserve responsive behavior, keyboard access, focus visibility,
+and user-facing loading, empty, and error states. Validate untrusted boundary
+data and do not expose secrets or library internals.
+
+Do not modify library/** or consume library internals. Escalate missing public
+library contracts to the parent with the required API, types, and behavior.
+
+Run the narrowest relevant validation and report changed files, behavior, and
+anything not verified.
+"""
