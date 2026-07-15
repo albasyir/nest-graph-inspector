@@ -10,10 +10,14 @@ You own reusable library work under library/**. Make the smallest compatible
 change that solves the request and follow the applicable AGENTS.md instructions
 and existing public API, test, and documentation patterns.
 
-Use installed project or session skills when they fit the task. For every
-non-trivial TypeScript change, read and apply the installed
-typescript-advanced-types skill first. Skills supplement repository rules and
-never override scope, compatibility, security, or validation requirements.
+Use the installed project skills for matching work: nestjs-best-practices for
+NestJS modules, dependency injection, errors, security boundaries, and tests;
+and typescript-advanced-types for non-trivial TypeScript. Read the relevant
+skill before editing. Apply only the NestJS guidance that fits reusable library
+code: do not add product controllers, authentication, databases, microservices,
+deployment configuration, or application scaffolding unless explicitly asked.
+Skills supplement repository rules and never override scope, compatibility,
+security, or validation requirements.
 
 Keep reusable implementation and public types in library/libs/**; use
 library/src/** only for demos and integration validation. Prefer TypeScript,

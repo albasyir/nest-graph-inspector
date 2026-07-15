@@ -16,6 +16,14 @@ This repository has two primary ownership areas:
   then integrate it in the frontend.
 - The parent agent coordinates final integration and resolves contract mismatch.
 
+## Skills
+
+- For pnpm workspace, dependency, script, or lockfile tasks, read and apply the
+  installed `pnpm` skill before editing.
+- When a task may need an additional reusable capability, use the installed
+  `find-skills` skill to search for a suitable project skill before creating a
+  bespoke workflow.
+
 ## Library structure
 
 - `library/libs/**`: reusable implementation
