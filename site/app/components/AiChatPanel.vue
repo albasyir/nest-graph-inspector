@@ -76,6 +76,7 @@ const props = withDefaults(defineProps<{
   initialMessage?: string
   previewReply?: string
   placeholder?: string
+  disabled?: boolean
 }>(), {
   active: true,
   preview: false,
@@ -86,7 +87,8 @@ const props = withDefaults(defineProps<{
   promptClass: 'px-4 sm:px-5 py-4 bg-default',
   initialMessage: DEFAULT_INITIAL_MESSAGE,
   previewReply: DEFAULT_PREVIEW_REPLY,
-  placeholder: undefined
+  placeholder: undefined,
+  disabled: false
 })
 
 const emit = defineEmits<{
@@ -190,8 +192,7 @@ const selectedProviderIcon = computed(() => {
 })
 
 const isAIAvailable = computed(() => {
-  // TODO: this temporary solution
-  return graphStore.decodedUrl.includes('mock-graph') || graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
+  return props.disabled || graphStore.graphIsStatic || graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
 })
 
 const chatMessages = computed(() => messages.value.map((message, index) => {
@@ -231,16 +232,18 @@ const promptPlaceholder = computed(() => {
     return 'Ask about your NestJS graph...'
   }
 
-  return isAIAvailable.value ? 'DISABLED: Dont use Example or Update Package' : 'Ask about this graph...'
+  return isAIAvailable.value ? 'DISABLED: Use a live supported graph' : 'Ask about this graph...'
 })
 
-const isPromptDisabled = computed(() => {
+const isChatSubmitDisabled = computed(() => {
   if (props.preview) {
     return isLoading.value
   }
 
   return isAIAvailable.value || isLoading.value || isDownloadingRecommendedModel.value
 })
+const isPromptDisabled = computed(() => isLoading.value || isDownloadingRecommendedModel.value)
+const isChatControlDisabled = computed(() => !props.preview && isAIAvailable.value)
 
 const recommendedModelDownloadProgress = computed(() => {
   if (!recommendedModelDownloadTotal.value) {
@@ -1061,7 +1064,7 @@ async function handleSubmit(event: Event) {
           color="neutral"
           variant="ghost"
           size="sm"
-          :disabled="isLoading"
+          :disabled="isLoading || isChatControlDisabled"
           aria-label="Restart chat"
           @click="restartChat"
         />
@@ -1127,6 +1130,7 @@ async function handleSubmit(event: Event) {
           <UChatPromptSubmit
             color="neutral"
             :status="isLoading ? 'submitted' : 'ready'"
+            :disabled="isChatSubmitDisabled"
           />
 
           <template #footer>
@@ -1170,6 +1174,7 @@ async function handleSubmit(event: Event) {
                 v-model:open="isProviderSelectOpen"
                 :items="providerItems"
                 :icon="selectedProviderIcon"
+                :disabled="isChatControlDisabled"
                 class="min-w-0 flex-1"
                 placeholder="Select provider"
                 variant="ghost"
@@ -1186,7 +1191,7 @@ async function handleSubmit(event: Event) {
                 v-model:open="isModelSelectOpen"
                 :items="modelItems"
                 :loading="isLoadingModels || isDownloadingRecommendedModel"
-                :disabled="!selectedProvider"
+                :disabled="isChatControlDisabled || !selectedProvider"
                 icon="i-lucide-brain"
                 class="min-w-0 flex-1"
                 placeholder="Select model"
@@ -1203,6 +1208,7 @@ async function handleSubmit(event: Event) {
                   icon="i-lucide-download"
                   color="neutral"
                   variant="ghost"
+                  :disabled="isChatControlDisabled"
                   :aria-label="`Download ${selectedDownloadModel}`"
                   @click="handleRecommendedModelDownloadClick"
                 />
@@ -1261,7 +1267,7 @@ async function handleSubmit(event: Event) {
                 color="neutral"
                 variant="ghost"
                 :loading="isLoadingModels"
-                :disabled="isLoading || isDownloadingRecommendedModel || !selectedProvider"
+                :disabled="isChatControlDisabled || isLoading || isDownloadingRecommendedModel || !selectedProvider"
                 aria-label="Refresh Ollama models"
                 @click="() => loadDownloadedModels()"
               />

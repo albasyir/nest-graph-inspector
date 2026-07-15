@@ -1,0 +1,110 @@
+{
+  "traceId": "1c9057bd-9c05-4af9-9475-19778ad0cc14",
+  "runId": "ed721533-20d4-40ea-b93d-fc4bf65db972",
+  "entrypoint": {
+    "module": "OrderModule",
+    "className": "OrderService",
+    "methodName": "getOrdersByUser"
+  },
+  "startedAt": "2026-07-08T14:44:14.690Z",
+  "endedAt": "2026-07-08T14:44:14.995Z",
+  "totalDurationMs": 305,
+  "status": "error",
+  "totalSpans": 4,
+  "failedSpanId": "fded19f2-0b98-4220-8ed6-3a58ccd42ea2",
+  "spans": [
+    {
+      "spanId": "fded19f2-0b98-4220-8ed6-3a58ccd42ea2",
+      "runId": "ed721533-20d4-40ea-b93d-fc4bf65db972",
+      "order": 0,
+      "name": "OrderService.getOrdersByUser",
+      "moduleName": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getOrdersByUser",
+      "startedAt": "2026-07-08T14:44:14.690Z",
+      "endedAt": "2026-07-08T14:44:14.995Z",
+      "durationMs": 305,
+      "status": "error",
+      "errorName": "NotFoundException",
+      "errorMessage": "User not found",
+      "args": [
+        0
+      ],
+      "result": {
+        "name": "NotFoundException",
+        "message": "User not found"
+      }
+    },
+    {
+      "spanId": "ec83da4e-eec8-4d36-b172-6f18c5cfe226",
+      "parentSpanId": "29781a36-ea58-498d-81ef-88ec93e7d21a",
+      "runId": "ed721533-20d4-40ea-b93d-fc4bf65db972",
+      "order": 1,
+      "name": "OrderRepository.findAll",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-08T14:44:14.792Z",
+      "endedAt": "2026-07-08T14:44:14.893Z",
+      "durationMs": 101,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "spanId": "388d7214-2a47-4c38-9c4c-11afa72c3b41",
+      "parentSpanId": "29781a36-ea58-498d-81ef-88ec93e7d21a",
+      "runId": "ed721533-20d4-40ea-b93d-fc4bf65db972",
+      "order": 2,
+      "name": "OrderRepository.findAll",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-08T14:44:14.893Z",
+      "endedAt": "2026-07-08T14:44:14.994Z",
+      "durationMs": 101,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "spanId": "29781a36-ea58-498d-81ef-88ec93e7d21a",
+      "parentSpanId": "fded19f2-0b98-4220-8ed6-3a58ccd42ea2",
+      "runId": "ed721533-20d4-40ea-b93d-fc4bf65db972",
+      "order": 3,
+      "name": "OrderRepository.findByUserId",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "findByUserId",
+      "startedAt": "2026-07-08T14:44:14.690Z",
+      "endedAt": "2026-07-08T14:44:14.995Z",
+      "durationMs": 305,
+      "status": "error",
+      "errorName": "NotFoundException",
+      "errorMessage": "User not found",
+      "args": [
+        0
+      ],
+      "result": {
+        "name": "NotFoundException",
+        "message": "User not found"
+      }
+    }
+  ]
+}

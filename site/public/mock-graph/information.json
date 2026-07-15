@@ -1,3 +1,4 @@
 {
-  "for": "nest-graph-inspector"
+  "for": "nest-graph-inspector",
+  "is-static": true
 }

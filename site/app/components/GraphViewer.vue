@@ -7,16 +7,16 @@ import {
   MarkerType,
   BaseEdge,
   EdgeLabelRenderer,
-  getSmoothStepPath
-} from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
-import { NodeResizer } from '@vue-flow/node-resizer'
-import { useDebounceFn, useResizeObserver } from '@vueuse/core'
-import type { CSSProperties } from 'vue'
-import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
-import type * as Monaco from 'monaco-editor'
+  getSmoothStepPath,
+} from "@vue-flow/core";
+import { Background } from "@vue-flow/background";
+import { Controls } from "@vue-flow/controls";
+import { MiniMap } from "@vue-flow/minimap";
+import { NodeResizer } from "@vue-flow/node-resizer";
+import { useDebounceFn, useResizeObserver } from "@vueuse/core";
+import type { CSSProperties } from "vue";
+import type { Node, Edge, EdgeProps, NodeMouseEvent } from "@vue-flow/core";
+import type * as Monaco from "monaco-editor";
 import type {
   GraphOutput,
   GraphOutputModule,
@@ -24,342 +24,351 @@ import type {
   GraphOutputCycle,
   GraphOutputProviderCycle,
   GraphOutputCycles,
-  GraphOutputProvider
-} from '@library/libs/nest-graph-inspector/src/types/graph-output.type'
-import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
-import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
-import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
+  GraphOutputProvider,
+} from "nest-graph-inspector";
+import type { CircularDependencyIssue } from "~/utils/circular-dependency-issues";
+import { buildCircularIssueFlow } from "~/utils/circular-dependency-flow";
+import { resolveCircularDependencyEndpoints } from "~/utils/circular-dependency-issues";
 import {
   getDirectRunProviderState,
   parseProviderNodeId,
   type DirectRunExecutionSnapshot,
-  type DirectRunProviderMethod
-} from '~/utils/direct-run-provider'
+  type DirectRunProviderMethod,
+  type DirectRunResultPayload,
+  buildDirectRunRequest,
+  buildDirectRunSnapshot,
+} from "~/utils/direct-run-provider";
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
-  moduleName: string
-  token: string
+  moduleName: string;
+  token: string;
 } {
-  return { moduleName: dep.providedBy.name, token: dep.token }
+  return { moduleName: dep.providedBy.name, token: dep.token };
 }
 
 type ModuleNodeData = {
-  label: string
-  isRoot: boolean
-  isCollapsed: boolean
-  isExpandable: boolean
-  minWidth: number
-  minHeight: number
-}
+  label: string;
+  isRoot: boolean;
+  isCollapsed: boolean;
+  isExpandable: boolean;
+  minWidth: number;
+  minHeight: number;
+};
 
 type ItemNodeData = {
-  label: string
-  kind: 'controller' | 'provider'
-  isExported: boolean
-}
+  label: string;
+  kind: "controller" | "provider";
+  isExported: boolean;
+};
 
 type DirectRunActionRequest = {
-  moduleName: string
-  providerName: string
-  methodName: string
-  args?: unknown[]
-}
+  moduleName: string;
+  providerName: string;
+  methodName: string;
+  args?: unknown[];
+};
+
+type DirectRunMode = "run" | "inspect";
 
 type DirectRunProviderContext = {
-  nodeId: string
-  moduleName: string
-  provider: GraphOutputProvider
-}
+  nodeId: string;
+  moduleName: string;
+  provider: GraphOutputProvider;
+};
 
 type DirectRunStatusBadge = {
-  label: string
-  color: 'neutral' | 'primary' | 'success' | 'error'
-  variant: 'soft' | 'solid' | 'outline'
-}
+  label: string;
+  color: "neutral" | "primary" | "success" | "error";
+  variant: "soft" | "solid" | "outline";
+};
 
 type DirectRunMethodTab = {
-  label: string
-  value: string
-  method: DirectRunProviderMethod
-  badge?: string
-}
+  label: string;
+  value: string;
+  method: DirectRunProviderMethod;
+  badge?: string;
+};
 
-type DirectRunArgsJsonSchema = Monaco.json.JSONSchema
-type DirectRunEditorMarker = Monaco.editor.IMarker
+type DirectRunArgsJsonSchema = Monaco.json.JSONSchema;
+type DirectRunEditorMarker = Monaco.editor.IMarker;
 type DirectRunParameterInfo = {
-  name: string
-  type: string
-  schema: DirectRunArgsJsonSchema
-}
+  name: string;
+  type: string;
+  schema: DirectRunArgsJsonSchema;
+};
 type DirectRunArgsSchemaCacheEntry = {
-  fingerprint: string
-  schema: DirectRunArgsJsonSchema
-}
+  fingerprint: string;
+  schema: DirectRunArgsJsonSchema;
+};
 
 type ModuleItemLayout = ItemNodeData & {
-  id: string
-  depth: number
-  dependencies: GraphOutputDependencyRef[]
-}
+  id: string;
+  depth: number;
+  dependencies: GraphOutputDependencyRef[];
+};
 
 type ModuleItemDependencyGraph = {
-  items: ModuleItemLayout[]
-  sameModuleDependencies: Map<string, string[]>
-  components: string[][]
-  componentByItemId: Map<string, number>
-}
+  items: ModuleItemLayout[];
+  sameModuleDependencies: Map<string, string[]>;
+  components: string[][];
+  componentByItemId: Map<string, number>;
+};
 
-type CircularEdgeInfo = CircularDependencyIssue
+type CircularEdgeInfo = CircularDependencyIssue;
 
 type CircularEdgeData = {
-  isNormallyVisible: boolean
-  circularIds: number[]
-  circularReason: string
-  circularDetails: CircularEdgeInfo[]
-}
+  isNormallyVisible: boolean;
+  circularIds: number[];
+  circularReason: string;
+  circularDetails: CircularEdgeInfo[];
+};
 
 type StandardEdgeData = {
-  isNormallyVisible: boolean
-}
+  isNormallyVisible: boolean;
+};
 
-type FlowEdgeData = CircularEdgeData | StandardEdgeData
+type FlowEdgeData = CircularEdgeData | StandardEdgeData;
 
 type CircularEdgeDialogData = {
-  circularIds: number[]
-  issues: CircularEdgeInfo[]
-}
+  circularIds: number[];
+  issues: CircularEdgeInfo[];
+};
 
 type CircularEdgePairAggregate = {
-  edgeKeys: string[]
-  infoById: Map<number, CircularEdgeInfo>
-  sizeByEdgeKey: Map<string, number>
-}
+  edgeKeys: string[];
+  infoById: Map<number, CircularEdgeInfo>;
+  sizeByEdgeKey: Map<string, number>;
+};
 
-type FlowNode
-  = | Node<ModuleNodeData, Record<string, never>, 'module'>
-    | Node<ItemNodeData, Record<string, never>, 'item'>
+type FlowNode =
+  | Node<ModuleNodeData, Record<string, never>, "module">
+  | Node<ItemNodeData, Record<string, never>, "item">;
 type FlowEdge = Edge<
   FlowEdgeData,
   Record<string, never>,
-  'smoothstep' | 'warning'
->
-type WarningEdgeProps = EdgeProps<CircularEdgeData>
-type NodePosition = { x: number, y: number }
-
-const emit = defineEmits<{
-  directRun: [request: DirectRunActionRequest]
-}>()
+  "smoothstep" | "warning"
+>;
+type WarningEdgeProps = EdgeProps<CircularEdgeData>;
+type NodePosition = { x: number; y: number };
 
 const props = withDefaults(
   defineProps<{
-    data: GraphOutput
-    height?: string
-    interactive?: boolean
-    flush?: boolean
-    flowId?: string
-    defaultOpenModuleDetail?: boolean
-    fixBightline?: boolean | string
-    excludeModules?: string[] | string
-    enableBrightLine?: boolean
-    collapsedModules?: string[] | string
-    directRunResult?: {
-      moduleName: string
-      providerName: string
-      snapshot: DirectRunExecutionSnapshot
-    } | null
-    directRunError?: {
-      moduleName: string
-      providerName: string
-      error: string
-    } | null
+    data: GraphOutput;
+    height?: string;
+    interactive?: boolean;
+    flush?: boolean;
+    flowId?: string;
+    defaultOpenModuleDetail?: boolean;
+    fixBightline?: boolean | string;
+    excludeModules?: string[] | string;
+    enableBrightLine?: boolean;
+    collapsedModules?: string[] | string;
+    directRunUrl?: string;
+    directRunDisabled?: boolean;
+    directRunOn?: string;
   }>(),
   {
-    height: '75vh',
+    height: "75vh",
     interactive: true,
     flush: false,
     flowId: undefined,
+    directRunUrl: undefined,
+    directRunDisabled: false,
+    directRunOn: undefined,
     defaultOpenModuleDetail: false,
     fixBightline: false,
     excludeModules: () => [],
     enableBrightLine: true,
-    collapsedModules: () => []
-  }
-)
+    collapsedModules: () => [],
+  },
+);
+
+const emit = defineEmits<{
+  directRunDrawerOpen: [providerName: string];
+  directRunDrawerClose: [];
+  executionSequenceOpen: [];
+}>();
 
 const showCircularDependencies = defineModel<boolean>(
-  'showCircularDependencies',
-  { default: true }
-)
+  "showCircularDependencies",
+  { default: true },
+);
 
-const generatedFlowId = useId()
-const flowId = props.flowId || generatedFlowId
-const { fitView } = useVueFlow(flowId)
-const graphViewerRef = ref<HTMLElement | null>(null)
+const generatedFlowId = useId();
+const flowId = props.flowId || generatedFlowId;
+const { fitView } = useVueFlow(flowId);
+const graphViewerRef = ref<HTMLElement | null>(null);
 
-const NODE_WIDTH = 200
-const NODE_HEIGHT = 32
-const NODE_GAP_X = 52
-const NODE_LEVEL_GAP_Y = 72
-const MODULE_PADDING = 20
-const MODULE_TITLE_HEIGHT = 36
-const MODULE_COLLAPSED_HEIGHT = 40
-const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
-const MODULE_GAP_X = 320
-const MODULE_GAP_Y = 100
-const GRAPH_FIT_PADDING = 0.12
-const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
-const MODULE_EDGE_COLOR = '#888'
-const DEPENDENCY_EDGE_COLOR = '#555'
-const CIRCULAR_DEPENDENCY_EDGE_COLOR = '#facc15'
-const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'UserRepository'
-const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
-const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
-const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
-const BRIGHT_LINE_NODE_DIMMED_CLASS = 'bright-line-node--dimmed'
-const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
-const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
-const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
-const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
+const NODE_WIDTH = 200;
+const NODE_HEIGHT = 32;
+const NODE_GAP_X = 52;
+const NODE_LEVEL_GAP_Y = 72;
+const MODULE_PADDING = 20;
+const MODULE_TITLE_HEIGHT = 36;
+const MODULE_COLLAPSED_HEIGHT = 40;
+const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2;
+const MODULE_GAP_X = 320;
+const MODULE_GAP_Y = 100;
+const GRAPH_FIT_PADDING = 0.12;
+const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250;
+const MODULE_EDGE_COLOR = "#888";
+const DEPENDENCY_EDGE_COLOR = "#555";
+const CIRCULAR_DEPENDENCY_EDGE_COLOR = "#facc15";
+const DEFAULT_FIXED_BRIGHT_LINE_TARGET = "UserRepository";
+const BRIGHT_LINE_NODE_CLASS = "bright-line-node";
+const BRIGHT_LINE_NODE_ACTIVE_CLASS = "bright-line-node--active";
+const BRIGHT_LINE_NODE_CONNECTED_CLASS = "bright-line-node--connected";
+const BRIGHT_LINE_NODE_DIMMED_CLASS = "bright-line-node--dimmed";
+const BRIGHT_LINE_NODE_FIXED_CLASS = "bright-line-node--fixed";
+const BRIGHT_LINE_EDGE_CLASS = "bright-line-edge";
+const BRIGHT_LINE_EDGE_DIMMED_CLASS = "bright-line-edge--dimmed";
+const BRIGHT_LINE_EDGE_HIDDEN_CLASS = "bright-line-edge--hidden";
 
 function parseModuleNameList(moduleNames: string[] | string): string[] {
-  return Array.isArray(moduleNames) ? moduleNames : moduleNames.split(',')
+  return Array.isArray(moduleNames) ? moduleNames : moduleNames.split(",");
 }
 
 function shouldKeepDependency(
   dep: GraphOutputDependencyRef,
-  excludedModules: Set<string>
+  excludedModules: Set<string>,
 ): boolean {
-  return !excludedModules.has(dep.providedBy.name)
+  return !excludedModules.has(dep.providedBy.name);
 }
 
 function filterDependencyCycle(
   cycle: GraphOutputCycle,
   excludedModules: Set<string>,
-  moduleNames: Set<string>
+  moduleNames: Set<string>,
 ): boolean {
   return cycle.path.every((key) => {
-    const parsedKey = splitDependencyCycleKey(key)
-    return parsedKey
-      && !excludedModules.has(parsedKey.moduleName)
-      && moduleNames.has(parsedKey.moduleName)
-  })
+    const parsedKey = splitDependencyCycleKey(key);
+    return (
+      parsedKey &&
+      !excludedModules.has(parsedKey.moduleName) &&
+      moduleNames.has(parsedKey.moduleName)
+    );
+  });
 }
 
 function filterGraphOutput(
   moduleMap: GraphOutput,
-  excludeModules: string[] | string
+  excludeModules: string[] | string,
 ): GraphOutput {
-  const moduleNamesToExclude = parseModuleNameList(excludeModules)
+  const moduleNamesToExclude = parseModuleNameList(excludeModules);
   const excludedModules = new Set(
-    moduleNamesToExclude.map(moduleName => moduleName.trim()).filter(Boolean)
-  )
+    moduleNamesToExclude.map((moduleName) => moduleName.trim()).filter(Boolean),
+  );
 
   if (excludedModules.size === 0) {
-    return moduleMap
+    return moduleMap;
   }
 
-  const modules: GraphOutput['modules'] = {}
+  const modules: GraphOutput["modules"] = {};
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     if (excludedModules.has(moduleName)) {
-      continue
+      continue;
     }
 
     modules[moduleName] = {
       ...mod,
-      imports: mod.imports.filter(importName => !excludedModules.has(importName)),
-      providers: mod.providers.map(provider => ({
+      imports: mod.imports.filter(
+        (importName) => !excludedModules.has(importName),
+      ),
+      providers: mod.providers.map((provider) => ({
         ...provider,
-        dependencies: provider.dependencies.filter(dep =>
-          shouldKeepDependency(dep, excludedModules)
-        )
+        dependencies: provider.dependencies.filter((dep) =>
+          shouldKeepDependency(dep, excludedModules),
+        ),
       })),
-      controllers: mod.controllers.map(controller => ({
+      controllers: mod.controllers.map((controller) => ({
         ...controller,
-        dependencies: controller.dependencies.filter(dep =>
-          shouldKeepDependency(dep, excludedModules)
-        )
-      }))
-    }
+        dependencies: controller.dependencies.filter((dep) =>
+          shouldKeepDependency(dep, excludedModules),
+        ),
+      })),
+    };
   }
 
-  const moduleNames = new Set(Object.keys(modules))
+  const moduleNames = new Set(Object.keys(modules));
   const root = moduleNames.has(moduleMap.root)
     ? moduleMap.root
-    : Object.keys(modules)[0] || moduleMap.root
+    : Object.keys(modules)[0] || moduleMap.root;
   const cycles: GraphOutputCycles = {
-    modules: (moduleMap.cycles?.modules || []).filter(cycle =>
-      cycle.path.every(moduleName =>
-        !excludedModules.has(moduleName) && moduleNames.has(moduleName)
-      )
+    modules: (moduleMap.cycles?.modules || []).filter((cycle) =>
+      cycle.path.every(
+        (moduleName) =>
+          !excludedModules.has(moduleName) && moduleNames.has(moduleName),
+      ),
     ),
-    providers: (moduleMap.cycles?.providers || []).filter(cycle =>
-      cycle.path.every(item =>
-        !excludedModules.has(item.module.name)
-        && moduleNames.has(item.module.name)
-      )
+    providers: (moduleMap.cycles?.providers || []).filter((cycle) =>
+      cycle.path.every(
+        (item) =>
+          !excludedModules.has(item.module.name) &&
+          moduleNames.has(item.module.name),
+      ),
     ),
-    controllers: (moduleMap.cycles?.controllers || []).filter(cycle =>
-      filterDependencyCycle(cycle, excludedModules, moduleNames)
-    )
-  }
+    controllers: (moduleMap.cycles?.controllers || []).filter((cycle) =>
+      filterDependencyCycle(cycle, excludedModules, moduleNames),
+    ),
+  };
 
   return {
     ...moduleMap,
     root,
     modules,
-    cycles
-  }
+    cycles,
+  };
 }
 
 const graphData = computed(() =>
-  filterGraphOutput(props.data, props.excludeModules)
-)
+  filterGraphOutput(props.data, props.excludeModules),
+);
 
 async function centerGraph(duration = 200) {
   if (!import.meta.client) {
-    return
+    return;
   }
 
-  await nextTick()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  await nextTick();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await fitView({
     padding: GRAPH_FIT_PADDING,
-    duration
-  })
+    duration,
+  });
 }
 
 const debouncedCenterGraph = useDebounceFn(() => {
-  void centerGraph()
-}, GRAPH_RESIZE_CENTER_DEBOUNCE_MS)
+  void centerGraph();
+}, GRAPH_RESIZE_CENTER_DEBOUNCE_MS);
 
 function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
-  const layers = new Map<number, string[]>()
-  const visited = new Set<string>()
-  const queue: { name: string, depth: number }[] = [
-    { name: moduleMap.root, depth: 0 }
-  ]
-  visited.add(moduleMap.root)
+  const layers = new Map<number, string[]>();
+  const visited = new Set<string>();
+  const queue: { name: string; depth: number }[] = [
+    { name: moduleMap.root, depth: 0 },
+  ];
+  visited.add(moduleMap.root);
 
   while (queue.length > 0) {
-    const next = queue.shift()
+    const next = queue.shift();
     if (!next) {
-      continue
+      continue;
     }
 
-    const { name, depth } = next
-    let layer = layers.get(depth)
+    const { name, depth } = next;
+    let layer = layers.get(depth);
     if (!layer) {
-      layer = []
-      layers.set(depth, layer)
+      layer = [];
+      layers.set(depth, layer);
     }
-    layer.push(name)
+    layer.push(name);
 
-    const mod = moduleMap.modules[name]
+    const mod = moduleMap.modules[name];
     if (mod) {
       for (const imp of mod.imports) {
         if (!visited.has(imp) && moduleMap.modules[imp]) {
-          visited.add(imp)
-          queue.push({ name: imp, depth: depth + 1 })
+          visited.add(imp);
+          queue.push({ name: imp, depth: depth + 1 });
         }
       }
     }
@@ -367,185 +376,185 @@ function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
 
   for (const name of Object.keys(moduleMap.modules)) {
     if (!visited.has(name)) {
-      const maxDepth = Math.max(...Array.from(layers.keys()), 0) + 1
-      let layer = layers.get(maxDepth)
+      const maxDepth = Math.max(...Array.from(layers.keys()), 0) + 1;
+      let layer = layers.get(maxDepth);
       if (!layer) {
-        layer = []
-        layers.set(maxDepth, layer)
+        layer = [];
+        layers.set(maxDepth, layer);
       }
-      layer.push(name)
+      layer.push(name);
     }
   }
 
-  return layers
+  return layers;
 }
 
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
-  return new Set(Object.keys(moduleMap.modules))
+  return new Set(Object.keys(moduleMap.modules));
 }
 
 function hasModuleComponents(mod: GraphOutputModule): boolean {
-  return mod.providers.length > 0 || mod.controllers.length > 0
+  return mod.providers.length > 0 || mod.controllers.length > 0;
 }
 
 function getPermanentCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
   return new Set(
     Object.entries(moduleMap.modules)
       .filter(([, mod]) => !hasModuleComponents(mod))
-      .map(([moduleName]) => moduleName)
-  )
+      .map(([moduleName]) => moduleName),
+  );
 }
 
 function getInitialCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
   const collapsedModules = props.defaultOpenModuleDetail
     ? getPermanentCollapsedModuleNames(moduleMap)
-    : getDefaultCollapsedModuleNames(moduleMap)
+    : getDefaultCollapsedModuleNames(moduleMap);
 
   for (const moduleName of parseModuleNameList(props.collapsedModules)) {
-    const normalizedModuleName = moduleName.trim()
+    const normalizedModuleName = moduleName.trim();
     if (normalizedModuleName && moduleMap.modules[normalizedModuleName]) {
-      collapsedModules.add(normalizedModuleName)
+      collapsedModules.add(normalizedModuleName);
     }
   }
 
-  return collapsedModules
+  return collapsedModules;
 }
 
 function resolveDepNodeId(
   dep: GraphOutputDependencyRef,
   currentModule: string,
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): string | null {
-  const { moduleName, token } = normalizeDep(dep)
+  const { moduleName, token } = normalizeDep(dep);
 
-  const targetMod = moduleMap.modules[moduleName]
+  const targetMod = moduleMap.modules[moduleName];
   if (targetMod) {
-    if (targetMod.providers.some(provider => provider.name === token))
-      return `provider-${moduleName}-${token}`
-    if (targetMod.controllers.some(controller => controller.name === token))
-      return `controller-${moduleName}-${token}`
+    if (targetMod.providers.some((provider) => provider.name === token))
+      return `provider-${moduleName}-${token}`;
+    if (targetMod.controllers.some((controller) => controller.name === token))
+      return `controller-${moduleName}-${token}`;
   }
 
   if (moduleName !== currentModule) {
-    return null
+    return null;
   }
 
   for (const [modName, modData] of Object.entries(moduleMap.modules)) {
-    if (modData.providers.some(provider => provider.name === token))
-      return `provider-${modName}-${token}`
-    if (modData.controllers.some(controller => controller.name === token))
-      return `controller-${modName}-${token}`
+    if (modData.providers.some((provider) => provider.name === token))
+      return `provider-${modName}-${token}`;
+    if (modData.controllers.some((controller) => controller.name === token))
+      return `controller-${modName}-${token}`;
   }
 
-  return null
+  return null;
 }
 
 function isNodeInModule(nodeId: string, moduleName: string): boolean {
   return (
-    nodeId.startsWith(`provider-${moduleName}-`)
-    || nodeId.startsWith(`controller-${moduleName}-`)
-  )
+    nodeId.startsWith(`provider-${moduleName}-`) ||
+    nodeId.startsWith(`controller-${moduleName}-`)
+  );
 }
 
 function getModuleItemDependencyGraph(
   moduleName: string,
   mod: GraphOutputModule,
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): ModuleItemDependencyGraph {
   const items: ModuleItemLayout[] = [
-    ...mod.providers.map(provider => ({
+    ...mod.providers.map((provider) => ({
       id: `provider-${moduleName}-${provider.name}`,
       label: provider.name,
-      kind: 'provider' as const,
+      kind: "provider" as const,
       isExported: mod.exports.includes(provider.name),
       dependencies: provider.dependencies,
-      depth: 0
+      depth: 0,
     })),
-    ...mod.controllers.map(controller => ({
+    ...mod.controllers.map((controller) => ({
       id: `controller-${moduleName}-${controller.name}`,
       label: controller.name,
-      kind: 'controller' as const,
+      kind: "controller" as const,
       isExported: mod.exports.includes(controller.name),
       dependencies: controller.dependencies,
-      depth: 0
-    }))
-  ]
+      depth: 0,
+    })),
+  ];
 
-  const itemIds = new Set(items.map(item => item.id))
-  const sameModuleDependencies = new Map<string, string[]>()
+  const itemIds = new Set(items.map((item) => item.id));
+  const sameModuleDependencies = new Map<string, string[]>();
   for (const item of items) {
     sameModuleDependencies.set(
       item.id,
       item.dependencies
-        .map(dep => resolveDepNodeId(dep, moduleName, moduleMap))
-        .filter((nodeId): nodeId is string => typeof nodeId === 'string')
+        .map((dep) => resolveDepNodeId(dep, moduleName, moduleMap))
+        .filter((nodeId): nodeId is string => typeof nodeId === "string")
         .filter(
-          nodeId => itemIds.has(nodeId) && isNodeInModule(nodeId, moduleName)
-        )
-    )
+          (nodeId) => itemIds.has(nodeId) && isNodeInModule(nodeId, moduleName),
+        ),
+    );
   }
 
-  const indexById = new Map<string, number>()
-  const lowLinkById = new Map<string, number>()
-  const stack: string[] = []
-  const stacked = new Set<string>()
-  const components: string[][] = []
-  let nextIndex = 0
+  const indexById = new Map<string, number>();
+  const lowLinkById = new Map<string, number>();
+  const stack: string[] = [];
+  const stacked = new Set<string>();
+  const components: string[][] = [];
+  let nextIndex = 0;
 
   function visit(itemId: string) {
-    indexById.set(itemId, nextIndex)
-    lowLinkById.set(itemId, nextIndex)
-    nextIndex += 1
-    stack.push(itemId)
-    stacked.add(itemId)
+    indexById.set(itemId, nextIndex);
+    lowLinkById.set(itemId, nextIndex);
+    nextIndex += 1;
+    stack.push(itemId);
+    stacked.add(itemId);
 
     for (const dependencyId of sameModuleDependencies.get(itemId) || []) {
       if (!indexById.has(dependencyId)) {
-        visit(dependencyId)
+        visit(dependencyId);
         lowLinkById.set(
           itemId,
           Math.min(
             lowLinkById.get(itemId) || 0,
-            lowLinkById.get(dependencyId) || 0
-          )
-        )
+            lowLinkById.get(dependencyId) || 0,
+          ),
+        );
       } else if (stacked.has(dependencyId)) {
         lowLinkById.set(
           itemId,
           Math.min(
             lowLinkById.get(itemId) || 0,
-            indexById.get(dependencyId) || 0
-          )
-        )
+            indexById.get(dependencyId) || 0,
+          ),
+        );
       }
     }
 
     if (lowLinkById.get(itemId) !== indexById.get(itemId)) {
-      return
+      return;
     }
 
-    const component: string[] = []
-    let stackedId: string | undefined
+    const component: string[] = [];
+    let stackedId: string | undefined;
     do {
-      stackedId = stack.pop()
+      stackedId = stack.pop();
       if (stackedId) {
-        stacked.delete(stackedId)
-        component.push(stackedId)
+        stacked.delete(stackedId);
+        component.push(stackedId);
       }
-    } while (stackedId && stackedId !== itemId)
-    components.push(component)
+    } while (stackedId && stackedId !== itemId);
+    components.push(component);
   }
 
   for (const item of items) {
     if (!indexById.has(item.id)) {
-      visit(item.id)
+      visit(item.id);
     }
   }
 
-  const componentByItemId = new Map<string, number>()
+  const componentByItemId = new Map<string, number>();
   for (const [componentIndex, component] of components.entries()) {
     for (const itemId of component) {
-      componentByItemId.set(itemId, componentIndex)
+      componentByItemId.set(itemId, componentIndex);
     }
   }
 
@@ -553,185 +562,185 @@ function getModuleItemDependencyGraph(
     items,
     sameModuleDependencies,
     components,
-    componentByItemId
-  }
+    componentByItemId,
+  };
 }
 
 function getModuleItemHierarchy(
   moduleName: string,
   mod: GraphOutputModule,
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): ModuleItemLayout[] {
-  const { items, sameModuleDependencies, componentByItemId }
-    = getModuleItemDependencyGraph(moduleName, mod, moduleMap)
+  const { items, sameModuleDependencies, componentByItemId } =
+    getModuleItemDependencyGraph(moduleName, mod, moduleMap);
 
-  const kindRank: Record<ItemNodeData['kind'], number> = {
+  const kindRank: Record<ItemNodeData["kind"], number> = {
     provider: 0,
-    controller: 1
-  }
+    controller: 1,
+  };
 
-  const componentDependencies = new Map<number, Set<number>>()
+  const componentDependencies = new Map<number, Set<number>>();
   for (const [itemId, dependencies] of sameModuleDependencies.entries()) {
-    const componentIndex = componentByItemId.get(itemId)
+    const componentIndex = componentByItemId.get(itemId);
     if (componentIndex === undefined) {
-      continue
+      continue;
     }
 
-    const dependenciesSet
-      = componentDependencies.get(componentIndex) || new Set<number>()
+    const dependenciesSet =
+      componentDependencies.get(componentIndex) || new Set<number>();
     for (const dependencyId of dependencies) {
-      const dependencyComponentIndex = componentByItemId.get(dependencyId)
+      const dependencyComponentIndex = componentByItemId.get(dependencyId);
       if (
-        dependencyComponentIndex !== undefined
-        && dependencyComponentIndex !== componentIndex
+        dependencyComponentIndex !== undefined &&
+        dependencyComponentIndex !== componentIndex
       ) {
-        dependenciesSet.add(dependencyComponentIndex)
+        dependenciesSet.add(dependencyComponentIndex);
       }
     }
-    componentDependencies.set(componentIndex, dependenciesSet)
+    componentDependencies.set(componentIndex, dependenciesSet);
   }
 
-  const depthByComponent = new Map<number, number>()
+  const depthByComponent = new Map<number, number>();
   function getComponentDepth(componentIndex: number): number {
-    const knownDepth = depthByComponent.get(componentIndex)
+    const knownDepth = depthByComponent.get(componentIndex);
     if (knownDepth !== undefined) {
-      return knownDepth
+      return knownDepth;
     }
 
     const dependencies = Array.from(
-      componentDependencies.get(componentIndex) || []
-    )
-    const depth
-      = dependencies.length === 0
+      componentDependencies.get(componentIndex) || [],
+    );
+    const depth =
+      dependencies.length === 0
         ? 0
-        : Math.max(...dependencies.map(getComponentDepth)) + 1
-    depthByComponent.set(componentIndex, depth)
-    return depth
+        : Math.max(...dependencies.map(getComponentDepth)) + 1;
+    depthByComponent.set(componentIndex, depth);
+    return depth;
   }
 
   return items
     .map((item) => {
-      const componentIndex = componentByItemId.get(item.id)
+      const componentIndex = componentByItemId.get(item.id);
       return {
         ...item,
         depth:
-          componentIndex === undefined ? 0 : getComponentDepth(componentIndex)
-      }
+          componentIndex === undefined ? 0 : getComponentDepth(componentIndex),
+      };
     })
     .sort(
       (a, b) =>
-        a.depth - b.depth
-        || kindRank[a.kind] - kindRank[b.kind]
-        || a.label.localeCompare(b.label)
-    )
+        a.depth - b.depth ||
+        kindRank[a.kind] - kindRank[b.kind] ||
+        a.label.localeCompare(b.label),
+    );
 }
 
 function getEdgeDataProps(
   info: CircularEdgeInfo[] | undefined,
-  isNormallyVisible: boolean
+  isNormallyVisible: boolean,
 ): {
-  data: FlowEdgeData
+  data: FlowEdgeData;
 } {
   if (!info?.length) {
-    return { data: { isNormallyVisible } }
+    return { data: { isNormallyVisible } };
   }
 
   const normalizedInfo = Array.from(
     info.reduce<Map<number, CircularEdgeInfo>>((map, item) => {
-      map.set(item.id, item)
-      return map
-    }, new Map())
+      map.set(item.id, item);
+      return map;
+    }, new Map()),
   )
     .map(([, item]) => item)
-    .sort((a, b) => a.id - b.id)
+    .sort((a, b) => a.id - b.id);
 
   return {
     data: {
       isNormallyVisible,
-      circularIds: normalizedInfo.map(item => item.id),
-      circularDetails: normalizedInfo.map(item => ({
+      circularIds: normalizedInfo.map((item) => item.id),
+      circularDetails: normalizedInfo.map((item) => ({
         id: item.id,
         category: item.category,
         type: item.type,
         from: item.from,
         to: item.to,
-        path: [...item.path]
+        path: [...item.path],
       })),
       circularReason: normalizedInfo
-        .map(item => `ID ${item.id}: ${item.path.join(' -> ')}`)
-        .join('\n')
-    }
-  }
+        .map((item) => `ID ${item.id}: ${item.path.join(" -> ")}`)
+        .join("\n"),
+    },
+  };
 }
 
 function deduplicateCircularEdgeLabels(
-  circularEdges: Map<string, CircularEdgeInfo[]>
+  circularEdges: Map<string, CircularEdgeInfo[]>,
 ): Map<string, CircularEdgeInfo[]> {
-  const pairAggregates = new Map<string, CircularEdgePairAggregate>()
+  const pairAggregates = new Map<string, CircularEdgePairAggregate>();
 
   for (const [edgeKey, info] of circularEdges.entries()) {
-    const [source, target] = edgeKey.split('->')
+    const [source, target] = edgeKey.split("->");
     if (!source || !target) {
-      continue
+      continue;
     }
 
-    const pairKey
-      = source < target ? `${source}<->${target}` : `${target}<->${source}`
-    let aggregate = pairAggregates.get(pairKey)
+    const pairKey =
+      source < target ? `${source}<->${target}` : `${target}<->${source}`;
+    let aggregate = pairAggregates.get(pairKey);
     if (!aggregate) {
       aggregate = {
         edgeKeys: [],
         infoById: new Map(),
-        sizeByEdgeKey: new Map()
-      }
-      pairAggregates.set(pairKey, aggregate)
+        sizeByEdgeKey: new Map(),
+      };
+      pairAggregates.set(pairKey, aggregate);
     }
 
-    aggregate.edgeKeys.push(edgeKey)
+    aggregate.edgeKeys.push(edgeKey);
     aggregate.sizeByEdgeKey.set(
       edgeKey,
-      new Set(info.map(item => item.id)).size
-    )
+      new Set(info.map((item) => item.id)).size,
+    );
 
     for (const item of info) {
-      aggregate.infoById.set(item.id, item)
+      aggregate.infoById.set(item.id, item);
     }
   }
 
-  const dedupedEdgeLabels = new Map<string, CircularEdgeInfo[]>()
+  const dedupedEdgeLabels = new Map<string, CircularEdgeInfo[]>();
 
   for (const aggregate of pairAggregates.values()) {
     const mergedInfo = Array.from(aggregate.infoById.values()).sort(
-      (a, b) => a.id - b.id
-    )
+      (a, b) => a.id - b.id,
+    );
     if (!aggregate.edgeKeys.length || !mergedInfo.length) {
-      continue
+      continue;
     }
 
-    const [firstEdgeKey] = aggregate.edgeKeys
+    const [firstEdgeKey] = aggregate.edgeKeys;
     if (!firstEdgeKey) {
-      continue
+      continue;
     }
 
-    let displayEdgeKey = firstEdgeKey
+    let displayEdgeKey = firstEdgeKey;
 
     for (const edgeKey of aggregate.edgeKeys.slice(1)) {
-      const currentSize = aggregate.sizeByEdgeKey.get(displayEdgeKey) || 0
-      const nextSize = aggregate.sizeByEdgeKey.get(edgeKey) || 0
+      const currentSize = aggregate.sizeByEdgeKey.get(displayEdgeKey) || 0;
+      const nextSize = aggregate.sizeByEdgeKey.get(edgeKey) || 0;
       if (nextSize > currentSize) {
-        displayEdgeKey = edgeKey
-        continue
+        displayEdgeKey = edgeKey;
+        continue;
       }
 
       if (nextSize === currentSize && edgeKey < displayEdgeKey) {
-        displayEdgeKey = edgeKey
+        displayEdgeKey = edgeKey;
       }
     }
 
-    dedupedEdgeLabels.set(displayEdgeKey, mergedInfo)
+    dedupedEdgeLabels.set(displayEdgeKey, mergedInfo);
   }
 
-  return dedupedEdgeLabels
+  return dedupedEdgeLabels;
 }
 
 function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
@@ -741,10 +750,10 @@ function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
     sourcePosition: edgeProps.sourcePosition,
     targetX: edgeProps.targetX,
     targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
-  })
+    targetPosition: edgeProps.targetPosition,
+  });
 
-  return path
+  return path;
 }
 
 function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
@@ -754,152 +763,152 @@ function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
     sourcePosition: edgeProps.sourcePosition,
     targetX: edgeProps.targetX,
     targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
-  })
+    targetPosition: edgeProps.targetPosition,
+  });
 
   return {
-    position: 'absolute',
+    position: "absolute",
     transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-    pointerEvents: 'all'
-  }
+    pointerEvents: "all",
+  };
 }
 
 function splitDependencyCycleKey(
-  key: string
-): { moduleName: string, token: string } | null {
-  const separatorIndex = key.indexOf(':')
+  key: string,
+): { moduleName: string; token: string } | null {
+  const separatorIndex = key.indexOf(":");
   if (separatorIndex === -1) {
-    return null
+    return null;
   }
 
   return {
     moduleName: key.slice(0, separatorIndex),
-    token: key.slice(separatorIndex + 1)
-  }
+    token: key.slice(separatorIndex + 1),
+  };
 }
 
 function formatDependencyCyclePath(path: string[]): string[] {
   return path.map((key) => {
-    const parsedKey = splitDependencyCycleKey(key)
+    const parsedKey = splitDependencyCycleKey(key);
     if (!parsedKey) {
-      return key
+      return key;
     }
 
-    return `${parsedKey.token} from ${parsedKey.moduleName}`
-  })
+    return `${parsedKey.token} from ${parsedKey.moduleName}`;
+  });
 }
 
 function formatProviderCyclePath(
-  path: GraphOutputProviderCycle['path']
+  path: GraphOutputProviderCycle["path"],
 ): string[] {
-  return path.map(item => `${item.provider.name} from ${item.module.name}`)
+  return path.map((item) => `${item.provider.name} from ${item.module.name}`);
 }
 
 function resolveCycleNodeId(
   key: string,
   moduleMap: GraphOutput,
-  preferredKind?: ItemNodeData['kind']
+  preferredKind?: ItemNodeData["kind"],
 ): string | null {
-  const parsedKey = splitDependencyCycleKey(key)
+  const parsedKey = splitDependencyCycleKey(key);
   if (!parsedKey) {
-    return null
+    return null;
   }
 
-  const mod = moduleMap.modules[parsedKey.moduleName]
+  const mod = moduleMap.modules[parsedKey.moduleName];
   if (!mod) {
-    return null
+    return null;
   }
 
   if (
-    preferredKind === 'provider'
-    && mod.providers.some(provider => provider.name === parsedKey.token)
+    preferredKind === "provider" &&
+    mod.providers.some((provider) => provider.name === parsedKey.token)
   ) {
-    return `provider-${parsedKey.moduleName}-${parsedKey.token}`
+    return `provider-${parsedKey.moduleName}-${parsedKey.token}`;
   }
 
   if (
-    preferredKind === 'controller'
-    && mod.controllers.some(controller => controller.name === parsedKey.token)
+    preferredKind === "controller" &&
+    mod.controllers.some((controller) => controller.name === parsedKey.token)
   ) {
-    return `controller-${parsedKey.moduleName}-${parsedKey.token}`
+    return `controller-${parsedKey.moduleName}-${parsedKey.token}`;
   }
 
-  if (mod.providers.some(provider => provider.name === parsedKey.token)) {
-    return `provider-${parsedKey.moduleName}-${parsedKey.token}`
+  if (mod.providers.some((provider) => provider.name === parsedKey.token)) {
+    return `provider-${parsedKey.moduleName}-${parsedKey.token}`;
   }
 
   if (
-    mod.controllers.some(controller => controller.name === parsedKey.token)
+    mod.controllers.some((controller) => controller.name === parsedKey.token)
   ) {
-    return `controller-${parsedKey.moduleName}-${parsedKey.token}`
+    return `controller-${parsedKey.moduleName}-${parsedKey.token}`;
   }
 
-  return null
+  return null;
 }
 
 function resolveCycleDisplayId(
-  cycle: Pick<GraphOutputCycle, 'id'>,
-  fallbackId: number
+  cycle: Pick<GraphOutputCycle, "id">,
+  fallbackId: number,
 ): number {
-  return typeof cycle.id === 'number' && Number.isFinite(cycle.id)
+  return typeof cycle.id === "number" && Number.isFinite(cycle.id)
     ? cycle.id
-    : fallbackId
+    : fallbackId;
 }
 
 function addDependencyCycleEdges(
   circularEdges: Map<string, CircularEdgeInfo[]>,
   cycles: GraphOutputCycle[] | undefined,
   moduleMap: GraphOutput,
-  fromKind: ItemNodeData['kind']
+  fromKind: ItemNodeData["kind"],
 ): void {
   for (const [cycleIndex, cycle] of (cycles || []).entries()) {
-    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1)
-    const formattedPath = formatDependencyCyclePath(cycle.path)
-    const { from, to } = resolveCircularDependencyEndpoints(formattedPath)
+    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1);
+    const formattedPath = formatDependencyCyclePath(cycle.path);
+    const { from, to } = resolveCircularDependencyEndpoints(formattedPath);
     const info = {
       id: displayId,
       category: fromKind,
       type: cycle.type,
       from,
       to,
-      path: formattedPath
-    }
+      path: formattedPath,
+    };
 
     addDependencyCyclePathEdges(
       circularEdges,
       cycle.path,
       moduleMap,
       fromKind,
-      info
-    )
+      info,
+    );
   }
 }
 
 function addProviderDependencyCycleEdges(
   circularEdges: Map<string, CircularEdgeInfo[]>,
   cycles: GraphOutputProviderCycle[] | undefined,
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): void {
   for (const [cycleIndex, cycle] of (cycles || []).entries()) {
-    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1)
-    const formattedPath = formatProviderCyclePath(cycle.path)
-    const { from, to } = resolveCircularDependencyEndpoints(formattedPath)
+    const displayId = resolveCycleDisplayId(cycle, cycleIndex + 1);
+    const formattedPath = formatProviderCyclePath(cycle.path);
+    const { from, to } = resolveCircularDependencyEndpoints(formattedPath);
     const info = {
       id: displayId,
-      category: 'provider' as const,
+      category: "provider" as const,
       type: cycle.type,
       from,
       to,
-      path: formattedPath
-    }
+      path: formattedPath,
+    };
 
     addDependencyCyclePathEdges(
       circularEdges,
       cycle.path.map(providerCyclePathItemToKey),
       moduleMap,
-      'provider',
-      info
-    )
+      "provider",
+      info,
+    );
   }
 }
 
@@ -907,276 +916,277 @@ function addDependencyCyclePathEdges(
   circularEdges: Map<string, CircularEdgeInfo[]>,
   path: string[],
   moduleMap: GraphOutput,
-  fromKind: ItemNodeData['kind'],
-  info: CircularEdgeInfo
+  fromKind: ItemNodeData["kind"],
+  info: CircularEdgeInfo,
 ): void {
   for (let index = 0; index < path.length - 1; index += 1) {
-    const fromId = resolveCycleNodeId(path[index] || '', moduleMap, fromKind)
-    const toId = resolveCycleNodeId(path[index + 1] || '', moduleMap)
+    const fromId = resolveCycleNodeId(path[index] || "", moduleMap, fromKind);
+    const toId = resolveCycleNodeId(path[index + 1] || "", moduleMap);
     if (!fromId || !toId) {
-      continue
+      continue;
     }
 
-    addCircularEdgeInfo(circularEdges, `${toId}->${fromId}`, info)
+    addCircularEdgeInfo(circularEdges, `${toId}->${fromId}`, info);
   }
 }
 
 function providerCyclePathItemToKey(
-  item: GraphOutputProviderCycle['path'][number]
+  item: GraphOutputProviderCycle["path"][number],
 ): string {
-  return `${item.module.name}:${item.provider.name}`
+  return `${item.module.name}:${item.provider.name}`;
 }
 
 function addCircularEdgeInfo(
   circularEdges: Map<string, CircularEdgeInfo[]>,
   edgeKey: string,
-  info: CircularEdgeInfo
+  info: CircularEdgeInfo,
 ): void {
-  const existingInfo = circularEdges.get(edgeKey) || []
-  if (existingInfo.some(item => item.id === info.id)) {
-    return
+  const existingInfo = circularEdges.get(edgeKey) || [];
+  if (existingInfo.some((item) => item.id === info.id)) {
+    return;
   }
 
-  existingInfo.push(info)
-  circularEdges.set(edgeKey, existingInfo)
+  existingInfo.push(info);
+  circularEdges.set(edgeKey, existingInfo);
 }
 
 function getCircularDependencyEdges(
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): Map<string, CircularEdgeInfo[]> {
-  const circularEdges = new Map<string, CircularEdgeInfo[]>()
+  const circularEdges = new Map<string, CircularEdgeInfo[]>();
   addProviderDependencyCycleEdges(
     circularEdges,
     moduleMap.cycles?.providers,
-    moduleMap
-  )
+    moduleMap,
+  );
   addDependencyCycleEdges(
     circularEdges,
     moduleMap.cycles?.controllers,
     moduleMap,
-    'controller'
-  )
+    "controller",
+  );
 
-  return circularEdges
+  return circularEdges;
 }
 
 function getCircularModuleEdges(
-  moduleMap: GraphOutput
+  moduleMap: GraphOutput,
 ): Map<string, CircularEdgeInfo[]> {
-  const circularEdges = new Map<string, CircularEdgeInfo[]>()
+  const circularEdges = new Map<string, CircularEdgeInfo[]>();
 
   for (const [cycleIndex, cycle] of (
     moduleMap.cycles?.modules || []
   ).entries()) {
-    const { from, to } = resolveCircularDependencyEndpoints(cycle.path)
+    const { from, to } = resolveCircularDependencyEndpoints(cycle.path);
     const info = {
       id: resolveCycleDisplayId(cycle, cycleIndex + 1),
-      category: 'module' as const,
+      category: "module" as const,
       type: cycle.type,
       from,
       to,
-      path: cycle.path
-    }
+      path: cycle.path,
+    };
 
     for (let index = 0; index < cycle.path.length - 1; index += 1) {
       addCircularEdgeInfo(
         circularEdges,
         `${cycle.path[index + 1]}->${cycle.path[index]}`,
-        info
-      )
+        info,
+      );
     }
   }
 
-  return circularEdges
+  return circularEdges;
 }
 
 function getHierarchyRows(items: ModuleItemLayout[]): ModuleItemLayout[][] {
-  const rows = new Map<number, ModuleItemLayout[]>()
+  const rows = new Map<number, ModuleItemLayout[]>();
   for (const item of items) {
-    const row = rows.get(item.depth) || []
-    row.push(item)
-    rows.set(item.depth, row)
+    const row = rows.get(item.depth) || [];
+    row.push(item);
+    rows.set(item.depth, row);
   }
 
   return Array.from(rows.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, row]) => row)
+    .map(([, row]) => row);
 }
 
 function calcModuleSize(
   moduleName: string,
   mod: GraphOutputModule,
   moduleMap: GraphOutput,
-  isCollapsed = false
-): { width: number, height: number } {
+  isCollapsed = false,
+): { width: number; height: number } {
   if (isCollapsed) {
-    return { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT }
+    return { width: MODULE_MIN_WIDTH, height: MODULE_COLLAPSED_HEIGHT };
   }
 
-  const itemCount = mod.providers.length + mod.controllers.length
+  const itemCount = mod.providers.length + mod.controllers.length;
   if (itemCount === 0) {
     return {
       width: MODULE_MIN_WIDTH,
-      height: MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16
-    }
+      height: MODULE_TITLE_HEIGHT + MODULE_PADDING * 2 + 16,
+    };
   }
 
   const rows = getHierarchyRows(
-    getModuleItemHierarchy(moduleName, mod, moduleMap)
-  )
-  const maxRowItemCount = Math.max(...rows.map(row => row.length), 1)
+    getModuleItemHierarchy(moduleName, mod, moduleMap),
+  );
+  const maxRowItemCount = Math.max(...rows.map((row) => row.length), 1);
   const width = Math.max(
     MODULE_MIN_WIDTH,
-    MODULE_PADDING * 2
-    + maxRowItemCount * NODE_WIDTH
-    + (maxRowItemCount - 1) * NODE_GAP_X
-  )
-  const height
-    = MODULE_TITLE_HEIGHT
-      + MODULE_PADDING
-      + rows.length * NODE_HEIGHT
-      + Math.max(rows.length - 1, 0) * NODE_LEVEL_GAP_Y
-      + MODULE_PADDING
+    MODULE_PADDING * 2 +
+      maxRowItemCount * NODE_WIDTH +
+      (maxRowItemCount - 1) * NODE_GAP_X,
+  );
+  const height =
+    MODULE_TITLE_HEIGHT +
+    MODULE_PADDING +
+    rows.length * NODE_HEIGHT +
+    Math.max(rows.length - 1, 0) * NODE_LEVEL_GAP_Y +
+    MODULE_PADDING;
 
-  return { width, height }
+  return { width, height };
 }
 
 function pickHandles(
-  sourcePos: { x: number, y: number },
-  targetPos: { x: number, y: number }
-): { sourceHandle: string, targetHandle: string } {
-  const dx = targetPos.x - sourcePos.x
-  const dy = targetPos.y - sourcePos.y
+  sourcePos: { x: number; y: number },
+  targetPos: { x: number; y: number },
+): { sourceHandle: string; targetHandle: string } {
+  const dx = targetPos.x - sourcePos.x;
+  const dy = targetPos.y - sourcePos.y;
 
   if (dx === 0 && dy === 0) {
-    return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+    return { sourceHandle: "source-bottom", targetHandle: "target-top" };
   }
 
   if (Math.abs(dy) >= Math.abs(dx)) {
     if (dy > 0) {
-      return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+      return { sourceHandle: "source-bottom", targetHandle: "target-top" };
     }
-    return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
+    return { sourceHandle: "source-top", targetHandle: "target-bottom" };
   }
 
   if (dx > 0) {
-    return { sourceHandle: 'source-right', targetHandle: 'target-left' }
+    return { sourceHandle: "source-right", targetHandle: "target-left" };
   }
-  return { sourceHandle: 'source-left', targetHandle: 'target-right' }
+  return { sourceHandle: "source-left", targetHandle: "target-right" };
 }
 
 function pickDependencyHandles(
-  sourcePos: { x: number, y: number },
-  targetPos: { x: number, y: number }
-): { sourceHandle: string, targetHandle: string } {
+  sourcePos: { x: number; y: number },
+  targetPos: { x: number; y: number },
+): { sourceHandle: string; targetHandle: string } {
   if (Math.abs(targetPos.y - sourcePos.y) < NODE_HEIGHT) {
     if (targetPos.x >= sourcePos.x) {
-      return { sourceHandle: 'source-right', targetHandle: 'target-left' }
+      return { sourceHandle: "source-right", targetHandle: "target-left" };
     }
 
-    return { sourceHandle: 'source-left', targetHandle: 'target-right' }
+    return { sourceHandle: "source-left", targetHandle: "target-right" };
   }
 
   if (targetPos.y >= sourcePos.y) {
-    return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+    return { sourceHandle: "source-bottom", targetHandle: "target-top" };
   }
 
-  return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
+  return { sourceHandle: "source-top", targetHandle: "target-bottom" };
 }
 
 function buildGraph(
   moduleMap: GraphOutput,
   collapsedModules = new Set<string>(),
   options: {
-    showCircularDependencies?: boolean
-    showModuleToModuleLine?: boolean
-    showProviderToProviderInsideModule?: boolean
-    showProviderToProviderAcrossModule?: boolean
-    nodePositions?: Map<string, NodePosition>
-  } = {}
-): { nodes: FlowNode[], edges: FlowEdge[] } {
-  const nodes: FlowNode[] = []
-  const edges: FlowEdge[] = []
-  const layers = assignLayers(moduleMap)
-  const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
-  const showCircularDependencies = options.showCircularDependencies ?? true
-  const showModuleToModuleLine = options.showModuleToModuleLine ?? true
-  const showProviderToProviderInsideModule
-    = options.showProviderToProviderInsideModule ?? true
-  const showProviderToProviderAcrossModule
-    = options.showProviderToProviderAcrossModule ?? false
-  const nodePositions = options.nodePositions ?? new Map<string, NodePosition>()
+    showCircularDependencies?: boolean;
+    showModuleToModuleLine?: boolean;
+    showProviderToProviderInsideModule?: boolean;
+    showProviderToProviderAcrossModule?: boolean;
+    nodePositions?: Map<string, NodePosition>;
+  } = {},
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const nodes: FlowNode[] = [];
+  const edges: FlowEdge[] = [];
+  const layers = assignLayers(moduleMap);
+  const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0]);
+  const showCircularDependencies = options.showCircularDependencies ?? true;
+  const showModuleToModuleLine = options.showModuleToModuleLine ?? true;
+  const showProviderToProviderInsideModule =
+    options.showProviderToProviderInsideModule ?? true;
+  const showProviderToProviderAcrossModule =
+    options.showProviderToProviderAcrossModule ?? false;
+  const nodePositions =
+    options.nodePositions ?? new Map<string, NodePosition>();
   const circularModuleEdges = showCircularDependencies
     ? getCircularModuleEdges(moduleMap)
-    : new Map<string, CircularEdgeInfo[]>()
+    : new Map<string, CircularEdgeInfo[]>();
   const circularDependencyEdges = showCircularDependencies
     ? getCircularDependencyEdges(moduleMap)
-    : new Map<string, CircularEdgeInfo[]>()
+    : new Map<string, CircularEdgeInfo[]>();
   const circularModuleEdgeLabels = showCircularDependencies
     ? deduplicateCircularEdgeLabels(circularModuleEdges)
-    : new Map<string, CircularEdgeInfo[]>()
+    : new Map<string, CircularEdgeInfo[]>();
   const circularDependencyEdgeLabels = showCircularDependencies
     ? deduplicateCircularEdgeLabels(circularDependencyEdges)
-    : new Map<string, CircularEdgeInfo[]>()
+    : new Map<string, CircularEdgeInfo[]>();
 
-  const moduleSizes = new Map<string, { width: number, height: number }>()
+  const moduleSizes = new Map<string, { width: number; height: number }>();
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    const isCollapsed = collapsedModules.has(moduleName)
-      || !hasModuleComponents(mod)
+    const isCollapsed =
+      collapsedModules.has(moduleName) || !hasModuleComponents(mod);
     moduleSizes.set(
       moduleName,
-      calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
-    )
+      calcModuleSize(moduleName, mod, moduleMap, isCollapsed),
+    );
   }
 
-  const modulePositions = new Map<string, { x: number, y: number }>()
-  const nodeAbsPositions = new Map<string, { x: number, y: number }>()
-  let currentY = 0
+  const modulePositions = new Map<string, { x: number; y: number }>();
+  const nodeAbsPositions = new Map<string, { x: number; y: number }>();
+  let currentY = 0;
 
   for (const [, moduleNames] of sortedLayers) {
     const layerWidth = moduleNames.reduce(
       (sum, name) => {
-        const size = moduleSizes.get(name)
-        return sum + (size?.width || MODULE_MIN_WIDTH)
+        const size = moduleSizes.get(name);
+        return sum + (size?.width || MODULE_MIN_WIDTH);
       },
-      Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X
-    )
-    let currentX = -(layerWidth / 2)
+      Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X,
+    );
+    let currentX = -(layerWidth / 2);
 
-    let maxHeight = 0
+    let maxHeight = 0;
     for (const name of moduleNames) {
       const size = moduleSizes.get(name) || {
         width: MODULE_MIN_WIDTH,
-        height: MODULE_COLLAPSED_HEIGHT
-      }
-      modulePositions.set(name, { x: currentX, y: currentY })
-      maxHeight = Math.max(maxHeight, size.height)
-      currentX += size.width + MODULE_GAP_X
+        height: MODULE_COLLAPSED_HEIGHT,
+      };
+      modulePositions.set(name, { x: currentX, y: currentY });
+      maxHeight = Math.max(maxHeight, size.height);
+      currentX += size.width + MODULE_GAP_X;
     }
-    currentY += maxHeight + MODULE_GAP_Y
+    currentY += maxHeight + MODULE_GAP_Y;
   }
 
   for (const moduleName of Object.keys(moduleMap.modules)) {
-    const savedPosition = nodePositions.get(`module-${moduleName}`)
+    const savedPosition = nodePositions.get(`module-${moduleName}`);
     if (savedPosition) {
       modulePositions.set(moduleName, {
         x: savedPosition.x,
-        y: savedPosition.y
-      })
+        y: savedPosition.y,
+      });
     }
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    const pos = modulePositions.get(moduleName) || { x: 0, y: 0 }
-    const isExpandable = hasModuleComponents(mod)
-    const isCollapsed = collapsedModules.has(moduleName) || !isExpandable
-    const size
-      = moduleSizes.get(moduleName)
-        || calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
+    const pos = modulePositions.get(moduleName) || { x: 0, y: 0 };
+    const isExpandable = hasModuleComponents(mod);
+    const isCollapsed = collapsedModules.has(moduleName) || !isExpandable;
+    const size =
+      moduleSizes.get(moduleName) ||
+      calcModuleSize(moduleName, mod, moduleMap, isCollapsed);
 
     nodes.push({
       id: `module-${moduleName}`,
-      type: 'module',
+      type: "module",
       position: { x: pos.x, y: pos.y },
       data: {
         label: moduleName,
@@ -1184,61 +1194,64 @@ function buildGraph(
         isCollapsed,
         isExpandable,
         minWidth: size.width,
-        minHeight: size.height
+        minHeight: size.height,
       },
       style: { width: `${size.width}px`, height: `${size.height}px` },
-      class: node => getBrightLineNodeClass(node.id)
-    })
+      class: (node) => getBrightLineNodeClass(node.id),
+    });
   }
 
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     if (collapsedModules.has(moduleName) || !hasModuleComponents(mod)) {
-      continue
+      continue;
     }
 
-    const modPos = modulePositions.get(moduleName) || { x: 0, y: 0 }
+    const modPos = modulePositions.get(moduleName) || { x: 0, y: 0 };
     const moduleSize = moduleSizes.get(moduleName) || {
       width: MODULE_MIN_WIDTH,
-      height: MODULE_COLLAPSED_HEIGHT
-    }
+      height: MODULE_COLLAPSED_HEIGHT,
+    };
     const rows = getHierarchyRows(
-      getModuleItemHierarchy(moduleName, mod, moduleMap)
-    )
+      getModuleItemHierarchy(moduleName, mod, moduleMap),
+    );
 
     for (const [rowIndex, row] of rows.entries()) {
-      const rowWidth
-        = row.length * NODE_WIDTH + Math.max(row.length - 1, 0) * NODE_GAP_X
-      const startX = Math.max(MODULE_PADDING, (moduleSize.width - rowWidth) / 2)
-      const childY
-        = MODULE_TITLE_HEIGHT
-          + MODULE_PADDING
-          + rowIndex * (NODE_HEIGHT + NODE_LEVEL_GAP_Y)
+      const rowWidth =
+        row.length * NODE_WIDTH + Math.max(row.length - 1, 0) * NODE_GAP_X;
+      const startX = Math.max(
+        MODULE_PADDING,
+        (moduleSize.width - rowWidth) / 2,
+      );
+      const childY =
+        MODULE_TITLE_HEIGHT +
+        MODULE_PADDING +
+        rowIndex * (NODE_HEIGHT + NODE_LEVEL_GAP_Y);
 
       for (const [itemIndex, item] of row.entries()) {
-        const childX = startX + itemIndex * (NODE_WIDTH + NODE_GAP_X)
-        const savedPosition = nodePositions.get(item.id)
+        const childX = startX + itemIndex * (NODE_WIDTH + NODE_GAP_X);
+        const savedPosition = nodePositions.get(item.id);
         const itemPosition = savedPosition
           ? { x: savedPosition.x, y: savedPosition.y }
-          : { x: childX, y: childY }
+          : { x: childX, y: childY };
         nodeAbsPositions.set(item.id, {
           x: modPos.x + itemPosition.x + NODE_WIDTH / 2,
-          y: modPos.y + itemPosition.y + NODE_HEIGHT / 2
-        })
+          y: modPos.y + itemPosition.y + NODE_HEIGHT / 2,
+        });
         nodes.push({
           id: item.id,
-          type: 'item',
+          type: "item",
           position: itemPosition,
           parentNode: `module-${moduleName}`,
-          extent: 'parent',
+          extent: "parent",
           draggable: true,
           data: {
             label: item.label,
             kind: item.kind,
-            isExported: item.isExported
+            isExported: item.isExported,
           },
           style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` },
-          class: node => getBrightLineNodeClass(node.id)
-        })
+          class: (node) => getBrightLineNodeClass(node.id),
+        });
       }
     }
   }
@@ -1246,21 +1259,23 @@ function buildGraph(
   for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
     for (const imp of mod.imports) {
       if (moduleMap.modules[imp]) {
-        const sourcePos = modulePositions.get(imp)
-        const targetPos = modulePositions.get(moduleName)
+        const sourcePos = modulePositions.get(imp);
+        const targetPos = modulePositions.get(moduleName);
         if (!sourcePos || !targetPos) {
-          continue
+          continue;
         }
 
-        const { sourceHandle, targetHandle }
-          = pickHandles(sourcePos, targetPos)
-        const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
+        const { sourceHandle, targetHandle } = pickHandles(
+          sourcePos,
+          targetPos,
+        );
+        const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`);
         const circularLabelInfo = circularModuleEdgeLabels.get(
-          `${imp}->${moduleName}`
-        )
+          `${imp}->${moduleName}`,
+        );
         const edgeColor = circularInfo
           ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-          : MODULE_EDGE_COLOR
+          : MODULE_EDGE_COLOR;
 
         edges.push({
           id: `e-mod-${imp}->${moduleName}`,
@@ -1268,17 +1283,17 @@ function buildGraph(
           target: `module-${moduleName}`,
           sourceHandle,
           targetHandle,
-          type: circularLabelInfo ? 'warning' : 'smoothstep',
+          type: circularLabelInfo ? "warning" : "smoothstep",
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-          class: edge =>
+          class: (edge) =>
             getBrightLineEdgeClass(
               edge.source,
               edge.target,
-              edge.data?.isNormallyVisible ?? true
+              edge.data?.isNormallyVisible ?? true,
             ),
           markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getEdgeDataProps(circularLabelInfo, showModuleToModuleLine)
-        })
+          ...getEdgeDataProps(circularLabelInfo, showModuleToModuleLine),
+        });
       }
     }
   }
@@ -1286,22 +1301,24 @@ function buildGraph(
   function addDependencyEdge(
     sourceId: string,
     targetId: string,
-    isNormallyVisible: boolean
+    isNormallyVisible: boolean,
   ): void {
-    const sPos = nodeAbsPositions.get(sourceId)
-    const tPos = nodeAbsPositions.get(targetId)
+    const sPos = nodeAbsPositions.get(sourceId);
+    const tPos = nodeAbsPositions.get(targetId);
     if (!sPos || !tPos) {
-      return
+      return;
     }
 
-    const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos)
-    const circularInfo = circularDependencyEdges.get(`${sourceId}->${targetId}`)
+    const { sourceHandle, targetHandle } = pickDependencyHandles(sPos, tPos);
+    const circularInfo = circularDependencyEdges.get(
+      `${sourceId}->${targetId}`,
+    );
     const circularLabelInfo = circularDependencyEdgeLabels.get(
-      `${sourceId}->${targetId}`
-    )
+      `${sourceId}->${targetId}`,
+    );
     const edgeColor = circularInfo
       ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-      : DEPENDENCY_EDGE_COLOR
+      : DEPENDENCY_EDGE_COLOR;
 
     edges.push({
       id: `e-dep-${sourceId}->${targetId}`,
@@ -1309,1066 +1326,1190 @@ function buildGraph(
       target: targetId,
       sourceHandle,
       targetHandle,
-      type: circularLabelInfo ? 'warning' : 'smoothstep',
+      type: circularLabelInfo ? "warning" : "smoothstep",
       style: {
         stroke: edgeColor,
-        strokeWidth: circularInfo ? 2.2 : 1.5
+        strokeWidth: circularInfo ? 2.2 : 1.5,
       },
-      class: edge =>
+      class: (edge) =>
         getBrightLineEdgeClass(
           edge.source,
           edge.target,
-          edge.data?.isNormallyVisible ?? true
+          edge.data?.isNormallyVisible ?? true,
         ),
       markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-      ...getEdgeDataProps(circularLabelInfo, isNormallyVisible)
-    })
+      ...getEdgeDataProps(circularLabelInfo, isNormallyVisible),
+    });
   }
 
   function addModuleItemDependencyEdges(): void {
     for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
       for (const provider of mod.providers) {
         for (const dep of provider.dependencies) {
-          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
-          const targetId = `provider-${moduleName}-${provider.name}`
+          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap);
+          const targetId = `provider-${moduleName}-${provider.name}`;
           if (sourceId) {
             const isNormallyVisible = isNodeInModule(sourceId, moduleName)
               ? showProviderToProviderInsideModule
-              : showProviderToProviderAcrossModule
-            addDependencyEdge(sourceId, targetId, isNormallyVisible)
+              : showProviderToProviderAcrossModule;
+            addDependencyEdge(sourceId, targetId, isNormallyVisible);
           }
         }
       }
 
       for (const controller of mod.controllers) {
         for (const dep of controller.dependencies) {
-          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
-          const targetId = `controller-${moduleName}-${controller.name}`
+          const sourceId = resolveDepNodeId(dep, moduleName, moduleMap);
+          const targetId = `controller-${moduleName}-${controller.name}`;
           if (sourceId) {
             const isNormallyVisible = isNodeInModule(sourceId, moduleName)
               ? showProviderToProviderInsideModule
-              : showProviderToProviderAcrossModule
-            addDependencyEdge(sourceId, targetId, isNormallyVisible)
+              : showProviderToProviderAcrossModule;
+            addDependencyEdge(sourceId, targetId, isNormallyVisible);
           }
         }
       }
     }
   }
 
-  addModuleItemDependencyEdges()
+  addModuleItemDependencyEdges();
 
-  return { nodes, edges }
+  return { nodes, edges };
 }
 
 const collapsedModuleNames = ref<Set<string>>(
-  getInitialCollapsedModuleNames(graphData.value)
-)
-const showGraphSettings = ref(false)
-const autoAdjustGraphView = ref(true)
-const showLegends = ref(true)
-const showBrightLine = ref(props.enableBrightLine)
-const activeBrightLineNodeId = ref<string | null>(null)
-const hasInitialFixedBrightLine = props.enableBrightLine
-  && props.fixBightline !== false
-  && props.fixBightline !== undefined
-const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
-const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
-const showProviderToProviderAcrossModule = ref(false)
-const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>({})
-const selectedProviderNodeId = ref<string | null>(null)
-const directRunPendingMethodByNodeId = ref<Record<string, string>>({})
-const directRunErrorByNodeId = ref<Record<string, string>>({})
-const directRunArgsInputByKey = ref<Record<string, string>>({})
-const directRunArgsErrorByKey = ref<Record<string, string>>({})
-const directRunArgsInvalidByKey = ref<Record<string, boolean>>({})
-const directRunActiveTab = ref<string>('')
-const directRunArgsSchemaCache = new Map<string, DirectRunArgsSchemaCacheEntry>()
+  getInitialCollapsedModuleNames(graphData.value),
+);
+const showGraphSettings = ref(false);
+const autoAdjustGraphView = ref(true);
+const showLegends = ref(true);
+const showBrightLine = ref(props.enableBrightLine);
+const activeBrightLineNodeId = ref<string | null>(null);
+const hasInitialFixedBrightLine =
+  props.enableBrightLine &&
+  props.fixBightline !== false &&
+  props.fixBightline !== undefined;
+const showModuleToModuleLine = ref(!hasInitialFixedBrightLine);
+const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine);
+const showProviderToProviderAcrossModule = ref(false);
+const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>(
+  {},
+);
+const selectedProviderNodeId = ref<string | null>(null);
+const directRunPendingMethodByNodeId = ref<Record<string, string>>({});
+const directRunPendingModeByNodeId = ref<Record<string, DirectRunMode>>({});
+const directRunErrorByNodeId = ref<Record<string, string>>({});
+const directRunArgsInputByKey = ref<Record<string, string>>({});
+const directRunArgsErrorByKey = ref<Record<string, string>>({});
+const directRunArgsInvalidByKey = ref<Record<string, boolean>>({});
+const directRunActiveTab = ref<string>("");
+const showStaticDirectRunDialog = ref(false);
+const directRunArgsSchemaCache = new Map<
+  string,
+  DirectRunArgsSchemaCacheEntry
+>();
 const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
   showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
-  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value
-})
+  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value,
+});
 
-const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
-const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
-const nodePositionOverrides = new Map<string, NodePosition>()
-const activeCircularTooltipEdgeId = ref<string | null>(null)
-const showCircularDetailDialog = ref(false)
-const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
+const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes);
+const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges);
+const nodePositionOverrides = new Map<string, NodePosition>();
+const activeCircularTooltipEdgeId = ref<string | null>(null);
+const showCircularDetailDialog = ref(false);
+const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null);
 const fixedBrightLineTarget = computed(() => {
   if (!props.enableBrightLine) {
-    return null
+    return null;
   }
 
   if (props.fixBightline === false || props.fixBightline === undefined) {
-    return null
+    return null;
   }
 
-  if (typeof props.fixBightline === 'string') {
-    const target = props.fixBightline.trim()
-    return target || DEFAULT_FIXED_BRIGHT_LINE_TARGET
+  if (typeof props.fixBightline === "string") {
+    const target = props.fixBightline.trim();
+    return target || DEFAULT_FIXED_BRIGHT_LINE_TARGET;
   }
 
-  return DEFAULT_FIXED_BRIGHT_LINE_TARGET
-})
+  return DEFAULT_FIXED_BRIGHT_LINE_TARGET;
+});
 const activeBrightLineConnectedNodeIds = computed(() => {
-  const activeNodeId = activeBrightLineNodeId.value
-  const connectedNodeIds = new Set<string>()
+  const activeNodeId = activeBrightLineNodeId.value;
+  const connectedNodeIds = new Set<string>();
   if (!showBrightLine.value || !activeNodeId) {
-    return connectedNodeIds
+    return connectedNodeIds;
   }
 
-  const edgesByNodeId = new Map<string, FlowEdge[]>()
+  const edgesByNodeId = new Map<string, FlowEdge[]>();
   for (const edge of flowEdges.value) {
-    const sourceEdges = edgesByNodeId.get(edge.source) || []
-    sourceEdges.push(edge)
-    edgesByNodeId.set(edge.source, sourceEdges)
+    const sourceEdges = edgesByNodeId.get(edge.source) || [];
+    sourceEdges.push(edge);
+    edgesByNodeId.set(edge.source, sourceEdges);
   }
 
-  const queue = [activeNodeId]
-  connectedNodeIds.add(activeNodeId)
+  const queue = [activeNodeId];
+  connectedNodeIds.add(activeNodeId);
 
   while (queue.length > 0) {
-    const currentNodeId = queue.shift()
+    const currentNodeId = queue.shift();
     if (!currentNodeId) {
-      continue
+      continue;
     }
 
     for (const edge of edgesByNodeId.get(currentNodeId) || []) {
-      const nextNodeId = edge.target
+      const nextNodeId = edge.target;
       if (connectedNodeIds.has(nextNodeId)) {
-        continue
+        continue;
       }
 
-      connectedNodeIds.add(nextNodeId)
-      queue.push(nextNodeId)
+      connectedNodeIds.add(nextNodeId);
+      queue.push(nextNodeId);
     }
   }
 
-  return connectedNodeIds
-})
+  return connectedNodeIds;
+});
 const expandableModuleNames = computed(() =>
   Object.entries(graphData.value.modules)
     .filter(([, mod]) => hasModuleComponents(mod))
-    .map(([moduleName]) => moduleName)
-)
-const allModulesOpenState = computed<boolean | 'indeterminate'>(() => {
+    .map(([moduleName]) => moduleName),
+);
+const allModulesOpenState = computed<boolean | "indeterminate">(() => {
   if (expandableModuleNames.value.length === 0) {
-    return false
+    return false;
   }
 
   const openModuleCount = expandableModuleNames.value.filter(
-    moduleName => !collapsedModuleNames.value.has(moduleName)
-  ).length
+    (moduleName) => !collapsedModuleNames.value.has(moduleName),
+  ).length;
 
   if (openModuleCount === 0) {
-    return false
+    return false;
   }
 
   if (openModuleCount === expandableModuleNames.value.length) {
-    return true
+    return true;
   }
 
-  return 'indeterminate'
-})
-const selectedProviderContext = computed<DirectRunProviderContext | null>(() => {
-  const nodeId = selectedProviderNodeId.value
-  if (!nodeId) {
-    return null
-  }
+  return "indeterminate";
+});
+const selectedProviderContext = computed<DirectRunProviderContext | null>(
+  () => {
+    const nodeId = selectedProviderNodeId.value;
+    if (!nodeId) {
+      return null;
+    }
 
-  const parsed = parseProviderNodeId(nodeId)
-  if (!parsed) {
-    return null
-  }
+    const parsed = parseProviderNodeId(nodeId);
+    if (!parsed) {
+      return null;
+    }
 
-  const provider = graphData.value.modules[parsed.moduleName]?.providers
-    .find(item => item.name === parsed.providerName)
+    const provider = graphData.value.modules[parsed.moduleName]?.providers.find(
+      (item) => item.name === parsed.providerName,
+    );
 
-  if (!provider) {
-    return null
-  }
+    if (!provider) {
+      return null;
+    }
 
-  return {
-    nodeId,
-    moduleName: parsed.moduleName,
-    provider
-  }
-})
+    return {
+      nodeId,
+      moduleName: parsed.moduleName,
+      provider,
+    };
+  },
+);
 const selectedProviderDirectRunState = computed(() => {
-  const context = selectedProviderContext.value
-  return context ? getDirectRunProviderState(context.provider) : null
-})
+  const context = selectedProviderContext.value;
+  return context ? getDirectRunProviderState(context.provider) : null;
+});
 const showDirectRunDrawer = computed({
   get: () => Boolean(selectedProviderContext.value),
   set: (value: boolean) => {
     if (!value) {
-      selectedProviderNodeId.value = null
+      const hadSelectedProvider = Boolean(selectedProviderNodeId.value);
+      selectedProviderNodeId.value = null;
+      if (hadSelectedProvider || !props.directRunOn) {
+        emit("directRunDrawerClose");
+      }
+    }
+  },
+});
+
+function findProviderNodeId(providerName: string): string | null {
+  for (const [moduleName, moduleData] of Object.entries(graphData.value.modules)) {
+    if (moduleData.providers.some((provider) => provider.name === providerName)) {
+      return getProviderNodeId(moduleName, providerName);
     }
   }
-})
+
+  return null;
+}
+
+function syncDirectRunOn(): void {
+  const nodeId = props.directRunOn ? findProviderNodeId(props.directRunOn) : null;
+  if (nodeId && selectedProviderNodeId.value !== nodeId) {
+    selectedProviderNodeId.value = nodeId;
+  }
+}
+
 const directRunMethodTabs = computed<DirectRunMethodTab[]>(() =>
   (selectedProviderDirectRunState.value?.methods || []).map((method) => {
-    const parameterCount = getDirectRunParameterCount(method)
+    const parameterCount = getDirectRunParameterCount(method);
 
     return {
       label: method.name,
       value: method.name,
       method,
       badge: parameterCount
-        ? `${parameterCount} ${parameterCount === 1 ? 'arg' : 'args'}`
-        : undefined
-    }
-  })
-)
+        ? `${parameterCount} ${parameterCount === 1 ? "arg" : "args"}`
+        : undefined,
+    };
+  }),
+);
 const selectedProviderSnapshot = computed(() => {
-  const nodeId = selectedProviderContext.value?.nodeId
-  return nodeId ? directRunStateByNodeId.value[nodeId] || null : null
-})
+  const nodeId = selectedProviderContext.value?.nodeId;
+  return nodeId ? directRunStateByNodeId.value[nodeId] || null : null;
+});
 const selectedProviderPendingMethod = computed(() => {
-  const nodeId = selectedProviderContext.value?.nodeId
-  return nodeId ? directRunPendingMethodByNodeId.value[nodeId] || '' : ''
-})
+  const nodeId = selectedProviderContext.value?.nodeId;
+  return nodeId ? directRunPendingMethodByNodeId.value[nodeId] || "" : "";
+});
+const selectedProviderPendingMode = computed(() => {
+  const nodeId = selectedProviderContext.value?.nodeId;
+  return nodeId ? directRunPendingModeByNodeId.value[nodeId] || "" : "";
+});
 const selectedProviderError = computed(() => {
-  const nodeId = selectedProviderContext.value?.nodeId
-  return nodeId ? directRunErrorByNodeId.value[nodeId] || '' : ''
-})
+  const nodeId = selectedProviderContext.value?.nodeId;
+  return nodeId ? directRunErrorByNodeId.value[nodeId] || "" : "";
+});
 const selectedProviderArgsErrors = computed<Record<string, string>>(() => {
-  const context = selectedProviderContext.value
+  const context = selectedProviderContext.value;
   if (!context) {
-    return {}
+    return {};
   }
 
   return Object.fromEntries(
-    (selectedProviderDirectRunState.value?.methods || []).map(method => [
+    (selectedProviderDirectRunState.value?.methods || []).map((method) => [
       method.name,
       directRunArgsErrorByKey.value[
         directRunArgsKey(context.nodeId, method.name)
-      ] || ''
-    ])
-  )
-})
+      ] || "",
+    ]),
+  );
+});
 const selectedProviderLastRunLabel = computed(() => {
-  const value = selectedProviderSnapshot.value?.updatedAt
+  const value = selectedProviderSnapshot.value?.updatedAt;
   if (!value) {
-    return ''
+    return "";
   }
 
-  return new Date(value).toLocaleString()
-})
-const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(() => {
-  const context = selectedProviderContext.value
-  if (!context) {
-    return null
-  }
-
-  const directRunState = selectedProviderDirectRunState.value
-  if (!directRunState) {
-    return null
-  }
-
-  if (!directRunState.runnable) {
-    return {
-      label: 'Not runnable',
-      color: 'neutral',
-      variant: 'outline'
+  return new Date(value).toLocaleString();
+});
+const selectedProviderStatusBadge = computed<DirectRunStatusBadge | null>(
+  () => {
+    const context = selectedProviderContext.value;
+    if (!context) {
+      return null;
     }
-  }
 
-  const pendingMethod = selectedProviderPendingMethod.value
-  if (pendingMethod) {
-    return {
-      label: 'Running',
-      color: 'primary',
-      variant: 'solid'
+    const directRunState = selectedProviderDirectRunState.value;
+    if (!directRunState) {
+      return null;
     }
-  }
 
-  const snapshot = selectedProviderSnapshot.value
-  if (!snapshot) {
-    return {
-      label: 'Idle',
-      color: 'neutral',
-      variant: 'soft'
+    if (!directRunState.runnable) {
+      return {
+        label: "Not runnable",
+        color: "neutral",
+        variant: "outline",
+      };
     }
-  }
 
-  return snapshot.state === 'success'
-    ? {
-        label: 'Success',
-        color: 'success',
-        variant: 'solid'
-      }
-    : {
-        label: 'Failed',
-        color: 'error',
-        variant: 'solid'
-      }
-})
+    const pendingMethod = selectedProviderPendingMethod.value;
+    if (pendingMethod) {
+      return {
+        label: "Running",
+        color: "primary",
+        variant: "solid",
+      };
+    }
+
+    if (selectedProviderError.value) {
+      return {
+        label: "Failed",
+        color: "error",
+        variant: "solid",
+      };
+    }
+
+    const snapshot = selectedProviderSnapshot.value;
+    if (!snapshot) {
+      return {
+        label: "Idle",
+        color: "neutral",
+        variant: "soft",
+      };
+    }
+
+    return snapshot.state === "success"
+      ? {
+          label: "Success",
+          color: "success",
+          variant: "solid",
+        }
+      : {
+          label: "Failed",
+          color: "error",
+          variant: "solid",
+        };
+  },
+);
 
 function resolveBrightLineNodeId(target: string): string | null {
-  const matchedNode = flowNodes.value.find(node =>
-    node.id === target
-    || node.data?.label === target
-    || node.id.endsWith(`-${target}`)
-  )
+  const matchedNode = flowNodes.value.find(
+    (node) =>
+      node.id === target ||
+      node.data?.label === target ||
+      node.id.endsWith(`-${target}`),
+  );
 
-  return matchedNode?.id || null
+  return matchedNode?.id || null;
 }
 
 function syncFixedBrightLineNode(): void {
-  const target = fixedBrightLineTarget.value
+  const target = fixedBrightLineTarget.value;
   if (!target) {
-    return
+    return;
   }
 
-  activeBrightLineNodeId.value = resolveBrightLineNodeId(target)
+  activeBrightLineNodeId.value = resolveBrightLineNodeId(target);
 }
 
 function hasActiveBrightLine(): boolean {
-  return showBrightLine.value && activeBrightLineNodeId.value !== null
+  return showBrightLine.value && activeBrightLineNodeId.value !== null;
 }
 
 function getBrightLineNodeClass(nodeId: string): string[] {
   if (!hasActiveBrightLine()) {
-    return []
+    return [];
   }
 
   if (activeBrightLineNodeId.value === nodeId) {
-    const classes = [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS]
-    const fixedTarget = fixedBrightLineTarget.value
+    const classes = [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS];
+    const fixedTarget = fixedBrightLineTarget.value;
     if (fixedTarget && resolveBrightLineNodeId(fixedTarget) === nodeId) {
-      classes.push(BRIGHT_LINE_NODE_FIXED_CLASS)
+      classes.push(BRIGHT_LINE_NODE_FIXED_CLASS);
     }
 
-    return classes
+    return classes;
   }
 
   if (activeBrightLineConnectedNodeIds.value.has(nodeId)) {
-    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_CONNECTED_CLASS]
+    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_CONNECTED_CLASS];
   }
 
-  return [BRIGHT_LINE_NODE_DIMMED_CLASS]
+  return [BRIGHT_LINE_NODE_DIMMED_CLASS];
 }
 
 function isBrightLineEdgeActive(sourceId: string, targetId: string): boolean {
-  const activeNodeId = activeBrightLineNodeId.value
+  const activeNodeId = activeBrightLineNodeId.value;
   if (!showBrightLine.value || !activeNodeId) {
-    return false
+    return false;
   }
 
-  const connectedNodeIds = activeBrightLineConnectedNodeIds.value
-  return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)
+  const connectedNodeIds = activeBrightLineConnectedNodeIds.value;
+  return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId);
 }
 
 function getBrightLineEdgeClass(
   sourceId: string,
   targetId: string,
-  isNormallyVisible: boolean
+  isNormallyVisible: boolean,
 ): string[] {
   if (isBrightLineEdgeActive(sourceId, targetId)) {
-    return [BRIGHT_LINE_EDGE_CLASS]
+    return [BRIGHT_LINE_EDGE_CLASS];
   }
 
   if (!isNormallyVisible) {
-    return [BRIGHT_LINE_EDGE_HIDDEN_CLASS]
+    return [BRIGHT_LINE_EDGE_HIDDEN_CLASS];
   }
 
   if (hasActiveBrightLine()) {
-    return [BRIGHT_LINE_EDGE_DIMMED_CLASS]
+    return [BRIGHT_LINE_EDGE_DIMMED_CLASS];
   }
 
-  return []
+  return [];
 }
 
 function shouldShowCircularEdgeWarning(
   sourceId: string,
   targetId: string,
-  edgeData: CircularEdgeData
+  edgeData: CircularEdgeData,
 ): boolean {
-  return edgeData.isNormallyVisible
-    || isBrightLineEdgeActive(sourceId, targetId)
+  return (
+    edgeData.isNormallyVisible || isBrightLineEdgeActive(sourceId, targetId)
+  );
 }
 
 function setActiveBrightLineNode(event: NodeMouseEvent): void {
   if (!props.enableBrightLine) {
-    return
+    return;
   }
 
-  activeBrightLineNodeId.value = event.node.id
+  activeBrightLineNodeId.value = event.node.id;
 }
 
 function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
   if (!props.enableBrightLine) {
-    activeBrightLineNodeId.value = null
-    return
+    activeBrightLineNodeId.value = null;
+    return;
   }
 
   if (fixedBrightLineTarget.value) {
     if (!event || activeBrightLineNodeId.value === event.node.id) {
-      syncFixedBrightLineNode()
+      syncFixedBrightLineNode();
     }
-    return
+    return;
   }
 
   if (!event || activeBrightLineNodeId.value === event.node.id) {
-    activeBrightLineNodeId.value = null
+    activeBrightLineNodeId.value = null;
   }
 }
 
 function selectProviderNode(nodeId: string | null): void {
-  if (nodeId && parseProviderNodeId(nodeId)) {
-    selectedProviderNodeId.value = nodeId
-    return
+  const providerNode = nodeId ? parseProviderNodeId(nodeId) : null;
+
+  if (nodeId && providerNode) {
+    selectedProviderNodeId.value = nodeId;
+    emit("directRunDrawerOpen", providerNode.providerName);
+    return;
   }
 
-  selectedProviderNodeId.value = null
+  selectedProviderNodeId.value = null;
+  emit("directRunDrawerClose");
 }
 
 function handleNodeClick(event: NodeMouseEvent): void {
-  selectProviderNode(event.node.id)
+  selectProviderNode(event.node.id);
 }
 
 function clearDirectRunPending(nodeId: string): void {
-  const { [nodeId]: _removed, ...nextPendingState } = directRunPendingMethodByNodeId.value
-  directRunPendingMethodByNodeId.value = nextPendingState
+  const { [nodeId]: _removed, ...nextPendingState } =
+    directRunPendingMethodByNodeId.value;
+  const { [nodeId]: _removedMode, ...nextPendingModeState } =
+    directRunPendingModeByNodeId.value;
+  directRunPendingMethodByNodeId.value = nextPendingState;
+  directRunPendingModeByNodeId.value = nextPendingModeState;
 }
 
 function setDirectRunError(nodeId: string, error: string): void {
   directRunErrorByNodeId.value = {
     ...directRunErrorByNodeId.value,
-    [nodeId]: error
-  }
+    [nodeId]: error,
+  };
 }
 
 function clearDirectRunError(nodeId: string): void {
-  const { [nodeId]: _removed, ...nextErrorState } = directRunErrorByNodeId.value
-  directRunErrorByNodeId.value = nextErrorState
+  const { [nodeId]: _removed, ...nextErrorState } =
+    directRunErrorByNodeId.value;
+  directRunErrorByNodeId.value = nextErrorState;
 }
 
 function directRunArgsKey(nodeId: string, methodName: string): string {
-  return `${nodeId}:${methodName}`
+  return `${nodeId}:${methodName}`;
 }
 
 function getDirectRunMethodSignature(method: DirectRunProviderMethod): string {
-  const parameters = getDirectRunParameterInfos(method)
+  const parameters = getDirectRunParameterInfos(method);
   if (parameters.length === 0) {
-    return `${method.name}()`
+    return `${method.name}()`;
   }
 
-  const args = parameters.map(parameter => parameter.name).join(', ')
+  const args = parameters.map((parameter) => parameter.name).join(", ");
 
-  return `${method.name}(${args})`
+  return `${method.name}(${args})`;
 }
 
 function getDirectRunParameterCount(method: DirectRunProviderMethod): number {
-  return getDirectRunParameterInfos(method).length
+  return getDirectRunParameterInfos(method).length;
 }
 
 function getDirectRunParameterInfos(
-  method: DirectRunProviderMethod
+  method: DirectRunProviderMethod,
 ): DirectRunParameterInfo[] {
-  const parameterTypes = method.parameterTypes?.trim() || '[]'
-  const tupleBody = parseDirectRunTupleBody(parameterTypes)
+  const parameterTypes = method.parameterTypes?.trim() || "[]";
+  const tupleBody = parseDirectRunTupleBody(parameterTypes);
   if (!tupleBody) {
-    return []
+    return [];
   }
 
-  return splitTopLevel(tupleBody, ',')
-    .map((parameter, index): DirectRunParameterInfo => {
-      const separatorIndex = findTopLevelSeparator(parameter, ':')
-      const rawName = separatorIndex >= 0
-        ? parameter.slice(0, separatorIndex).trim()
-        : `arg${index + 1}`
-      const type = separatorIndex >= 0
-        ? parameter.slice(separatorIndex + 1).trim() || 'unknown'
-        : parameter.trim() || 'unknown'
-      const name = sanitizeDirectRunParameterName(rawName) || `arg${index + 1}`
+  return splitTopLevel(tupleBody, ",").map(
+    (parameter, index): DirectRunParameterInfo => {
+      const separatorIndex = findTopLevelSeparator(parameter, ":");
+      const rawName =
+        separatorIndex >= 0
+          ? parameter.slice(0, separatorIndex).trim()
+          : `arg${index + 1}`;
+      const type =
+        separatorIndex >= 0
+          ? parameter.slice(separatorIndex + 1).trim() || "unknown"
+          : parameter.trim() || "unknown";
+      const name = sanitizeDirectRunParameterName(rawName) || `arg${index + 1}`;
 
       return {
         name,
         type,
-        schema: typeScriptTypeToJsonSchema(type)
-      }
-    })
+        schema: typeScriptTypeToJsonSchema(type),
+      };
+    },
+  );
 }
 
 function parseDirectRunTupleBody(parameterTypes: string): string {
-  const trimmed = stripOuterParens(parameterTypes.trim())
-  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
-    return ''
+  const trimmed = stripOuterParens(parameterTypes.trim());
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return "";
   }
 
-  return trimmed.slice(1, -1).trim()
+  return trimmed.slice(1, -1).trim();
 }
 
 function sanitizeDirectRunParameterName(name: string): string {
   return name
-    .replace(/^\.\.\./, '')
-    .replace(/^readonly\s+/, '')
-    .replace(/\?$/, '')
-    .replace(/^['"]|['"]$/g, '')
-    .trim()
+    .replace(/^\.\.\./, "")
+    .replace(/^readonly\s+/, "")
+    .replace(/\?$/, "")
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
 }
 
 function getDirectRunEditorPath(methodName: string): string {
-  const context = selectedProviderContext.value
+  const context = selectedProviderContext.value;
   if (!context) {
-    return `direct-run://${methodName}.json`
+    return `direct-run://${methodName}.json`;
   }
 
-  return `direct-run://${context.moduleName}/${context.provider.name}/${methodName}.json`
+  return `direct-run://${context.moduleName}/${context.provider.name}/${methodName}.json`;
 }
 
-function getDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJsonSchema {
-  const context = selectedProviderContext.value
+function getDirectRunArgsSchema(
+  method: DirectRunProviderMethod,
+): DirectRunArgsJsonSchema {
+  const context = selectedProviderContext.value;
   const cacheKey = context
     ? directRunArgsKey(context.nodeId, method.name)
-    : method.name
-  const fingerprint = method.parameterTypes || '[]'
-  const cachedSchema = directRunArgsSchemaCache.get(cacheKey)
+    : method.name;
+  const fingerprint = method.parameterTypes || "[]";
+  const cachedSchema = directRunArgsSchemaCache.get(cacheKey);
   if (cachedSchema?.fingerprint === fingerprint) {
-    return cachedSchema.schema
+    return cachedSchema.schema;
   }
 
-  const schema = buildDirectRunArgsSchema(method)
+  const schema = buildDirectRunArgsSchema(method);
   directRunArgsSchemaCache.set(cacheKey, {
     fingerprint,
-    schema
-  })
+    schema,
+  });
 
-  return schema
+  return schema;
 }
 
-function buildDirectRunArgsSchema(method: DirectRunProviderMethod): DirectRunArgsJsonSchema {
-  const parameters = getDirectRunParameterInfos(method)
-  const parameterCount = parameters.length
+function buildDirectRunArgsSchema(
+  method: DirectRunProviderMethod,
+): DirectRunArgsJsonSchema {
+  const parameters = getDirectRunParameterInfos(method);
+  const parameterCount = parameters.length;
 
-  if (parameterCount <= 1) {
-    const parameter = parameters[0]
-    const parameterName = parameter?.name || 'argument'
-    const parameterType = parameter?.type || 'unknown'
-    const parameterSchema = parameter?.schema || {}
+  if (parameterCount === 0) {
+    return {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      title: `${method.name}() arguments`,
+      description: "JSON array passed as method arguments.",
+      type: "array",
+      minItems: 0,
+      maxItems: 0,
+      items: [],
+    };
+  }
+
+  if (parameterCount === 1) {
+    const parameter = parameters[0];
+    const parameterName = parameter?.name || "argument";
+    const parameterType = parameter?.type || "unknown";
+    const parameterSchema = parameter?.schema || {};
 
     return {
-      $schema: 'http://json-schema.org/draft-07/schema#',
-      title: `${method.name}() ${parameterName}`,
-      description: `JSON value passed as ${parameterName}: ${parameterType}.`,
-      ...parameterSchema
-    }
+      $schema: "http://json-schema.org/draft-07/schema#",
+      title: `${method.name}() arguments`,
+      description: `JSON array passed as ${parameterName}: ${parameterType}.`,
+      type: "array",
+      minItems: 1,
+      maxItems: 1,
+      items: [
+        {
+          title: parameterName,
+          description: parameterType,
+          ...parameterSchema,
+        },
+      ],
+    };
   }
 
   return {
-    $schema: 'http://json-schema.org/draft-07/schema#',
+    $schema: "http://json-schema.org/draft-07/schema#",
     title: `${method.name}() arguments`,
     description: `JSON array passed as ${parameterCount} method arguments.`,
-    type: 'array',
+    type: "array",
     minItems: parameterCount,
     maxItems: parameterCount,
-    items: parameters.map((parameter): DirectRunArgsJsonSchema => ({
-      title: parameter.name,
-      description: parameter.type,
-      ...parameter.schema
-    }))
-  }
+    items: parameters.map(
+      (parameter): DirectRunArgsJsonSchema => ({
+        title: parameter.name,
+        description: parameter.type,
+        ...parameter.schema,
+      }),
+    ),
+  };
 }
 
 function typeScriptTypeToJsonSchema(typeText: string): DirectRunArgsJsonSchema {
-  const type = stripOuterParens(typeText.trim())
-  if (!type || type === 'unknown' || type === 'any') {
-    return {}
+  const type = stripOuterParens(typeText.trim());
+  if (!type || type === "unknown" || type === "any") {
+    return {};
   }
 
-  if (type === 'string') {
-    return { type: 'string' }
+  if (type === "string") {
+    return { type: "string" };
   }
-  if (type === 'number') {
-    return { type: 'number' }
+  if (type === "number") {
+    return { type: "number" };
   }
-  if (type === 'boolean') {
-    return { type: 'boolean' }
+  if (type === "boolean") {
+    return { type: "boolean" };
   }
-  if (type === 'null') {
-    return { type: 'null' }
+  if (type === "null") {
+    return { type: "null" };
   }
-  if (type === 'object') {
-    return { type: 'object' }
+  if (type === "object") {
+    return { type: "object" };
   }
 
-  const literal = parseTypeScriptLiteral(type)
+  const literal = parseTypeScriptLiteral(type);
   if (literal.matched) {
-    return { enum: [literal.value] }
+    return { enum: [literal.value] };
   }
 
-  const rawUnionTypes = splitTopLevel(type, '|')
+  const rawUnionTypes = splitTopLevel(type, "|");
   const unionTypes = rawUnionTypes
-    .map(candidate => candidate.trim())
-    .filter(candidate => candidate && candidate !== 'undefined' && candidate !== 'void')
+    .map((candidate) => candidate.trim())
+    .filter(
+      (candidate) =>
+        candidate && candidate !== "undefined" && candidate !== "void",
+    );
   if (rawUnionTypes.length > 1) {
     if (unionTypes.length === 1) {
-      return typeScriptTypeToJsonSchema(unionTypes[0] || 'unknown')
+      return typeScriptTypeToJsonSchema(unionTypes[0] || "unknown");
     }
 
-    const literals = unionTypes.map(parseTypeScriptLiteral)
-    if (literals.every(candidate => candidate.matched)) {
-      return { enum: literals.map(candidate => candidate.value) }
+    const literals = unionTypes.map(parseTypeScriptLiteral);
+    if (literals.every((candidate) => candidate.matched)) {
+      return { enum: literals.map((candidate) => candidate.value) };
     }
 
     return {
-      anyOf: unionTypes.map(candidate => typeScriptTypeToJsonSchema(candidate))
-    }
+      anyOf: unionTypes.map((candidate) =>
+        typeScriptTypeToJsonSchema(candidate),
+      ),
+    };
   }
 
   if (isArrayType(type)) {
     return {
-      type: 'array',
-      items: typeScriptTypeToJsonSchema(type.slice(0, -2))
-    }
+      type: "array",
+      items: typeScriptTypeToJsonSchema(type.slice(0, -2)),
+    };
   }
 
-  if (type.startsWith('[') && type.endsWith(']')) {
-    const tupleItems = splitTopLevel(type.slice(1, -1), ',')
-      .map(item => typeScriptTypeToJsonSchema(item))
+  if (type.startsWith("[") && type.endsWith("]")) {
+    const tupleItems = splitTopLevel(type.slice(1, -1), ",").map((item) =>
+      typeScriptTypeToJsonSchema(item),
+    );
 
     return {
-      type: 'array',
+      type: "array",
       minItems: tupleItems.length,
       maxItems: tupleItems.length,
-      items: tupleItems
-    }
+      items: tupleItems,
+    };
   }
 
-  if (type.startsWith('{') && type.endsWith('}')) {
-    return objectTypeToJsonSchema(type.slice(1, -1))
+  if (type.startsWith("{") && type.endsWith("}")) {
+    return objectTypeToJsonSchema(type.slice(1, -1));
   }
 
-  return {}
+  return {};
 }
 
 function objectTypeToJsonSchema(typeBody: string): DirectRunArgsJsonSchema {
-  const properties: Record<string, DirectRunArgsJsonSchema> = {}
-  const required: string[] = []
+  const properties: Record<string, DirectRunArgsJsonSchema> = {};
+  const required: string[] = [];
 
-  for (const member of splitTopLevelAny(typeBody, [';', ','])) {
-    const separatorIndex = findTopLevelSeparator(member, ':')
+  for (const member of splitTopLevelAny(typeBody, [";", ","])) {
+    const separatorIndex = findTopLevelSeparator(member, ":");
     if (separatorIndex <= 0) {
-      continue
+      continue;
     }
 
-    const rawName = member.slice(0, separatorIndex).trim()
-    const propertyType = member.slice(separatorIndex + 1).trim()
-    const optional = rawName.endsWith('?')
-    const name = sanitizeDirectRunParameterName(rawName)
+    const rawName = member.slice(0, separatorIndex).trim();
+    const propertyType = member.slice(separatorIndex + 1).trim();
+    const optional = rawName.endsWith("?");
+    const name = sanitizeDirectRunParameterName(rawName);
     if (!name) {
-      continue
+      continue;
     }
 
-    properties[name] = typeScriptTypeToJsonSchema(propertyType)
+    properties[name] = typeScriptTypeToJsonSchema(propertyType);
     if (!optional && !typeIncludesUndefined(propertyType)) {
-      required.push(name)
+      required.push(name);
     }
   }
 
   return {
-    type: 'object',
+    type: "object",
     additionalProperties: true,
     properties,
-    required
-  }
+    required,
+  };
 }
 
 function stripOuterParens(value: string): string {
-  let next = value.trim()
-  while (next.startsWith('(') && next.endsWith(')') && enclosesWholeValue(next)) {
-    next = next.slice(1, -1).trim()
+  let next = value.trim();
+  while (
+    next.startsWith("(") &&
+    next.endsWith(")") &&
+    enclosesWholeValue(next)
+  ) {
+    next = next.slice(1, -1).trim();
   }
 
-  return next
+  return next;
 }
 
 function enclosesWholeValue(value: string): boolean {
-  let depth = 0
-  let quote: string | null = null
-  let escaped = false
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
 
   for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]
+    const character = value[index];
     if (quote) {
       if (escaped) {
-        escaped = false
-      } else if (character === '\\') {
-        escaped = true
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
       } else if (character === quote) {
-        quote = null
+        quote = null;
       }
-      continue
+      continue;
     }
 
-    if (character === '"' || character === "'" || character === '`') {
-      quote = character
-      continue
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
     }
-    if (character === '(') {
-      depth += 1
-    } else if (character === ')') {
-      depth -= 1
+    if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth -= 1;
       if (depth === 0 && index < value.length - 1) {
-        return false
+        return false;
       }
     }
   }
 
-  return depth === 0
+  return depth === 0;
 }
 
 function splitTopLevel(value: string, separator: string): string[] {
-  return splitTopLevelAny(value, [separator])
+  return splitTopLevelAny(value, [separator]);
 }
 
 function splitTopLevelAny(value: string, separators: string[]): string[] {
-  const parts: string[] = []
-  let start = 0
-  let angleDepth = 0
-  let braceDepth = 0
-  let bracketDepth = 0
-  let parenDepth = 0
-  let quote: string | null = null
-  let escaped = false
+  const parts: string[] = [];
+  let start = 0;
+  let angleDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let quote: string | null = null;
+  let escaped = false;
 
   for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]
+    const character = value[index] || "";
     if (quote) {
       if (escaped) {
-        escaped = false
-      } else if (character === '\\') {
-        escaped = true
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
       } else if (character === quote) {
-        quote = null
+        quote = null;
       }
-      continue
+      continue;
     }
 
-    if (character === '"' || character === "'" || character === '`') {
-      quote = character
-      continue
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
     }
 
-    if (character === '{') {
-      braceDepth += 1
-    } else if (character === '}') {
-      braceDepth -= 1
-    } else if (character === '[') {
-      bracketDepth += 1
-    } else if (character === ']') {
-      bracketDepth -= 1
-    } else if (character === '(') {
-      parenDepth += 1
-    } else if (character === ')') {
-      parenDepth -= 1
-    } else if (character === '<') {
-      angleDepth += 1
-    } else if (character === '>') {
-      angleDepth -= 1
+    if (character === "{") {
+      braceDepth += 1;
+    } else if (character === "}") {
+      braceDepth -= 1;
+    } else if (character === "[") {
+      bracketDepth += 1;
+    } else if (character === "]") {
+      bracketDepth -= 1;
+    } else if (character === "(") {
+      parenDepth += 1;
+    } else if (character === ")") {
+      parenDepth -= 1;
+    } else if (character === "<") {
+      angleDepth += 1;
+    } else if (character === ">") {
+      angleDepth -= 1;
     } else if (
-      separators.includes(character)
-      && angleDepth === 0
-      && braceDepth === 0
-      && bracketDepth === 0
-      && parenDepth === 0
+      separators.includes(character) &&
+      angleDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      parenDepth === 0
     ) {
-      const part = value.slice(start, index).trim()
+      const part = value.slice(start, index).trim();
       if (part) {
-        parts.push(part)
+        parts.push(part);
       }
-      start = index + 1
+      start = index + 1;
     }
   }
 
-  const part = value.slice(start).trim()
+  const part = value.slice(start).trim();
   if (part) {
-    parts.push(part)
+    parts.push(part);
   }
 
-  return parts
+  return parts;
 }
 
 function findTopLevelSeparator(value: string, separator: string): number {
-  let angleDepth = 0
-  let braceDepth = 0
-  let bracketDepth = 0
-  let parenDepth = 0
-  let quote: string | null = null
-  let escaped = false
+  let angleDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let quote: string | null = null;
+  let escaped = false;
 
   for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]
+    const character = value[index];
     if (quote) {
       if (escaped) {
-        escaped = false
-      } else if (character === '\\') {
-        escaped = true
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
       } else if (character === quote) {
-        quote = null
+        quote = null;
       }
-      continue
+      continue;
     }
 
-    if (character === '"' || character === "'" || character === '`') {
-      quote = character
-      continue
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
     }
 
-    if (character === '{') {
-      braceDepth += 1
-    } else if (character === '}') {
-      braceDepth -= 1
-    } else if (character === '[') {
-      bracketDepth += 1
-    } else if (character === ']') {
-      bracketDepth -= 1
-    } else if (character === '(') {
-      parenDepth += 1
-    } else if (character === ')') {
-      parenDepth -= 1
-    } else if (character === '<') {
-      angleDepth += 1
-    } else if (character === '>') {
-      angleDepth -= 1
+    if (character === "{") {
+      braceDepth += 1;
+    } else if (character === "}") {
+      braceDepth -= 1;
+    } else if (character === "[") {
+      bracketDepth += 1;
+    } else if (character === "]") {
+      bracketDepth -= 1;
+    } else if (character === "(") {
+      parenDepth += 1;
+    } else if (character === ")") {
+      parenDepth -= 1;
+    } else if (character === "<") {
+      angleDepth += 1;
+    } else if (character === ">") {
+      angleDepth -= 1;
     } else if (
-      character === separator
-      && angleDepth === 0
-      && braceDepth === 0
-      && bracketDepth === 0
-      && parenDepth === 0
+      character === separator &&
+      angleDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      parenDepth === 0
     ) {
-      return index
+      return index;
     }
   }
 
-  return -1
+  return -1;
 }
 
 function parseTypeScriptLiteral(
-  value: string
-): { matched: true, value: unknown } | { matched: false } {
+  value: string,
+): { matched: true; value: unknown } | { matched: false } {
   if (/^'(?:\\.|[^'\\])*'$/.test(value) || /^"(?:\\.|[^"\\])*"$/.test(value)) {
     try {
       const normalizedValue = value.startsWith("'")
-        ? `"${value.slice(1, -1).replace(/"/g, '\\"')}"`
-        : value
+        ? JSON.stringify(value.slice(1, -1).replace(/\\'/g, "'"))
+        : value;
 
-      return { matched: true, value: JSON.parse(normalizedValue) }
+      return { matched: true, value: JSON.parse(normalizedValue) };
     } catch {
-      return { matched: true, value: value.slice(1, -1) }
+      return { matched: true, value: value.slice(1, -1) };
     }
   }
 
   if (/^-?\d+(?:\.\d+)?$/.test(value)) {
-    return { matched: true, value: Number(value) }
+    return { matched: true, value: Number(value) };
   }
-  if (value === 'true') {
-    return { matched: true, value: true }
+  if (value === "true") {
+    return { matched: true, value: true };
   }
-  if (value === 'false') {
-    return { matched: true, value: false }
+  if (value === "false") {
+    return { matched: true, value: false };
   }
-  if (value === 'null') {
-    return { matched: true, value: null }
+  if (value === "null") {
+    return { matched: true, value: null };
   }
 
-  return { matched: false }
+  return { matched: false };
 }
 
 function isArrayType(type: string): boolean {
-  return type.endsWith('[]') && stripOuterParens(type.slice(0, -2)).length > 0
+  return type.endsWith("[]") && stripOuterParens(type.slice(0, -2)).length > 0;
 }
 
 function typeIncludesUndefined(type: string): boolean {
-  return splitTopLevel(type, '|').some(candidate =>
-    candidate.trim() === 'undefined'
-  )
+  return splitTopLevel(type, "|").some(
+    (candidate) => candidate.trim() === "undefined",
+  );
 }
 
 function getDirectRunArgsInput(methodName: string): string {
-  const nodeId = selectedProviderContext.value?.nodeId
+  const nodeId = selectedProviderContext.value?.nodeId;
   return nodeId
-    ? directRunArgsInputByKey.value[directRunArgsKey(nodeId, methodName)] || ''
-    : ''
+    ? directRunArgsInputByKey.value[directRunArgsKey(nodeId, methodName)] || ""
+    : "";
 }
 
 function setDirectRunArgsInput(methodName: string, value: unknown): void {
-  const nodeId = selectedProviderContext.value?.nodeId
+  const nodeId = selectedProviderContext.value?.nodeId;
   if (!nodeId) {
-    return
+    return;
   }
 
-  const key = directRunArgsKey(nodeId, methodName)
+  const key = directRunArgsKey(nodeId, methodName);
   directRunArgsInputByKey.value = {
     ...directRunArgsInputByKey.value,
-    [key]: typeof value === 'string' ? value : String(value ?? '')
-  }
+    [key]: typeof value === "string" ? value : String(value ?? ""),
+  };
 
-  const { [key]: _removed, ...nextArgsErrorState } = directRunArgsErrorByKey.value
-  directRunArgsErrorByKey.value = nextArgsErrorState
+  const { [key]: _removed, ...nextArgsErrorState } =
+    directRunArgsErrorByKey.value;
+  directRunArgsErrorByKey.value = nextArgsErrorState;
 }
 
 function setDirectRunArgsValidation(
   methodName: string,
-  markers: DirectRunEditorMarker[]
+  markers: DirectRunEditorMarker[],
 ): void {
-  const nodeId = selectedProviderContext.value?.nodeId
+  const nodeId = selectedProviderContext.value?.nodeId;
   if (!nodeId) {
-    return
+    return;
   }
 
   directRunArgsInvalidByKey.value = {
     ...directRunArgsInvalidByKey.value,
-    [directRunArgsKey(nodeId, methodName)]: markers.some(marker =>
-      marker.severity >= 8
-    )
-  }
+    [directRunArgsKey(nodeId, methodName)]: markers.some(
+      (marker) => marker.severity >= 8,
+    ),
+  };
 }
 
 function hasDirectRunArgsValidationError(methodName: string): boolean {
-  const nodeId = selectedProviderContext.value?.nodeId
+  const nodeId = selectedProviderContext.value?.nodeId;
   return nodeId
-    ? Boolean(directRunArgsInvalidByKey.value[directRunArgsKey(nodeId, methodName)])
-    : false
+    ? Boolean(
+        directRunArgsInvalidByKey.value[directRunArgsKey(nodeId, methodName)],
+      )
+    : false;
 }
 
 function isDirectRunActionDisabled(method: DirectRunProviderMethod): boolean {
+  if (!props.directRunUrl) {
+    return true;
+  }
+
+  if (props.directRunDisabled) {
+    return false;
+  }
+
   if (selectedProviderPendingMethod.value) {
-    return true
+    return true;
   }
 
   if (getDirectRunParameterCount(method) === 0) {
-    return false
+    return false;
   }
 
-  return !parseDirectRunArgs(method, getDirectRunArgsInput(method.name)).ok
-    || hasDirectRunArgsValidationError(method.name)
+  return (
+    !parseDirectRunArgs(method, getDirectRunArgsInput(method.name)).ok ||
+    hasDirectRunArgsValidationError(method.name)
+  );
+}
+
+function openStaticDirectRunDialog(): void {
+  showStaticDirectRunDialog.value = true;
+}
+
+function openExecutionSequenceHistory(): void {
+  showStaticDirectRunDialog.value = false;
+  emit("executionSequenceOpen");
+}
+
+function handleDirectRunAction(
+  method: DirectRunProviderMethod,
+  mode: DirectRunMode,
+): void {
+  if (props.directRunDisabled) {
+    openStaticDirectRunDialog();
+    return;
+  }
+
+  void requestDirectRun(method, mode);
 }
 
 function getDirectRunArgsError(method: DirectRunProviderMethod): string {
-  const storedError = selectedProviderArgsErrors.value[method.name]
+  const storedError = selectedProviderArgsErrors.value[method.name];
   if (storedError) {
-    return storedError
+    return storedError;
   }
 
-  const input = getDirectRunArgsInput(method.name)
+  const input = getDirectRunArgsInput(method.name);
   if (!input.trim()) {
-    return ''
+    return "";
   }
 
-  const parsedArgs = parseDirectRunArgs(method, input)
-  return parsedArgs.ok ? '' : parsedArgs.error
+  const parsedArgs = parseDirectRunArgs(method, input);
+  return parsedArgs.ok ? "" : parsedArgs.error;
 }
 
 function setDirectRunArgsError(
   nodeId: string,
   methodName: string,
-  error: string
+  error: string,
 ): void {
   directRunArgsErrorByKey.value = {
     ...directRunArgsErrorByKey.value,
-    [directRunArgsKey(nodeId, methodName)]: error
-  }
+    [directRunArgsKey(nodeId, methodName)]: error,
+  };
 }
 
 function clearDirectRunArgsError(nodeId: string, methodName: string): void {
-  const key = directRunArgsKey(nodeId, methodName)
-  const { [key]: _removed, ...nextArgsErrorState } = directRunArgsErrorByKey.value
-  directRunArgsErrorByKey.value = nextArgsErrorState
+  const key = directRunArgsKey(nodeId, methodName);
+  const { [key]: _removed, ...nextArgsErrorState } =
+    directRunArgsErrorByKey.value;
+  directRunArgsErrorByKey.value = nextArgsErrorState;
 }
 
 function parseDirectRunArgs(
   method: DirectRunProviderMethod,
-  input: string
-): { ok: true, args: unknown[] | undefined } | { ok: false, error: string } {
-  const parameterCount = getDirectRunParameterCount(method)
+  input: string,
+): { ok: true; args: unknown[] | undefined } | { ok: false; error: string } {
+  const parameterCount = getDirectRunParameterCount(method);
   if (parameterCount === 0) {
-    return { ok: true, args: undefined }
+    return { ok: true, args: undefined };
   }
 
-  const trimmedInput = input.trim()
+  const trimmedInput = input.trim();
   if (!trimmedInput) {
     return {
       ok: false,
-      error: `Enter JSON arguments for ${method.name}().`
-    }
+      error: `Enter JSON arguments for ${method.name}().`,
+    };
   }
 
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmedInput)
+    parsed = JSON.parse(trimmedInput);
   } catch {
     return {
       ok: false,
-      error: 'Arguments must be valid JSON.'
-    }
-  }
-
-  if (parameterCount === 1) {
-    const validationError = validateDirectRunParsedArgs(method, [parsed])
-    if (validationError) {
-      return { ok: false, error: validationError }
-    }
-
-    return { ok: true, args: [parsed] }
+      error: "Arguments must be valid JSON.",
+    };
   }
 
   if (!Array.isArray(parsed)) {
     return {
       ok: false,
-      error: `${method.name}() expects ${parameterCount} arguments. Use a JSON array.`
-    }
+      error: `${method.name}() expects ${parameterCount} arguments. Use a JSON array.`,
+    };
   }
 
-  const validationError = validateDirectRunParsedArgs(method, parsed)
+  const validationError = validateDirectRunParsedArgs(method, parsed);
   if (validationError) {
-    return { ok: false, error: validationError }
+    return { ok: false, error: validationError };
   }
 
-  return { ok: true, args: parsed }
+  return { ok: true, args: parsed };
 }
 
 function validateDirectRunParsedArgs(
   method: DirectRunProviderMethod,
-  args: unknown[]
+  args: unknown[],
 ): string {
-  const parameters = getDirectRunParameterInfos(method)
-  const parameterCount = parameters.length
+  const parameters = getDirectRunParameterInfos(method);
+  const parameterCount = parameters.length;
   if (args.length !== parameterCount) {
-    return `${method.name}() expects ${parameterCount} arguments.`
+    return `${method.name}() expects ${parameterCount} arguments.`;
   }
 
   for (let index = 0; index < parameterCount; index += 1) {
-    const parameter = parameters[index]
+    const parameter = parameters[index];
     const error = validateJsonSchemaValue(
       args[index],
       parameter?.schema || {},
-      parameter?.name || `arg${index + 1}`
-    )
+      parameter?.name || `arg${index + 1}`,
+    );
     if (error) {
-      return error
+      return error;
     }
   }
 
-  return ''
+  return "";
 }
 
 function validateJsonSchemaValue(
   value: unknown,
   schema: DirectRunArgsJsonSchema,
-  label: string
+  label: string,
 ): string {
   if (schema.enum && Array.isArray(schema.enum)) {
-    const matchesEnum = schema.enum.some(candidate =>
-      JSON.stringify(candidate) === JSON.stringify(value)
-    )
+    const matchesEnum = schema.enum.some(
+      (candidate) => JSON.stringify(candidate) === JSON.stringify(value),
+    );
     if (!matchesEnum) {
-      return `${label} must be one of ${schema.enum.map(String).join(', ')}.`
+      return `${label} must be one of ${schema.enum.map(String).join(", ")}.`;
     }
   }
 
@@ -2376,89 +2517,96 @@ function validateJsonSchemaValue(
     ? schema.anyOf
     : Array.isArray(schema.oneOf)
       ? schema.oneOf
-      : null
+      : null;
   if (unionSchemas) {
-    const hasMatch = unionSchemas.some(candidate =>
-      !validateJsonSchemaValue(value, candidate as DirectRunArgsJsonSchema, label)
-    )
-    return hasMatch ? '' : `${label} does not match the expected type.`
+    const hasMatch = unionSchemas.some(
+      (candidate) =>
+        !validateJsonSchemaValue(
+          value,
+          candidate as DirectRunArgsJsonSchema,
+          label,
+        ),
+    );
+    return hasMatch ? "" : `${label} does not match the expected type.`;
   }
 
-  const typeError = validateJsonSchemaType(value, schema, label)
+  const typeError = validateJsonSchemaType(value, schema, label);
   if (typeError) {
-    return typeError
+    return typeError;
   }
 
   if (Array.isArray(value)) {
-    return validateJsonSchemaArray(value, schema, label)
+    return validateJsonSchemaArray(value, schema, label);
   }
 
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return validateJsonSchemaObject(
       value as Record<string, unknown>,
       schema,
-      label
-    )
+      label,
+    );
   }
 
-  return ''
+  return "";
 }
 
 function validateJsonSchemaType(
   value: unknown,
   schema: DirectRunArgsJsonSchema,
-  label: string
+  label: string,
 ): string {
-  const schemaType = schema.type
+  const schemaType = schema.type;
   const allowedTypes = Array.isArray(schemaType)
     ? schemaType
-    : typeof schemaType === 'string'
+    : typeof schemaType === "string"
       ? [schemaType]
-      : []
+      : [];
 
   if (allowedTypes.length === 0) {
-    return ''
+    return "";
   }
 
   const isValid = allowedTypes.some((type) => {
-    if (type === 'string') {
-      return typeof value === 'string'
+    if (type === "string") {
+      return typeof value === "string";
     }
-    if (type === 'number') {
-      return typeof value === 'number' && Number.isFinite(value)
+    if (type === "number") {
+      return typeof value === "number" && Number.isFinite(value);
     }
-    if (type === 'integer') {
-      return Number.isInteger(value)
+    if (type === "integer") {
+      return Number.isInteger(value);
     }
-    if (type === 'boolean') {
-      return typeof value === 'boolean'
+    if (type === "boolean") {
+      return typeof value === "boolean";
     }
-    if (type === 'array') {
-      return Array.isArray(value)
+    if (type === "array") {
+      return Array.isArray(value);
     }
-    if (type === 'object') {
-      return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    if (type === "object") {
+      return (
+        Boolean(value) && typeof value === "object" && !Array.isArray(value)
+      );
     }
-    if (type === 'null') {
-      return value === null
+    if (type === "null") {
+      return value === null;
     }
-    return true
-  })
+    return true;
+  });
 
-  return isValid ? '' : `${label} must be ${allowedTypes.join(' or ')}.`
+  return isValid ? "" : `${label} must be ${allowedTypes.join(" or ")}.`;
 }
 
 function validateJsonSchemaArray(
   value: unknown[],
   schema: DirectRunArgsJsonSchema,
-  label: string
+  label: string,
 ): string {
-  if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
-    return `${label} must contain at least ${schema.minItems} items.`
+  if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+    return `${label} must contain at least ${schema.minItems} items.`;
   }
 
-  if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
-    return `${label} must contain at most ${schema.maxItems} items.`
+  if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+    return `${label} must contain at most ${schema.maxItems} items.`;
   }
 
   if (Array.isArray(schema.items)) {
@@ -2466,338 +2614,402 @@ function validateJsonSchemaArray(
       const error = validateJsonSchemaValue(
         value[index],
         schema.items[index] as DirectRunArgsJsonSchema,
-        `${label}[${index}]`
-      )
+        `${label}[${index}]`,
+      );
       if (error) {
-        return error
+        return error;
       }
     }
-    return ''
+    return "";
   }
 
-  if (schema.items && typeof schema.items === 'object') {
+  if (schema.items && typeof schema.items === "object") {
     for (let index = 0; index < value.length; index += 1) {
       const error = validateJsonSchemaValue(
         value[index],
         schema.items as DirectRunArgsJsonSchema,
-        `${label}[${index}]`
-      )
+        `${label}[${index}]`,
+      );
       if (error) {
-        return error
+        return error;
       }
     }
   }
 
-  return ''
+  return "";
 }
 
 function validateJsonSchemaObject(
   value: Record<string, unknown>,
   schema: DirectRunArgsJsonSchema,
-  label: string
+  label: string,
 ): string {
   const required = Array.isArray(schema.required)
-    ? schema.required.filter((key): key is string => typeof key === 'string')
-    : []
+    ? schema.required.filter((key): key is string => typeof key === "string")
+    : [];
   for (const key of required) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) {
-      return `${label}.${key} is required.`
+      return `${label}.${key} is required.`;
     }
   }
 
-  const properties = schema.properties
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
-    return ''
+  const properties = schema.properties;
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return "";
   }
 
   for (const [key, propertySchema] of Object.entries(properties)) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) {
-      continue
+      continue;
     }
 
     const error = validateJsonSchemaValue(
       value[key],
       propertySchema as DirectRunArgsJsonSchema,
-      `${label}.${key}`
-    )
+      `${label}.${key}`,
+    );
     if (error) {
-      return error
+      return error;
     }
   }
 
-  return ''
+  return "";
 }
 
-async function emitDirectRun(request: DirectRunActionRequest): Promise<void> {
-  const nodeId = `provider-${request.moduleName}-${request.providerName}`
+async function executeDirectRun(
+  request: DirectRunActionRequest,
+  mode: DirectRunMode,
+): Promise<void> {
+  const nodeId = `provider-${request.moduleName}-${request.providerName}`;
+
   directRunPendingMethodByNodeId.value = {
     ...directRunPendingMethodByNodeId.value,
-    [nodeId]: request.methodName
-  }
-  clearDirectRunError(nodeId)
+    [nodeId]: request.methodName,
+  };
+  directRunPendingModeByNodeId.value = {
+    ...directRunPendingModeByNodeId.value,
+    [nodeId]: mode,
+  };
+  clearDirectRunError(nodeId);
 
   try {
-    await Promise.resolve()
-    emit('directRun', request)
-  } catch (error) {
-    clearDirectRunPending(nodeId)
-    setDirectRunError(nodeId, error instanceof Error ? error.message : 'Direct run failed.')
+    if (!props.directRunUrl) {
+      throw new Error("Direct run endpoint is unavailable for this graph URL.");
+    }
+    const response = await $fetch<DirectRunResultPayload>(props.directRunUrl, {
+      method: "POST",
+      body: buildDirectRunRequest(request),
+    });
+    const snapshot = buildDirectRunSnapshot({
+      response,
+      requestedMethod: request.methodName,
+    });
+    applyDirectRunResult({
+      moduleName: request.moduleName,
+      providerName: request.providerName,
+      snapshot,
+    });
+    if (mode === "inspect" && snapshot.runtimeTrace) {
+      emit("executionSequenceOpen");
+    }
+    clearDirectRunPending(nodeId);
+  } catch (err) {
+    clearDirectRunPending(nodeId);
+    const errorPayload = err as {
+      data?: DirectRunResultPayload;
+      message?: string;
+    };
+    const responsePayload = errorPayload?.data;
+    setDirectRunError(
+      nodeId,
+      responsePayload?.error ||
+        (err instanceof Error ? err.message : "Direct run failed."),
+    );
+    if (responsePayload) {
+      const snapshot = buildDirectRunSnapshot({
+        response: responsePayload,
+        requestedMethod: request.methodName,
+      });
+      applyDirectRunResult({
+        moduleName: request.moduleName,
+        providerName: request.providerName,
+        snapshot,
+      });
+      if (mode === "inspect" && snapshot.runtimeTrace) {
+        emit("executionSequenceOpen");
+      }
+    }
   }
+}
+
+function getDirectRunResultType(value: unknown): string {
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
+}
+
+function getRuntimeTraceErrorName(
+  trace: NonNullable<DirectRunExecutionSnapshot["runtimeTrace"]>,
+): string {
+  const failedSpan = trace.spans.find(
+    (span) => span.spanId === trace.failedSpanId,
+  );
+  return failedSpan?.errorName || "Error";
+}
+
+function getProviderNodeId(moduleName: string, providerName: string): string {
+  return `provider-${moduleName}-${providerName}`;
 }
 
 function applyDirectRunResult(payload: {
-  moduleName: string
-  providerName: string
-  snapshot: DirectRunExecutionSnapshot
+  moduleName: string;
+  providerName: string;
+  snapshot: DirectRunExecutionSnapshot;
 }): void {
-  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
+  const nodeId = getProviderNodeId(payload.moduleName, payload.providerName);
   directRunStateByNodeId.value = {
     ...directRunStateByNodeId.value,
-    [nodeId]: payload.snapshot
-  }
-  clearDirectRunPending(nodeId)
-  clearDirectRunError(nodeId)
+    [nodeId]: payload.snapshot,
+  };
+  clearDirectRunPending(nodeId);
+  clearDirectRunError(nodeId);
 }
 
-function applyDirectRunFailure(payload: {
-  moduleName: string
-  providerName: string
-  error: string
-}): void {
-  const nodeId = `provider-${payload.moduleName}-${payload.providerName}`
-  clearDirectRunPending(nodeId)
-  setDirectRunError(nodeId, payload.error)
-}
-
-function requestDirectRun(method: DirectRunProviderMethod): void {
-  const context = selectedProviderContext.value
+function requestDirectRun(
+  method: DirectRunProviderMethod,
+  mode: DirectRunMode,
+): void {
+  const context = selectedProviderContext.value;
   if (!context) {
-    return
+    return;
   }
 
-  const parsedArgs = parseDirectRunArgs(method, getDirectRunArgsInput(method.name))
+  const parsedArgs = parseDirectRunArgs(
+    method,
+    getDirectRunArgsInput(method.name),
+  );
   if (!parsedArgs.ok) {
-    setDirectRunArgsError(context.nodeId, method.name, parsedArgs.error)
-    return
+    setDirectRunArgsError(context.nodeId, method.name, parsedArgs.error);
+    return;
   }
 
-  clearDirectRunArgsError(context.nodeId, method.name)
-  void emitDirectRun({
-    moduleName: context.moduleName,
-    providerName: context.provider.name,
-    methodName: method.name,
-    args: parsedArgs.args
-  })
+  clearDirectRunArgsError(context.nodeId, method.name);
+  void executeDirectRun(
+    {
+      moduleName: context.moduleName,
+      providerName: context.provider.name,
+      methodName: method.name,
+      args: parsedArgs.args,
+    },
+    mode,
+  );
 }
 
 watch(
   () => ({
-    nodeId: selectedProviderContext.value?.nodeId || '',
-    tabs: directRunMethodTabs.value.map(tab => tab.value)
+    nodeId: selectedProviderContext.value?.nodeId || "",
+    tabs: directRunMethodTabs.value.map((tab) => tab.value),
   }),
   ({ tabs }) => {
     if (tabs.length === 0) {
-      directRunActiveTab.value = ''
-      return
+      directRunActiveTab.value = "";
+      return;
     }
 
     if (!tabs.includes(directRunActiveTab.value)) {
-      directRunActiveTab.value = tabs[0] || ''
+      directRunActiveTab.value = tabs[0] || "";
     }
   },
-  { immediate: true }
-)
+  { immediate: true },
+);
 
 function openCircularTooltip(edgeId: string): void {
-  activeCircularTooltipEdgeId.value = edgeId
+  activeCircularTooltipEdgeId.value = edgeId;
 }
 
 function closeCircularTooltip(edgeId: string): void {
   if (activeCircularTooltipEdgeId.value === edgeId) {
-    activeCircularTooltipEdgeId.value = null
+    activeCircularTooltipEdgeId.value = null;
   }
 }
 
 function openCircularDetailDialog(edgeData: CircularEdgeData): void {
   circularDetailDialogData.value = {
     circularIds: [...edgeData.circularIds],
-    issues: edgeData.circularDetails.map(detail => ({
+    issues: edgeData.circularDetails.map((detail) => ({
       id: detail.id,
       category: detail.category,
       type: detail.type,
       from: detail.from,
       to: detail.to,
-      path: [...detail.path]
-    }))
-  }
-  showCircularDetailDialog.value = true
+      path: [...detail.path],
+    })),
+  };
+  showCircularDetailDialog.value = true;
 }
 
 function rememberCurrentNodePositions(): void {
   for (const node of flowNodes.value) {
     nodePositionOverrides.set(node.id, {
       x: node.position.x,
-      y: node.position.y
-    })
+      y: node.position.y,
+    });
   }
 }
 
 function refreshGraph(options: { preservePositions?: boolean } = {}) {
-  const preservePositions = options.preservePositions ?? true
+  const preservePositions = options.preservePositions ?? true;
   if (preservePositions) {
-    rememberCurrentNodePositions()
+    rememberCurrentNodePositions();
   } else {
-    nodePositionOverrides.clear()
+    nodePositionOverrides.clear();
   }
 
-  activeCircularTooltipEdgeId.value = null
-  activeBrightLineNodeId.value = null
-  if (selectedProviderNodeId.value && !flowNodes.value.some(node => node.id === selectedProviderNodeId.value)) {
-    selectedProviderNodeId.value = null
+  activeCircularTooltipEdgeId.value = null;
+  activeBrightLineNodeId.value = null;
+  if (
+    selectedProviderNodeId.value &&
+    !flowNodes.value.some((node) => node.id === selectedProviderNodeId.value)
+  ) {
+    selectedProviderNodeId.value = null;
   }
-  showCircularDetailDialog.value = false
-  circularDetailDialogData.value = null
+  showCircularDetailDialog.value = false;
+  circularDetailDialogData.value = null;
   const graph = buildGraph(graphData.value, collapsedModuleNames.value, {
     showCircularDependencies: showCircularDependencies.value,
     showModuleToModuleLine: showModuleToModuleLine.value,
-    showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
-    showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value,
-    nodePositions: preservePositions ? nodePositionOverrides : undefined
-  })
-  flowNodes.value = graph.nodes
-  flowEdges.value = graph.edges
-  syncFixedBrightLineNode()
+    showProviderToProviderInsideModule:
+      showProviderToProviderInsideModule.value,
+    showProviderToProviderAcrossModule:
+      showProviderToProviderAcrossModule.value,
+    nodePositions: preservePositions ? nodePositionOverrides : undefined,
+  });
+  flowNodes.value = graph.nodes;
+  flowEdges.value = graph.edges;
+  syncFixedBrightLineNode();
 }
 
 function toggleModule(moduleName: string) {
-  const mod = graphData.value.modules[moduleName]
+  const mod = graphData.value.modules[moduleName];
   if (!mod || !hasModuleComponents(mod)) {
-    return
+    return;
   }
 
-  const nextCollapsedModules = new Set(collapsedModuleNames.value)
+  const nextCollapsedModules = new Set(collapsedModuleNames.value);
   if (nextCollapsedModules.has(moduleName)) {
-    nextCollapsedModules.delete(moduleName)
+    nextCollapsedModules.delete(moduleName);
   } else {
-    nextCollapsedModules.add(moduleName)
+    nextCollapsedModules.add(moduleName);
   }
 
-  collapsedModuleNames.value = nextCollapsedModules
-  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
+  collapsedModuleNames.value = nextCollapsedModules;
+  refreshGraph({ preservePositions: !autoAdjustGraphView.value });
   if (autoAdjustGraphView.value) {
-    void centerGraph()
+    void centerGraph();
   }
 }
 
-function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
-  collapsedModuleNames.value
-    = isOpen === true
+function setAllModulesOpen(isOpen: boolean | "indeterminate") {
+  collapsedModuleNames.value =
+    isOpen === true
       ? getPermanentCollapsedModuleNames(graphData.value)
-      : getDefaultCollapsedModuleNames(graphData.value)
-  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
+      : getDefaultCollapsedModuleNames(graphData.value);
+  refreshGraph({ preservePositions: !autoAdjustGraphView.value });
   if (autoAdjustGraphView.value) {
-    void centerGraph()
+    void centerGraph();
   }
 }
 
 watch(showCircularDependencies, () => {
-  refreshGraph()
-})
+  refreshGraph();
+});
 
 watch(showBrightLine, (isEnabled) => {
   if (!isEnabled) {
-    activeBrightLineNodeId.value = null
-    return
+    activeBrightLineNodeId.value = null;
+    return;
   }
 
-  syncFixedBrightLineNode()
-})
+  syncFixedBrightLineNode();
+});
 
 watch(
   () => props.enableBrightLine,
   (isEnabled) => {
-    showBrightLine.value = isEnabled
+    showBrightLine.value = isEnabled;
     if (!isEnabled) {
-      activeBrightLineNodeId.value = null
+      activeBrightLineNodeId.value = null;
     }
-  }
-)
+  },
+);
 
-watch(fixedBrightLineTarget, (target) => {
-  if (target) {
-    syncFixedBrightLineNode()
-    return
-  }
+watch(
+  fixedBrightLineTarget,
+  (target) => {
+    if (target) {
+      syncFixedBrightLineNode();
+      return;
+    }
 
-  activeBrightLineNodeId.value = null
-}, { immediate: true })
+    activeBrightLineNodeId.value = null;
+  },
+  { immediate: true },
+);
 
 watch(showModuleToModuleLine, () => {
-  refreshGraph()
-})
+  refreshGraph();
+});
 
 watch(showProviderToProviderInsideModule, () => {
-  refreshGraph()
-})
+  refreshGraph();
+});
 
 watch(showProviderToProviderAcrossModule, () => {
-  refreshGraph()
-})
+  refreshGraph();
+});
 
 watch(
   graphData,
   () => {
-    nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
-    refreshGraph({ preservePositions: false })
-    void centerGraph()
+    nodePositionOverrides.clear();
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(
+      graphData.value,
+    );
+    refreshGraph({ preservePositions: false });
+    syncDirectRunOn();
+    void centerGraph();
   },
-  { deep: true }
-)
+  { deep: true },
+);
 
-watch(
-  () => props.directRunResult,
-  (payload) => {
-    if (!payload) {
-      return
-    }
-
-    applyDirectRunResult(payload)
-  },
-  { deep: true }
-)
-
-watch(
-  () => props.directRunError,
-  (payload) => {
-    if (!payload) {
-      return
-    }
-
-    applyDirectRunFailure(payload)
-  },
-  { deep: true }
-)
+watch(() => props.directRunOn, syncDirectRunOn, { immediate: true });
 
 watch(
   [() => props.defaultOpenModuleDetail, () => props.collapsedModules],
   () => {
-    nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
-    refreshGraph({ preservePositions: false })
-    void centerGraph()
-  }
-)
+    nodePositionOverrides.clear();
+    collapsedModuleNames.value = getInitialCollapsedModuleNames(
+      graphData.value,
+    );
+    refreshGraph({ preservePositions: false });
+    void centerGraph();
+  },
+);
 
 onMounted(() => {
+  syncDirectRunOn();
   setTimeout(() => {
-    void centerGraph(0)
-  }, 200)
-})
+    void centerGraph(0);
+  }, 200);
+});
 
 useResizeObserver(graphViewerRef, () => {
-  debouncedCenterGraph()
-})
+  debouncedCenterGraph();
+});
 </script>
 
 <template>
@@ -2807,10 +3019,7 @@ useResizeObserver(graphViewerRef, () => {
     :class="{ 'graph-viewer--flush': props.flush }"
     :style="{ height: props.height }"
   >
-    <div
-      v-if="props.interactive"
-      class="graph-viewer-settings"
-    >
+    <div v-if="props.interactive" class="graph-viewer-settings">
       <UPopover
         v-model:open="showGraphSettings"
         :content="{ side: 'left', align: 'start', sideOffset: 8 }"
@@ -2829,30 +3038,19 @@ useResizeObserver(graphViewerRef, () => {
 
         <template #content>
           <div class="graph-viewer-settings__content nodrag nopan">
-            <p class="graph-viewer-settings__title">
-              Graph settings
-            </p>
+            <p class="graph-viewer-settings__title">Graph settings</p>
             <UCheckbox
               :model-value="allModulesOpenState"
               label="Open Module Detail"
               @update:model-value="setAllModulesOpen"
             />
-            <UCheckbox
-              v-model="autoAdjustGraphView"
-              label="Auto Re-position"
-            />
-            <UCheckbox
-              v-model="showLegends"
-              label="Show Legends"
-            />
+            <UCheckbox v-model="autoAdjustGraphView" label="Auto Re-position" />
+            <UCheckbox v-model="showLegends" label="Show Legends" />
             <div
               v-if="props.enableBrightLine"
               class="graph-viewer-settings__row"
             >
-              <UCheckbox
-                v-model="showBrightLine"
-                label="Bright Line"
-              />
+              <UCheckbox v-model="showBrightLine" label="Bright Line" />
               <UTooltip
                 text="Highlight the full path of modules, providers, or controllers that depend on the hovered item."
                 :delay-duration="0"
@@ -2894,23 +3092,27 @@ useResizeObserver(graphViewerRef, () => {
       class="graph-viewer-legends nodrag nopan"
       aria-label="Graph legends"
     >
-      <p class="graph-viewer-legends__title">
-        Legends
-      </p>
+      <p class="graph-viewer-legends__title">Legends</p>
       <div class="graph-viewer-legends__item">
-        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--provider">
+        <span
+          class="graph-viewer-legends__badge graph-viewer-legends__badge--provider"
+        >
           P
         </span>
         <span class="graph-viewer-legends__label">Provider</span>
       </div>
       <div class="graph-viewer-legends__item">
-        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--export">
+        <span
+          class="graph-viewer-legends__badge graph-viewer-legends__badge--export"
+        >
           E
         </span>
         <span class="graph-viewer-legends__label">Exported</span>
       </div>
       <div class="graph-viewer-legends__item">
-        <span class="graph-viewer-legends__badge graph-viewer-legends__badge--controller">
+        <span
+          class="graph-viewer-legends__badge graph-viewer-legends__badge--controller"
+        >
           C
         </span>
         <span class="graph-viewer-legends__label">Controller</span>
@@ -2954,7 +3156,7 @@ useResizeObserver(graphViewerRef, () => {
             shouldShowCircularEdgeWarning(
               edgeProps.source,
               edgeProps.target,
-              edgeProps.data
+              edgeProps.data,
             )
           "
         >
@@ -3001,33 +3203,17 @@ useResizeObserver(graphViewerRef, () => {
           color="var(--mg-node-resizer-color)"
         />
 
-        <Handle
-          id="target-top"
-          type="target"
-          :position="Position.Top"
-        />
-        <Handle
-          id="target-bottom"
-          type="target"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="target-left"
-          type="target"
-          :position="Position.Left"
-        />
-        <Handle
-          id="target-right"
-          type="target"
-          :position="Position.Right"
-        />
+        <Handle id="target-top" type="target" :position="Position.Top" />
+        <Handle id="target-bottom" type="target" :position="Position.Bottom" />
+        <Handle id="target-left" type="target" :position="Position.Left" />
+        <Handle id="target-right" type="target" :position="Position.Right" />
 
         <div
           class="module-subgraph"
           :class="{
             'module-subgraph--root': moduleProps.data.isRoot,
             'module-subgraph--collapsed': moduleProps.data.isCollapsed,
-            'module-subgraph--expandable': moduleProps.data.isExpandable
+            'module-subgraph--expandable': moduleProps.data.isExpandable,
           }"
         >
           <div class="module-subgraph__title">
@@ -3062,61 +3248,26 @@ useResizeObserver(graphViewerRef, () => {
           />
         </div>
 
-        <Handle
-          id="source-top"
-          type="source"
-          :position="Position.Top"
-        />
-        <Handle
-          id="source-bottom"
-          type="source"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="source-left"
-          type="source"
-          :position="Position.Left"
-        />
-        <Handle
-          id="source-right"
-          type="source"
-          :position="Position.Right"
-        />
+        <Handle id="source-top" type="source" :position="Position.Top" />
+        <Handle id="source-bottom" type="source" :position="Position.Bottom" />
+        <Handle id="source-left" type="source" :position="Position.Left" />
+        <Handle id="source-right" type="source" :position="Position.Right" />
       </template>
 
       <template #node-item="itemProps">
-        <Handle
-          id="target-top"
-          type="target"
-          :position="Position.Top"
-        />
-        <Handle
-          id="target-bottom"
-          type="target"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="target-left"
-          type="target"
-          :position="Position.Left"
-        />
-        <Handle
-          id="target-right"
-          type="target"
-          :position="Position.Right"
-        />
+        <Handle id="target-top" type="target" :position="Position.Top" />
+        <Handle id="target-bottom" type="target" :position="Position.Bottom" />
+        <Handle id="target-left" type="target" :position="Position.Left" />
+        <Handle id="target-right" type="target" :position="Position.Right" />
 
         <div
           class="mermaid-node"
           :class="`mermaid-node--${itemProps.data.kind}`"
         >
           <span class="mermaid-node__kind">
-            {{ itemProps.data.kind === 'controller' ? 'C' : 'P' }}
+            {{ itemProps.data.kind === "controller" ? "C" : "P" }}
           </span>
-          <span
-            v-if="itemProps.data.isExported"
-            class="mermaid-node__export"
-          >
+          <span v-if="itemProps.data.isExported" class="mermaid-node__export">
             E
           </span>
           <span class="mermaid-node__label">
@@ -3124,26 +3275,10 @@ useResizeObserver(graphViewerRef, () => {
           </span>
         </div>
 
-        <Handle
-          id="source-top"
-          type="source"
-          :position="Position.Top"
-        />
-        <Handle
-          id="source-bottom"
-          type="source"
-          :position="Position.Bottom"
-        />
-        <Handle
-          id="source-left"
-          type="source"
-          :position="Position.Left"
-        />
-        <Handle
-          id="source-right"
-          type="source"
-          :position="Position.Right"
-        />
+        <Handle id="source-top" type="source" :position="Position.Top" />
+        <Handle id="source-bottom" type="source" :position="Position.Bottom" />
+        <Handle id="source-left" type="source" :position="Position.Left" />
+        <Handle id="source-right" type="source" :position="Position.Right" />
       </template>
 
       <Background />
@@ -3159,9 +3294,7 @@ useResizeObserver(graphViewerRef, () => {
       <template #header>
         <div class="direct-run-drawer__header">
           <div class="min-w-0">
-            <p class="direct-run-drawer__eyebrow">
-              Provider Action
-            </p>
+            <p class="direct-run-drawer__eyebrow">Provider Action</p>
             <p class="direct-run-drawer__title">
               {{ selectedProviderContext?.provider.name }}
             </p>
@@ -3171,12 +3304,6 @@ useResizeObserver(graphViewerRef, () => {
           </div>
 
           <div class="direct-run-drawer__header-actions">
-            <UBadge
-              v-if="selectedProviderStatusBadge"
-              :label="selectedProviderStatusBadge.label"
-              :color="selectedProviderStatusBadge.color"
-              :variant="selectedProviderStatusBadge.variant"
-            />
             <UButton
               icon="i-lucide-x"
               color="neutral"
@@ -3192,7 +3319,10 @@ useResizeObserver(graphViewerRef, () => {
       <template #body>
         <div class="direct-run-drawer__body">
           <p
-            v-if="selectedProviderDirectRunState && !selectedProviderDirectRunState.runnable"
+            v-if="
+              selectedProviderDirectRunState &&
+              !selectedProviderDirectRunState.runnable
+            "
             class="direct-run-drawer__message"
           >
             {{ selectedProviderDirectRunState.reason }}
@@ -3208,7 +3338,7 @@ useResizeObserver(graphViewerRef, () => {
               root: 'gap-4',
               list: 'w-full overflow-x-auto',
               trigger: 'shrink-0',
-              content: 'outline-none'
+              content: 'outline-none',
             }"
           >
             <template #content="{ item }">
@@ -3240,8 +3370,13 @@ useResizeObserver(graphViewerRef, () => {
                     :schema="getDirectRunArgsSchema(item.method)"
                     :readonly="Boolean(selectedProviderPendingMethod)"
                     height="240px"
-                    @update:model-value="value => setDirectRunArgsInput(item.method.name, value)"
-                    @validate="markers => setDirectRunArgsValidation(item.method.name, markers)"
+                    @update:model-value="
+                      (value) => setDirectRunArgsInput(item.method.name, value)
+                    "
+                    @validate="
+                      (markers) =>
+                        setDirectRunArgsValidation(item.method.name, markers)
+                    "
                   />
 
                   <template #fallback>
@@ -3258,16 +3393,40 @@ useResizeObserver(graphViewerRef, () => {
                   {{ getDirectRunArgsError(item.method) }}
                 </p>
 
-                <UButton
-                  type="button"
-                  :label="`Direct Run ${item.method.name}()`"
-                  icon="i-lucide-play"
-                  color="primary"
-                  block
-                  :loading="selectedProviderPendingMethod === item.method.name"
-                  :disabled="isDirectRunActionDisabled(item.method)"
-                  @click="requestDirectRun(item.method)"
-                />
+                <div class="direct-run-drawer__actions">
+                  <p class="direct-run-drawer__action-label">
+                    Direct Run this with
+                  </p>
+                  <div class="direct-run-drawer__action-buttons">
+                    <UButton
+                      type="button"
+                      label="Run"
+                      icon="i-lucide-play"
+                      color="primary"
+                      class="flex-1"
+                      :loading="
+                        selectedProviderPendingMethod === item.method.name &&
+                        selectedProviderPendingMode === 'run'
+                      "
+                      :disabled="isDirectRunActionDisabled(item.method)"
+                      @click="handleDirectRunAction(item.method, 'run')"
+                    />
+                    <UButton
+                      type="button"
+                      label="Run Inspection"
+                      icon="i-lucide-chart-gantt"
+                      color="neutral"
+                      variant="soft"
+                      class="flex-1"
+                      :loading="
+                        selectedProviderPendingMethod === item.method.name &&
+                        selectedProviderPendingMode === 'inspect'
+                      "
+                      :disabled="isDirectRunActionDisabled(item.method)"
+                      @click="handleDirectRunAction(item.method, 'inspect')"
+                    />
+                  </div>
+                </div>
               </div>
             </template>
           </UTabs>
@@ -3306,6 +3465,29 @@ useResizeObserver(graphViewerRef, () => {
         </div>
       </template>
     </UDrawer>
+
+    <UModal
+      v-model:open="showStaticDirectRunDialog"
+      title="Direct Run is unavailable"
+      description="This static graph cannot run provider methods, but you can open saved execution history."
+    >
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton
+            label="Cancel"
+            color="neutral"
+            variant="outline"
+            @click="showStaticDirectRunDialog = false"
+          />
+          <UButton
+            label="Open Execution Sequence"
+            icon="i-lucide-history"
+            color="primary"
+            @click="openExecutionSequenceHistory"
+          />
+        </div>
+      </template>
+    </UModal>
 
     <UDrawer
       v-model:open="showCircularDetailDialog"
@@ -3358,11 +3540,11 @@ useResizeObserver(graphViewerRef, () => {
 </template>
 
 <style>
-@import '@vue-flow/core/dist/style.css';
-@import '@vue-flow/core/dist/theme-default.css';
-@import '@vue-flow/controls/dist/style.css';
-@import '@vue-flow/minimap/dist/style.css';
-@import '@vue-flow/node-resizer/dist/style.css';
+@import "@vue-flow/core/dist/style.css";
+@import "@vue-flow/core/dist/theme-default.css";
+@import "@vue-flow/controls/dist/style.css";
+@import "@vue-flow/minimap/dist/style.css";
+@import "@vue-flow/node-resizer/dist/style.css";
 
 :root {
   --mg-node-bg: #ececff;
@@ -3390,6 +3572,11 @@ useResizeObserver(graphViewerRef, () => {
     var(--ui-text-highlighted)
   );
   --mg-toggle-text: var(--ui-bg);
+  --mg-trace-border: rgba(148, 163, 184, 0.35);
+  --mg-trace-bg: rgba(15, 23, 42, 0.04);
+  --mg-trace-card-bg: rgba(15, 23, 42, 0.03);
+  --mg-trace-error-border: rgba(239, 68, 68, 0.45);
+  --mg-trace-slow-border: rgba(245, 158, 11, 0.45);
 }
 
 .dark {
@@ -3411,6 +3598,11 @@ useResizeObserver(graphViewerRef, () => {
   --mg-root-bg: rgba(248, 113, 113, 0.08);
   --mg-root-title-bg: rgba(248, 113, 113, 0.1);
   --mg-node-resizer-color: #a78bfa;
+  --mg-trace-border: rgba(148, 163, 184, 0.4);
+  --mg-trace-bg: rgba(15, 23, 42, 0.36);
+  --mg-trace-card-bg: rgba(15, 23, 42, 0.48);
+  --mg-trace-error-border: rgba(248, 113, 113, 0.55);
+  --mg-trace-slow-border: rgba(251, 191, 36, 0.55);
 }
 
 .graph-viewer {
@@ -3450,7 +3642,7 @@ useResizeObserver(graphViewerRef, () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  font-family: 'Public Sans', system-ui, sans-serif;
+  font-family: "Public Sans", system-ui, sans-serif;
 }
 
 .graph-viewer-settings__title {
@@ -3489,7 +3681,7 @@ useResizeObserver(graphViewerRef, () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-family: 'Public Sans', system-ui, sans-serif;
+  font-family: "Public Sans", system-ui, sans-serif;
   pointer-events: none;
 }
 
@@ -3555,10 +3747,30 @@ useResizeObserver(graphViewerRef, () => {
   gap: 12px;
 }
 
+.direct-run-drawer__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.direct-run-drawer__action-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-text-muted);
+}
+
+.direct-run-drawer__action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .direct-run-drawer__method-name {
   min-width: 0;
   color: var(--ui-text-highlighted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -3619,7 +3831,7 @@ useResizeObserver(graphViewerRef, () => {
   align-items: center;
   justify-content: center;
   flex: 0 0 18px;
-  font-family: ui-monospace, 'SF Mono', monospace;
+  font-family: ui-monospace, "SF Mono", monospace;
   font-size: 10px;
   font-weight: 700;
 }
@@ -3696,7 +3908,9 @@ useResizeObserver(graphViewerRef, () => {
 .graph-viewer .bright-line-edge .vue-flow__edge-path {
   stroke: var(--ui-primary) !important;
   stroke-width: 3.2px !important;
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ui-primary) 52%, transparent));
+  filter: drop-shadow(
+    0 0 5px color-mix(in srgb, var(--ui-primary) 52%, transparent)
+  );
 }
 
 .graph-viewer .bright-line-edge--dimmed {
@@ -3716,7 +3930,7 @@ useResizeObserver(graphViewerRef, () => {
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  font-family: 'Public Sans', system-ui, sans-serif;
+  font-family: "Public Sans", system-ui, sans-serif;
   box-sizing: border-box;
 }
 
@@ -3806,7 +4020,7 @@ useResizeObserver(graphViewerRef, () => {
   gap: 8px;
   padding: 0 10px;
   font-size: 12px;
-  font-family: ui-monospace, 'SF Mono', monospace;
+  font-family: ui-monospace, "SF Mono", monospace;
   color: var(--mg-node-text);
   box-sizing: border-box;
   white-space: nowrap;
