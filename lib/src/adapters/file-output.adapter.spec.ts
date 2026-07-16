@@ -3,7 +3,12 @@ import { dirname, join } from 'node:path';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { FileOutputAdapter } from './file-output.adapter';
+import { createInspectorEndpointInfo } from '../inspector-endpoint-info';
 import type { GraphOutput } from '../types/graph-output.type';
+
+const { version: packageVersion } = require('../../package.json') as {
+  version: string;
+};
 
 jest.mock('node:fs/promises', () => ({
   mkdir: jest.fn(),
@@ -22,6 +27,9 @@ describe(FileOutputAdapter.name, () => {
   });
 
   beforeEach(async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: packageVersion })),
+    );
     mockedMkdir.mockResolvedValue(undefined);
     mockedWriteFile.mockResolvedValue(undefined);
 
@@ -64,7 +72,7 @@ describe(FileOutputAdapter.name, () => {
     });
     expect(mockedWriteFile).toHaveBeenCalledWith(
       join(dirname(filePath), 'information.json'),
-      JSON.stringify({ for: 'nest-graph-inspector', 'is-static': true }, null, 2),
+      JSON.stringify(await createInspectorEndpointInfo(true), null, 2),
       'utf8',
     );
     expect(mockedWriteFile).toHaveBeenCalledWith(

@@ -166,6 +166,8 @@ const props = withDefaults(
     directRunUrl?: string;
     directRunDisabled?: boolean;
     directRunOn?: string;
+    showControls?: boolean;
+    showMiniMap?: boolean;
   }>(),
   {
     height: "75vh",
@@ -175,6 +177,8 @@ const props = withDefaults(
     directRunUrl: undefined,
     directRunDisabled: false,
     directRunOn: undefined,
+    showControls: true,
+    showMiniMap: true,
     defaultOpenModuleDetail: false,
     fixBightline: false,
     excludeModules: () => [],
@@ -3282,8 +3286,8 @@ useResizeObserver(graphViewerRef, () => {
       </template>
 
       <Background />
-      <Controls v-if="props.interactive" />
-      <MiniMap v-if="props.interactive" />
+      <Controls v-if="props.interactive && props.showControls" />
+      <MiniMap v-if="props.interactive && props.showMiniMap" />
     </VueFlow>
 
     <UDrawer
@@ -3469,7 +3473,7 @@ useResizeObserver(graphViewerRef, () => {
     <UModal
       v-model:open="showStaticDirectRunDialog"
       title="Direct Run is unavailable"
-      description="This static graph cannot run provider methods, but you can open saved execution history."
+      description="This preview uses a static graph, so provider methods cannot run here. Open the saved execution history to explore a recorded run."
     >
       <template #footer>
         <div class="flex w-full justify-end gap-2">

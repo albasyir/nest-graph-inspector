@@ -1,24 +1,13 @@
 [
   {
-    "traceId": "2d8370ed-5a74-4805-9948-4408046b7961",
+    "traceId": "b574db75-934d-4099-be12-ec1ba4a83ad1",
     "entrypoint": {
       "module": "OrderModule",
       "className": "OrderService",
-      "methodName": "getOrdersByUser"
+      "methodName": "confirmOrder"
     },
-    "startedAt": "2026-07-08T14:44:06.877Z",
+    "startedAt": "2026-07-16T16:51:51.963Z",
     "status": "success",
-    "totalDurationMs": 306
-  },
-  {
-    "traceId": "1c9057bd-9c05-4af9-9475-19778ad0cc14",
-    "entrypoint": {
-      "module": "OrderModule",
-      "className": "OrderService",
-      "methodName": "getOrdersByUser"
-    },
-    "startedAt": "2026-07-08T14:44:14.690Z",
-    "status": "error",
-    "totalDurationMs": 305
+    "totalDurationMs": 505
   }
 ]

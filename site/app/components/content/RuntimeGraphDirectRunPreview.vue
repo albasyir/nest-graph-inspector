@@ -46,46 +46,52 @@ const previewData = computed<GraphOutput | null>(() => {
   }
 })
 
-const methods = computed(() => {
-  const provider = previewData.value?.modules.UserModule?.providers[0]
-  return provider?.directRun?.methods.slice(0, 3) || []
-})
-
 const directRunUrl = computed(() => `${base}mock-graph/direct-run`)
+
+function openExecutionSequence() {
+  navigateTo('/view?preview=true&execution-sequence=true')
+}
 </script>
 
 <template>
-  <div class="grid gap-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <div class="min-h-80 border-b border-default lg:border-r lg:border-b-0">
-        <ClientOnly>
-          <GraphViewer
-            v-if="status === 'success' && previewData"
-            :data="previewData"
-            flow-id="runtime-graph-preview-direct-run"
-            height="clamp(18rem, 58vh, 34rem)"
-            :direct-run-disabled="true"
-            :direct-run-url="directRunUrl"
-            :show-circular-dependencies="false"
-            :enable-bright-line="false"
-            default-open-module-detail
-          />
-          <UAlert
-            v-else-if="status === 'error'"
-            icon="i-lucide-triangle-alert"
-            color="error"
-            variant="subtle"
-            title="Could not load preview graph"
-            :description="error?.message || 'The mock graph endpoint is unavailable.'"
-          />
-          <USkeleton
-            v-else
-            class="h-80 w-full rounded-none"
-          />
+  <div class="space-y-3">
+    <div class="overflow-hidden rounded-xl border border-default bg-default shadow-sm">
+      <ClientOnly>
+        <GraphViewer
+          v-if="status === 'success' && previewData"
+          :data="previewData"
+          flow-id="runtime-graph-preview-direct-run"
+          height="clamp(18rem, 58vh, 34rem)"
+          :direct-run-url="directRunUrl"
+          :direct-run-disabled="true"
+          :show-controls="false"
+          :show-mini-map="false"
+          :show-circular-dependencies="false"
+          :enable-bright-line="false"
+          default-open-module-detail
+          @execution-sequence-open="openExecutionSequence"
+        />
+        <UAlert
+          v-else-if="status === 'error'"
+          icon="i-lucide-triangle-alert"
+          color="error"
+          variant="subtle"
+          title="Could not load preview graph"
+          :description="error?.message || 'The mock graph endpoint is unavailable.'"
+        />
+        <USkeleton
+          v-else
+          class="h-80 w-full rounded-none"
+        />
 
-          <template #fallback>
-            <USkeleton class="h-80 w-full rounded-none" />
-          </template>
-        </ClientOnly>
-      </div>
+        <template #fallback>
+          <USkeleton class="h-80 w-full rounded-none" />
+        </template>
+      </ClientOnly>
     </div>
+
+    <p class="text-sm text-muted">
+      Select the <span class="font-medium text-highlighted">UserService</span> provider to see the static graph Direct Run dialog.
+    </p>
+  </div>
 </template>

@@ -59,7 +59,7 @@ Related reading:
 - `package-lock.json` — appears to be a secondary lockfile; its presence alongside `pnpm-lock.yaml` is unusual (see Open questions).
 - `.npmrc` — `shamefully-hoist=true`; required because some packages assume a flat `node_modules`.
 - `.gitignore`, `.gitattributes` — repo-wide VCS hygiene.
-- `README.md` — project overview, quick start, and links. The `release.ts` script copies this into the npm package.
+- `README.md` — project overview, quick start, and links.
 - `SECURITY.md` — vulnerability reporting policy.
 - `LICENSE` — MIT.
 - `AGENTS.md` — AI-agent delegation rules for the whole repo.
@@ -99,10 +99,10 @@ Related reading:
 
 ### `.github/workflows/deploy-site.yml`
 
-The only CI pipeline. Triggers on push to `main` or manual dispatch:
-1. Runs `pnpm install --frozen-lockfile` at the repo root.
-2. Runs `nuxt generate` inside `site/` with `NITRO_PRESET=github-pages`.
-3. Uploads `site/.output/public` and deploys to GitHub Pages.
+The release pipeline. It triggers when a GitHub release is published:
+1. Checks out the release tag, installs dependencies, derives the package version from that tag (removing a leading `v`), builds `nest-graph-inspector`, and publishes it to npm.
+2. After publishing succeeds, checks out the same release tag, generates the Nuxt site with the GitHub Pages preset, and uploads the static site artifact.
+3. Deploys that artifact to GitHub Pages.
 
 **Note:** There is no CI pipeline that runs library unit tests (`pnpm test`) or linting. Those must be run locally before merging.
 
@@ -117,7 +117,7 @@ Watches `npm` packages at `/` (root) on a weekly schedule. Does not separately w
 Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 **What does NOT belong here:**
-- Library builds or npm publish steps (those are manual via `demo/scripts/release.ts`).
+- Manual library publishing scripts; the release workflow builds and publishes the package.
 
 ---
 
@@ -359,12 +359,11 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 ### `demo/scripts/`
 
-**Purpose:** Development and release tooling. These are run manually by the maintainer; they are not part of CI.
+**Purpose:** Demo development tooling. These scripts are run manually by the maintainer; they are not part of CI.
 
 | File | What it does |
 |---|---|
 | `mock-sync.ts` | Copies `demo/tmp/graph/**` to `site/public/mock-graph/`; run after `pnpm dev` to refresh the "Load Example" fixture |
-| `release.ts` | Builds the library, copies `README.md` + `package.json` into `dist/`, stamps the version, and runs `npm publish` |
 
 **Running scripts:** `mock-sync.ts` uses ts-node-style execution from `demo/`.
 
@@ -388,7 +387,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.ts`, `.js.map`).
 
-**Never edit these files.** They are regenerated on every build. The `release.ts` script publishes from here.
+**Never edit these files.** They are regenerated on every build and included when the release workflow publishes the package.
 
 ---
 
@@ -609,7 +608,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | File | Role |
 |---|---|
-| `information.json` | Endpoint discovery; `{ "for": "nest-graph-inspector", "is-static": true }` |
+| `information.json` | Endpoint discovery; includes `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static` (`true` for static files; `false` for HTTP output). `latestVersion` is the npm registry's latest package version or `null` when unavailable or invalid; `isLatestVersion` exactly compares it with `version`. |
 | `output.json` | Full `GraphOutput` v3 JSON from the demo app |
 | `output.md` | Markdown representation of the same graph |
 | `direct-run/history/index.json` | Index of mock trace history entries |
@@ -619,7 +618,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 **Never edit these files by hand.** They must reflect actual library output. Always regenerate from the demo app.
 
-**Important:** `information.json` uses `"is-static": true`, which disables Direct Run in the viewer for the example (correct — the static files can't execute real providers).
+`information.json` includes `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static`: `true` for static files and `false` for HTTP output. `latestVersion` is the npm-registry version or `null` if the lookup is unavailable or invalid; `isLatestVersion` is an exact comparison with `version`.
 
 ---
 
@@ -687,8 +686,8 @@ site/app/stores/graph-inspector.ts  (via "Load Example" URL)
 lib/src/
     ↑ compiled by nest build into
 lib/dist/
-    ↑ published to npm by
-demo/scripts/release.ts
+    ↑ included in the package published by
+.github/workflows/deploy-site.yml (on GitHub release publication)
 
 site/content/
     ↑ queried by

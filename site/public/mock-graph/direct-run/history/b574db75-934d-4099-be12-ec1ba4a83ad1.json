@@ -1,0 +1,161 @@
+{
+  "traceId": "b574db75-934d-4099-be12-ec1ba4a83ad1",
+  "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+  "entrypoint": {
+    "module": "OrderModule",
+    "className": "OrderService",
+    "methodName": "confirmOrder"
+  },
+  "startedAt": "2026-07-16T16:51:51.963Z",
+  "endedAt": "2026-07-16T16:51:52.468Z",
+  "totalDurationMs": 505,
+  "status": "success",
+  "totalSpans": 6,
+  "spans": [
+    {
+      "spanId": "cb5f5900-a194-431f-99ec-b613ac56551e",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 0,
+      "name": "OrderService.confirmOrder",
+      "moduleName": "OrderModule",
+      "className": "OrderService",
+      "methodName": "confirmOrder",
+      "startedAt": "2026-07-16T16:51:51.963Z",
+      "endedAt": "2026-07-16T16:51:52.468Z",
+      "durationMs": 505,
+      "status": "success",
+      "args": [
+        1
+      ],
+      "result": {
+        "id": 1,
+        "userId": 1,
+        "productId": 1,
+        "quantity": 2,
+        "status": "confirmed"
+      }
+    },
+    {
+      "spanId": "6df16fad-acca-4212-88a1-80935b329550",
+      "parentSpanId": "df5b7000-3c26-4de9-b969-2eb2a3c6a52f",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 1,
+      "name": "ProductService.getAllProducts",
+      "moduleName": "ProductModule",
+      "className": "ProductService",
+      "methodName": "getAllProducts",
+      "startedAt": "2026-07-16T16:51:51.964Z",
+      "endedAt": "2026-07-16T16:51:52.366Z",
+      "durationMs": 402,
+      "status": "success",
+      "args": [],
+      "result": [],
+      "metadata": {
+        "async": true,
+        "awaited": false
+      }
+    },
+    {
+      "spanId": "df5b7000-3c26-4de9-b969-2eb2a3c6a52f",
+      "parentSpanId": "cb5f5900-a194-431f-99ec-b613ac56551e",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 2,
+      "name": "OrderService.getAllOrders",
+      "moduleName": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getAllOrders",
+      "startedAt": "2026-07-16T16:51:51.964Z",
+      "endedAt": "2026-07-16T16:51:52.468Z",
+      "durationMs": 504,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "confirmed"
+        }
+      ],
+      "metadata": {
+        "async": true,
+        "awaited": false
+      }
+    },
+    {
+      "spanId": "9c5039cb-cd63-40c8-9d55-63c545a5700c",
+      "parentSpanId": "cb5f5900-a194-431f-99ec-b613ac56551e",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 3,
+      "name": "OrderRepository.updateStatus",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "updateStatus",
+      "startedAt": "2026-07-16T16:51:51.965Z",
+      "endedAt": "2026-07-16T16:51:52.066Z",
+      "durationMs": 101,
+      "status": "success",
+      "args": [
+        1,
+        "confirmed"
+      ],
+      "result": {
+        "id": 1,
+        "userId": 1,
+        "productId": 1,
+        "quantity": 2,
+        "status": "confirmed"
+      },
+      "metadata": {
+        "async": true
+      }
+    },
+    {
+      "spanId": "3bcb9bab-a946-4a7d-9f2c-0f04f55d7e29",
+      "parentSpanId": "6df16fad-acca-4212-88a1-80935b329550",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 4,
+      "name": "ProductRepository.findAll",
+      "moduleName": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-16T16:51:52.165Z",
+      "endedAt": "2026-07-16T16:51:52.366Z",
+      "durationMs": 201,
+      "status": "success",
+      "args": [],
+      "result": [],
+      "metadata": {
+        "async": true
+      }
+    },
+    {
+      "spanId": "0f9af10c-279e-436f-909d-cb61dd29867f",
+      "parentSpanId": "df5b7000-3c26-4de9-b969-2eb2a3c6a52f",
+      "runId": "14c98a78-cf07-480c-b20c-8d4a80b47c05",
+      "order": 5,
+      "name": "OrderRepository.findAll",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-16T16:51:52.367Z",
+      "endedAt": "2026-07-16T16:51:52.468Z",
+      "durationMs": 101,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "confirmed"
+        }
+      ],
+      "metadata": {
+        "async": true
+      }
+    }
+  ]
+}

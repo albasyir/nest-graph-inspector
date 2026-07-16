@@ -5,7 +5,12 @@ import { HttpOutputAdapter } from './http-output.adapter';
 import type { GraphOutput } from '../types/graph-output.type';
 import { FileOutputAdapter } from './file-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
+import { createInspectorEndpointInfo } from '../inspector-endpoint-info';
 import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
+
+const { version: packageVersion } = require('../../package.json') as {
+  version: string;
+};
 
 type HttpResponse = {
   statusCode?: number;
@@ -23,6 +28,9 @@ describe(HttpOutputAdapter.name, () => {
   });
 
   beforeEach(async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: packageVersion })),
+    );
     moduleRef = await Test.createTestingModule({
       providers: [FileOutputAdapter, HttpServeAdapter, HttpOutputAdapter],
     }).compile();
@@ -97,10 +105,9 @@ describe(HttpOutputAdapter.name, () => {
     expect(informationResponse.headers['content-type']).toBe(
       'application/json; charset=utf-8',
     );
-    expect(JSON.parse(informationResponse.body)).toEqual({
-      for: 'nest-graph-inspector',
-      'is-static': false,
-    });
+    expect(JSON.parse(informationResponse.body)).toEqual(
+      await createInspectorEndpointInfo(false),
+    );
 
     const jsonResponse = await get(jsonOutputUrl);
     expect(jsonResponse.statusCode).toBe(200);

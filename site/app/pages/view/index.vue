@@ -24,13 +24,24 @@ const isNavigating = ref(false)
 const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+let activePollId = 0
 
-function loadExample() {
+async function loadExample() {
   graphStore.showCircularDependencies = true
   graphStore.openModuleDetail = true
   let base = config.app.baseURL || '/'
   if (!base.endsWith('/')) base += '/'
-  startPolling(`${window.location.origin}${base}mock-graph`, true)
+
+  const exampleUrl = `${window.location.origin}${base}mock-graph`
+  const encodedExampleUrl = encodeURIComponent(btoa(exampleUrl))
+  const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
+
+  isNavigating.value = true
+  await navigateTo(
+    shouldOpenExecutionSequence
+      ? `/view/${encodedExampleUrl}/execution-sequence`
+      : `/view/${encodedExampleUrl}`
+  )
 }
 
 function clearPolling() {
@@ -40,7 +51,7 @@ function clearPolling() {
   }
 }
 
-async function tryLoadGraph() {
+async function tryLoadGraph(pollId: number) {
   if (isRequestRunning.value || isNavigating.value) {
     return
   }
@@ -50,6 +61,10 @@ async function tryLoadGraph() {
 
   try {
     const isLoaded = await graphStore.setInputUrl(activeOrigin.value)
+    if (pollId !== activePollId) {
+      return
+    }
+
     if (shouldShowUpdateModal.value) {
       clearPolling()
       return
@@ -76,7 +91,9 @@ async function tryLoadGraph() {
       attempts: attemptCount.value
     })
   } catch {
-    clearPolling()
+    if (pollId === activePollId) {
+      clearPolling()
+    }
   } finally {
     isRequestRunning.value = false
   }
@@ -95,9 +112,10 @@ function startPolling(origin: string, navigateOnLoad = false) {
   shouldNavigateOnLoad.value = navigateOnLoad
   clearPolling()
 
-  void tryLoadGraph()
+  const pollId = ++activePollId
+  void tryLoadGraph(pollId)
   pollingTimer.value = setInterval(() => {
-    void tryLoadGraph()
+    void tryLoadGraph(pollId)
   }, RETRY_INTERVAL_MS)
 }
 
@@ -112,6 +130,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  activePollId += 1
   clearPolling()
 })
 
@@ -157,6 +176,7 @@ watch(shouldShowUpdateModal, (visible) => {
             <UButton
               icon="i-lucide-circle-help"
               label="Learn Why"
+              to="/getting-started"
               size="lg"
               color="neutral"
               variant="subtle"
@@ -167,6 +187,7 @@ watch(shouldShowUpdateModal, (visible) => {
             <UButton
               icon="i-lucide-book-open"
               label="Install It"
+              to="/getting-started/installation"
               size="lg"
               color="neutral"
               variant="subtle"

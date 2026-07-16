@@ -1,9 +1,13 @@
 import type { GraphOutput } from 'nest-graph-inspector'
 import { defineStore } from 'pinia'
+import { requiresVersionAcknowledgement } from '~/utils/graph-inspector-version-gate'
 
 type InspectorEndpointInfo = {
   for?: string
   'is-static'?: boolean
+  isLatestVersion?: unknown
+  latestVersion?: string | null
+  version?: unknown
 }
 
 type LegacyGraphOutput = Partial<GraphOutput>
@@ -88,9 +92,12 @@ function isSupportedGraphOutputVersion(value: unknown): boolean {
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const encodedUrl = ref('')
   const shouldShowUpdateModal = ref(false)
+  const shouldShowVersionAcknowledgement = ref(false)
+  const acknowledgedVersionEndpointUrl = ref('')
   const dependencyTraceEnabled = ref(false)
   const showCircularDependencies = ref(true)
   const openModuleDetail = ref(false)
+  let resolveVersionAcknowledgement: ((acknowledged: boolean) => void) | undefined
 
   const decodedUrl = computed(() => {
     if (!encodedUrl.value) {
@@ -166,6 +173,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
   const errorMessage = computed(() => error.value?.message || '')
   const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
+  const endpointVersion = computed(() => endpointInfo.value?.version)
+  const latestVersion = computed(() => {
+    const version = endpointInfo.value?.latestVersion
+    return typeof version === 'string' && version.trim() ? version : null
+  })
 
   function toggleDependencyTrace() {
     dependencyTraceEnabled.value = !dependencyTraceEnabled.value
@@ -177,6 +189,34 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     clearJson()
     clearMarkdown()
     shouldShowUpdateModal.value = false
+    shouldShowVersionAcknowledgement.value = false
+    acknowledgedVersionEndpointUrl.value = ''
+    resolveVersionAcknowledgement?.(false)
+    resolveVersionAcknowledgement = undefined
+  }
+
+  async function acknowledgeEndpointVersion() {
+    acknowledgedVersionEndpointUrl.value = decodedUrl.value
+    shouldShowVersionAcknowledgement.value = false
+    resolveVersionAcknowledgement?.(true)
+    resolveVersionAcknowledgement = undefined
+  }
+
+  async function ensureEndpointVersionAcknowledged() {
+    if (
+      !requiresVersionAcknowledgement(
+        endpointInfo.value?.isLatestVersion,
+        endpointInfo.value?.['is-static'],
+      )
+      || acknowledgedVersionEndpointUrl.value === decodedUrl.value
+    ) {
+      return true
+    }
+
+    shouldShowVersionAcknowledgement.value = true
+    return await new Promise<boolean>((resolve) => {
+      resolveVersionAcknowledgement = resolve
+    })
   }
 
   async function validateEndpoint() {
@@ -240,6 +280,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       return false
     }
 
+    if (!await ensureEndpointVersionAcknowledged()) {
+      return false
+    }
+
     return await fetchJson()
   }
 
@@ -251,6 +295,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   async function fetchGraph() {
     const isValidEndpoint = await validateEndpoint()
     if (!isValidEndpoint) {
+      return false
+    }
+
+    if (!await ensureEndpointVersionAcknowledged()) {
       return false
     }
 
@@ -272,15 +320,19 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     graphData,
     graphMarkdown,
     graphIsStatic,
+    endpointVersion,
+    latestVersion,
     status,
     error,
     errorMessage,
     shouldShowUpdateModal,
+    shouldShowVersionAcknowledgement,
     dependencyTraceEnabled,
     showCircularDependencies,
     openModuleDetail,
     toggleDependencyTrace,
     validateEndpoint,
+    acknowledgeEndpointVersion,
     setEncodedUrl,
     setInputUrl,
     fetchJson,

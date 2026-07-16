@@ -272,26 +272,6 @@ Turn your runtime graph into an action surface. Select `Service` inside `Module`
   :runtime-graph-direct-run-preview
 ::
 
-::u-page-section{class="dark:bg-neutral-950"}
-#title
-Next Feature List
-
-#description
-Better than now, make our service more stable
-
-#features
-  :::u-page-feature
-  ---
-  icon: i-lucide-git-branch-plus
-  ---
-  #title
-  Process Sequence :badge[Coming Soon]{.ml-2}
-
-  #description
-  Coming soon: generate sequence diagrams from entry point to completion.
-  :::
-::
-
 ::u-page-section
 ---
 class: dark:bg-gradient-to-b from-neutral-950 to-neutral-900

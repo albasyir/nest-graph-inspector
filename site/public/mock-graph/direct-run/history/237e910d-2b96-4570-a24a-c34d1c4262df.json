@@ -1,0 +1,104 @@
+{
+  "traceId": "237e910d-2b96-4570-a24a-c34d1c4262df",
+  "runId": "881c22d8-4657-4c43-9e60-032e4ab9f02e",
+  "entrypoint": {
+    "module": "OrderModule",
+    "className": "OrderService",
+    "methodName": "getAllOrders"
+  },
+  "startedAt": "2026-07-16T16:16:28.924Z",
+  "endedAt": "2026-07-16T16:16:29.430Z",
+  "totalDurationMs": 506,
+  "status": "success",
+  "totalSpans": 4,
+  "spans": [
+    {
+      "spanId": "9ceac300-1880-4897-946f-0834409cfd37",
+      "runId": "881c22d8-4657-4c43-9e60-032e4ab9f02e",
+      "order": 0,
+      "name": "OrderService.getAllOrders",
+      "moduleName": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getAllOrders",
+      "startedAt": "2026-07-16T16:16:28.924Z",
+      "endedAt": "2026-07-16T16:16:29.430Z",
+      "durationMs": 506,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "spanId": "62ec00d0-16a0-42de-ad1a-7d290a3f0643",
+      "parentSpanId": "9ceac300-1880-4897-946f-0834409cfd37",
+      "runId": "881c22d8-4657-4c43-9e60-032e4ab9f02e",
+      "order": 1,
+      "name": "ProductService.getAllProducts",
+      "moduleName": "ProductModule",
+      "className": "ProductService",
+      "methodName": "getAllProducts",
+      "startedAt": "2026-07-16T16:16:28.925Z",
+      "endedAt": "2026-07-16T16:16:29.328Z",
+      "durationMs": 403,
+      "status": "success",
+      "args": [],
+      "result": [],
+      "metadata": {
+        "async": true
+      }
+    },
+    {
+      "spanId": "f24480fb-4093-476d-a204-2b7c5116f0a4",
+      "parentSpanId": "62ec00d0-16a0-42de-ad1a-7d290a3f0643",
+      "runId": "881c22d8-4657-4c43-9e60-032e4ab9f02e",
+      "order": 2,
+      "name": "ProductRepository.findAll",
+      "moduleName": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-16T16:16:29.126Z",
+      "endedAt": "2026-07-16T16:16:29.328Z",
+      "durationMs": 202,
+      "status": "success",
+      "args": [],
+      "result": [],
+      "metadata": {
+        "async": true
+      }
+    },
+    {
+      "spanId": "63619874-5e9d-4832-aea6-d17d26a6a824",
+      "parentSpanId": "9ceac300-1880-4897-946f-0834409cfd37",
+      "runId": "881c22d8-4657-4c43-9e60-032e4ab9f02e",
+      "order": 3,
+      "name": "OrderRepository.findAll",
+      "moduleName": "OrderModule",
+      "className": "OrderRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-16T16:16:29.328Z",
+      "endedAt": "2026-07-16T16:16:29.429Z",
+      "durationMs": 101,
+      "status": "success",
+      "args": [],
+      "result": [
+        {
+          "id": 1,
+          "userId": 1,
+          "productId": 1,
+          "quantity": 2,
+          "status": "pending"
+        }
+      ],
+      "metadata": {
+        "async": true
+      }
+    }
+  ]
+}

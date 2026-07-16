@@ -1,4 +1,7 @@
 {
   "for": "nest-graph-inspector",
-  "is-static": true
+  "is-static": true,
+  "version": "0.0.1-development-only",
+  "latestVersion": "0.6.0",
+  "isLatestVersion": false
 }

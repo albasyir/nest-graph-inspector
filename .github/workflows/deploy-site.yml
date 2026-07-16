@@ -31,17 +31,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify package version
+      - name: Set package version from release tag
         working-directory: lib
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: node -e 'const { version } = require("./package.json"); if (`v${version}` !== process.env.RELEASE_TAG) throw new Error(`Release tag ${process.env.RELEASE_TAG} must equal v${version}`);'
+        run: npm version "${RELEASE_TAG#v}" --no-git-tag-version --ignore-scripts
 
       - name: Build package
         run: pnpm --filter nest-graph-inspector run build
 
       - name: Publish package
         working-directory: lib
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
   build:

@@ -1,6 +1,6 @@
 {
   "name": "nest-graph-inspector",
-  "version": "0.3.0",
+  "version": "0.0.1-development-only",
   "description": "NestJS module graph inspector for discovery and dependency analysis",
   "license": "MIT",
   "main": "./dist/index.js",

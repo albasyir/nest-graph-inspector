@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createInspectorEndpointInfo } from '../inspector-endpoint-info';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
@@ -22,11 +23,6 @@ interface HttpOutputInternalOptions {
 
 @Injectable()
 export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
-  private static readonly inspectorEndpointInfo = {
-    for: 'nest-graph-inspector',
-    'is-static': false,
-  };
-
   static readonly defaultConfig: Readonly<
     Required<Pick<HttpOutputConfig, 'host' | 'port'>>
   > = {
@@ -49,6 +45,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
     const jsonOutputPath = this.joinPath(path, 'output.json');
     const jsonSchemaOutputPath = this.joinPath(path, 'output.schema.json');
     const markdownOutputPath = this.joinPath(path, 'output.md');
+    const inspectorEndpointInfo = await createInspectorEndpointInfo(false);
 
     const isReuseHttpAdapter = !!config.httpAdapter;
     const httpAdapter = config.httpAdapter ?? this.httpServeAdapter;
@@ -62,7 +59,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
       [
         httpAdapter.get(
           informationOutputPath,
-          () => HttpOutputAdapter.inspectorEndpointInfo,
+          () => inspectorEndpointInfo,
           {
             responseHeaders: {
               'content-type': 'application/json; charset=utf-8',
