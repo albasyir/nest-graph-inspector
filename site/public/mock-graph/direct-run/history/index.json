@@ -1,12 +1,89 @@
 [
   {
-    "traceId": "b574db75-934d-4099-be12-ec1ba4a83ad1",
+    "traceId": "37f3090e-165a-4882-b818-09b23ce4c264",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll"
+    },
+    "startedAt": "2026-07-27T14:35:54.885Z",
+    "status": "success",
+    "totalDurationMs": 209
+  },
+  {
+    "traceId": "fffc5a87-ec68-4d62-b6f8-22d403f2fa5f",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll"
+    },
+    "startedAt": "2026-07-27T14:36:00.426Z",
+    "status": "success",
+    "totalDurationMs": 201
+  },
+  {
+    "traceId": "0780a1c8-ed32-4279-abfb-04dfe7388aaf",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll"
+    },
+    "startedAt": "2026-07-27T14:36:02.285Z",
+    "status": "success",
+    "totalDurationMs": 202
+  },
+  {
+    "traceId": "203194b8-bfa6-4a33-a213-c64c5230a71c",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll"
+    },
+    "startedAt": "2026-07-27T14:36:03.339Z",
+    "status": "success",
+    "totalDurationMs": 201
+  },
+  {
+    "traceId": "c0e34ce2-9517-4a73-89cc-a3f92e9f5fc3",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll"
+    },
+    "startedAt": "2026-07-27T14:36:04.388Z",
+    "status": "success",
+    "totalDurationMs": 201
+  },
+  {
+    "traceId": "80410ade-db3d-4455-ba08-8ab10b5d2109",
+    "entrypoint": {
+      "module": "ProductModule",
+      "className": "ProductService",
+      "methodName": "getAllProducts"
+    },
+    "startedAt": "2026-07-27T14:36:13.203Z",
+    "status": "success",
+    "totalDurationMs": 404
+  },
+  {
+    "traceId": "f2384652-a2f0-4957-a3b4-a54b82305cc7",
+    "entrypoint": {
+      "module": "OrderModule",
+      "className": "OrderService",
+      "methodName": "getOrdersByUser"
+    },
+    "startedAt": "2026-07-27T14:58:27.044Z",
+    "status": "success",
+    "totalDurationMs": 305
+  },
+  {
+    "traceId": "2beda91a-fa32-4a70-acb9-7e760597ebc9",
     "entrypoint": {
       "module": "OrderModule",
       "className": "OrderService",
       "methodName": "confirmOrder"
     },
-    "startedAt": "2026-07-16T16:51:51.963Z",
+    "startedAt": "2026-07-27T14:58:39.166Z",
     "status": "success",
     "totalDurationMs": 505
   }

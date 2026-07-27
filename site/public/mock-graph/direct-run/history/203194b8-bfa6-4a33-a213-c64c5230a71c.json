@@ -1,0 +1,31 @@
+{
+  "traceId": "203194b8-bfa6-4a33-a213-c64c5230a71c",
+  "runId": "b5b04d5d-f80d-4b9d-bc6a-13a50900ce24",
+  "entrypoint": {
+    "module": "ProductModule",
+    "className": "ProductRepository",
+    "methodName": "findAll"
+  },
+  "startedAt": "2026-07-27T14:36:03.339Z",
+  "endedAt": "2026-07-27T14:36:03.540Z",
+  "totalDurationMs": 201,
+  "status": "success",
+  "totalSpans": 1,
+  "spans": [
+    {
+      "spanId": "a284620d-2e29-4398-a59c-28fe2414c6f9",
+      "runId": "b5b04d5d-f80d-4b9d-bc6a-13a50900ce24",
+      "order": 0,
+      "name": "ProductRepository.findAll",
+      "moduleName": "ProductModule",
+      "className": "ProductRepository",
+      "methodName": "findAll",
+      "startedAt": "2026-07-27T14:36:03.339Z",
+      "endedAt": "2026-07-27T14:36:03.540Z",
+      "durationMs": 201,
+      "status": "success",
+      "args": [],
+      "result": []
+    }
+  ]
+}
