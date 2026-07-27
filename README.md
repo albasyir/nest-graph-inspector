@@ -22,20 +22,20 @@ This is a static preview. [**Try the interactive viewer with AI Chat →**](http
 
 Shipping speed depends on confidence. Teams need runtime visibility to trace impact, find architecture issues early, and ship safer changes.
 
-- **Ship Changes Faster** — trace impact in minutes, not meetings, before touching critical providers or modules
-- **Cut Regression Risk** — catch circular and high-coupling patterns before they become release blockers
-- **Make PR Reviews Concrete** — replace assumptions with runtime-backed module and provider-level evidence
-- **Onboard With Real Context** — give new engineers a live map of how the system actually connects and behaves
-- **Find Architecture Issues Early** — use Issue Finder to surface structural problems before they grow into production incidents
+- **Ship Changes Faster** trace impact in minutes, not meetings, before touching critical providers or modules
+- **Cut Regression Risk** catch circular and high-coupling patterns before they become release blockers
+- **Make PR Reviews Concrete** replace assumptions with runtime-backed module and provider-level evidence
+- **Onboard With Real Context** give new engineers a live map of how the system actually connects and behaves
+- **Find Architecture Issues Early** use Issue Finder to surface structural problems before they grow into production incidents
 
 ## Feature List
 
-- **Dependency Graph** — visualize modules, providers, controllers, imports, and dependency edges from the running app
-- **Circular Detection** — surface circular relationships early so teams can resolve risky loops before release
-- **Relation Focus** — coming soon: focus provider/module pairs to see how they relate and where dependencies connect
-- **Context-Aware AI Assistant** — ask graph and trace questions in plain language with context-aware answers, always free in the viewer
-- **Process Sequence** — coming soon: generate sequence diagrams from an entry point to completion flow
-- **Direct Run** — coming soon: execute runtime-resolved services and functions directly from graph context
+- **Dependency Graph** visualize modules, providers, controllers, imports, and dependency edges from the running app
+- **Circular Detection** surface circular relationships early so teams can resolve risky loops before release
+- **Relation Focus** focus provider/module pairs to see how they relate and where dependencies connect
+- **Context-Aware AI Assistant** ask graph and trace questions in plain language with context-aware answers, always free in the viewer
+- **Process Sequence** generate sequence diagrams from an entry point to completion flow
+- **Direct Run** execute runtime-resolved services and functions directly from graph context
 
 ## Quick Start
 
