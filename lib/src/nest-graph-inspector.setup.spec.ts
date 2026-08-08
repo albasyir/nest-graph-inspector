@@ -1,26 +1,28 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { Logger } from '@nestjs/common';
-import { ModulesContainer } from '@nestjs/core';
-import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
-import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
-import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
-import { FileOutputAdapter } from './adapters/file-output.adapter';
-import { HttpOutputAdapter } from './adapters/http-output.adapter';
-import { JsonOutputAdapter } from './adapters/json-output.adapter';
-import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
-import { RuntimeTraceRecorder } from './runtime-trace.recorder';
-import type { GraphOutput } from './types/graph-output.type';
-import type { ModuleMap } from './types/module-map.type';
+import { Test, TestingModule } from "@nestjs/testing";
+import { Logger } from "@nestjs/common";
+import { ModulesContainer } from "@nestjs/core";
+import { Node, Project, Type as TsMorphType } from "ts-morph";
+import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
+import { NestGraphInspectorSetup } from "./nest-graph-inspector.setup";
+import { NestGraphInspectorModuleOptions } from "./nest-graph-inspector.type";
+import { FileOutputAdapter } from "./adapters/file-output.adapter";
+import { HttpOutputAdapter } from "./adapters/http-output.adapter";
+import { JsonOutputAdapter } from "./adapters/json-output.adapter";
+import { ViewerOutputAdapter } from "./adapters/viewer-output.adapter";
+import { RuntimeTraceRecorder } from "./runtime-trace.recorder";
+import type { GraphOutput } from "./types/graph-output.type";
+import type { ModuleMap } from "./types/module-map.type";
 
 type SetupWithPrivateMethods = Omit<
   NestGraphInspectorSetup,
-  'enrichModuleMap' | 'getDirectRunMethods'
+  "enrichModuleMap" | "getDirectRunMethods"
 > & {
   enrichModuleMap(moduleMap: ModuleMap): GraphOutput;
   getDirectRunMethods(instance: unknown): Array<{
     name: string;
     parameterTypes: string;
   }>;
+  typeToTypeScriptCode(type: TsMorphType, enclosingNode: Node): string;
 };
 
 /**
@@ -40,7 +42,7 @@ describe(NestGraphInspectorSetup.name, () => {
   let service: NestGraphInspectorSetup;
   let options: NestGraphInspectorModuleOptions & {
     rootModule: typeof TestRootModule;
-    outputs: NonNullable<NestGraphInspectorModuleOptions['outputs']>;
+    outputs: NonNullable<NestGraphInspectorModuleOptions["outputs"]>;
   };
   let appModuleRef: {
     metatype: typeof TestRootModule;
@@ -58,26 +60,26 @@ describe(NestGraphInspectorSetup.name, () => {
   beforeEach(async () => {
     options = {
       rootModule: TestRootModule,
-      outputs: [{ type: 'json', path: 'graph.json' }],
+      outputs: [{ type: "json", path: "graph.json" }],
     };
     fileOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
-        message: 'Graph inspector markdown output installed',
+        message: "Graph inspector markdown output installed",
       }),
     };
     httpOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
-        message: 'Graph inspector HTTP output installed',
+        message: "Graph inspector HTTP output installed",
       }),
     };
     jsonOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
-        message: 'Graph inspector JSON output installed',
+        message: "Graph inspector JSON output installed",
       }),
     };
     viewerOutputAdapter = {
       execute: jest.fn().mockResolvedValue({
-        message: 'Graph inspector viewer output installed',
+        message: "Graph inspector viewer output installed",
       }),
     };
     runtimeTraceRecorder = new RuntimeTraceRecorder();
@@ -133,18 +135,18 @@ describe(NestGraphInspectorSetup.name, () => {
     jest.restoreAllMocks();
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(service).toBeDefined();
   });
 
-  it('should log the message returned by the output adapter', async () => {
-    const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation();
+  it("should log the message returned by the output adapter", async () => {
+    const debugSpy = jest.spyOn(Logger.prototype, "debug").mockImplementation();
 
     await service.onModuleInit();
 
     expect(jsonOutputAdapter.execute).toHaveBeenCalledWith(
       {
-        version: '3',
+        version: "3",
         root: TestRootModule.name,
         modules: {
           [TestRootModule.name]: {
@@ -160,14 +162,14 @@ describe(NestGraphInspectorSetup.name, () => {
           controllers: [],
         },
       },
-      { type: 'json', path: 'graph.json' },
+      { type: "json", path: "graph.json" },
     );
     expect(debugSpy).toHaveBeenCalledWith(
-      'Graph inspector JSON output installed',
+      "Graph inspector JSON output installed",
     );
   });
 
-  it('should wait until every configured output adapter has completed', async () => {
+  it("should wait until every configured output adapter has completed", async () => {
     let resolveJsonOutput: (value: { message: string }) => void;
     let resolveMarkdownOutput: (value: { message: string }) => void;
     const jsonOutputCompleted = new Promise<{ message: string }>((resolve) => {
@@ -181,8 +183,8 @@ describe(NestGraphInspectorSetup.name, () => {
     let onModuleInitCompleted = false;
 
     options.outputs = [
-      { type: 'json', path: 'graph.json' },
-      { type: 'markdown', path: 'graph.md' },
+      { type: "json", path: "graph.json" },
+      { type: "markdown", path: "graph.md" },
     ];
     jsonOutputAdapter.execute.mockReturnValue(jsonOutputCompleted);
     fileOutputAdapter.execute.mockReturnValue(markdownOutputCompleted);
@@ -196,53 +198,53 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(fileOutputAdapter.execute).toHaveBeenCalled();
     expect(onModuleInitCompleted).toBe(false);
 
-    resolveJsonOutput!({ message: 'JSON done' });
+    resolveJsonOutput!({ message: "JSON done" });
     await Promise.resolve();
 
     expect(onModuleInitCompleted).toBe(false);
 
-    resolveMarkdownOutput!({ message: 'Markdown done' });
+    resolveMarkdownOutput!({ message: "Markdown done" });
     await onModuleInitPromise;
 
     expect(onModuleInitCompleted).toBe(true);
   });
 
-  it('should enrich graph output with module and provider cycles', () => {
+  it("should enrich graph output with module and provider cycles", () => {
     const graphOutput = (
       service as unknown as SetupWithPrivateMethods
     ).enrichModuleMap({
-      version: '2',
-      root: 'UserModule',
+      version: "2",
+      root: "UserModule",
       modules: {
         UserModule: {
-          imports: ['MobileModule'],
+          imports: ["MobileModule"],
           exports: [],
           providers: [
             {
-              name: 'UserService',
-              dependencies: ['MobileModule:MobileService'],
+              name: "UserService",
+              dependencies: ["MobileModule:MobileService"],
             },
           ],
           controllers: [],
         },
         MobileModule: {
-          imports: ['ProductModule'],
+          imports: ["ProductModule"],
           exports: [],
           providers: [
             {
-              name: 'MobileService',
-              dependencies: ['ProductModule:ProductService'],
+              name: "MobileService",
+              dependencies: ["ProductModule:ProductService"],
             },
           ],
           controllers: [],
         },
         ProductModule: {
-          imports: ['UserModule'],
+          imports: ["UserModule"],
           exports: [],
           providers: [
             {
-              name: 'ProductService',
-              dependencies: ['UserModule:UserService'],
+              name: "ProductService",
+              dependencies: ["UserModule:UserService"],
             },
           ],
           controllers: [],
@@ -253,72 +255,72 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(graphOutput.cycles.modules).toEqual([
       {
         id: 1,
-        from: 'UserModule',
-        to: 'MobileModule',
-        type: 'indirect',
-        path: ['UserModule', 'MobileModule', 'ProductModule', 'UserModule'],
+        from: "UserModule",
+        to: "MobileModule",
+        type: "indirect",
+        path: ["UserModule", "MobileModule", "ProductModule", "UserModule"],
       },
     ]);
     expect(graphOutput.cycles.providers).toEqual([
       {
         id: 2,
-        from: 'UserModule:UserService',
-        to: 'MobileModule:MobileService',
-        type: 'indirect',
+        from: "UserModule:UserService",
+        to: "MobileModule:MobileService",
+        type: "indirect",
         path: [
           {
-            module: { name: 'UserModule' },
-            provider: { name: 'UserService' },
+            module: { name: "UserModule" },
+            provider: { name: "UserService" },
           },
           {
-            module: { name: 'MobileModule' },
-            provider: { name: 'MobileService' },
+            module: { name: "MobileModule" },
+            provider: { name: "MobileService" },
           },
           {
-            module: { name: 'ProductModule' },
-            provider: { name: 'ProductService' },
+            module: { name: "ProductModule" },
+            provider: { name: "ProductService" },
           },
           {
-            module: { name: 'UserModule' },
-            provider: { name: 'UserService' },
+            module: { name: "UserModule" },
+            provider: { name: "UserService" },
           },
         ],
       },
     ]);
   });
 
-  it('should apply default viewer Ollama proxy options', async () => {
-    options.outputs = [{ type: 'viewer', host: '127.0.0.1', port: 3998 }];
+  it("should apply default viewer Ollama proxy options", async () => {
+    options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
 
     await service.onModuleInit();
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
-        type: 'viewer',
-        host: '127.0.0.1',
+        type: "viewer",
+        host: "127.0.0.1",
         port: 3998,
         ollama: {
-          origin: 'http://localhost:11434',
-          path: '/ollama',
+          origin: "http://localhost:11434",
+          path: "/ollama",
         },
         directRun: expect.objectContaining({
-          path: '/direct-run',
+          path: "/direct-run",
           instanceLookup: expect.any(Function),
         }),
       }),
     );
   });
 
-  it('should let viewer output override default Ollama proxy options', async () => {
+  it("should let viewer output override default Ollama proxy options", async () => {
     options.outputs = [
       {
-        type: 'viewer',
-        host: '127.0.0.1',
+        type: "viewer",
+        host: "127.0.0.1",
         port: 3998,
         ollama: {
-          origin: 'http://localhost:11435',
-          path: '/llm',
+          origin: "http://localhost:11435",
+          path: "/llm",
         },
       },
     ];
@@ -328,22 +330,22 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
-        type: 'viewer',
-        host: '127.0.0.1',
+        type: "viewer",
+        host: "127.0.0.1",
         port: 3998,
         ollama: {
-          origin: 'http://localhost:11435',
-          path: '/llm',
+          origin: "http://localhost:11435",
+          path: "/llm",
         },
         directRun: expect.objectContaining({
-          path: '/direct-run',
+          path: "/direct-run",
           instanceLookup: expect.any(Function),
         }),
       }),
     );
   });
 
-  it('should use the default inspector filtering options when none are configured', () => {
+  it("should use the default inspector filtering options when none are configured", () => {
     class ModuleRef {}
     class ApplicationConfig {}
     class Reflector {}
@@ -364,7 +366,7 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
-  it('should include class JSDoc on documented providers', () => {
+  it("should include class JSDoc on documented providers", () => {
     appModuleRef.providers.set(DocumentedProvider.name, {
       metatype: DocumentedProvider,
     });
@@ -374,16 +376,16 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(moduleMap.modules[TestRootModule.name].providers).toEqual([
       {
         name: DocumentedProvider.name,
-        jsdoc: 'Provides documented app behavior.',
+        jsdoc: "Provides documented app behavior.",
         dependencies: [],
       },
     ]);
   });
 
-  it('should include direct-run metadata for provider methods', () => {
+  it("should include direct-run metadata for provider methods", () => {
     class RunnableProvider {
       ping() {
-        return 'pong';
+        return "pong";
       }
 
       withArgs(value: string) {
@@ -407,10 +409,10 @@ describe(NestGraphInspectorSetup.name, () => {
         dependencies: [],
         directRun: {
           methods: [
-            { name: 'ping', parameterTypes: '[]' },
+            { name: "ping", parameterTypes: "[]" },
             {
-              name: 'withArgs',
-              parameterTypes: '[value: string]',
+              name: "withArgs",
+              parameterTypes: "[value: string]",
             },
           ],
         },
@@ -418,16 +420,68 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
-  it('should exclude instance-dependent prototype getters from direct-run methods', () => {
+  it("should bound recursive, deep, and wide direct-run parameter types", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const deepInput = `${Array.from({ length: 30 }, () => "{ child: ").join("")}string${" }".repeat(30)}`;
+    const wideInput = Array.from(
+      { length: 100 },
+      (_, index) => `property${index}: string`,
+    ).join("; ");
+    const sourceFile = project.createSourceFile(
+      "direct-run-types.ts",
+      `
+        interface RecursiveInput {
+          value: string;
+          next?: RecursiveInput;
+          children: RecursiveInput[];
+        }
+        type DeepInput = ${deepInput};
+        type WideInput = { ${wideInput} };
+        class TypeSource {
+          recursive(value: RecursiveInput) {}
+          deep(value: DeepInput) {}
+          wide(value: WideInput) {}
+        }
+      `,
+    );
+    const setup = service as unknown as SetupWithPrivateMethods;
+    const parameterTypeCode = (methodName: string): string => {
+      const method = sourceFile
+        .getClassOrThrow("TypeSource")
+        .getInstanceMethod(methodName);
+      const parameter = method?.getParameters()[0];
+      expect(parameter).toBeDefined();
+
+      return setup.typeToTypeScriptCode(parameter!.getType(), parameter!);
+    };
+
+    const recursive = parameterTypeCode("recursive");
+    const deep = parameterTypeCode("deep");
+    const wide = parameterTypeCode("wide");
+
+    expect(recursive).toContain("value: string");
+    expect(recursive).toMatch(
+      /next\?: (?:RecursiveInput \| undefined|undefined \| RecursiveInput)/,
+    );
+    expect(recursive).toContain("children: RecursiveInput[]");
+    expect(deep).toContain("unknown");
+    expect(deep.length).toBeLessThanOrEqual(8_000);
+    expect(wide).toContain("property49: string");
+    expect(wide).not.toContain("property50: string");
+    expect(wide).toContain("[key: string]: unknown");
+    expect(wide.length).toBeLessThanOrEqual(8_000);
+  });
+
+  it("should exclude instance-dependent prototype getters from direct-run methods", () => {
     class ProviderWithInstanceDependentGetter {
-      private readonly value = 'available only on an instance';
+      private readonly value = "available only on an instance";
 
       get instanceDependentValue() {
         return this.value.toUpperCase();
       }
 
       normalMethod() {
-        return 'normal';
+        return "normal";
       }
     }
 
@@ -436,11 +490,11 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(() => setup.getDirectRunMethods(provider)).not.toThrow();
     expect(setup.getDirectRunMethods(provider)).toEqual([
-      { name: 'normalMethod', parameterTypes: '[]' },
+      { name: "normalMethod", parameterTypes: "[]" },
     ]);
   });
 
-  it('should instrument nested provider calls for runtime traces from setup', async () => {
+  it("should instrument nested provider calls for runtime traces from setup", async () => {
     class ProductService {
       getAllProducts() {
         return [];
@@ -474,7 +528,7 @@ describe(NestGraphInspectorSetup.name, () => {
     const handle = runtimeTraceRecorder.start({
       moduleName: TestRootModule.name,
       providerName: OrderService.name,
-      methodName: 'getAllOrders',
+      methodName: "getAllOrders",
       args: [],
     });
     const result = await runtimeTraceRecorder.runWithContext(handle, async () =>
@@ -483,23 +537,23 @@ describe(NestGraphInspectorSetup.name, () => {
     const trace = await runtimeTraceRecorder.finishSuccess(handle, result);
 
     expect(trace).toMatchObject({
-      status: 'success',
+      status: "success",
       totalSpans: 2,
       spans: [
         expect.objectContaining({
-          name: 'OrderService.getAllOrders',
-          methodName: 'getAllOrders',
+          name: "OrderService.getAllOrders",
+          methodName: "getAllOrders",
         }),
         expect.objectContaining({
-          name: 'ProductService.getAllProducts',
-          methodName: 'getAllProducts',
+          name: "ProductService.getAllProducts",
+          methodName: "getAllProducts",
           parentSpanId: expect.any(String),
         }),
       ],
     });
   });
 
-  it('should mark not-awaited promise spans with measured duration', async () => {
+  it("should mark not-awaited promise spans with measured duration", async () => {
     class ProductService {
       async getAllProducts() {
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -549,7 +603,7 @@ describe(NestGraphInspectorSetup.name, () => {
     const handle = runtimeTraceRecorder.start({
       moduleName: TestRootModule.name,
       providerName: OrderService.name,
-      methodName: 'confirmOrder',
+      methodName: "confirmOrder",
       args: [],
     });
     const result = await runtimeTraceRecorder.runWithContext(handle, async () =>
@@ -558,21 +612,21 @@ describe(NestGraphInspectorSetup.name, () => {
     const trace = await runtimeTraceRecorder.finishSuccess(handle, result);
 
     const productSpan = trace.spans.find(
-      (span) => span.name === 'ProductService.getAllProducts',
+      (span) => span.name === "ProductService.getAllProducts",
     );
     const updateSpan = trace.spans.find(
-      (span) => span.name === 'OrderRepository.updateStatus',
+      (span) => span.name === "OrderRepository.updateStatus",
     );
 
     expect(productSpan).toMatchObject({
-      status: 'success',
+      status: "success",
       metadata: expect.objectContaining({ awaited: false }),
     });
     expect(productSpan?.durationMs).toBeGreaterThanOrEqual(5);
     expect(updateSpan?.parentSpanId).toBe(trace.spans[0]?.spanId);
   });
 
-  it('should include class JSDoc on documented modules', () => {
+  it("should include class JSDoc on documented modules", () => {
     const documentedModuleRef = {
       metatype: DocumentedAppModule,
       imports: new Map(),
@@ -596,7 +650,7 @@ describe(NestGraphInspectorSetup.name, () => {
     const moduleMap = customService.buildModuleMap(DocumentedAppModule);
 
     expect(moduleMap.modules[DocumentedAppModule.name]).toMatchObject({
-      jsdoc: 'Wires documented app dependencies.',
+      jsdoc: "Wires documented app dependencies.",
       imports: [],
       exports: [],
       providers: [],
@@ -604,11 +658,11 @@ describe(NestGraphInspectorSetup.name, () => {
     });
   });
 
-  it('should keep building the module map when the consumer tsconfig is missing', () => {
+  it("should keep building the module map when the consumer tsconfig is missing", () => {
     jest
-      .spyOn(process, 'cwd')
-      .mockReturnValue('/tmp/nest-graph-inspector-missing-tsconfig');
-    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      .spyOn(process, "cwd")
+      .mockReturnValue("/tmp/nest-graph-inspector-missing-tsconfig");
+    const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation();
     const customService = new NestGraphInspectorSetup(
       options,
       new Map([[TestRootModule.name, appModuleRef]]) as never,
@@ -623,11 +677,11 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(moduleMap.modules[TestRootModule.name].providers).toEqual([]);
     expect(warnSpy).toHaveBeenCalledWith(
-      'Could not find tsconfig.json at /tmp/nest-graph-inspector-missing-tsconfig/tsconfig.json; JSDoc metadata will be skipped.',
+      "Could not find tsconfig.json at /tmp/nest-graph-inspector-missing-tsconfig/tsconfig.json; JSDoc metadata will be skipped.",
     );
   });
 
-  it('should apply configured inspector filtering options', () => {
+  it("should apply configured inspector filtering options", () => {
     class HiddenProvider {}
     class VisibleProvider {}
     class IgnoredModule {}
@@ -643,11 +697,11 @@ describe(NestGraphInspectorSetup.name, () => {
 
     const customOptions: NestGraphInspectorModuleOptions = {
       rootModule: TestRootModule,
-      outputs: [{ type: 'json', path: 'graph.json' }],
+      outputs: [{ type: "json", path: "graph.json" }],
       ignoreProvider: [HiddenProvider.name],
       ignoreImport: [IgnoredModule.name],
-      nestCoreModuleName: 'CustomCoreModule',
-      nestCoreProviders: ['CUSTOM_CONTEXT'],
+      nestCoreModuleName: "CustomCoreModule",
+      nestCoreProviders: ["CUSTOM_CONTEXT"],
     };
     appModuleRef.imports.set(IgnoredModule.name, ignoredModuleRef);
     appModuleRef.providers.set(HiddenProvider.name, {
@@ -658,7 +712,7 @@ describe(NestGraphInspectorSetup.name, () => {
     });
     appModuleRef.providers.set(ConsumerProvider.name, {
       metatype: ConsumerProvider,
-      inject: ['CUSTOM_CONTEXT'],
+      inject: ["CUSTOM_CONTEXT"],
     });
     const customService = new NestGraphInspectorSetup(
       customOptions,
@@ -681,15 +735,15 @@ describe(NestGraphInspectorSetup.name, () => {
       },
       {
         name: ConsumerProvider.name,
-        dependencies: ['CustomCoreModule:CUSTOM_CONTEXT'],
+        dependencies: ["CustomCoreModule:CUSTOM_CONTEXT"],
       },
     ]);
     expect(moduleMap.modules.CustomCoreModule).toEqual({
       imports: [],
-      exports: ['CUSTOM_CONTEXT'],
+      exports: ["CUSTOM_CONTEXT"],
       providers: [
         {
-          name: 'CUSTOM_CONTEXT',
+          name: "CUSTOM_CONTEXT",
           dependencies: [],
         },
       ],

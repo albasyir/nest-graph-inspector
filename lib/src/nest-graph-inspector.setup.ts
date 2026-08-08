@@ -1,31 +1,31 @@
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { Inject, Injectable, Logger, OnModuleInit, Type } from '@nestjs/common';
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { Inject, Injectable, Logger, OnModuleInit, Type } from "@nestjs/common";
 import type {
   InjectionToken,
   OptionalFactoryDependency,
-} from '@nestjs/common/interfaces';
-import { ModulesContainer } from '@nestjs/core';
-import type { InstanceWrapper } from '@nestjs/core/injector/instance-wrapper';
-import type { Module } from '@nestjs/core/injector/module';
-import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
+} from "@nestjs/common/interfaces";
+import { ModulesContainer } from "@nestjs/core";
+import type { InstanceWrapper } from "@nestjs/core/injector/instance-wrapper";
+import type { Module } from "@nestjs/core/injector/module";
+import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
 import type {
   NestGraphInspectorModuleOptions,
   NestGraphInspectorOutput,
-} from './nest-graph-inspector.type';
+} from "./nest-graph-inspector.type";
 import {
   defaultOptions,
   NestGraphInspectorModule,
-} from './nest-graph-inspector.module';
-import { ModuleController } from './types/module-controller.type';
-import { ModuleProvider } from './types/module-provider.type';
-import { Modules } from './types/module.type';
-import { ModuleMap } from './types/module-map.type';
+} from "./nest-graph-inspector.module";
+import { ModuleController } from "./types/module-controller.type";
+import { ModuleProvider } from "./types/module-provider.type";
+import { Modules } from "./types/module.type";
+import { ModuleMap } from "./types/module-map.type";
 import type {
   DirectRunProviderMeta,
   DirectRunProviderMethod,
   RuntimeTraceSpanType,
-} from './types/direct-run.type';
+} from "./types/direct-run.type";
 import type {
   GraphOutput,
   GraphOutputCycle,
@@ -36,17 +36,17 @@ import type {
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
   GraphOutputProvider,
-} from './types/graph-output.type';
-import { HttpOutputAdapter } from './adapters/http-output.adapter';
-import { FileOutputAdapter } from './adapters/file-output.adapter';
-import { JsonOutputAdapter } from './adapters/json-output.adapter';
-import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
-import { OutputAdapter } from './ports/output.adapter';
-import { Node, Project, SyntaxKind, Type as TsMorphType } from 'ts-morph';
-import type { NestGraphInspectorViewerDirectRunOptions } from './nest-graph-inspector.type';
-import { RuntimeTraceRecorder } from './runtime-trace.recorder';
+} from "./types/graph-output.type";
+import { HttpOutputAdapter } from "./adapters/http-output.adapter";
+import { FileOutputAdapter } from "./adapters/file-output.adapter";
+import { JsonOutputAdapter } from "./adapters/json-output.adapter";
+import { ViewerOutputAdapter } from "./adapters/viewer-output.adapter";
+import { OutputAdapter } from "./ports/output.adapter";
+import { Node, Project, SyntaxKind, Type as TsMorphType } from "ts-morph";
+import type { NestGraphInspectorViewerDirectRunOptions } from "./nest-graph-inspector.type";
+import { RuntimeTraceRecorder } from "./runtime-trace.recorder";
 
-type DependencyNodeKind = 'provider' | 'controller';
+type DependencyNodeKind = "provider" | "controller";
 type DependencyNode = {
   key: string;
   kind: DependencyNodeKind;
@@ -54,6 +54,19 @@ type DependencyNode = {
   name: string;
 };
 type NextCycleId = () => number;
+
+// Direct-run type metadata must remain bounded even for recursive application types.
+const MAX_TYPE_RENDER_DEPTH = 12;
+const MAX_TYPE_RENDER_MEMBERS = 50;
+const MAX_TYPE_RENDER_LENGTH = 8_000;
+const MAX_TYPE_PROPERTY_NAME_LENGTH = 160;
+const MIN_TYPE_RENDER_LENGTH = "unknown".length;
+
+type TypeRenderState = {
+  activeTypes: Set<TsMorphType>;
+  depth: number;
+  maxLength: number;
+};
 type ModuleTree = {
   name: string;
   jsdoc?: string;
@@ -69,7 +82,7 @@ type ModuleTree = {
 export class NestGraphInspectorSetup implements OnModuleInit {
   private readonly logger = new Logger(NestGraphInspectorSetup.name);
   private readonly outputAdapters: Record<
-    NestGraphInspectorOutput['type'],
+    NestGraphInspectorOutput["type"],
     OutputAdapter
   >;
   private readonly ignoreProvider: string[];
@@ -104,7 +117,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     this.nestCoreModuleName =
       this.options.nestCoreModuleName ??
       defaultOptions.nestCoreModuleName ??
-      'NestJSCoreModule';
+      "NestJSCoreModule";
     this.nestCoreProviders = [
       ...(this.options.nestCoreProviders ??
         defaultOptions.nestCoreProviders ??
@@ -212,15 +225,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private withDefaultOutputOptions(
     output: NestGraphInspectorOutput,
   ): NestGraphInspectorOutput {
-    if (output.type !== 'viewer') {
+    if (output.type !== "viewer") {
       return output;
     }
 
     const defaultViewerOutput = defaultOptions.outputs?.find(
-      (defaultOutput) => defaultOutput.type === 'viewer',
+      (defaultOutput) => defaultOutput.type === "viewer",
     );
 
-    if (!defaultViewerOutput || defaultViewerOutput.type !== 'viewer') {
+    if (!defaultViewerOutput || defaultViewerOutput.type !== "viewer") {
       return output;
     }
 
@@ -256,11 +269,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
   private getDirectRunHistoryDirPath(): string | undefined {
     const jsonOutput = this.options.outputs?.find(
-      (output) => output.type === 'json',
+      (output) => output.type === "json",
     );
 
-    return jsonOutput?.type === 'json'
-      ? join(process.cwd(), dirname(jsonOutput.path), 'direct-run', 'history')
+    return jsonOutput?.type === "json"
+      ? join(process.cwd(), dirname(jsonOutput.path), "direct-run", "history")
       : undefined;
   }
 
@@ -280,7 +293,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     const modules = this.flattenModuleTree(moduleTree);
 
     return {
-      version: '3',
+      version: "3",
       root: moduleTree.name,
       modules,
     };
@@ -295,7 +308,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
       if (
         this.ignoreImport.includes(moduleName) ||
-        moduleName === 'InternalCoreModule'
+        moduleName === "InternalCoreModule"
       ) {
         continue;
       }
@@ -308,7 +321,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     throw new Error(
-      'Could not auto-detect root module. No module imports NestGraphInspectorModule.',
+      "Could not auto-detect root module. No module imports NestGraphInspectorModule.",
     );
   }
 
@@ -370,14 +383,14 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
       this.instrumentRuntimeTraceWrappers({
         moduleName: node.name,
-        type: 'provider',
+        type: "provider",
         wrappers: node.moduleRef.providers.values(),
         shouldIgnore: (name) =>
           name === node.name || this.ignoreProvider.includes(name),
       });
       this.instrumentRuntimeTraceWrappers({
         moduleName: node.name,
-        type: 'controller',
+        type: "controller",
         wrappers: node.moduleRef.controllers.values(),
       });
     });
@@ -391,7 +404,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }): void {
     for (const wrapper of param.wrappers) {
       const instance = wrapper.instance;
-      if (!instance || typeof instance !== 'object') {
+      if (!instance || typeof instance !== "object") {
         continue;
       }
 
@@ -427,13 +440,13 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     for (const methodName of Object.getOwnPropertyNames(prototype)) {
-      if (methodName === 'constructor') {
+      if (methodName === "constructor") {
         continue;
       }
 
       const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName);
       const method = descriptor?.value;
-      if (typeof method !== 'function') {
+      if (typeof method !== "function") {
         continue;
       }
 
@@ -650,7 +663,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private createTsMorphProject(): Project {
-    const tsConfigFilePath = join(process.cwd(), 'tsconfig.json');
+    const tsConfigFilePath = join(process.cwd(), "tsconfig.json");
 
     if (!existsSync(tsConfigFilePath)) {
       this.logger.warn(
@@ -689,7 +702,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       ?.getJsDocs()
       .map((doc) => doc.getCommentText())
       .filter((comment): comment is string => !!comment)
-      .join('\n');
+      .join("\n");
   }
 
   private wrapperClassName(wrapper: InstanceWrapper<unknown>): string | null {
@@ -700,7 +713,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     const instance = wrapper.instance;
     if (
       instance &&
-      (typeof instance === 'object' || typeof instance === 'function')
+      (typeof instance === "object" || typeof instance === "function")
     ) {
       return instance.constructor?.name ?? null;
     }
@@ -735,7 +748,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           depWrapper.token,
           moduleRef,
         );
-        if (dependencyName && dependencyName !== 'Object') {
+        if (dependencyName && dependencyName !== "Object") {
           dependencies.add(dependencyName);
         }
       }
@@ -750,7 +763,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           depWrapper.token,
           moduleRef,
         );
-        if (dependencyName && dependencyName !== 'Object') {
+        if (dependencyName && dependencyName !== "Object") {
           dependencies.add(dependencyName);
         }
       }
@@ -762,7 +775,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private resolveInjectionToken(
     token: InjectionToken | OptionalFactoryDependency,
   ): InjectionToken {
-    if (typeof token === 'object' && token !== null && 'token' in token) {
+    if (typeof token === "object" && token !== null && "token" in token) {
       return token.token;
     }
 
@@ -822,8 +835,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
       const providerInstance =
         wrapper.instance &&
-        (typeof wrapper.instance === 'object' ||
-          typeof wrapper.instance === 'function')
+        (typeof wrapper.instance === "object" ||
+          typeof wrapper.instance === "function")
           ? (wrapper.instance as { constructor?: { name?: string } })
           : null;
       const providerName =
@@ -859,7 +872,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     if (
       wrapper.instance &&
-      typeof wrapper.instance === 'object' &&
+      typeof wrapper.instance === "object" &&
       wrapper.instance.constructor === token
     ) {
       return true;
@@ -923,15 +936,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return (
       moduleRef.metatype?.name ||
       this.tokenName(moduleRef.token) ||
-      'AnonymousModule'
+      "AnonymousModule"
     );
   }
 
   private tokenName(token: InjectionToken | null | undefined): string | null {
     if (!token) return null;
-    if (typeof token === 'string') return token;
-    if (typeof token === 'symbol') return token.toString();
-    if (typeof token === 'function') return token.name;
+    if (typeof token === "string") return token;
+    if (typeof token === "symbol") return token.toString();
+    if (typeof token === "function") return token.name;
     return null;
   }
 
@@ -1008,8 +1021,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       (wrapper) => {
         const instance =
           wrapper.instance &&
-          (typeof wrapper.instance === 'object' ||
-            typeof wrapper.instance === 'function')
+          (typeof wrapper.instance === "object" ||
+            typeof wrapper.instance === "function")
             ? (wrapper.instance as { constructor?: { name?: string } })
             : null;
         const resolvedName =
@@ -1027,7 +1040,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
     if (
       !instance ||
-      (typeof instance !== 'object' && typeof instance !== 'function')
+      (typeof instance !== "object" && typeof instance !== "function")
     ) {
       return [];
     }
@@ -1041,11 +1054,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     const methods = Object.getOwnPropertyNames(prototype)
-      .filter((name) => name !== 'constructor')
+      .filter((name) => name !== "constructor")
       .map((name) => {
         const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
         const method = descriptor?.value;
-        if (typeof method !== 'function') {
+        if (typeof method !== "function") {
           return null;
         }
 
@@ -1076,7 +1089,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }): string {
     const { instance, method, methodName } = param;
     const className =
-      typeof instance === 'function'
+      typeof instance === "function"
         ? instance.name
         : instance.constructor?.name;
     const sourceTypes = className
@@ -1091,10 +1104,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       method,
     );
     if (!runtimeNames?.length) {
-      return '[]';
+      return "[]";
     }
 
-    return `[${runtimeNames.map((name) => `${name}: unknown`).join(', ')}]`;
+    return `[${runtimeNames.map((name) => `${name}: unknown`).join(", ")}]`;
   }
 
   private extractMethodParameterTypesFromProject(
@@ -1119,7 +1132,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         (parameter) =>
           `${parameter.getName()}: ${this.typeToTypeScriptCode(parameter.getType(), parameter)}`,
       )
-      .join(', ')}]`;
+      .join(", ")}]`;
   }
 
   private extractMethodParameterNamesFromFunctionSource(
@@ -1131,12 +1144,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     try {
       const sourceFile = project.createSourceFile(
-        'direct-run-method.ts',
+        "direct-run-method.ts",
         `class DirectRunMethodSource { ${methodSource} }`,
       );
 
       const names = sourceFile
-        .getClassOrThrow('DirectRunMethodSource')
+        .getClassOrThrow("DirectRunMethodSource")
         .getInstanceMethod(methodName)
         ?.getParameters()
         .map((parameter) => parameter.getName());
@@ -1149,11 +1162,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     try {
       const sourceFile = project.createSourceFile(
-        'direct-run-function.ts',
+        "direct-run-function.ts",
         `const directRunMethod = ${methodSource};`,
       );
       const initializer = sourceFile
-        .getVariableDeclarationOrThrow('directRunMethod')
+        .getVariableDeclarationOrThrow("directRunMethod")
         .getInitializer();
       const callable =
         initializer?.asKind(SyntaxKind.FunctionExpression) ??
@@ -1168,125 +1181,292 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private typeToTypeScriptCode(
     type: TsMorphType,
     enclosingNode: Node,
-    seenTypeTexts = new Set<string>(),
+    state: TypeRenderState = {
+      activeTypes: new Set<TsMorphType>(),
+      depth: 0,
+      maxLength: MAX_TYPE_RENDER_LENGTH,
+    },
   ): string {
     if (type.isAny() || type.isUnknown()) {
-      return 'unknown';
+      return "unknown";
     }
 
     if (type.isNever()) {
-      return 'never';
+      return "never";
     }
 
     if (type.isUndefined()) {
-      return 'undefined';
+      return "undefined";
     }
 
     if (type.isVoid()) {
-      return 'void';
+      return "void";
     }
 
     if (type.isString()) {
-      return 'string';
+      return "string";
     }
 
     if (type.isNumber()) {
-      return 'number';
+      return "number";
     }
 
     if (type.isBoolean()) {
-      return 'boolean';
+      return "boolean";
     }
 
     if (type.isNull()) {
-      return 'null';
+      return "null";
     }
 
     if (type.isStringLiteral()) {
-      return JSON.stringify(type.getLiteralValue());
+      const literalValue = type.getLiteralValue();
+      if (
+        typeof literalValue !== "string" ||
+        literalValue.length > Math.floor(state.maxLength / 6)
+      ) {
+        return "string";
+      }
+
+      const literal = JSON.stringify(literalValue);
+      return literal.length <= state.maxLength ? literal : "string";
     }
 
     if (type.isNumberLiteral()) {
-      return String(type.getLiteralValue());
+      const literal = String(type.getLiteralValue());
+      return literal.length <= state.maxLength ? literal : "number";
     }
 
     if (type.isBooleanLiteral()) {
-      return type.getText(enclosingNode);
+      return this.typeTextWithinLimit(type, enclosingNode, state.maxLength);
     }
 
-    if (type.isUnion()) {
-      return type
-        .getUnionTypes()
-        .map((unionType) =>
-          this.typeToTypeScriptCode(
-            unionType,
-            enclosingNode,
-            new Set(seenTypeTexts),
-          ),
-        )
-        .join(' | ');
-    }
+    const isArray = type.isArray() || type.isReadonlyArray();
+    const isComposite =
+      type.isUnion() || type.isTuple() || isArray || type.isObject();
 
-    if (type.isTuple()) {
-      return `[${type
-        .getTupleElements()
-        .map((tupleType) =>
-          this.typeToTypeScriptCode(
-            tupleType,
-            enclosingNode,
-            new Set(seenTypeTexts),
-          ),
-        )
-        .join(', ')}]`;
-    }
-
-    if (type.isArray() || type.isReadonlyArray()) {
-      const itemType = this.typeToTypeScriptCode(
-        type.getArrayElementType() ?? type,
-        enclosingNode,
-        new Set(seenTypeTexts),
+    if (!isComposite) {
+      return (
+        this.typeReferenceCode(type) ??
+        this.typeTextWithinLimit(type, enclosingNode, state.maxLength)
       );
-
-      return `${this.wrapArrayItemType(itemType)}[]`;
     }
 
-    if (!type.isObject() || type.getCallSignatures().length > 0) {
-      return type.getText(enclosingNode);
+    if (state.activeTypes.has(type) || state.depth >= MAX_TYPE_RENDER_DEPTH) {
+      return this.typeReferenceCode(type) ?? "unknown";
     }
 
-    const typeText = type.getText(enclosingNode);
-    if (seenTypeTexts.has(typeText)) {
-      return typeText;
-    }
+    state.activeTypes.add(type);
+    try {
+      if (type.isUnion()) {
+        const unionTypes = type.getUnionTypes();
+        if (unionTypes.length > MAX_TYPE_RENDER_MEMBERS) {
+          return "unknown";
+        }
 
-    seenTypeTexts.add(typeText);
+        return this.renderTypeSequence({
+          types: unionTypes,
+          enclosingNode,
+          state,
+          prefix: "",
+          delimiter: " | ",
+          suffix: "",
+          fallback: "unknown",
+        });
+      }
 
-    const properties = type.getProperties();
-    if (properties.length === 0) {
-      return typeText;
-    }
+      if (type.isTuple()) {
+        const tupleTypes = type.getTupleElements();
+        if (tupleTypes.length > MAX_TYPE_RENDER_MEMBERS) {
+          return this.typeFallback(state.maxLength, "unknown[]");
+        }
 
-    return `{ ${properties
-      .map((property) => {
-        const propertyNode =
-          property.getValueDeclaration() ?? property.getDeclarations()[0];
-        const propertyType = property.getTypeAtLocation(
-          propertyNode ?? enclosingNode,
+        return this.renderTypeSequence({
+          types: tupleTypes,
+          enclosingNode,
+          state,
+          prefix: "[",
+          delimiter: ", ",
+          suffix: "]",
+          fallback: "unknown[]",
+        });
+      }
+
+      if (isArray) {
+        if (state.maxLength < MIN_TYPE_RENDER_LENGTH + 4) {
+          return this.typeFallback(state.maxLength, "unknown[]");
+        }
+
+        const itemType = this.typeToTypeScriptCode(
+          type.getArrayElementType() ?? type,
+          enclosingNode,
+          {
+            ...state,
+            depth: state.depth + 1,
+            maxLength: state.maxLength - 4,
+          },
         );
-        const optional =
-          property.isOptional() || this.typeAllowsUndefined(propertyType);
 
-        return `${this.propertyNameToTypeScriptCode(property.getName())}${optional ? '?' : ''}: ${this.typeToTypeScriptCode(
-          propertyType,
-          propertyNode ?? enclosingNode,
-          new Set(seenTypeTexts),
-        )}`;
-      })
-      .join('; ')} }`;
+        return `${this.wrapArrayItemType(itemType)}[]`;
+      }
+
+      if (type.getCallSignatures().length > 0) {
+        return (
+          this.typeReferenceCode(type) ??
+          this.typeTextWithinLimit(type, enclosingNode, state.maxLength)
+        );
+      }
+
+      const properties = type.getProperties();
+      if (properties.length === 0) {
+        return (
+          this.typeReferenceCode(type) ??
+          this.typeTextWithinLimit(type, enclosingNode, state.maxLength)
+        );
+      }
+
+      return this.renderObjectType(properties, enclosingNode, state);
+    } finally {
+      state.activeTypes.delete(type);
+    }
+  }
+
+  private renderTypeSequence(param: {
+    types: TsMorphType[];
+    enclosingNode: Node;
+    state: TypeRenderState;
+    prefix: string;
+    delimiter: string;
+    suffix: string;
+    fallback: string;
+  }): string {
+    const { types, enclosingNode, state, prefix, delimiter, suffix, fallback } =
+      param;
+    let output = prefix;
+
+    for (let index = 0; index < types.length; index += 1) {
+      const remainingTypes = types.length - index - 1;
+      const separator = index === 0 ? "" : delimiter;
+      const childMaxLength =
+        state.maxLength -
+        output.length -
+        separator.length -
+        suffix.length -
+        remainingTypes * (delimiter.length + MIN_TYPE_RENDER_LENGTH);
+      if (childMaxLength < MIN_TYPE_RENDER_LENGTH) {
+        return this.typeFallback(state.maxLength, fallback);
+      }
+
+      output += `${separator}${this.typeToTypeScriptCode(
+        types[index],
+        enclosingNode,
+        {
+          ...state,
+          depth: state.depth + 1,
+          maxLength: childMaxLength,
+        },
+      )}`;
+    }
+
+    return `${output}${suffix}`;
+  }
+
+  private renderObjectType(
+    properties: ReturnType<TsMorphType["getProperties"]>,
+    enclosingNode: Node,
+    state: TypeRenderState,
+  ): string {
+    const maxProperties = Math.min(properties.length, MAX_TYPE_RENDER_MEMBERS);
+    const truncation = "[key: string]: unknown";
+    const propertyCodes: string[] = [];
+    let propertyCodesLength = 0;
+    let truncated = properties.length > maxProperties;
+
+    for (let index = 0; index < maxProperties; index += 1) {
+      const property = properties[index];
+      const propertyName = property.getName();
+      if (propertyName.length > MAX_TYPE_PROPERTY_NAME_LENGTH) {
+        truncated = true;
+        break;
+      }
+
+      const propertyNode =
+        property.getValueDeclaration() ?? property.getDeclarations()[0];
+      const propertyType = property.getTypeAtLocation(
+        propertyNode ?? enclosingNode,
+      );
+      const optional =
+        property.isOptional() || this.typeAllowsUndefined(propertyType);
+      const propertyPrefix = `${this.propertyNameToTypeScriptCode(propertyName)}${optional ? "?" : ""}: `;
+      const separator = propertyCodes.length === 0 ? "" : "; ";
+      const reservedTruncationLength =
+        2 + (propertyCodes.length === 0 ? 0 : 2) + truncation.length;
+      const childMaxLength =
+        state.maxLength -
+        2 -
+        propertyCodesLength -
+        separator.length -
+        propertyPrefix.length -
+        reservedTruncationLength;
+      if (childMaxLength < MIN_TYPE_RENDER_LENGTH) {
+        truncated = true;
+        break;
+      }
+
+      const propertyCode = `${propertyPrefix}${this.typeToTypeScriptCode(
+        propertyType,
+        propertyNode ?? enclosingNode,
+        {
+          ...state,
+          depth: state.depth + 1,
+          maxLength: childMaxLength,
+        },
+      )}`;
+      propertyCodes.push(propertyCode);
+      propertyCodesLength += separator.length + propertyCode.length;
+    }
+
+    if (truncated) {
+      const separator = propertyCodes.length === 0 ? "" : "; ";
+      const output = `{ ${propertyCodes.join("; ")}${separator}${truncation} }`;
+      return output.length <= state.maxLength
+        ? output
+        : this.typeFallback(state.maxLength, "unknown");
+    }
+
+    const output = `{ ${propertyCodes.join("; ")} }`;
+    return output.length <= state.maxLength
+      ? output
+      : this.typeFallback(state.maxLength, "unknown");
+  }
+
+  private typeReferenceCode(type: TsMorphType): string | undefined {
+    const name =
+      type.getAliasSymbol()?.getName() ?? type.getSymbol()?.getName();
+    return name && !name.startsWith("__") && /^[A-Za-z_$][\w$]*$/.test(name)
+      ? name
+      : undefined;
+  }
+
+  private typeTextWithinLimit(
+    type: TsMorphType,
+    enclosingNode: Node,
+    maxLength: number,
+  ): string {
+    try {
+      const typeText = type.getText(enclosingNode);
+      return typeText.length <= maxLength ? typeText : "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  private typeFallback(maxLength: number, preferred: string): string {
+    return preferred.length <= maxLength ? preferred : "unknown";
   }
 
   private wrapArrayItemType(typeText: string): string {
-    return typeText.includes(' | ') || typeText.includes('&')
+    return typeText.includes(" | ") || typeText.includes("&")
       ? `(${typeText})`
       : typeText;
   }
@@ -1335,7 +1515,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private findDependencyCycles(
     modules: Record<string, GraphOutputModule>,
     nextCycleId: NextCycleId,
-  ): Pick<GraphOutputCycles, 'providers' | 'controllers'> {
+  ): Pick<GraphOutputCycles, "providers" | "controllers"> {
     const nodes = new Map<string, DependencyNode>();
 
     for (const [moduleName, moduleData] of Object.entries(modules)) {
@@ -1343,7 +1523,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         const key = this.dependencyNodeKey(moduleName, provider.name);
         nodes.set(key, {
           key,
-          kind: 'provider',
+          kind: "provider",
           moduleName,
           name: provider.name,
         });
@@ -1353,7 +1533,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         const key = this.dependencyNodeKey(moduleName, controller.name);
         nodes.set(key, {
           key,
-          kind: 'controller',
+          kind: "controller",
           moduleName,
           name: controller.name,
         });
@@ -1386,10 +1566,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     return {
       providers: cycles
-        .filter((cycle) => nodes.get(cycle.from)?.kind === 'provider')
+        .filter((cycle) => nodes.get(cycle.from)?.kind === "provider")
         .map((cycle) => this.toProviderCycle(cycle, nodes)),
       controllers: cycles.filter(
-        (cycle) => nodes.get(cycle.from)?.kind === 'controller',
+        (cycle) => nodes.get(cycle.from)?.kind === "controller",
       ),
     };
   }
@@ -1474,7 +1654,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     const cyclePath = path.slice(0, -1);
 
     if (cyclePath.length <= 1) {
-      return cyclePath.join('->');
+      return cyclePath.join("->");
     }
 
     const rotations = cyclePath.map((_, index) => [
@@ -1483,7 +1663,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     ]);
 
     return rotations
-      .map((rotation) => rotation.join('->'))
+      .map((rotation) => rotation.join("->"))
       .sort((a, b) => a.localeCompare(b))[0];
   }
 
@@ -1509,10 +1689,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       };
     }
 
-    const separatorIndex = key.indexOf(':');
+    const separatorIndex = key.indexOf(":");
     if (separatorIndex === -1) {
       return {
-        module: { name: '' },
+        module: { name: "" },
         provider: { name: key },
       };
     }
@@ -1529,10 +1709,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     graph: Map<string, Set<string>>,
   ): GraphOutputCycleType {
     if (source === target || graph.get(target)?.has(source)) {
-      return 'direct';
+      return "direct";
     }
 
-    return 'indirect';
+    return "indirect";
   }
 
   private findPath(
@@ -1600,12 +1780,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     dependency: string,
     currentModule: string,
   ): GraphOutputDependencyRef {
-    const colonIndex = dependency.indexOf(':');
+    const colonIndex = dependency.indexOf(":");
 
     if (colonIndex !== -1) {
       return {
         providedBy: {
-          type: 'module',
+          type: "module",
           name: dependency.substring(0, colonIndex),
         },
         token: dependency.substring(colonIndex + 1),
@@ -1613,7 +1793,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     return {
-      providedBy: { type: 'module', name: currentModule },
+      providedBy: { type: "module", name: currentModule },
       token: dependency,
     };
   }
