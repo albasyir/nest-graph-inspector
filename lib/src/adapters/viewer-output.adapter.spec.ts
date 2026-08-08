@@ -81,7 +81,7 @@ describe(ViewerOutputAdapter.name, () => {
     expect(result.message).toContain(`/view/${encodedEndpoint}`);
   });
 
-  it('registers the default Ollama proxy on the viewer HTTP origin', async () => {
+  it('registers the Ollama proxy on the viewer HTTP origin', async () => {
     await adapter.execute({} as never, {
       type: 'viewer',
       host: '127.0.0.1',
@@ -100,7 +100,7 @@ describe(ViewerOutputAdapter.name, () => {
         from: 'http://127.0.0.1:3998',
         to: 'http://localhost:11434',
         cors: {
-          origins: ['https://albasyir.github.io'],
+          origins: [expect.any(RegExp)],
         },
       },
       {
@@ -110,9 +110,7 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
-  it('allows loopback frontend origins on arbitrary ports for a local viewer', async () => {
-    Reflect.set(adapter, 'viewerBaseUrl', 'http://localhost:3000');
-
+  it('allows every browser origin through the proxy allow-list', async () => {
     await adapter.execute({} as never, {
       type: 'viewer',
       host: '127.0.0.1',
@@ -125,12 +123,13 @@ describe(ViewerOutputAdapter.name, () => {
     });
 
     const cors = proxyAdapter.serve.mock.calls[0][0].cors;
+    const [allOrigins] = cors.origins;
 
-    expect(cors.origins[0]).toBe('http://localhost:3000');
-    expect(cors.origins[1]).toBeInstanceOf(RegExp);
-    expect(cors.origins[1].test('http://localhost:5173')).toBe(true);
-    expect(cors.origins[1].test('https://127.0.0.1:8443')).toBe(true);
-    expect(cors.origins[1].test('https://viewer.example')).toBe(false);
+    expect(cors.origins).toHaveLength(1);
+    expect(allOrigins).toBeInstanceOf(RegExp);
+    expect((allOrigins as RegExp).test('http://localhost:5173')).toBe(true);
+    expect((allOrigins as RegExp).test('https://viewer.example')).toBe(true);
+    expect((allOrigins as RegExp).test('null')).toBe(true);
   });
 
   it('passes native HTTP host and port options to the HTTP output adapter', async () => {

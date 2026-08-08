@@ -342,7 +342,7 @@ describe(NestGraphInspectorSetup.name, () => {
         host: "127.0.0.1",
         port: 3998,
         ollama: {
-          origin: "http://localhost:11434",
+          origin: "http://127.0.0.1:11434",
           path: "/ollama",
         },
         directRun: expect.objectContaining({

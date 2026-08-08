@@ -18,7 +18,7 @@ describe(NestGraphInspectorModule.name, () => {
           type: 'viewer',
           ...HttpOutputAdapter.defaultConfig,
           ollama: {
-            origin: 'http://localhost:11434',
+            origin: 'http://127.0.0.1:11434',
             path: '/ollama',
           },
           directRun: {
