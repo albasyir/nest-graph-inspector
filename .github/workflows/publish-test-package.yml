@@ -1,0 +1,50 @@
+name: Publish Test Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Unique prerelease version to publish (for example, 0.0.1-test.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-test-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set test package version
+        working-directory: lib
+        env:
+          TEST_VERSION: ${{ inputs.version }}
+        run: npm version "$TEST_VERSION" --no-git-tag-version --ignore-scripts
+
+      - name: Build package
+        run: pnpm --filter nest-graph-inspector run build
+
+      - name: Publish test package
+        working-directory: lib
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag test
