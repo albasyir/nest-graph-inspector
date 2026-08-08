@@ -164,6 +164,105 @@ describe(ProxyAdapter.name, () => {
     expect(response.headers.vary).toBe('Origin');
   });
 
+  it('allows loopback development origins on arbitrary ports', async () => {
+    targetServer = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+      });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: {
+          origins: [
+            /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
+          ],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        headers: {
+          origin: 'http://localhost:5173',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'http://localhost:5173',
+    );
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('does not return generic CORS headers for origins outside the allow-list', async () => {
+    targetServer = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+      });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: {
+          origins: ['https://viewer.example'],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        headers: {
+          origin: 'http://localhost:5173',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expectNoCorsPermissionHeaders(response.headers);
+
+    const preflight = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'http://localhost:5173',
+          'access-control-request-method': 'GET',
+        },
+      },
+    );
+
+    expect(preflight.statusCode).toBe(204);
+    expectNoCorsPermissionHeaders(preflight.headers);
+  });
+
   it('responds to CORS preflight requests without forwarding to the target origin', async () => {
     let targetRequestCount = 0;
 
@@ -269,6 +368,16 @@ function listen(server: http.Server, port: number): Promise<void> {
       resolve();
     });
   });
+}
+
+function expectNoCorsPermissionHeaders(headers: http.IncomingHttpHeaders) {
+  expect(headers['access-control-allow-origin']).toBeUndefined();
+  expect(headers['access-control-allow-methods']).toBeUndefined();
+  expect(headers['access-control-allow-headers']).toBeUndefined();
+  expect(headers['access-control-allow-credentials']).toBeUndefined();
+  expect(headers['access-control-expose-headers']).toBeUndefined();
+  expect(headers['access-control-max-age']).toBeUndefined();
+  expect(headers.vary).toBeUndefined();
 }
 
 function availablePort(): Promise<number> {

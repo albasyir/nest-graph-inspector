@@ -36,6 +36,8 @@ export class ProxyAdapter implements ProxyGateway {
         type: '*',
         path,
         rawCallback: (clientReq, clientRes) => {
+          this.clearDefaultCorsHeaders(clientRes);
+
           if (this.handleCorsPreflight(cors, clientReq, clientRes)) {
             return;
           }
@@ -144,6 +146,16 @@ export class ProxyAdapter implements ProxyGateway {
 
   private getRequestModule(targetUrl: URL) {
     return targetUrl.protocol === 'https:' ? https : http;
+  }
+
+  private clearDefaultCorsHeaders(res: http.ServerResponse): void {
+    res.removeHeader('Access-Control-Allow-Origin');
+    res.removeHeader('Access-Control-Allow-Methods');
+    res.removeHeader('Access-Control-Allow-Headers');
+    res.removeHeader('Access-Control-Allow-Credentials');
+    res.removeHeader('Access-Control-Expose-Headers');
+    res.removeHeader('Access-Control-Max-Age');
+    res.removeHeader('Vary');
   }
 
   private getCorsHeaders(

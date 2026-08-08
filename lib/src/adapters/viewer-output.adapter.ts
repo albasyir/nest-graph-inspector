@@ -143,9 +143,20 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
   }
 
   private viewerCorsOptions(): ProxyCorsOptions {
+    const viewerUrl = new URL(this.viewerBaseUrl);
+    const viewerOrigin = viewerUrl.origin;
+
     return {
-      origins: [new URL(this.viewerBaseUrl).origin],
+      origins: this.isLoopbackHost(viewerUrl.hostname)
+        ? [viewerOrigin, /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/]
+        : [viewerOrigin],
     };
+  }
+
+  private isLoopbackHost(hostname: string): boolean {
+    return (
+      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    );
   }
 
   private async writeHistoryFiles(

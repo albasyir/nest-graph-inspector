@@ -50,7 +50,6 @@ type ModelSelectItem = {
   onSelect?: () => void
 }
 
-const OLLAMA_PROXY_PATH = '/ollama'
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
 const OLLAMA_THINKING_EFFORT = 'low'
 const OLLAMA_THINKING_FALLBACK_CHAR_LIMIT = 3000
@@ -62,6 +61,21 @@ const DEFAULT_PREVIEW_REPLY = 'Hai!, load real project to chat with me!'
 class OllamaThinkingFallbackError extends Error {
   constructor() {
     super('Ollama thinking stream did not produce answer content quickly enough.')
+  }
+}
+
+class OllamaProxyRequestError extends Error {
+  constructor(
+    readonly endpoint: string,
+    readonly status?: number,
+    readonly statusText?: string,
+    readonly detail?: string
+  ) {
+    const statusDescription = status
+      ? `HTTP ${status}${statusText ? ` ${statusText}` : ''}`
+      : detail || 'Network request failed'
+
+    super(`Ollama proxy request to ${endpoint} failed: ${statusDescription}`)
   }
 }
 
@@ -102,6 +116,7 @@ const hasLoadedModels = ref(false)
 const isDownloadingRecommendedModel = ref(false)
 const modelError = ref('')
 const isOllamaUnavailable = ref(false)
+const isOllamaDaemonUnavailable = ref(false)
 const isProviderSelectOpen = ref(false)
 const isModelSelectOpen = ref(false)
 const isRecommendedModelDownloadPopoverOpen = ref(false)
@@ -285,10 +300,12 @@ function showProviderSelectionToast() {
   })
 }
 
-function showOllamaUnavailableToast() {
+function showOllamaUnavailableToast(context?: string) {
   toast.add({
     title: 'Ollama unavailable',
-    description: 'Please install Ollama and start it before selecting a model.',
+    description: context
+      ? `Please install Ollama and start it before selecting a model. ${context}`
+      : 'Please install Ollama and start it before selecting a model.',
     icon: 'i-lucide-triangle-alert',
     color: 'error',
     actions: [{
@@ -300,6 +317,15 @@ function showOllamaUnavailableToast() {
       rel: 'noopener noreferrer',
       external: true
     }]
+  })
+}
+
+function showOllamaProxyErrorToast(description: string) {
+  toast.add({
+    title: 'Connection problem',
+    description,
+    icon: 'i-lucide-triangle-alert',
+    color: 'error'
   })
 }
 
@@ -364,8 +390,46 @@ function getOllamaApiUrl(path: string) {
   return `${graphStore.ollamaUrl}${normalizedPath}`
 }
 
+async function fetchOllama(path: string, options?: RequestInit) {
+  const endpoint = getOllamaApiUrl(path)
+  let response: Response
+
+  try {
+    response = await fetch(endpoint, options)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Network request failed'
+    throw new OllamaProxyRequestError(endpoint, undefined, undefined, detail)
+  }
+
+  if (!response.ok) {
+    throw new OllamaProxyRequestError(endpoint, response.status, response.statusText)
+  }
+
+  return response
+}
+
+function isOllamaUnavailableError(error: unknown): error is OllamaProxyRequestError {
+  return error instanceof OllamaProxyRequestError && error.status === 502
+}
+
+function getOllamaUnavailableDiagnostic(_error: OllamaProxyRequestError) {
+  return 'The graph inspector could not reach Ollama.'
+}
+
+function getOllamaProxyDiagnostic(error: unknown) {
+  if (error instanceof OllamaProxyRequestError) {
+    if (error.status) {
+      return 'The AI service is not available from this graph. Check that the graph inspector is set up and running, then try again.'
+    }
+
+    return 'Couldn\'t connect to the graph inspector. Make sure it is running, then try again.'
+  }
+
+  return 'Couldn\'t connect to the AI assistant. Try again after checking the graph inspector.'
+}
+
 async function loadModelCapabilities(model: string) {
-  const response = await fetch(getOllamaApiUrl('/api/show'), {
+  const response = await fetchOllama('/api/show', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -373,14 +437,10 @@ async function loadModelCapabilities(model: string) {
     body: JSON.stringify({ model })
   })
 
-  if (!response.ok) {
-    throw new Error(`Ollama returned ${response.status} for ${model}`)
-  }
-
   return await response.json() as OllamaShowResponse
 }
 
-async function loadDownloadedModels(options: { fallbackProvider?: string } = {}) {
+async function loadDownloadedModels() {
   if (!import.meta.client || isLoadingModels.value || selectedProvider.value !== 'ollama') {
     return
   }
@@ -389,13 +449,10 @@ async function loadDownloadedModels(options: { fallbackProvider?: string } = {})
   hasLoadedModels.value = false
   modelError.value = ''
   isOllamaUnavailable.value = false
+  isOllamaDaemonUnavailable.value = false
 
   try {
-    const response = await fetch(getOllamaApiUrl('/api/tags'))
-    if (!response.ok) {
-      throw new Error(`Ollama returned ${response.status}`)
-    }
-
+    const response = await fetchOllama('/api/tags')
     const data = await response.json() as OllamaTagsResponse
     const models = data.models?.map(model => model.name).filter(Boolean) || []
     const modelsWithCapabilities = await Promise.all(models.map(async (model) => {
@@ -431,20 +488,24 @@ async function loadDownloadedModels(options: { fallbackProvider?: string } = {})
       selectedModel.value = completionModels[0] || ''
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to load Ollama models.'
-
     selectedModel.value = ''
     downloadedModels.value = []
     hasLoadedModels.value = false
 
-    if (options.fallbackProvider !== undefined && selectedProvider.value === 'ollama') {
-      selectedProvider.value = options.fallbackProvider
-      await nextTick()
-    }
+    const ollamaUnavailable = isOllamaUnavailableError(error)
+    const diagnostic = ollamaUnavailable
+      ? getOllamaUnavailableDiagnostic(error)
+      : getOllamaProxyDiagnostic(error)
 
     isOllamaUnavailable.value = true
-    modelError.value = message
-    showOllamaUnavailableToast()
+    isOllamaDaemonUnavailable.value = ollamaUnavailable
+    modelError.value = diagnostic
+
+    if (ollamaUnavailable) {
+      showOllamaUnavailableToast(diagnostic)
+    } else {
+      showOllamaProxyErrorToast(diagnostic)
+    }
   } finally {
     isLoadingModels.value = false
   }
@@ -470,15 +531,16 @@ function restartChat() {
   messages.value = [createInitialAssistantMessage()]
 }
 
-watch(selectedProvider, (provider, previousProvider) => {
+watch(selectedProvider, (provider) => {
   selectedModel.value = ''
   downloadedModels.value = []
   hasLoadedModels.value = false
   modelError.value = ''
   isOllamaUnavailable.value = false
+  isOllamaDaemonUnavailable.value = false
 
   if (provider === 'ollama') {
-    loadDownloadedModels({ fallbackProvider: previousProvider })
+    loadDownloadedModels()
   }
 })
 
@@ -597,9 +659,10 @@ async function downloadModel(model: string) {
   resetRecommendedModelDownloadProgress()
   modelError.value = ''
   isOllamaUnavailable.value = false
+  isOllamaDaemonUnavailable.value = false
 
   try {
-    const response = await fetch(getOllamaApiUrl('/api/pull'), {
+    const response = await fetchOllama('/api/pull', {
       method: 'POST',
       body: JSON.stringify({
         model,
@@ -607,19 +670,25 @@ async function downloadModel(model: string) {
       })
     })
 
-    if (!response.ok) {
-      throw new Error(`Ollama returned ${response.status} while downloading ${model}`)
-    }
-
     await streamRecommendedModelDownload(response)
     recommendedModelDownloadStatus.value = 'success'
     await loadDownloadedModels()
   } catch (error) {
-    const message = error instanceof Error ? error.message : `Unable to download ${model}.`
+    const ollamaUnavailable = isOllamaUnavailableError(error)
+    const diagnostic = ollamaUnavailable
+      ? getOllamaUnavailableDiagnostic(error)
+      : getOllamaProxyDiagnostic(error)
 
-    modelError.value = message
+    isOllamaUnavailable.value = ollamaUnavailable
+    isOllamaDaemonUnavailable.value = ollamaUnavailable
+    modelError.value = diagnostic
     recommendedModelDownloadStatus.value = 'Download failed'
-    showModelErrorToast(message)
+
+    if (ollamaUnavailable) {
+      showOllamaUnavailableToast(diagnostic)
+    } else {
+      showOllamaProxyErrorToast(diagnostic)
+    }
   } finally {
     isDownloadingRecommendedModel.value = false
   }
@@ -786,7 +855,7 @@ async function streamOllamaChat(
   think: boolean | 'low' | 'medium' | 'high',
   onChunk: (chunk: OllamaChatStreamResponse) => void
 ) {
-  const response = await fetch(getOllamaApiUrl('/api/chat'), {
+  const response = await fetchOllama('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -801,10 +870,6 @@ async function streamOllamaChat(
       }
     })
   })
-
-  if (!response.ok) {
-    throw new Error(`Ollama returned ${response.status} while streaming chat.`)
-  }
 
   if (!response.body) {
     throw new Error('Ollama did not return a readable stream.')
@@ -896,7 +961,11 @@ async function handleSubmit(event: Event) {
   }
 
   if (isOllamaUnavailable.value) {
-    showOllamaUnavailableToast()
+    if (isOllamaDaemonUnavailable.value) {
+      showOllamaUnavailableToast(modelError.value)
+    } else {
+      showOllamaProxyErrorToast(modelError.value || 'Unable to load Ollama models. Check that the graph inspector is running, then try again.')
+    }
     return
   }
 
@@ -1028,12 +1097,23 @@ async function handleSubmit(event: Event) {
       content: finalContent
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
+    const ollamaUnavailable = isOllamaUnavailableError(error)
+    const diagnostic = ollamaUnavailable
+      ? getOllamaUnavailableDiagnostic(error)
+      : getOllamaProxyDiagnostic(error)
+
+    if (ollamaUnavailable) {
+      isOllamaUnavailable.value = true
+      isOllamaDaemonUnavailable.value = true
+      showOllamaUnavailableToast(diagnostic)
+    }
 
     updateAssistantMessage({
       reasoning: '',
       reasoningStreaming: false,
-      content: `I could not reach Ollama through the graph proxy at ${graphStore.ollamaUrl || OLLAMA_PROXY_PATH}. Make sure Ollama is running, the selected model is available, and the graph inspector proxy is configured. Error: ${message}`
+      content: ollamaUnavailable
+        ? `Ollama is unavailable. ${diagnostic}`
+        : diagnostic
     })
   } finally {
     isLoading.value = false

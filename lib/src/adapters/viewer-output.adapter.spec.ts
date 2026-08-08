@@ -110,6 +110,29 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
+  it('allows loopback frontend origins on arbitrary ports for a local viewer', async () => {
+    Reflect.set(adapter, 'viewerBaseUrl', 'http://localhost:3000');
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port: 3998,
+      path: 'graph',
+      ollama: {
+        origin: 'http://localhost:11434',
+        path: '/ollama',
+      },
+    });
+
+    const cors = proxyAdapter.serve.mock.calls[0][0].cors;
+
+    expect(cors.origins[0]).toBe('http://localhost:3000');
+    expect(cors.origins[1]).toBeInstanceOf(RegExp);
+    expect(cors.origins[1].test('http://localhost:5173')).toBe(true);
+    expect(cors.origins[1].test('https://127.0.0.1:8443')).toBe(true);
+    expect(cors.origins[1].test('https://viewer.example')).toBe(false);
+  });
+
   it('passes native HTTP host and port options to the HTTP output adapter', async () => {
     const result = await adapter.execute({} as never, {
       type: 'viewer',
