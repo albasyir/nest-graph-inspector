@@ -4,6 +4,7 @@ import {
   MODULE_OPTIONS_TOKEN,
 } from './nest-graph-inspector.config';
 import { NestGraphInspectorSetup } from './nest-graph-inspector.setup';
+import { DiscoveryAdapter } from './adapters/discovery';
 import { JsonOutputAdapter } from './adapters/json-output.adapter';
 import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
@@ -47,6 +48,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
       useValue: defaultOptions,
     },
     NestGraphInspectorSetup,
+    DiscoveryAdapter,
     JsonOutputAdapter,
     FileOutputAdapter,
     HttpServeAdapter,

@@ -5,6 +5,7 @@ import { Node, Project, Type as TsMorphType } from "ts-morph";
 import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
 import { NestGraphInspectorSetup } from "./nest-graph-inspector.setup";
 import { NestGraphInspectorModuleOptions } from "./nest-graph-inspector.type";
+import { DiscoveryAdapter } from "./adapters/discovery";
 import { FileOutputAdapter } from "./adapters/file-output.adapter";
 import { HttpOutputAdapter } from "./adapters/http-output.adapter";
 import { JsonOutputAdapter } from "./adapters/json-output.adapter";
@@ -95,6 +96,7 @@ describe(NestGraphInspectorSetup.name, () => {
     moduleRef = await Test.createTestingModule({
       providers: [
         NestGraphInspectorSetup,
+        DiscoveryAdapter,
         {
           provide: MODULE_OPTIONS_TOKEN,
           useValue: options,
@@ -210,6 +212,8 @@ describe(NestGraphInspectorSetup.name, () => {
   });
 
   it("should enrich graph output with module and provider cycles", () => {
+    service.buildModuleMap(TestRootModule);
+
     const graphOutput = (
       service as unknown as SetupWithPrivateMethods
     ).enrichModuleMap({
@@ -399,9 +403,16 @@ describe(NestGraphInspectorSetup.name, () => {
       token: RunnableProvider,
     });
 
+    const moduleMap = service.buildModuleMap(TestRootModule);
+    jest
+      .spyOn(moduleRef.get(ModulesContainer), "values")
+      .mockImplementation(() => {
+        throw new Error("Setup must use the cached discovery tree.");
+      });
+
     const graphOutput = (
       service as unknown as SetupWithPrivateMethods
-    ).enrichModuleMap(service.buildModuleMap(TestRootModule));
+    ).enrichModuleMap(moduleMap);
 
     expect(graphOutput.modules[TestRootModule.name].providers).toEqual([
       {
@@ -640,6 +651,14 @@ describe(NestGraphInspectorSetup.name, () => {
         rootModule: DocumentedAppModule,
       },
       new Map([[DocumentedAppModule.name, documentedModuleRef]]) as never,
+      new DiscoveryAdapter(
+        {
+          ...options,
+          rootModule: DocumentedAppModule,
+        },
+        new Map([[DocumentedAppModule.name, documentedModuleRef]]) as never,
+        runtimeTraceRecorder,
+      ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
@@ -666,6 +685,11 @@ describe(NestGraphInspectorSetup.name, () => {
     const customService = new NestGraphInspectorSetup(
       options,
       new Map([[TestRootModule.name, appModuleRef]]) as never,
+      new DiscoveryAdapter(
+        options,
+        new Map([[TestRootModule.name, appModuleRef]]) as never,
+        runtimeTraceRecorder,
+      ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
@@ -717,6 +741,11 @@ describe(NestGraphInspectorSetup.name, () => {
     const customService = new NestGraphInspectorSetup(
       customOptions,
       new Map([[TestRootModule.name, appModuleRef]]) as never,
+      new DiscoveryAdapter(
+        customOptions,
+        new Map([[TestRootModule.name, appModuleRef]]) as never,
+        runtimeTraceRecorder,
+      ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
