@@ -85,7 +85,7 @@ export class ProxyAdapter implements ProxyGateway {
     );
 
     proxyReq.on('error', (error) => {
-      this.handleProxyError(error, clientRes);
+      this.handleProxyError(error, cors, clientReq, clientRes);
     });
 
     clientReq.pipe(proxyReq);
@@ -134,12 +134,18 @@ export class ProxyAdapter implements ProxyGateway {
     };
   }
 
-  private handleProxyError(error: Error, res: http.ServerResponse) {
+  private handleProxyError(
+    error: Error,
+    cors: ProxyCorsOptions | undefined,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) {
     if (res.headersSent) {
       res.destroy(error);
       return;
     }
 
+    this.applyCors(cors, req, res);
     res.statusCode = 502;
     res.end(`Proxy error: ${error.message}`);
   }

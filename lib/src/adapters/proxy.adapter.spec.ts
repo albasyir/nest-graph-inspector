@@ -112,6 +112,76 @@ describe(ProxyAdapter.name, () => {
     });
   });
 
+  it('adds CORS headers to upstream connection errors for allowed origins', async () => {
+    const viewerPort = await availablePort();
+    const unavailableTargetPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${unavailableTargetPort}`,
+        cors: {
+          origins: ['https://viewer.example'],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        headers: {
+          origin: 'https://viewer.example',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toMatch(/^Proxy error:/);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://viewer.example',
+    );
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers.vary).toBe('Origin');
+  });
+
+  it('does not add CORS headers to upstream connection errors for rejected origins', async () => {
+    const viewerPort = await availablePort();
+    const unavailableTargetPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${unavailableTargetPort}`,
+        cors: {
+          origins: ['https://viewer.example'],
+        },
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags`,
+      {
+        headers: {
+          origin: 'https://untrusted.example',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toMatch(/^Proxy error:/);
+    expectNoCorsPermissionHeaders(response.headers);
+  });
+
   it('adds CORS headers to proxied responses for allowed origins', async () => {
     targetServer = http.createServer((req, res) => {
       res.writeHead(200, {
