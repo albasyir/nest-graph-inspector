@@ -61,6 +61,32 @@ describe(HttpOutputAdapter.name, () => {
     expect(adapter.normalizePath()).toBe('/__nest-graph-inspector');
   });
 
+  it('defers resolving a graph source until its output endpoint is requested', async () => {
+    const port = await availablePort();
+    const graphOutput: GraphOutput = {
+      version: '3',
+      root: 'AppModule',
+      modules: {},
+      cycles: emptyCycles(),
+    };
+    const graphSource = jest.fn().mockResolvedValue(graphOutput);
+
+    await adapter.execute(graphSource, {
+      type: 'http',
+      host: '127.0.0.1',
+      port,
+      path: '/graph',
+    });
+
+    expect(graphSource).not.toHaveBeenCalled();
+
+    const response = await get(`http://127.0.0.1:${port}/graph/output.json`);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual(graphOutput);
+    expect(graphSource).toHaveBeenCalledTimes(1);
+  });
+
   it('serves endpoint metadata, raw JSON, schema, and markdown output under child paths', async () => {
     const port = await availablePort();
     const graphOutput: GraphOutput = {

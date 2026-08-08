@@ -5,6 +5,7 @@ import {
   resolveGraphViewerLoadSource,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
+
 definePageMeta({
   layout: 'viewer'
 })
@@ -22,6 +23,7 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
+const isGraphLoading = ref(false)
 let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
@@ -69,31 +71,37 @@ async function loadGraphResources(
     return
   }
 
-  trackGraphViewerEvent('graph_viewer_load_started', {
-    loadSource,
-    isRetry
-  })
+  isGraphLoading.value = true
 
-  const graphLoaded = await graphStore.setEncodedUrl(value)
-  if (graphLoaded) {
-    await graphStore.fetchMarkdown()
-  }
-
-  if (graphLoaded) {
-    trackGraphViewerEvent('graph_viewer_load_succeeded', {
+  try {
+    trackGraphViewerEvent('graph_viewer_load_started', {
       loadSource,
       isRetry
     })
-  } else {
-    trackGraphViewerEvent('graph_viewer_load_failed', {
-      loadSource,
-      isRetry,
-      errorMessage: errorMessage.value || 'Unknown error'
-    })
-  }
 
-  if (!graphStore.decodedUrl) {
-    navigateTo('/view')
+    const graphLoaded = await graphStore.setEncodedUrl(value)
+    if (graphLoaded) {
+      await graphStore.fetchMarkdown()
+    }
+
+    if (graphLoaded) {
+      trackGraphViewerEvent('graph_viewer_load_succeeded', {
+        loadSource,
+        isRetry
+      })
+    } else {
+      trackGraphViewerEvent('graph_viewer_load_failed', {
+        loadSource,
+        isRetry,
+        errorMessage: errorMessage.value || 'Unknown error'
+      })
+    }
+
+    if (!graphStore.decodedUrl) {
+      navigateTo('/view')
+    }
+  } finally {
+    isGraphLoading.value = false
   }
 }
 
@@ -152,33 +160,16 @@ function handleExecutionSequenceOpen() {
 </script>
 
 <template>
-  <!-- Loading State -->
-  <div
-    v-if="status === 'pending'"
-    class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
-  >
-    <div
-      class="flex size-16 animate-pulse items-center justify-center rounded-2xl bg-primary/10"
-    >
-      <UIcon
-        name="i-lucide-loader-2"
-        class="size-8 animate-spin text-primary"
-      />
-    </div>
-    <div class="space-y-1 text-center">
-      <p class="font-medium">
-        Fetching graph data...
-      </p>
-      <p class="text-sm text-muted">
-        Connecting to {{ decodedUrl }}
-      </p>
-    </div>
-  </div>
+  <GraphViewerLoadingState
+    v-if="isGraphLoading || status === 'pending'"
+    :endpoint="decodedUrl"
+  />
 
   <!-- Error State -->
   <div
     v-else-if="status === 'error'"
     class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
+    role="alert"
   >
     <div
       class="flex size-16 items-center justify-center rounded-2xl bg-red-500/10"

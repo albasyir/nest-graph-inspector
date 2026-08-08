@@ -47,5 +47,26 @@ describe('ProductController (e2e)', () => {
       .get('/products/featured/mobile')
       .expect(200)
       .expect('Featured product');
+
+    const graphResponse = await request('http://localhost:53371')
+      .get('/__graph-inspector/output.json')
+      .expect('content-type', /json/)
+      .expect(200);
+
+    const graphBody: unknown = graphResponse.body;
+
+    expect(graphBody).not.toBeNull();
+    expect(typeof graphBody).toBe('object');
+
+    if (graphBody === null || typeof graphBody !== 'object') {
+      throw new Error('Viewer output must be a JSON graph object');
+    }
+
+    const graph = graphBody as Record<string, unknown>;
+
+    expect(typeof graph.version).toBe('string');
+    expect(graph.modules).not.toBeNull();
+    expect(typeof graph.modules).toBe('object');
+    expect(JSON.stringify(graph)).toContain('ConfigService');
   });
 });

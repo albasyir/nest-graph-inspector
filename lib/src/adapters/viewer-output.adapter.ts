@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
-import type { GraphOutput } from '../types/graph-output.type';
+
 import type { ProxyCorsOptions } from '../ports/proxy.gateway';
-import { HttpOutputAdapter } from './http-output.adapter';
+import {
+  GraphOutputSource,
+  HttpOutputAdapter,
+} from './http-output.adapter';
 import { ProxyAdapter } from './proxy.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
@@ -36,7 +39,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
   ) {}
 
   async execute(
-    graphOutput: GraphOutput,
+    graphOutput: GraphOutputSource,
     config: ViewerOutputConfig,
   ): Promise<{ message: string }> {
     const internalConfig = config as ViewerOutputInternalConfig;

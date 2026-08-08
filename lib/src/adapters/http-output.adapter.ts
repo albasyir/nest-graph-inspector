@@ -10,6 +10,16 @@ import { HttpServeAdapter } from './http-serve.adapter';
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 
 /**
+ * A graph value or a resolver evaluated by a graph HTTP endpoint on request.
+ *
+ * This lets a host install endpoints during bootstrap without discovering the
+ * Nest container until a client actually asks for graph output.
+ */
+export type GraphOutputSource =
+  | GraphOutput
+  | (() => GraphOutput | Promise<GraphOutput>);
+
+/**
  * Internal Configuration Options
  *
  * @private internal usage only
@@ -36,7 +46,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
   ) {}
 
   async execute(
-    graphOutput: GraphOutput,
+    graphOutput: GraphOutputSource,
     config: HttpOutputConfig & HttpOutputInternalOptions,
   ): Promise<{ message: string }> {
     const origin = config.origin ?? this.httpOrigin;
@@ -66,7 +76,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
             },
           },
         ),
-        httpAdapter.get(jsonOutputPath, () => graphOutput, {
+        httpAdapter.get(jsonOutputPath, () => this.resolveGraphOutput(graphOutput), {
           responseHeaders: {
             'content-type': 'application/json; charset=utf-8',
           },
@@ -78,7 +88,10 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
         }),
         httpAdapter.get(
           markdownOutputPath,
-          () => this.fileOutputAdapter.buildMarkdownText(graphOutput),
+          async () =>
+            this.fileOutputAdapter.buildMarkdownText(
+              await this.resolveGraphOutput(graphOutput),
+            ),
           {
             responseHeaders: {
               'content-type': 'text/markdown; charset=utf-8',
@@ -111,6 +124,14 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
 
   normalizePath(path = '/__nest-graph-inspector'): string {
     return path.startsWith('/') ? path : `/${path}`;
+  }
+
+  private async resolveGraphOutput(
+    graphOutput: GraphOutputSource,
+  ): Promise<GraphOutput> {
+    return typeof graphOutput === 'function'
+      ? graphOutput()
+      : graphOutput;
   }
 
   private get httpOrigin(): string {

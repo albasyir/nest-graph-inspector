@@ -43,12 +43,13 @@ export interface NestGraphInspectorModuleOptions {
    * - `type: 'http'` serves the module map from a native HTTP server on the
    *   given host, port, and route path, plus raw JSON and markdown at
    *   `/output.json` and `/output.md` under that path
-   * - `type: 'viewer'` serves the graph for the visualizer, proxies Ollama
-   *   requests from the configured same-origin path to the configured Ollama
-   *   origin, and exposes direct-run provider execution on the configured
-   *   same-origin path. If origin is provided, it prints a direct viewer URL.
-   *   Otherwise, it prints the viewer URL and the endpoint path to enter in
-   *   the viewer.
+   * - `type: 'viewer'` installs graph, Ollama proxy, and direct-run endpoints
+   *   without scanning the Nest container during bootstrap. A client requests
+   *   `GET {path}/output.json` to discover and cache the graph; that endpoint
+   *   responds with the existing GraphOutput JSON shape. `GET {path}/output.md`
+   *   resolves the same graph if it has not already been requested. If origin
+   *   is provided, it prints a direct viewer URL. Otherwise, it prints the
+   *   viewer URL and the endpoint path to enter in the viewer.
    */
   outputs?: NestGraphInspectorOutput[];
 

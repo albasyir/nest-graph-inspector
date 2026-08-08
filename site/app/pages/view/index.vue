@@ -60,7 +60,7 @@ async function tryLoadGraph(pollId: number) {
   attemptCount.value += 1
 
   try {
-    const isLoaded = await graphStore.setInputUrl(activeOrigin.value)
+    const isLoaded = await graphStore.detectInputUrl(activeOrigin.value)
     if (pollId !== activePollId) {
       return
     }

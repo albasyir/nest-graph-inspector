@@ -211,6 +211,28 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(onModuleInitCompleted).toBe(true);
   });
 
+  it("installs viewer output without discovery until a graph client requests it", async () => {
+    options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
+    const scanSpy = jest.spyOn(moduleRef.get(DiscoveryAdapter), "scan");
+
+    await service.onModuleInit();
+
+    expect(scanSpy).not.toHaveBeenCalled();
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledTimes(1);
+
+    const graphSource = viewerOutputAdapter.execute.mock.calls[0][0] as () =>
+      | GraphOutput
+      | Promise<GraphOutput>;
+    const graphOutput = await graphSource();
+    expect(graphOutput).toMatchObject({
+      version: "3",
+      root: TestRootModule.name,
+    });
+    await graphSource();
+
+    expect(scanSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("should enrich graph output with module and provider cycles", () => {
     service.buildModuleMap(TestRootModule);
 
@@ -299,7 +321,7 @@ describe(NestGraphInspectorSetup.name, () => {
     await service.onModuleInit();
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
-      expect.any(Object),
+      expect.any(Function),
       expect.objectContaining({
         type: "viewer",
         host: "127.0.0.1",
@@ -332,7 +354,7 @@ describe(NestGraphInspectorSetup.name, () => {
     await service.onModuleInit();
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
-      expect.any(Object),
+      expect.any(Function),
       expect.objectContaining({
         type: "viewer",
         host: "127.0.0.1",

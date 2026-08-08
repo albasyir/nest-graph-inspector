@@ -292,6 +292,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     return await setEncodedUrl(encodeURIComponent(btoa(sourceUrl)))
   }
 
+  async function detectInputUrl(input: string) {
+    const sourceUrl = normalizeSourceUrl(input)
+    const value = encodeURIComponent(btoa(sourceUrl))
+
+    if (encodedUrl.value !== value) {
+      encodedUrl.value = value
+      clearGraph()
+    }
+
+    return await validateEndpoint()
+  }
+
   async function fetchGraph() {
     const isValidEndpoint = await validateEndpoint()
     if (!isValidEndpoint) {
@@ -335,6 +347,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     acknowledgeEndpointVersion,
     setEncodedUrl,
     setInputUrl,
+    detectInputUrl,
     fetchJson,
     fetchMarkdown,
     fetchGraph,

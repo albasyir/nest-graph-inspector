@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import http from 'node:http';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { HttpOutputAdapter } from './http-output.adapter';
@@ -184,10 +185,13 @@ describe(ViewerOutputAdapter.name, () => {
   });
 
   it('registers the direct-run route when configured', async () => {
+    const port = await availablePort();
     const registerSpy = jest.spyOn(httpServeAdapter, 'register');
 
     await adapter.execute({} as never, {
       type: 'viewer',
+      host: '127.0.0.1',
+      port,
       path: 'graph',
       ollama: {
         origin: 'http://localhost:11434',
@@ -201,8 +205,8 @@ describe(ViewerOutputAdapter.name, () => {
 
     expect(registerSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        host: undefined,
-        port: undefined,
+        host: '127.0.0.1',
+        port,
       }),
       [
         expect.objectContaining({
@@ -225,3 +229,21 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 });
+
+function availablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Expected TCP address')));
+        return;
+      }
+
+      const { port } = address;
+      server.close(() => resolve(port));
+    });
+  });
+}

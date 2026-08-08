@@ -68,6 +68,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     OutputAdapter
   >;
   private readonly tsMorphProject = this.createTsMorphProject();
+  private graphOutput: GraphOutput | undefined;
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -89,30 +90,61 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    await this.inspectAndPublishGraph();
-  }
-
-  private async inspectAndPublishGraph(): Promise<void> {
-    if (!this.hasOutput) {
+    const outputs = this.options.outputs ?? [];
+    if (!outputs.length) {
       return;
     }
 
-    await this.publishModuleTree(this.discovery.scan());
-  }
-
-  private get hasOutput(): boolean {
-    return !!this.options.outputs?.length;
-  }
-
-  private async publishModuleTree(moduleTree: ModuleTree): Promise<void> {
-    const graphOutput = this.createGraphOutput(
-      this.createModuleMapFromTree(moduleTree),
+    const viewerOutputs = outputs.filter(
+      (output): output is Extract<NestGraphInspectorOutput, { type: "viewer" }> =>
+        output.type === "viewer",
     );
+    const eagerOutputs = outputs.filter((output) => output.type !== "viewer");
 
-    await this.publishOutputs({
-      graphOutput,
-      outputs: this.options.outputs ?? [],
-    });
+    // Viewer routes are installed without inspecting the Nest container. Their
+    // graph endpoint creates and caches the graph on the first client request.
+    await Promise.all(viewerOutputs.map((output) => this.installViewerOutput(output)));
+
+    // File and standalone HTTP outputs keep their established bootstrap-time
+    // publication behavior.
+    if (eagerOutputs.length) {
+      await this.publishOutputs({
+        graphOutput: this.getGraphOutput(),
+        outputs: eagerOutputs,
+      });
+    }
+  }
+
+  private getGraphOutput(): GraphOutput {
+    if (!this.graphOutput) {
+      this.graphOutput = this.createGraphOutput(
+        this.createModuleMapFromTree(this.discovery.scan()),
+      );
+    }
+
+    return this.graphOutput;
+  }
+
+  private async installViewerOutput(
+    output: Extract<NestGraphInspectorOutput, { type: "viewer" }>,
+  ): Promise<void> {
+    const configuredOutput = this.withDefaultOutputOptions(output);
+    if (configuredOutput.type !== "viewer") {
+      return;
+    }
+
+    try {
+      const { message } = await this.viewerOutputAdapter.execute(
+        () => this.getGraphOutput(),
+        configuredOutput,
+      );
+      this.logger.debug(message);
+    } catch (err) {
+      this.logger.error(
+        "Failed to execute output adapter for type viewer",
+        err,
+      );
+    }
   }
 
   private createGraphOutput(moduleMap: ModuleMap): GraphOutput {
@@ -341,7 +373,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     providerName: string,
   ): unknown {
     return this.findModuleTree(
-      this.discovery.tree,
+      this.discovery.scan(),
       moduleName,
     )?.providerInstances.get(providerName);
   }
