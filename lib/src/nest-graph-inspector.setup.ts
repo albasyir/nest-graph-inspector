@@ -1043,15 +1043,16 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     const methods = Object.getOwnPropertyNames(prototype)
       .filter((name) => name !== 'constructor')
       .map((name) => {
-        const candidate = prototype[name];
-        if (typeof candidate !== 'function') {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+        const method = descriptor?.value;
+        if (typeof method !== 'function') {
           return null;
         }
 
-        const method = candidate as (...args: unknown[]) => unknown;
+        const callable = method as (...args: unknown[]) => unknown;
         const parameterTypes = this.getDirectRunMethodParameterTypes({
           instance,
-          method,
+          method: callable,
           methodName: name,
         });
 

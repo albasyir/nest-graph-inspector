@@ -14,6 +14,13 @@ graph TD
   subgraph module_group_MobileModule["MobileModule"]
     provider_MobileModule_MobileService["MobileService"]
   end
+  subgraph module_group_ConfigModule["ConfigModule"]
+    provider_ConfigModule_useFactory["useFactory"]
+  end
+  subgraph module_group_ConfigHostModule["ConfigHostModule"]
+    provider_ConfigHostModule_useFactory["useFactory"]
+    provider_ConfigHostModule_ConfigService["ConfigService"]
+  end
   subgraph module_group_ProductModule["ProductModule"]
     provider_ProductModule_ProductService["ProductService"]
     provider_ProductModule_ProductRepository["ProductRepository"]
@@ -31,21 +38,31 @@ graph TD
   module_group_AppModule --> module_group_UserModule
   module_group_AppModule --> module_group_ProductModule
   module_group_AppModule --> module_group_OrderModule
+  module_group_AppModule --> module_group_ConfigHostModule
   module_group_UserModule --> module_group_MobileModule
+  module_group_UserModule --> module_group_ConfigHostModule
   provider_UserModule_UserService --> provider_UserModule_UserRepository
   provider_UserModule_UserService --> provider_MobileModule_MobileService
   provider_UserModule_UserSchedule --> provider_UserModule_UserRepository
   controller_UserModule_UserController --> provider_UserModule_UserService
   controller_UserModule_UserController --> provider_UserModule_UserSchedule
+  module_group_MobileModule --> module_group_ConfigModule
   module_group_MobileModule --> module_group_ProductModule
+  module_group_MobileModule --> module_group_ConfigHostModule
   provider_MobileModule_MobileService --> provider_ProductModule_ProductService
+  provider_MobileModule_MobileService --> provider_ConfigModule_useFactory
+  module_group_ConfigModule --> module_group_ConfigHostModule
+  provider_ConfigModule_useFactory --> provider_ConfigHostModule_ConfigService
+  provider_ConfigHostModule_ConfigService --> provider_ConfigHostModule_useFactory
   module_group_ProductModule --> module_group_UserModule
   module_group_ProductModule --> module_group_MobileModule
+  module_group_ProductModule --> module_group_ConfigHostModule
   provider_ProductModule_ProductService --> provider_ProductModule_ProductRepository
   provider_ProductModule_ProductService --> provider_MobileModule_MobileService
   controller_ProductModule_ProductController --> provider_ProductModule_ProductService
   module_group_OrderModule --> module_group_UserModule
   module_group_OrderModule --> module_group_ProductModule
+  module_group_OrderModule --> module_group_ConfigHostModule
   provider_OrderModule_OrderService --> provider_OrderModule_OrderRepository
   provider_OrderModule_OrderService --> provider_UserModule_UserService
   provider_OrderModule_OrderService --> provider_ProductModule_ProductService
@@ -60,13 +77,14 @@ graph TD
 
 ## AppModule
 
-This is playground root module 
+This is playground root module
 that imports the feature modules and the Nest Graph Inspector module.
 
 ### Imports
 - UserModule
 - ProductModule
 - OrderModule
+- ConfigHostModule
 
 ## UserModule
 
@@ -77,6 +95,8 @@ UserModule is example feature
 
 ### Imports
 - MobileModule
+- ConfigHostModule
+  - Warning: unused import module
 
 ### Exports
 - UserService
@@ -102,7 +122,10 @@ UserModule is example feature
 > - direct circular dependency with ProductModule
 
 ### Imports
+- ConfigModule
 - ProductModule
+- ConfigHostModule
+  - Warning: unused import module
 
 ### Exports
 - MobileService
@@ -111,6 +134,31 @@ UserModule is example feature
 - MobileService
   - Warning: direct circular dependency with ProductService from ProductModule
   - depends on ProductService from ProductModule
+  - depends on useFactory from ConfigModule
+
+## ConfigModule
+
+### Imports
+- ConfigHostModule
+
+### Exports
+- ConfigHostModule
+- ConfigService
+
+### Providers
+- useFactory
+  - depends on ConfigService from ConfigHostModule
+
+## ConfigHostModule
+
+### Exports
+- CONFIGURATION_TOKEN
+- Symbol(CONFIG_SERVICE)
+
+### Providers
+- useFactory
+- ConfigService
+  - depends on useFactory from ConfigHostModule
 
 ## ProductModule
 
@@ -121,6 +169,8 @@ This is an intentionally useless import to test graph-inspector detection.
 - UserModule
   - Warning: unused import module
 - MobileModule
+- ConfigHostModule
+  - Warning: unused import module
 
 ### Exports
 - ProductService
@@ -140,6 +190,8 @@ This is an intentionally useless import to test graph-inspector detection.
 ### Imports
 - UserModule
 - ProductModule
+- ConfigHostModule
+  - Warning: unused import module
 
 ### Exports
 - OrderService

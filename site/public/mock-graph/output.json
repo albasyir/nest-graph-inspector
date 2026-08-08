@@ -3,11 +3,12 @@
   "root": "AppModule",
   "modules": {
     "AppModule": {
-      "jsdoc": "This is playground root module \nthat imports the feature modules and the Nest Graph Inspector module.",
+      "jsdoc": "This is playground root module\nthat imports the feature modules and the Nest Graph Inspector module.",
       "imports": [
         "UserModule",
         "ProductModule",
-        "OrderModule"
+        "OrderModule",
+        "ConfigHostModule"
       ],
       "exports": [],
       "providers": [],
@@ -16,7 +17,8 @@
     "UserModule": {
       "jsdoc": "UserModule is example feature",
       "imports": [
-        "MobileModule"
+        "MobileModule",
+        "ConfigHostModule"
       ],
       "exports": [
         "UserService"
@@ -127,7 +129,9 @@
     },
     "MobileModule": {
       "imports": [
-        "ProductModule"
+        "ConfigModule",
+        "ProductModule",
+        "ConfigHostModule"
       ],
       "exports": [
         "MobileService"
@@ -142,13 +146,166 @@
                 "name": "ProductModule"
               },
               "token": "ProductService"
+            },
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ConfigModule"
+              },
+              "token": "useFactory"
             }
           ],
           "directRun": {
             "methods": [
               {
                 "name": "getFeaturedProductName",
-                "parameterTypes": "[productId: number]"
+                "parameterTypes": "[productId: undefined | number]"
+              }
+            ]
+          }
+        }
+      ],
+      "controllers": []
+    },
+    "ConfigModule": {
+      "imports": [
+        "ConfigHostModule"
+      ],
+      "exports": [
+        "ConfigHostModule",
+        "ConfigService"
+      ],
+      "providers": [
+        {
+          "name": "useFactory",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ConfigHostModule"
+              },
+              "token": "ConfigService"
+            }
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "get",
+                "parameterTypes": "[propertyPath: unknown, defaultValueOrOptions: unknown, options: unknown]"
+              },
+              {
+                "name": "getFromCache",
+                "parameterTypes": "[propertyPath: unknown, defaultValue: unknown]"
+              },
+              {
+                "name": "getFromInternalConfig",
+                "parameterTypes": "[propertyPath: unknown]"
+              },
+              {
+                "name": "getFromProcessEnv",
+                "parameterTypes": "[propertyPath: unknown, defaultValue: unknown]"
+              },
+              {
+                "name": "getFromValidatedEnv",
+                "parameterTypes": "[propertyPath: unknown]"
+              },
+              {
+                "name": "getOrThrow",
+                "parameterTypes": "[propertyPath: unknown, defaultValueOrOptions: unknown, options: unknown]"
+              },
+              {
+                "name": "isGetOptionsObject",
+                "parameterTypes": "[options: unknown]"
+              },
+              {
+                "name": "set",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
+              },
+              {
+                "name": "setEnvFilePaths",
+                "parameterTypes": "[paths: unknown]"
+              },
+              {
+                "name": "setInCacheIfDefined",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
+              },
+              {
+                "name": "updateInterpolatedEnv",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
+              }
+            ]
+          }
+        }
+      ],
+      "controllers": []
+    },
+    "ConfigHostModule": {
+      "imports": [],
+      "exports": [
+        "CONFIGURATION_TOKEN",
+        "Symbol(CONFIG_SERVICE)"
+      ],
+      "providers": [
+        {
+          "name": "useFactory",
+          "dependencies": []
+        },
+        {
+          "name": "ConfigService",
+          "dependencies": [
+            {
+              "providedBy": {
+                "type": "module",
+                "name": "ConfigHostModule"
+              },
+              "token": "useFactory"
+            }
+          ],
+          "directRun": {
+            "methods": [
+              {
+                "name": "get",
+                "parameterTypes": "[propertyPath: unknown, defaultValueOrOptions: unknown, options: unknown]"
+              },
+              {
+                "name": "getFromCache",
+                "parameterTypes": "[propertyPath: unknown, defaultValue: unknown]"
+              },
+              {
+                "name": "getFromInternalConfig",
+                "parameterTypes": "[propertyPath: unknown]"
+              },
+              {
+                "name": "getFromProcessEnv",
+                "parameterTypes": "[propertyPath: unknown, defaultValue: unknown]"
+              },
+              {
+                "name": "getFromValidatedEnv",
+                "parameterTypes": "[propertyPath: unknown]"
+              },
+              {
+                "name": "getOrThrow",
+                "parameterTypes": "[propertyPath: unknown, defaultValueOrOptions: unknown, options: unknown]"
+              },
+              {
+                "name": "isGetOptionsObject",
+                "parameterTypes": "[options: unknown]"
+              },
+              {
+                "name": "set",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
+              },
+              {
+                "name": "setEnvFilePaths",
+                "parameterTypes": "[paths: unknown]"
+              },
+              {
+                "name": "setInCacheIfDefined",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
+              },
+              {
+                "name": "updateInterpolatedEnv",
+                "parameterTypes": "[propertyPath: unknown, value: unknown]"
               }
             ]
           }
@@ -160,7 +317,8 @@
       "jsdoc": "ProductModule imports UserModule but does NOT use any of its providers.\nThis is an intentionally useless import to test graph-inspector detection.",
       "imports": [
         "UserModule",
-        "MobileModule"
+        "MobileModule",
+        "ConfigHostModule"
       ],
       "exports": [
         "ProductService"
@@ -196,7 +354,7 @@
               },
               {
                 "name": "getMobileFeaturedProductName",
-                "parameterTypes": "[productId: number]"
+                "parameterTypes": "[]"
               },
               {
                 "name": "getProductById",
@@ -252,7 +410,8 @@
     "OrderModule": {
       "imports": [
         "UserModule",
-        "ProductModule"
+        "ProductModule",
+        "ConfigHostModule"
       ],
       "exports": [
         "OrderService"

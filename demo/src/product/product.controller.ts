@@ -6,13 +6,24 @@ export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
   @Post()
-  createProduct(@Body() body: { name: string; price: number; ownerId: number }) {
-    return this.productService.createProduct(body.name, body.price, body.ownerId);
+  createProduct(
+    @Body() body: { name: string; price: number; ownerId: number },
+  ) {
+    return this.productService.createProduct(
+      body.name,
+      body.price,
+      body.ownerId,
+    );
   }
 
   @Get()
   getAllProducts() {
     return this.productService.getAllProducts();
+  }
+
+  @Get('featured/mobile')
+  getMobileFeaturedProductName() {
+    return this.productService.getMobileFeaturedProductName();
   }
 
   @Get(':id')

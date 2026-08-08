@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+
 import { ProductModule } from './product/product.module';
 import { OrderModule } from './order/order.module';
 import { NestGraphInspectorModule } from 'nest-graph-inspector';
 import { UserModule } from './user/user.module';
 
 /**
- * This is playground root module 
+ * This is playground root module
  * that imports the feature modules and the Nest Graph Inspector module.
  */
 @Module({

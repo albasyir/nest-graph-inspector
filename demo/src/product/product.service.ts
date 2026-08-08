@@ -18,7 +18,7 @@ export class ProductService {
   }
 
   async getAllProducts(): Promise<Product[]> {
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     return this.productRepository.findAll();
   }
 
@@ -26,7 +26,7 @@ export class ProductService {
     return this.productRepository.findByOwnerId(ownerId);
   }
 
-  getMobileFeaturedProductName(productId: number): string | undefined {
-    return this.mobileService.getFeaturedProductName(productId);
+  getMobileFeaturedProductName(): string | undefined {
+    return this.mobileService.getFeaturedProductName();
   }
 }

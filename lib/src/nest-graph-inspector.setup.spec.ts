@@ -12,8 +12,15 @@ import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 import type { GraphOutput } from './types/graph-output.type';
 import type { ModuleMap } from './types/module-map.type';
 
-type SetupWithPrivateMethods = NestGraphInspectorSetup & {
+type SetupWithPrivateMethods = Omit<
+  NestGraphInspectorSetup,
+  'enrichModuleMap' | 'getDirectRunMethods'
+> & {
   enrichModuleMap(moduleMap: ModuleMap): GraphOutput;
+  getDirectRunMethods(instance: unknown): Array<{
+    name: string;
+    parameterTypes: string;
+  }>;
 };
 
 /**
@@ -408,6 +415,28 @@ describe(NestGraphInspectorSetup.name, () => {
           ],
         },
       },
+    ]);
+  });
+
+  it('should exclude instance-dependent prototype getters from direct-run methods', () => {
+    class ProviderWithInstanceDependentGetter {
+      private readonly value = 'available only on an instance';
+
+      get instanceDependentValue() {
+        return this.value.toUpperCase();
+      }
+
+      normalMethod() {
+        return 'normal';
+      }
+    }
+
+    const provider = new ProviderWithInstanceDependentGetter();
+    const setup = service as unknown as SetupWithPrivateMethods;
+
+    expect(() => setup.getDirectRunMethods(provider)).not.toThrow();
+    expect(setup.getDirectRunMethods(provider)).toEqual([
+      { name: 'normalMethod', parameterTypes: '[]' },
     ]);
   });
 
