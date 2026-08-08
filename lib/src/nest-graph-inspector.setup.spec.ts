@@ -11,6 +11,7 @@ import { HttpOutputAdapter } from "./adapters/http-output.adapter";
 import { JsonOutputAdapter } from "./adapters/json-output.adapter";
 import { ViewerOutputAdapter } from "./adapters/viewer-output.adapter";
 import { RuntimeTraceRecorder } from "./runtime-trace.recorder";
+import { SourceMetadataService } from "./source-metadata.service";
 import type { GraphOutput } from "./types/graph-output.type";
 import type { ModuleMap } from "./types/module-map.type";
 
@@ -23,6 +24,14 @@ type SetupWithPrivateMethods = Omit<
     name: string;
     parameterTypes: string;
   }>;
+  runtimeParameterTypes(
+    methodName: string,
+    method: (...args: unknown[]) => unknown,
+  ): string;
+  extractMethodParameterTypesFromProject(
+    className: string,
+    methodName: string,
+  ): string | undefined;
   typeToTypeScriptCode(type: TsMorphType, enclosingNode: Node): string;
 };
 
@@ -97,6 +106,7 @@ describe(NestGraphInspectorSetup.name, () => {
       providers: [
         NestGraphInspectorSetup,
         DiscoveryAdapter,
+        SourceMetadataService,
         {
           provide: MODULE_OPTIONS_TOKEN,
           useValue: options,
@@ -214,15 +224,19 @@ describe(NestGraphInspectorSetup.name, () => {
   it("installs viewer output without discovery until a graph client requests it", async () => {
     options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
     const scanSpy = jest.spyOn(moduleRef.get(DiscoveryAdapter), "scan");
+    const sourceMetadata = moduleRef.get(SourceMetadataService) as unknown as {
+      createProject(): Project;
+    };
+    const createProjectSpy = jest.spyOn(sourceMetadata, "createProject");
 
     await service.onModuleInit();
 
     expect(scanSpy).not.toHaveBeenCalled();
+    expect(createProjectSpy).not.toHaveBeenCalled();
     expect(viewerOutputAdapter.execute).toHaveBeenCalledTimes(1);
 
     const graphSource = viewerOutputAdapter.execute.mock.calls[0][0] as () =>
-      | GraphOutput
-      | Promise<GraphOutput>;
+      GraphOutput | Promise<GraphOutput>;
     const graphOutput = await graphSource();
     expect(graphOutput).toMatchObject({
       version: "3",
@@ -231,6 +245,7 @@ describe(NestGraphInspectorSetup.name, () => {
     await graphSource();
 
     expect(scanSpy).toHaveBeenCalledTimes(1);
+    expect(createProjectSpy).toHaveBeenCalledTimes(1);
   });
 
   it("should enrich graph output with module and provider cycles", () => {
@@ -527,6 +542,26 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
+  it("should cache direct-run parameter metadata by method function", () => {
+    class RuntimeOnlyProvider {
+      execute(value: string) {
+        return value;
+      }
+    }
+
+    const setup = service as unknown as SetupWithPrivateMethods;
+    const sourceParameterTypesSpy = jest.spyOn(
+      setup,
+      "extractMethodParameterTypesFromProject",
+    );
+    const provider = new RuntimeOnlyProvider();
+
+    setup.getDirectRunMethods(provider);
+    setup.getDirectRunMethods(provider);
+
+    expect(sourceParameterTypesSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("should instrument nested provider calls for runtime traces from setup", async () => {
     class ProductService {
       getAllProducts() {
@@ -660,6 +695,7 @@ describe(NestGraphInspectorSetup.name, () => {
   });
 
   it("should include class JSDoc on documented modules", () => {
+    const sourceMetadata = new SourceMetadataService();
     const documentedModuleRef = {
       metatype: DocumentedAppModule,
       imports: new Map(),
@@ -680,12 +716,14 @@ describe(NestGraphInspectorSetup.name, () => {
         },
         new Map([[DocumentedAppModule.name, documentedModuleRef]]) as never,
         runtimeTraceRecorder,
+        sourceMetadata,
       ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
       runtimeTraceRecorder,
+      sourceMetadata,
     );
 
     const moduleMap = customService.buildModuleMap(DocumentedAppModule);
@@ -700,6 +738,7 @@ describe(NestGraphInspectorSetup.name, () => {
   });
 
   it("should keep building the module map when the consumer tsconfig is missing", () => {
+    const sourceMetadata = new SourceMetadataService();
     jest
       .spyOn(process, "cwd")
       .mockReturnValue("/tmp/nest-graph-inspector-missing-tsconfig");
@@ -711,12 +750,14 @@ describe(NestGraphInspectorSetup.name, () => {
         options,
         new Map([[TestRootModule.name, appModuleRef]]) as never,
         runtimeTraceRecorder,
+        sourceMetadata,
       ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
       runtimeTraceRecorder,
+      sourceMetadata,
     );
 
     const moduleMap = customService.buildModuleMap(TestRootModule);
@@ -728,6 +769,7 @@ describe(NestGraphInspectorSetup.name, () => {
   });
 
   it("should apply configured inspector filtering options", () => {
+    const sourceMetadata = new SourceMetadataService();
     class HiddenProvider {}
     class VisibleProvider {}
     class IgnoredModule {}
@@ -767,12 +809,14 @@ describe(NestGraphInspectorSetup.name, () => {
         customOptions,
         new Map([[TestRootModule.name, appModuleRef]]) as never,
         runtimeTraceRecorder,
+        sourceMetadata,
       ),
       httpOutputAdapter as never,
       fileOutputAdapter as never,
       jsonOutputAdapter as never,
       viewerOutputAdapter as never,
       runtimeTraceRecorder,
+      sourceMetadata,
     );
 
     const moduleMap = customService.buildModuleMap(TestRootModule);

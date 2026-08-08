@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { Inject, Injectable, Logger, Type } from "@nestjs/common";
+import { Inject, Injectable, Type } from "@nestjs/common";
 import type {
   InjectionToken,
   OptionalFactoryDependency,
@@ -18,7 +16,7 @@ import { ModuleController } from "../types/module-controller.type";
 import { ModuleProvider } from "../types/module-provider.type";
 import { RuntimeTraceSpanType } from "../types/direct-run.type";
 import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
-import { Project } from "ts-morph";
+import { SourceMetadataService } from "../source-metadata.service";
 
 export type ModuleTree = {
   name: string;
@@ -34,12 +32,10 @@ export type ModuleTree = {
 
 @Injectable()
 export class DiscoveryAdapter {
-  private readonly logger = new Logger(DiscoveryAdapter.name);
   private readonly ignoreProvider: string[];
   private readonly ignoreImport: string[];
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
-  private readonly tsMorphProject = this.createTsMorphProject();
   private readonly runtimeTraceInstrumentedInstances = new WeakSet<object>();
   private cachedTree: ModuleTree | undefined;
 
@@ -48,6 +44,7 @@ export class DiscoveryAdapter {
     private readonly options: NestGraphInspectorModuleOptions,
     private readonly modulesContainer: ModulesContainer,
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
+    private readonly sourceMetadata: SourceMetadataService,
   ) {
     this.ignoreProvider = [
       ...(this.options.ignoreProvider ?? defaultOptions.ignoreProvider ?? []),
@@ -479,22 +476,6 @@ export class DiscoveryAdapter {
     };
   }
 
-  private createTsMorphProject(): Project {
-    const tsConfigFilePath = join(process.cwd(), "tsconfig.json");
-
-    if (!existsSync(tsConfigFilePath)) {
-      this.logger.warn(
-        `Could not find tsconfig.json at ${tsConfigFilePath}; JSDoc metadata will be skipped.`,
-      );
-      return new Project();
-    }
-
-    return new Project({
-      tsConfigFilePath,
-      skipAddingFilesFromTsConfig: false,
-    });
-  }
-
   private extractModuleJsDoc(moduleRef: Module): string | undefined {
     return moduleRef.metatype
       ? this.extractClassJsDocByName(moduleRef.metatype.name)
@@ -510,16 +491,7 @@ export class DiscoveryAdapter {
   }
 
   private extractClassJsDocByName(className: string): string | undefined {
-    const targetClass = this.tsMorphProject
-      .getSourceFiles()
-      .flatMap((sourceFile) => sourceFile.getClasses())
-      .find((classDeclaration) => classDeclaration.getName() === className);
-
-    return targetClass
-      ?.getJsDocs()
-      .map((doc) => doc.getCommentText())
-      .filter((comment): comment is string => !!comment)
-      .join("\n");
+    return this.sourceMetadata.getClassJsDoc(className);
   }
 
   private wrapperClassName(wrapper: InstanceWrapper<unknown>): string | null {

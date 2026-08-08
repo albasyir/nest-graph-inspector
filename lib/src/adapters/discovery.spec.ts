@@ -1,4 +1,5 @@
 import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
+import { SourceMetadataService } from "../source-metadata.service";
 import { DiscoveryAdapter } from "./discovery";
 
 describe(DiscoveryAdapter.name, () => {
@@ -23,6 +24,7 @@ describe(DiscoveryAdapter.name, () => {
         ],
       ]) as never,
       new RuntimeTraceRecorder(),
+      new SourceMetadataService(),
     );
 
   it("throws when tree is read before scanning", () => {

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Inject, Injectable, Logger, OnModuleInit, Type } from "@nestjs/common";
 
@@ -37,6 +36,7 @@ import { OutputAdapter } from "./ports/output.adapter";
 import { Node, Project, SyntaxKind, Type as TsMorphType } from "ts-morph";
 import type { NestGraphInspectorViewerDirectRunOptions } from "./nest-graph-inspector.type";
 import { RuntimeTraceRecorder } from "./runtime-trace.recorder";
+import { SourceMetadataService } from "./source-metadata.service";
 
 type DependencyNodeKind = "provider" | "controller";
 type DependencyNode = {
@@ -67,8 +67,14 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     NestGraphInspectorOutput["type"],
     OutputAdapter
   >;
-  private readonly tsMorphProject = this.createTsMorphProject();
   private graphOutput: GraphOutput | undefined;
+  private readonly directRunParameterTypes = new WeakMap<
+    (...args: unknown[]) => unknown,
+    string
+  >();
+  private directRunProviderInstances:
+    | { tree: ModuleTree; modules: Map<string, Map<string, unknown>> }
+    | undefined;
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN)
@@ -80,6 +86,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     private readonly jsonOutputAdapter: JsonOutputAdapter,
     private readonly viewerOutputAdapter: ViewerOutputAdapter,
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
+    private readonly sourceMetadata: SourceMetadataService,
   ) {
     this.outputAdapters = {
       http: this.httpOutputAdapter,
@@ -96,14 +103,18 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     const viewerOutputs = outputs.filter(
-      (output): output is Extract<NestGraphInspectorOutput, { type: "viewer" }> =>
+      (
+        output,
+      ): output is Extract<NestGraphInspectorOutput, { type: "viewer" }> =>
         output.type === "viewer",
     );
     const eagerOutputs = outputs.filter((output) => output.type !== "viewer");
 
     // Viewer routes are installed without inspecting the Nest container. Their
     // graph endpoint creates and caches the graph on the first client request.
-    await Promise.all(viewerOutputs.map((output) => this.installViewerOutput(output)));
+    await Promise.all(
+      viewerOutputs.map((output) => this.installViewerOutput(output)),
+    );
 
     // File and standalone HTTP outputs keep their established bootstrap-time
     // publication behavior.
@@ -261,6 +272,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       options,
       this.modulesContainer,
       this.runtimeTraceRecorder,
+      this.sourceMetadata,
     );
   }
 
@@ -292,22 +304,6 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     visit(moduleTree);
     return modules;
-  }
-
-  private createTsMorphProject(): Project {
-    const tsConfigFilePath = join(process.cwd(), "tsconfig.json");
-
-    if (!existsSync(tsConfigFilePath)) {
-      this.logger.warn(
-        `Could not find tsconfig.json at ${tsConfigFilePath}; JSDoc metadata will be skipped.`,
-      );
-      return new Project();
-    }
-
-    return new Project({
-      tsConfigFilePath,
-      skipAddingFilesFromTsConfig: false,
-    });
   }
 
   private enrichModuleMap(moduleMap: ModuleMap): GraphOutput {
@@ -372,28 +368,32 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     moduleName: string,
     providerName: string,
   ): unknown {
-    return this.findModuleTree(
-      this.discovery.scan(),
-      moduleName,
-    )?.providerInstances.get(providerName);
+    const moduleInstances =
+      this.getDirectRunProviderInstances().get(moduleName);
+    return moduleInstances?.get(providerName);
   }
 
-  private findModuleTree(
-    moduleTree: ModuleTree,
-    moduleName: string,
-  ): ModuleTree | undefined {
-    if (moduleTree.name === moduleName) {
-      return moduleTree;
+  private getDirectRunProviderInstances(): Map<string, Map<string, unknown>> {
+    const tree = this.discovery.scan();
+    if (this.directRunProviderInstances?.tree === tree) {
+      return this.directRunProviderInstances.modules;
     }
 
-    for (const child of moduleTree.children) {
-      const match = this.findModuleTree(child, moduleName);
-      if (match) {
-        return match;
+    const modules = new Map<string, Map<string, unknown>>();
+    const visit = (node: ModuleTree): void => {
+      // The previous depth-first lookup returned the first module occurrence.
+      if (!modules.has(node.name)) {
+        modules.set(node.name, node.providerInstances);
       }
-    }
 
-    return undefined;
+      for (const child of node.children) {
+        visit(child);
+      }
+    };
+    visit(tree);
+
+    this.directRunProviderInstances = { tree, modules };
+    return modules;
   }
 
   private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
@@ -447,6 +447,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     methodName: string;
   }): string {
     const { instance, method, methodName } = param;
+    const cachedParameterTypes = this.directRunParameterTypes.get(method);
+    if (cachedParameterTypes) {
+      return cachedParameterTypes;
+    }
+
     const className =
       typeof instance === "function"
         ? instance.name
@@ -454,10 +459,17 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     const sourceTypes = className
       ? this.extractMethodParameterTypesFromProject(className, methodName)
       : undefined;
-    if (sourceTypes) {
-      return sourceTypes;
-    }
+    const parameterTypes =
+      sourceTypes ?? this.runtimeParameterTypes(methodName, method);
+    this.directRunParameterTypes.set(method, parameterTypes);
 
+    return parameterTypes;
+  }
+
+  private runtimeParameterTypes(
+    methodName: string,
+    method: (...args: unknown[]) => unknown,
+  ): string {
     const runtimeNames = this.extractMethodParameterNamesFromFunctionSource(
       methodName,
       method,
@@ -473,14 +485,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     className: string,
     methodName: string,
   ): string | undefined {
-    const targetClass = this.tsMorphProject
-      .getSourceFiles()
-      .flatMap((sourceFile) =>
-        sourceFile.getDescendantsOfKind(SyntaxKind.ClassDeclaration),
-      )
-      .find((classDeclaration) => classDeclaration.getName() === className);
-
-    const method = targetClass?.getInstanceMethod(methodName);
+    const method = this.sourceMetadata.getInstanceMethod(className, methodName);
     if (!method) {
       return undefined;
     }
