@@ -11,7 +11,7 @@ export type HttpServeOptions = {
 export type HttpServeRoute = {
   type: string;
   path: string;
-  callback?: (context: HttpServeRequest) => unknown | Promise<unknown>;
+  callback?: (context: HttpServeRequest) => unknown;
   rawCallback?: (
     req: http.IncomingMessage,
     res: http.ServerResponse,

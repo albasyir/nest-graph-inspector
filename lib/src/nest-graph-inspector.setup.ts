@@ -15,7 +15,6 @@ import { ModuleMap } from "./types/module-map.type";
 import type {
   DirectRunProviderMeta,
   DirectRunProviderMethod,
-  RuntimeTraceSpanType,
 } from "./types/direct-run.type";
 import type {
   GraphOutput,
@@ -26,7 +25,6 @@ import type {
   GraphOutputModule,
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
-  GraphOutputProvider,
 } from "./types/graph-output.type";
 import { HttpOutputAdapter } from "./adapters/http-output.adapter";
 import { FileOutputAdapter } from "./adapters/file-output.adapter";
@@ -597,7 +595,11 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     }
 
     if (type.isNumberLiteral()) {
-      const literal = String(type.getLiteralValue());
+      // getLiteralValue() is typed to also return ts.PseudoBigInt, which would
+      // stringify to "[object Object]" — narrow to number before formatting.
+      const literalValue = type.getLiteralValue();
+      const literal =
+        typeof literalValue === "number" ? String(literalValue) : "number";
       return literal.length <= state.maxLength ? literal : "number";
     }
 

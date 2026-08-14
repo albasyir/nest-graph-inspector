@@ -86,7 +86,7 @@ describe(DirectRunOutputAdapter.name, () => {
         totalSpans: 1,
       },
     });
-    expect(payload.runtimeTrace.spans).toHaveLength(1);
+    expect(payload.runtimeTrace?.spans).toHaveLength(1);
   });
 
   it('responds to browser preflight requests for direct run', async () => {
@@ -164,7 +164,7 @@ describe(DirectRunOutputAdapter.name, () => {
         totalSpans: 1,
       },
     });
-    expect(payload.runtimeTrace.spans).toHaveLength(1);
+    expect(payload.runtimeTrace?.spans).toHaveLength(1);
   });
 
   it('passes JSON args to provider methods', async () => {
