@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { AddressInfo } from 'node:net';
+import net, { AddressInfo } from 'node:net';
 
 import { HttpServeAdapter } from './http-serve.adapter';
 import { ProxyAdapter } from './proxy.adapter';
@@ -59,6 +59,52 @@ describe(ProxyAdapter.name, () => {
     expect(JSON.parse(response.body)).toEqual({
       url: '/api/tags?limit=1',
     });
+  });
+
+  it('does not forward to a foreign origin sent as an absolute-form request target', async () => {
+    const targetRequests: string[] = [];
+    targetServer = http.createServer((req, res) => {
+      targetRequests.push(req.url ?? '');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ url: req.url }));
+    });
+    await listen(targetServer, 0);
+
+    // Stands in for a host the proxy must never be tricked into reaching.
+    let foreignServerWasReached = false;
+    const foreignServer = http.createServer((_req, res) => {
+      foreignServerWasReached = true;
+      res.writeHead(200).end('reached');
+    });
+    await listen(foreignServer, 0);
+
+    try {
+      const targetAddress = targetServer.address() as AddressInfo;
+      const foreignAddress = foreignServer.address() as AddressInfo;
+      const viewerPort = await availablePort();
+
+      await proxyAdapter.serve(
+        {
+          from: `http://127.0.0.1:${viewerPort}`,
+          to: `http://127.0.0.1:${targetAddress.port}`,
+          cors: false,
+        },
+        { httpAdapter: httpServeAdapter, pathPrefix: '/ollama' },
+      );
+      await httpServeAdapter.serve();
+
+      // Node exposes an absolute-form request target verbatim on req.url, so
+      // this is the shape that used to escape the configured target origin.
+      await rawRequest(
+        viewerPort,
+        `GET http://127.0.0.1:${foreignAddress.port}/ollama/steal HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`,
+      );
+
+      expect(foreignServerWasReached).toBe(false);
+      expect(targetRequests).toEqual(['/steal']);
+    } finally {
+      foreignServer.close();
+    }
   });
 
   it('proxies request body to the target origin', async () => {
@@ -427,6 +473,22 @@ function request(
 
     req.on('error', reject);
     req.end(options.body);
+  });
+}
+
+/**
+ * Sends a hand-written request line so the test can use request-target forms
+ * that http.request() will not produce.
+ */
+function rawRequest(port: number, request: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => socket.write(request));
+    let response = '';
+
+    socket.setTimeout(5000, () => socket.destroy(new Error('raw request timed out')));
+    socket.on('data', (chunk) => (response += chunk.toString()));
+    socket.on('error', reject);
+    socket.on('close', () => resolve(response));
   });
 }
 
