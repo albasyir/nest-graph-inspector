@@ -1,13 +1,13 @@
+import type {
+  DirectRunProviderMethod,
+  RuntimeTrace
+} from 'nest-graph-inspector'
+
 export type {
   DirectRunProviderMethod,
   RuntimeTrace,
   RuntimeTraceSpan,
-  RuntimeTraceSpanStatus,
-} from 'nest-graph-inspector'
-
-import type {
-  DirectRunProviderMethod,
-  RuntimeTrace,
+  RuntimeTraceSpanStatus
 } from 'nest-graph-inspector'
 
 export type DirectRunProviderState = {

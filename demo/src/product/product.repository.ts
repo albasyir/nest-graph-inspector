@@ -23,7 +23,7 @@ export class ProductRepository {
   }
 
   async findAll(): Promise<Product[]> {
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     return [...this.products];
   }
 

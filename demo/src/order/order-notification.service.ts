@@ -14,7 +14,9 @@ export class OrderNotificationService {
   ) {}
 
   notifyOrderCreated(order: Order): void {
-    console.log(`[Notification] Order #${order.id} created for user #${order.userId}`);
+    console.log(
+      `[Notification] Order #${order.id} created for user #${order.userId}`,
+    );
   }
 
   notifyOrderShipped(orderId: number): void {

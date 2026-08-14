@@ -16,11 +16,7 @@ import { ProductModule } from '../product/product.module';
     ProductModule,
   ],
   controllers: [OrderController],
-  providers: [
-    OrderRepository,
-    OrderService,
-    OrderNotificationService,
-  ],
+  providers: [OrderRepository, OrderService, OrderNotificationService],
   exports: [OrderService],
 })
 export class OrderModule {}

@@ -2,179 +2,179 @@
 import type {
   DirectRunResultPayload,
   RuntimeTrace,
-  RuntimeTraceSpan,
-} from "~/utils/direct-run-provider";
-import { buildDirectRunRequest } from "~/utils/direct-run-provider";
-import type { AccordionItem } from "@nuxt/ui";
+  RuntimeTraceSpan
+} from '~/utils/direct-run-provider'
+import { buildDirectRunRequest } from '~/utils/direct-run-provider'
+import type { AccordionItem } from '@nuxt/ui'
 
 const props = defineProps<{
-  trace?: RuntimeTrace | null;
-  result?: string;
-  resultType?: string;
-  directRunUrl?: string;
-  running?: boolean;
-}>();
+  trace?: RuntimeTrace | null
+  result?: string
+  resultType?: string
+  directRunUrl?: string
+  running?: boolean
+}>()
 
 const emit = defineEmits<{
-  navigatorOpen: [];
-}>();
+  navigatorOpen: []
+}>()
 
-const LABEL_COL_MIN = 180;
-const LABEL_CHAR_W = 9;
-const LABEL_INDENT_W = 16;
-const LABEL_PAD_W = 28;
-const BAR_MIN_W = 4;
+const LABEL_COL_MIN = 180
+const LABEL_CHAR_W = 9
+const LABEL_INDENT_W = 16
+const LABEL_PAD_W = 28
+const BAR_MIN_W = 4
 
 type RuntimeTraceHistoryItem = Pick<
   RuntimeTrace,
-  "traceId" | "entrypoint" | "status" | "startedAt" | "totalDurationMs"
->;
+  'traceId' | 'entrypoint' | 'status' | 'startedAt' | 'totalDurationMs'
+>
 
-const activeTooltipSpanId = ref<string | null>(null);
-const historyIndex = ref<RuntimeTraceHistoryItem[]>([]);
-const historyTraces = ref<Record<string, RuntimeTrace>>({});
-const historyError = ref("");
-const historyIndexLoading = ref(false);
-const loadingTraceIds = ref<Set<string>>(new Set());
-const rerunningSpanIds = ref<Set<string>>(new Set());
-const activeHistoryTraceId = ref<string>();
+const activeTooltipSpanId = ref<string | null>(null)
+const historyIndex = ref<RuntimeTraceHistoryItem[]>([])
+const historyTraces = ref<Record<string, RuntimeTrace>>({})
+const historyError = ref('')
+const historyIndexLoading = ref(false)
+const loadingTraceIds = ref<Set<string>>(new Set())
+const rerunningSpanIds = ref<Set<string>>(new Set())
+const activeHistoryTraceId = ref<string>()
 
-const selectedTraceId = computed(() => props.trace?.traceId ?? "");
+const selectedTraceId = computed(() => props.trace?.traceId ?? '')
 const historyItems = computed<AccordionItem[]>(() =>
   historyIndex.value.map((summary) => {
-    const trace = historyTraces.value[summary.traceId];
+    const trace = historyTraces.value[summary.traceId]
 
     return {
       label: entrypointLabel(trace ?? summary),
       value: summary.traceId,
       icon: isTraceLoading(summary.traceId)
-        ? "i-lucide-loader-circle"
+        ? 'i-lucide-loader-circle'
         : summary.traceId === selectedTraceId.value
-          ? "i-lucide-circle-check"
-          : "i-lucide-history",
-    };
-  }),
-);
+          ? 'i-lucide-circle-check'
+          : 'i-lucide-history'
+    }
+  })
+)
 
 watch(
   () => props.trace,
   (trace) => {
-    if (!trace) return;
+    if (!trace) return
 
-    historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace };
+    historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace }
     if (historyIndex.value[0]?.traceId !== trace.traceId) {
       historyIndex.value = [
         historySummary(trace),
-        ...historyIndex.value.filter((item) => item.traceId !== trace.traceId),
-      ];
+        ...historyIndex.value.filter(item => item.traceId !== trace.traceId)
+      ]
     }
-    activeHistoryTraceId.value = trace.traceId;
+    activeHistoryTraceId.value = trace.traceId
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
 function traceSpans(trace: RuntimeTrace) {
-  const traceStart = new Date(trace.startedAt).getTime();
-  const total = trace.totalDurationMs || 1;
-  const sortedSpans = [...trace.spans].sort(compareSpans);
-  const childrenByParentId = new Map<string, RuntimeTraceSpan[]>();
-  const rootSpans: RuntimeTraceSpan[] = [];
-  const spanIds = new Set(sortedSpans.map((span) => span.spanId));
+  const traceStart = new Date(trace.startedAt).getTime()
+  const total = trace.totalDurationMs || 1
+  const sortedSpans = [...trace.spans].sort(compareSpans)
+  const childrenByParentId = new Map<string, RuntimeTraceSpan[]>()
+  const rootSpans: RuntimeTraceSpan[] = []
+  const spanIds = new Set(sortedSpans.map(span => span.spanId))
 
   for (const span of sortedSpans) {
     if (span.parentSpanId && spanIds.has(span.parentSpanId)) {
-      const children = childrenByParentId.get(span.parentSpanId) ?? [];
-      children.push(span);
-      childrenByParentId.set(span.parentSpanId, children);
+      const children = childrenByParentId.get(span.parentSpanId) ?? []
+      children.push(span)
+      childrenByParentId.set(span.parentSpanId, children)
     } else {
-      rootSpans.push(span);
+      rootSpans.push(span)
     }
   }
 
-  const rows: Array<{ span: RuntimeTraceSpan; depth: number }> = [];
+  const rows: Array<{ span: RuntimeTraceSpan, depth: number }> = []
   const appendSpan = (span: RuntimeTraceSpan, depth: number) => {
-    rows.push({ span, depth });
+    rows.push({ span, depth })
     for (const child of childrenByParentId.get(span.spanId) ?? []) {
-      appendSpan(child, depth + 1);
+      appendSpan(child, depth + 1)
     }
-  };
+  }
 
-  for (const span of rootSpans) appendSpan(span, 0);
+  for (const span of rootSpans) appendSpan(span, 0)
 
   return rows.map(({ span, depth }) => {
-      const spanStart = new Date(span.startedAt).getTime();
-      const offsetMs = Math.max(0, spanStart - traceStart);
-      const left = (offsetMs / total) * 100;
-      const width = Math.max(
-        (BAR_MIN_W / total) * 100,
-        (span.durationMs / total) * 100,
-      );
-      return { span, depth, left, width };
-    });
+    const spanStart = new Date(span.startedAt).getTime()
+    const offsetMs = Math.max(0, spanStart - traceStart)
+    const left = (offsetMs / total) * 100
+    const width = Math.max(
+      (BAR_MIN_W / total) * 100,
+      (span.durationMs / total) * 100
+    )
+    return { span, depth, left, width }
+  })
 }
 
 function compareSpans(a: RuntimeTraceSpan, b: RuntimeTraceSpan): number {
-  const startedDiff =
-    new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
-  return startedDiff || a.order - b.order;
+  const startedDiff
+    = new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()
+  return startedDiff || a.order - b.order
 }
 
-const TICK_COUNT = 5;
+const TICK_COUNT = 5
 function traceTicks(trace: RuntimeTrace) {
-  const total = trace.totalDurationMs || 1;
-  const labels = new Set<number>();
+  const total = trace.totalDurationMs || 1
+  const labels = new Set<number>()
   return Array.from({ length: TICK_COUNT + 1 }, (_, i) => {
-    const value = Math.round((i / TICK_COUNT) * total);
-    if (labels.has(value)) return null;
-    labels.add(value);
+    const value = Math.round((i / TICK_COUNT) * total)
+    if (labels.has(value)) return null
+    labels.add(value)
     return {
       pct: (value / total) * 100,
-      label: `${value} ms`,
-    };
-  }).filter((tick): tick is { pct: number; label: string } => Boolean(tick));
+      label: `${value} ms`
+    }
+  }).filter((tick): tick is { pct: number, label: string } => Boolean(tick))
 }
 
 function accordionTrace(item: AccordionItem): RuntimeTrace | undefined {
-  return historyTraces.value[String(item.value)];
+  return historyTraces.value[String(item.value)]
 }
 
 function accordionTraceSpans(item: AccordionItem) {
-  const trace = accordionTrace(item);
-  return trace ? traceSpans(trace) : [];
+  const trace = accordionTrace(item)
+  return trace ? traceSpans(trace) : []
 }
 
 function accordionTraceTicks(item: AccordionItem) {
-  const trace = accordionTrace(item);
-  return trace ? traceTicks(trace) : [];
+  const trace = accordionTrace(item)
+  return trace ? traceTicks(trace) : []
 }
 
 function accordionLabelCol(item: AccordionItem): number {
-  const rows = accordionTraceSpans(item);
+  const rows = accordionTraceSpans(item)
   return Math.max(
     LABEL_COL_MIN,
     ...rows.map(
       ({ span, depth }) =>
-        spanLabel(span).length * LABEL_CHAR_W + depth * LABEL_INDENT_W + LABEL_PAD_W,
-    ),
-  );
+        spanLabel(span).length * LABEL_CHAR_W + depth * LABEL_INDENT_W + LABEL_PAD_W
+    )
+  )
 }
 
-function entrypointLabel(trace: Pick<RuntimeTrace, "entrypoint">): string {
-  const className = trace.entrypoint.className;
-  const methodName = trace.entrypoint.methodName;
-  return className ? `${className}.${methodName}()` : `${methodName}()`;
+function entrypointLabel(trace: Pick<RuntimeTrace, 'entrypoint'>): string {
+  const className = trace.entrypoint.className
+  const methodName = trace.entrypoint.methodName
+  return className ? `${className}.${methodName}()` : `${methodName}()`
 }
 
-function startedAtLabel(trace: Pick<RuntimeTrace, "startedAt">): string {
-  return new Date(trace.startedAt).toLocaleString();
+function startedAtLabel(trace: Pick<RuntimeTrace, 'startedAt'>): string {
+  return new Date(trace.startedAt).toLocaleString()
 }
 
-function hasStartedAt(trace: Pick<RuntimeTrace, "startedAt">): boolean {
-  return Boolean(trace.startedAt);
+function hasStartedAt(trace: Pick<RuntimeTrace, 'startedAt'>): boolean {
+  return Boolean(trace.startedAt)
 }
 
-function durationLabel(trace: Pick<RuntimeTrace, "totalDurationMs">): string {
-  return `${trace.totalDurationMs} ms`;
+function durationLabel(trace: Pick<RuntimeTrace, 'totalDurationMs'>): string {
+  return `${trace.totalDurationMs} ms`
 }
 
 function historySummary(trace: RuntimeTrace): RuntimeTraceHistoryItem {
@@ -183,210 +183,209 @@ function historySummary(trace: RuntimeTrace): RuntimeTraceHistoryItem {
     entrypoint: trace.entrypoint,
     startedAt: trace.startedAt,
     status: trace.status,
-    totalDurationMs: trace.totalDurationMs,
-  };
+    totalDurationMs: trace.totalDurationMs
+  }
 }
 
 function normalizeHistoryItem(
-  item: string | RuntimeTraceHistoryItem,
+  item: string | RuntimeTraceHistoryItem
 ): RuntimeTraceHistoryItem {
-  if (typeof item !== "string") return item;
+  if (typeof item !== 'string') return item
 
   return {
     traceId: item,
     entrypoint: { methodName: item },
-    startedAt: "",
-    status: "success",
-    totalDurationMs: 0,
-  };
+    startedAt: '',
+    status: 'success',
+    totalDurationMs: 0
+  }
 }
 
-function statusLabel(trace: Pick<RuntimeTrace, "status">): string {
-  return trace.status === "error" ? "Fail" : "Success";
+function statusLabel(trace: Pick<RuntimeTrace, 'status'>): string {
+  return trace.status === 'error' ? 'Fail' : 'Success'
 }
 
 function spanStatusLabel(span: RuntimeTraceSpan): string {
-  if (isNotAwaitedSpan(span)) return "Not awaited";
-  if (span.status === "error") return "Fail";
-  if (span.status === "partial") return "Partial";
-  return "Success";
+  if (isNotAwaitedSpan(span)) return 'Not awaited'
+  if (span.status === 'error') return 'Fail'
+  if (span.status === 'partial') return 'Partial'
+  return 'Success'
 }
 
-function statusColor(trace: Pick<RuntimeTrace, "status">) {
-  return trace.status === "error" ? "error" : "success";
+function statusColor(trace: Pick<RuntimeTrace, 'status'>) {
+  return trace.status === 'error' ? 'error' : 'success'
 }
 
 function historyItem(value: unknown): RuntimeTraceHistoryItem | undefined {
-  const traceId = String(value);
-  const trace = historyTraces.value[traceId];
+  const traceId = String(value)
+  const trace = historyTraces.value[traceId]
   return trace
     ? historySummary(trace)
-    : historyIndex.value.find((item) => item.traceId === traceId);
+    : historyIndex.value.find(item => item.traceId === traceId)
 }
 
 function shortTraceId(traceId: string): string {
-  return traceId.slice(0, 8);
+  return traceId.slice(0, 8)
 }
 
 function isTraceLoading(traceId: string): boolean {
-  return loadingTraceIds.value.has(traceId);
+  return loadingTraceIds.value.has(traceId)
 }
 
 function isSpanRerunning(spanId: string): boolean {
-  return rerunningSpanIds.value.has(spanId);
+  return rerunningSpanIds.value.has(spanId)
 }
 
 function canRerunSpan(span: RuntimeTraceSpan): boolean {
   return Boolean(
-    props.directRunUrl && span.moduleName && span.className && span.methodName,
-  );
+    props.directRunUrl && span.moduleName && span.className && span.methodName
+  )
 }
 
 function barColor(span: RuntimeTraceSpan): string {
-  if (span.status === "error" || isNotAwaitedSpan(span))
-    return "var(--ui-color-error-500)";
-  if (span.status === "cancelled" || span.status === "partial")
-    return "var(--ui-color-neutral-500)";
-  return "var(--ui-color-success-500)";
+  if (span.status === 'error' || isNotAwaitedSpan(span))
+    return 'var(--ui-color-error-500)'
+  if (span.status === 'cancelled' || span.status === 'partial')
+    return 'var(--ui-color-neutral-500)'
+  return 'var(--ui-color-success-500)'
 }
 
 function isNotAwaitedSpan(span: RuntimeTraceSpan): boolean {
-  return span.metadata?.awaited === false;
+  return span.metadata?.awaited === false
 }
 
 function spanLabel(span: RuntimeTraceSpan): string {
   return span.methodName
     ? `${span.className ?? span.name}.${span.methodName}()`
-    : span.name;
+    : span.name
 }
 
 function previewLabel(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'string') return value
 
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(value, null, 2)
   } catch {
-    return String(value);
+    return String(value)
   }
 }
 
 function toggleTooltip(spanId: string): void {
-  activeTooltipSpanId.value =
-    activeTooltipSpanId.value === spanId ? null : spanId;
+  activeTooltipSpanId.value
+    = activeTooltipSpanId.value === spanId ? null : spanId
 }
 
 function historyUrl(path: string): string {
-  if (!props.directRunUrl) return "";
-  return `${props.directRunUrl.replace(/\/$/, "")}/history/${path}.json`;
+  if (!props.directRunUrl) return ''
+  return `${props.directRunUrl.replace(/\/$/, '')}/history/${path}.json`
 }
 
 async function fetchHistoryIndex(): Promise<void> {
-  const url = historyUrl("index");
-  if (!url) return;
+  const url = historyUrl('index')
+  if (!url) return
 
-  historyIndexLoading.value = true;
+  historyIndexLoading.value = true
   try {
-    const items = await $fetch<Array<string | RuntimeTraceHistoryItem>>(url);
-    const latestFirstItems = [...items].map(normalizeHistoryItem).reverse();
-    const selectedTrace = historyTraces.value[selectedTraceId.value];
+    const items = await $fetch<Array<string | RuntimeTraceHistoryItem>>(url)
+    const latestFirstItems = [...items].map(normalizeHistoryItem).reverse()
+    const selectedTrace = historyTraces.value[selectedTraceId.value]
     historyIndex.value = selectedTraceId.value
       ? [
           selectedTrace
             ? historySummary(selectedTrace)
             : normalizeHistoryItem(selectedTraceId.value),
           ...latestFirstItems.filter(
-            (item) => item.traceId !== selectedTraceId.value,
-          ),
+            item => item.traceId !== selectedTraceId.value
+          )
         ]
-      : latestFirstItems;
-    activeHistoryTraceId.value ||=
-      selectedTraceId.value || historyIndex.value[0]?.traceId;
-    historyError.value = "";
+      : latestFirstItems
+    activeHistoryTraceId.value
+      ||= selectedTraceId.value || historyIndex.value[0]?.traceId
+    historyError.value = ''
   } catch (err) {
-    historyError.value =
-      err instanceof Error ? err.message : "Failed to load history.";
+    historyError.value
+      = err instanceof Error ? err.message : 'Failed to load history.'
   } finally {
-    historyIndexLoading.value = false;
+    historyIndexLoading.value = false
   }
 }
 
 async function fetchHistoryTrace(traceId: string): Promise<void> {
-  if (historyTraces.value[traceId] || isTraceLoading(traceId)) return;
+  if (historyTraces.value[traceId] || isTraceLoading(traceId)) return
 
-  const url = historyUrl(encodeURIComponent(traceId));
-  if (!url) return;
+  const url = historyUrl(encodeURIComponent(traceId))
+  if (!url) return
 
-  loadingTraceIds.value = new Set([...loadingTraceIds.value, traceId]);
+  loadingTraceIds.value = new Set([...loadingTraceIds.value, traceId])
   try {
-    const trace = await $fetch<RuntimeTrace>(url);
-    historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace };
-    activeTooltipSpanId.value = null;
-    historyError.value = "";
+    const trace = await $fetch<RuntimeTrace>(url)
+    historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace }
+    activeTooltipSpanId.value = null
+    historyError.value = ''
   } catch (err) {
-    historyError.value =
-      err instanceof Error ? err.message : "Failed to load trace.";
+    historyError.value
+      = err instanceof Error ? err.message : 'Failed to load trace.'
   } finally {
-    const nextLoadingTraceIds = new Set(loadingTraceIds.value);
-    nextLoadingTraceIds.delete(traceId);
-    loadingTraceIds.value = nextLoadingTraceIds;
+    const nextLoadingTraceIds = new Set(loadingTraceIds.value)
+    nextLoadingTraceIds.delete(traceId)
+    loadingTraceIds.value = nextLoadingTraceIds
   }
 }
 
 async function rerunSpan(span: RuntimeTraceSpan): Promise<void> {
-  if (!canRerunSpan(span) || isSpanRerunning(span.spanId)) return;
+  if (!canRerunSpan(span) || isSpanRerunning(span.spanId)) return
 
-  rerunningSpanIds.value = new Set([...rerunningSpanIds.value, span.spanId]);
+  rerunningSpanIds.value = new Set([...rerunningSpanIds.value, span.spanId])
   try {
     const response = await $fetch<DirectRunResultPayload>(props.directRunUrl!, {
-      method: "POST",
+      method: 'POST',
       body: buildDirectRunRequest({
         moduleName: span.moduleName!,
         providerName: span.className!,
         methodName: span.methodName!,
-        args: Array.isArray(span.args) ? span.args : [],
-      }),
-    });
+        args: Array.isArray(span.args) ? span.args : []
+      })
+    })
     if (response.runtimeTrace) {
       historyTraces.value = {
         ...historyTraces.value,
-        [response.runtimeTrace.traceId]: response.runtimeTrace,
-      };
+        [response.runtimeTrace.traceId]: response.runtimeTrace
+      }
       historyIndex.value = [
         historySummary(response.runtimeTrace),
         ...historyIndex.value.filter(
-          (item) => item.traceId !== response.runtimeTrace?.traceId,
-        ),
-      ];
-      activeHistoryTraceId.value = response.runtimeTrace.traceId;
+          item => item.traceId !== response.runtimeTrace?.traceId
+        )
+      ]
+      activeHistoryTraceId.value = response.runtimeTrace.traceId
     } else {
-      await fetchHistoryIndex();
+      await fetchHistoryIndex()
     }
-    historyError.value = "";
+    historyError.value = ''
   } catch (err) {
-    historyError.value =
-      err instanceof Error ? err.message : "Failed to rerun span.";
+    historyError.value
+      = err instanceof Error ? err.message : 'Failed to rerun span.'
   } finally {
-    const nextRerunningSpanIds = new Set(rerunningSpanIds.value);
-    nextRerunningSpanIds.delete(span.spanId);
-    rerunningSpanIds.value = nextRerunningSpanIds;
+    const nextRerunningSpanIds = new Set(rerunningSpanIds.value)
+    nextRerunningSpanIds.delete(span.spanId)
+    rerunningSpanIds.value = nextRerunningSpanIds
   }
 }
 
 watch(
   () => props.directRunUrl,
   () => {
-    void fetchHistoryIndex();
+    void fetchHistoryIndex()
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
 watch(activeHistoryTraceId, (traceId) => {
   if (traceId && !historyTraces.value[traceId]) {
-    void fetchHistoryTrace(traceId);
+    void fetchHistoryTrace(traceId)
   }
-});
-
+})
 </script>
 
 <template>
@@ -395,7 +394,10 @@ watch(activeHistoryTraceId, (traceId) => {
       v-if="running && !trace"
       class="flex items-center gap-2 p-3 text-sm text-muted"
     >
-      <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+      <UIcon
+        name="i-lucide-loader-circle"
+        class="size-4 animate-spin"
+      />
       Running inspection…
     </div>
     <section
@@ -406,7 +408,10 @@ watch(activeHistoryTraceId, (traceId) => {
         v-if="historyIndexLoading && !historyItems.length"
         class="flex items-center gap-2 p-3 text-sm text-muted"
       >
-        <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="size-4 animate-spin"
+        />
         Loading execution history…
       </div>
       <UAccordion
@@ -415,16 +420,22 @@ watch(activeHistoryTraceId, (traceId) => {
         :items="historyItems"
         :ui="{
           trigger:
-            'px-3 transition-colors hover:bg-elevated/50 data-[state=open]:bg-elevated/70',
+            'px-3 transition-colors hover:bg-elevated/50 data-[state=open]:bg-elevated/70'
         }"
       >
         <template #trailing="{ item }">
           <div class="ms-auto flex flex-wrap items-center justify-end gap-2">
             <template v-if="historyItem(item.value)">
-              <UBadge variant="soft" color="neutral">
+              <UBadge
+                variant="soft"
+                color="neutral"
+              >
                 {{ shortTraceId(String(item.value)) }}
               </UBadge>
-              <UBadge variant="soft" :color="statusColor(historyItem(item.value)!)">
+              <UBadge
+                variant="soft"
+                :color="statusColor(historyItem(item.value)!)"
+              >
                 {{ statusLabel(historyItem(item.value)!) }}
               </UBadge>
               <UBadge
@@ -442,7 +453,11 @@ watch(activeHistoryTraceId, (traceId) => {
                 {{ durationLabel(historyItem(item.value)!) }}
               </UBadge>
             </template>
-            <UBadge v-else variant="soft" color="neutral">
+            <UBadge
+              v-else
+              variant="soft"
+              color="neutral"
+            >
               {{ shortTraceId(String(item.value)) }}
             </UBadge>
             <UBadge
@@ -456,7 +471,7 @@ watch(activeHistoryTraceId, (traceId) => {
               name="i-lucide-chevron-down"
               class="size-5 shrink-0 text-muted transition-transform duration-200"
               :class="{
-                'rotate-180': activeHistoryTraceId === String(item.value),
+                'rotate-180': activeHistoryTraceId === String(item.value)
               }"
             />
           </div>
@@ -464,15 +479,20 @@ watch(activeHistoryTraceId, (traceId) => {
 
         <template #content="{ item }">
           <!-- Gantt chart -->
-          <div v-if="accordionTrace(item)" class="exec-seq__gantt">
+          <div
+            v-if="accordionTrace(item)"
+            class="exec-seq__gantt"
+          >
             <!-- Tick axis -->
             <div
               class="exec-seq__axis"
               :style="{
-                gridTemplateColumns: `${accordionLabelCol(item)}px minmax(0, 1fr)`,
+                gridTemplateColumns: `${accordionLabelCol(item)}px minmax(0, 1fr)`
               }"
             >
-              <div class="exec-seq__axis-label">Timeline</div>
+              <div class="exec-seq__axis-label">
+                Timeline
+              </div>
               <div class="exec-seq__axis-track">
                 <div
                   v-for="tick in accordionTraceTicks(item)"
@@ -498,10 +518,13 @@ watch(activeHistoryTraceId, (traceId) => {
                   class="exec-seq__row-label"
                   :style="{
                     width: accordionLabelCol(item) + 'px',
-                    paddingLeft: 12 + depth * LABEL_INDENT_W + 'px',
+                    paddingLeft: 12 + depth * LABEL_INDENT_W + 'px'
                   }"
                 >
-                  <span class="exec-seq__row-name" :title="spanLabel(span)">{{
+                  <span
+                    class="exec-seq__row-name"
+                    :title="spanLabel(span)"
+                  >{{
                     spanLabel(span)
                   }}</span>
                 </div>
@@ -522,7 +545,7 @@ watch(activeHistoryTraceId, (traceId) => {
                     :content="{ side: 'top', align: 'center', sideOffset: 8 }"
                     :ui="{
                       content:
-                        '!h-auto !items-stretch !flex-col !gap-2 !p-2 w-[min(80vw,720px)] whitespace-normal',
+                        '!h-auto !items-stretch !flex-col !gap-2 !p-2 w-[min(80vw,720px)] whitespace-normal'
                     }"
                     :disable-hoverable-content="true"
                     :ignore-non-keyboard-focus="true"
@@ -539,7 +562,7 @@ watch(activeHistoryTraceId, (traceId) => {
                       :style="{
                         left: left + '%',
                         width: width + '%',
-                        background: barColor(span),
+                        background: barColor(span)
                       }"
                       role="button"
                       tabindex="0"
@@ -547,9 +570,10 @@ watch(activeHistoryTraceId, (traceId) => {
                       @keydown.enter.prevent="toggleTooltip(span.spanId)"
                       @keydown.space.prevent="toggleTooltip(span.spanId)"
                     >
-                      <span v-if="width > 8" class="exec-seq__bar-label"
-                        >{{ span.durationMs }} ms</span
-                      >
+                      <span
+                        v-if="width > 8"
+                        class="exec-seq__bar-label"
+                      >{{ span.durationMs }} ms</span>
                     </div>
                     <div
                       class="absolute top-1/2 right-2 z-1 flex -translate-y-1/2 items-center gap-1.5"
@@ -581,9 +605,7 @@ watch(activeHistoryTraceId, (traceId) => {
                         <div class="exec-seq__tooltip-summary">
                           <div class="exec-seq__tooltip-card">
                             <span class="exec-seq__card-label">Duration</span>
-                            <span class="exec-seq__card-value"
-                              >{{ span.durationMs }} ms</span
-                            >
+                            <span class="exec-seq__card-value">{{ span.durationMs }} ms</span>
                           </div>
                           <div class="exec-seq__tooltip-card">
                             <span class="exec-seq__card-label">Status</span>
@@ -594,7 +616,7 @@ watch(activeHistoryTraceId, (traceId) => {
                                   ? 'exec-seq__card-value--fail'
                                   : isNotAwaitedSpan(span)
                                     ? 'exec-seq__card-value--fail'
-                                  : 'exec-seq__card-value--success'
+                                    : 'exec-seq__card-value--success'
                               "
                             >
                               {{ spanStatusLabel(span) }}
@@ -616,23 +638,39 @@ watch(activeHistoryTraceId, (traceId) => {
               </div>
             </div>
           </div>
-          <div v-else class="flex items-center gap-2 p-3 text-sm text-muted">
-            <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          <div
+            v-else
+            class="flex items-center gap-2 p-3 text-sm text-muted"
+          >
+            <UIcon
+              name="i-lucide-loader-circle"
+              class="size-4 animate-spin"
+            />
             Loading trace…
           </div>
         </template>
       </UAccordion>
-      <p v-if="historyError" class="text-sm text-error">{{ historyError }}</p>
+      <p
+        v-if="historyError"
+        class="text-sm text-error"
+      >
+        {{ historyError }}
+      </p>
     </section>
     <div
       v-else
       class="flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-default p-8 text-center"
     >
       <div class="flex size-16 items-center justify-center rounded-2xl bg-primary/10">
-        <UIcon name="i-lucide-route" class="size-8 text-primary" />
+        <UIcon
+          name="i-lucide-route"
+          class="size-8 text-primary"
+        />
       </div>
       <div class="space-y-2">
-        <p class="text-lg font-medium">No execution data yet</p>
+        <p class="text-lg font-medium">
+          No execution data yet
+        </p>
         <p class="max-w-md text-sm text-muted">
           Run an inspection from Navigator to show the execution sequence history here.
         </p>

@@ -17,7 +17,7 @@ export class OrderRepository {
       productId: 1,
       quantity: 2,
       status: 'pending',
-    }
+    },
   ];
   private nextId = 1;
 
@@ -38,24 +38,27 @@ export class OrderRepository {
   }
 
   async findAll(): Promise<Order[]> {
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     return [...this.orders];
   }
 
   async findByUserId(userId: number): Promise<Order[]> {
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     await this.findAll();
 
     await this.findAll();
 
-    if(userId === 0) throw new NotFoundException('User not found');
+    if (userId === 0) throw new NotFoundException('User not found');
 
     return this.orders.filter((o) => o.userId === userId);
   }
 
-  async updateStatus(id: number, status: Order['status']): Promise<Order | undefined> {
-    await new Promise(resolve => setTimeout(resolve, 100));
+  async updateStatus(
+    id: number,
+    status: Order['status'],
+  ): Promise<Order | undefined> {
+    await new Promise((resolve) => setTimeout(resolve, 100));
     const order = this.orders.find((o) => o.id === id);
     if (order) {
       order.status = status;
