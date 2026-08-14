@@ -1,0 +1,8 @@
+# Default owner for everything in the repository.
+*                       @albasyir
+
+# The published package — changes here reach every consumer on npm.
+/lib/                   @albasyir
+
+# Release, publish, and deploy plumbing.
+/.github/workflows/     @albasyir

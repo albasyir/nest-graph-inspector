@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability for the library or the graph viewer.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - lib (the nest-graph-inspector npm package)
+        - site (documentation site / graph viewer)
+        - demo (the NestJS demo app)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation you hit, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+      description: |
+        If this changes the module options or the graph JSON output, sketch the
+        shape you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried or considered?

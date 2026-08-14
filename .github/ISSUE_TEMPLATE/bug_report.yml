@@ -1,0 +1,83 @@
+name: Bug report
+description: Something in the library, demo, or viewer does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here — follow
+        [SECURITY.md](https://github.com/albasyir/nest-graph-inspector/blob/main/SECURITY.md)
+        instead.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project is affected?
+      options:
+        - lib (the nest-graph-inspector npm package)
+        - site (documentation site / graph viewer)
+        - demo (the NestJS demo app)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: package-version
+    attributes:
+      label: nest-graph-inspector version
+      placeholder: e.g. 1.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: nest-version
+    attributes:
+      label: NestJS version
+      placeholder: e.g. @nestjs/core 11.0.5
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: e.g. 22.14.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: |
+        The module configuration you used, plus the steps to trigger the problem.
+        A link to a minimal repository is the fastest path to a fix.
+      value: |
+        ```ts
+        @Module({
+          imports: [NestGraphInspectorModule.forRoot({ /* your options */ })],
+        })
+        export class AppModule {}
+        ```
+
+        Steps:
+        1.
+        2.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Console output or stack trace. Remove anything sensitive.
+      render: shell

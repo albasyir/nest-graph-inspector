@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://albasyir.github.io/nest-graph-inspector/
+    about: Setup guide, configuration options, and how the graph is built.
+  - name: Report a security vulnerability
+    url: https://github.com/albasyir/nest-graph-inspector/blob/main/SECURITY.md
+    about: Security issues must not be filed as public issues.
