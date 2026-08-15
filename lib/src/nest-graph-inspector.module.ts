@@ -15,6 +15,7 @@ import { HttpServeAdapter } from './adapters/http-serve.adapter';
 import { DirectRunOutputAdapter } from './adapters/direct-run-output.adapter';
 import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 import { SourceMetadataService } from './source-metadata.service';
+import { AccessTokenService } from './access-token.service';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [
@@ -51,6 +52,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     NestGraphInspectorSetup,
     DiscoveryAdapter,
     SourceMetadataService,
+    AccessTokenService,
     JsonOutputAdapter,
     FileOutputAdapter,
     HttpServeAdapter,

@@ -6,6 +6,7 @@ import type { GraphOutput } from '../types/graph-output.type';
 import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
 import { FileOutputAdapter } from './file-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
+import { AccessTokenService } from '../access-token.service';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 
@@ -43,6 +44,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
   constructor(
     private readonly fileOutputAdapter: FileOutputAdapter,
     private readonly httpServeAdapter: HttpServeAdapter,
+    private readonly accessTokenService: AccessTokenService,
   ) {}
 
   async execute(
@@ -65,6 +67,7 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
         origin,
         host: config.host,
         port: config.port,
+        authorize: this.accessTokenService.createHttpGuard(),
       },
       [
         httpAdapter.get(
@@ -118,8 +121,23 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
     const markdownOutputUrl = new URL(markdownOutputPath, registration.origin);
 
     return {
-      message: `Graph inspector HTTP endpoints are installed at ${informationOutputUrl}, ${jsonOutputUrl}, and ${markdownOutputUrl}`,
+      message: `Graph inspector HTTP endpoints are installed at ${informationOutputUrl}, ${jsonOutputUrl}, and ${markdownOutputUrl}${this.accessTokenNotice()}`,
     };
+  }
+
+  /**
+   * These endpoints are token-gated, and this log line is the only place an
+   * operator can pick a token up, so it is stated once rather than repeated
+   * into each URL.
+   */
+  private accessTokenNotice(): string {
+    if (!this.accessTokenService.isEnabled()) {
+      return '';
+    }
+
+    return `. Access token (expires at ${this.accessTokenService
+      .currentExpiresAt()
+      .toISOString()}): ${this.accessTokenService.current()}`;
   }
 
   normalizePath(path = '/__nest-graph-inspector'): string {

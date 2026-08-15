@@ -3,6 +3,7 @@ import https from 'node:https';
 import { URL } from 'node:url';
 import { Injectable } from '@nestjs/common';
 import { HttpServeAdapter } from './http-serve.adapter';
+import type { HttpServeAuthorize } from './http-serve.adapter';
 import type {
   ProxyCorsOptions,
   ProxyGateway,
@@ -18,6 +19,7 @@ export class ProxyAdapter implements ProxyGateway {
     internalOptions: {
       httpAdapter?: HttpServeAdapter;
       pathPrefix?: string;
+      authorize?: HttpServeAuthorize;
     } = {},
   ): Promise<void> {
     const fromUrl = this.normalizeUrl(options.from);
@@ -31,7 +33,7 @@ export class ProxyAdapter implements ProxyGateway {
       : undefined;
 
     httpServeAdapter.register(
-      { origin: fromUrl.origin },
+      { origin: fromUrl.origin, authorize: internalOptions.authorize },
       (pathPrefix ? [pathPrefix, `${pathPrefix}/*`] : ['*']).map((path) => ({
         type: '*',
         path,

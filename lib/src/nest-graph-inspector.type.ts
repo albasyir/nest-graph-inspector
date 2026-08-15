@@ -9,6 +9,33 @@ export type NestGraphInspectorViewerDirectRunOptions = {
   path?: string;
 };
 
+export type NestGraphInspectorAccessTokenOptions = {
+  /**
+   * Whether inspector endpoints require an access token.
+   *
+   * Defaults to `true`. Turning this off exposes the dependency graph and the
+   * direct-run endpoint to anyone who can reach the inspector port.
+   */
+  enabled?: boolean;
+
+  /**
+   * How long an issued token stays valid, in milliseconds.
+   *
+   * Defaults to three hours. A token issued at 13:00 stops working at 16:00,
+   * and the next request mints a replacement.
+   */
+  ttlMs?: number;
+
+  /**
+   * Signing secret for issued tokens.
+   *
+   * Defaults to the `NEST_GRAPH_INSPECTOR_TOKEN_SECRET` environment variable,
+   * and falls back to a random per-process secret. Set it when tokens must
+   * survive an application restart.
+   */
+  secret?: string;
+};
+
 export type NestGraphInspectorOutput =
   | {
       type: 'viewer';
@@ -52,6 +79,18 @@ export interface NestGraphInspectorModuleOptions {
    *   viewer URL and the endpoint path to enter in the viewer.
    */
   outputs?: NestGraphInspectorOutput[];
+
+  /**
+   * Access token protection for every endpoint the inspector installs.
+   *
+   * Inspector endpoints expose the application's internal structure, and the
+   * direct-run endpoint invokes live provider methods, so they are gated by a
+   * short-lived token by default. The token is embedded in the viewer link
+   * printed on startup, and can also be sent as `Authorization: Bearer`, an
+   * `x-graph-inspector-token` header, or an `__inspector_token` query
+   * parameter.
+   */
+  accessToken?: NestGraphInspectorAccessTokenOptions;
 
   /**
    * Provider names that should be hidden from module exports, provider lists,

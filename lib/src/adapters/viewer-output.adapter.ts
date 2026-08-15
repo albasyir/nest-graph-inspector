@@ -14,6 +14,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 import type { RuntimeTrace } from '../types/direct-run.type';
+import { AccessTokenService } from '../access-token.service';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 type ViewerOutputInternalConfig = ViewerOutputConfig & {
@@ -36,6 +37,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     private readonly httpServeAdapter: HttpServeAdapter,
     private readonly directRunOutputAdapter: DirectRunOutputAdapter,
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
+    private readonly accessTokenService: AccessTokenService,
   ) {}
 
   async execute(
@@ -65,6 +67,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       {
         httpAdapter: this.httpServeAdapter,
         pathPrefix: ollama.path,
+        authorize: this.accessTokenService.createHttpGuard(),
       },
     );
 
@@ -74,6 +77,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
           origin: this.httpOrigin(config),
           host: config.host,
           port: config.port,
+          authorize: this.accessTokenService.createHttpGuard(),
         },
         [
           this.directRunOutputAdapter.createRoute(
@@ -111,13 +115,19 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       throw err;
     }
 
-    const graphEndpoint = new URL(path, this.httpOrigin(config)).toString();
+    // The token rides in the graph endpoint URL so the hosted viewer carries
+    // it into every follow-up request without the developer copying it by hand.
+    const graphEndpoint = this.accessTokenService
+      .appendToUrl(new URL(path, this.httpOrigin(config)))
+      .toString();
     const base64Origin = Buffer.from(graphEndpoint).toString('base64url');
 
     const viewerLink = `${this.viewerBaseUrl}/view/${base64Origin}`;
 
     return {
-      message: `Graph Viewer is available at ${viewerLink}`,
+      message: this.accessTokenService.isEnabled()
+        ? `Graph Viewer is available at ${viewerLink} (access token expires at ${this.accessTokenService.currentExpiresAt().toISOString()})`
+        : `Graph Viewer is available at ${viewerLink}`,
     };
   }
 
