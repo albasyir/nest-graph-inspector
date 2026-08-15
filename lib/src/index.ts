@@ -3,6 +3,7 @@ export * from './nest-graph-inspector.type';
 export {
   ACCESS_TOKEN_HEADER,
   ACCESS_TOKEN_QUERY_PARAM,
+  AccessTokenService,
   DEFAULT_ACCESS_TOKEN_TTL_MS,
 } from './access-token.service';
 export {

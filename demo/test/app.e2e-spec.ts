@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { AccessTokenService } from 'nest-graph-inspector';
 import { AppModule } from './../src/app.module';
 
 describe('ProductController (e2e)', () => {
@@ -48,8 +49,13 @@ describe('ProductController (e2e)', () => {
       .expect(200)
       .expect('Featured product');
 
+    // The graph endpoint is token gated, and the token is held by the
+    // inspector running inside this application.
+    const accessToken = app.get(AccessTokenService, { strict: false });
+
     const graphResponse = await request('http://localhost:53371')
       .get('/__graph-inspector/output.json')
+      .set('Authorization', `Bearer ${accessToken.current()}`)
       .expect('content-type', /json/)
       .expect(200);
 
