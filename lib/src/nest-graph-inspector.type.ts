@@ -9,6 +9,44 @@ export type NestGraphInspectorViewerDirectRunOptions = {
   path?: string;
 };
 
+export type NestGraphInspectorBruteForceOptions = {
+  /**
+   * Whether failed token guesses are counted per client address.
+   *
+   * Defaults to `true`.
+   */
+  enabled?: boolean;
+
+  /**
+   * Invalid tokens a client may send inside one window before being blocked.
+   *
+   * Defaults to 10. A request with no token at all, or with a genuine token
+   * that has expired, is not a guess and is not counted.
+   */
+  maxFailures?: number;
+
+  /**
+   * How long failed guesses accumulate before the count resets, in
+   * milliseconds. Defaults to one minute.
+   */
+  windowMs?: number;
+
+  /**
+   * How long a blocked client is refused with `429`, in milliseconds.
+   *
+   * Defaults to fifteen minutes.
+   */
+  blockMs?: number;
+
+  /**
+   * Upper bound on how many client addresses are tracked at once.
+   *
+   * Defaults to 1000, so the tracker itself cannot be grown without limit by
+   * requests from many addresses.
+   */
+  maxTrackedClients?: number;
+};
+
 export type NestGraphInspectorAccessTokenOptions = {
   /**
    * Whether inspector endpoints require an access token.
@@ -32,8 +70,20 @@ export type NestGraphInspectorAccessTokenOptions = {
    * Defaults to the `NEST_GRAPH_INSPECTOR_TOKEN_SECRET` environment variable,
    * and falls back to a random per-process secret. Set it when tokens must
    * survive an application restart.
+   *
+   * Keep it at least 32 characters. A short secret can be recovered offline
+   * from a single leaked token, because a token exposes both the payload it
+   * signs and the signature itself.
    */
   secret?: string;
+
+  /**
+   * Per-client lockout for repeated invalid tokens.
+   *
+   * Clients are identified by socket address, not by a forwarded header,
+   * since a header can be set by the caller.
+   */
+  bruteForce?: NestGraphInspectorBruteForceOptions;
 };
 
 export type NestGraphInspectorOutput =

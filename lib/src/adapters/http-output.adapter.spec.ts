@@ -359,6 +359,91 @@ describe(HttpOutputAdapter.name, () => {
       expect(response.statusCode).toBe(200);
     });
 
+    it('blocks a client that keeps guessing tokens', async () => {
+      const port = await availablePort();
+      const limited = await Test.createTestingModule({
+        providers: [
+          FileOutputAdapter,
+          HttpServeAdapter,
+          HttpOutputAdapter,
+          AccessTokenService,
+          {
+            provide: MODULE_OPTIONS_TOKEN,
+            useValue: {
+              accessToken: {
+                bruteForce: { maxFailures: 3, blockMs: 60_000 },
+              },
+            },
+          },
+        ],
+      }).compile();
+
+      await limited.get(HttpOutputAdapter).execute({} as never, {
+        type: 'http',
+        host: '127.0.0.1',
+        port,
+        path: '/graph',
+      });
+
+      const url = `http://127.0.0.1:${port}/graph/output.json`;
+      const guess = (attempt: number) =>
+        httpGet(url, { authorization: `Bearer ngi1.payload.guess${attempt}` });
+
+      // Three guesses are allowed; the third is what trips the block.
+      expect((await guess(1)).statusCode).toBe(401);
+      expect((await guess(2)).statusCode).toBe(401);
+      expect((await guess(3)).statusCode).toBe(401);
+
+      const blocked = await guess(4);
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.headers['retry-after']).toBe('60');
+      expect(JSON.parse(blocked.body)).toMatchObject({ reason: 'blocked' });
+
+      // A valid token is refused too: the block is on the client, not the token.
+      const withValidToken = await httpGet(url, {
+        authorization: `Bearer ${limited.get(AccessTokenService).current()}`,
+      });
+      expect(withValidToken.statusCode).toBe(429);
+
+      await limited.close();
+    });
+
+    it('does not count a request that presents no token as a guess', async () => {
+      const port = await availablePort();
+      const limited = await Test.createTestingModule({
+        providers: [
+          FileOutputAdapter,
+          HttpServeAdapter,
+          HttpOutputAdapter,
+          AccessTokenService,
+          {
+            provide: MODULE_OPTIONS_TOKEN,
+            useValue: { accessToken: { bruteForce: { maxFailures: 2 } } },
+          },
+        ],
+      }).compile();
+
+      await limited.get(HttpOutputAdapter).execute({} as never, {
+        type: 'http',
+        host: '127.0.0.1',
+        port,
+        path: '/graph',
+      });
+      const url = `http://127.0.0.1:${port}/graph/output.json`;
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        expect((await httpGet(url)).statusCode).toBe(401);
+      }
+
+      await expect(
+        httpGet(url, {
+          authorization: `Bearer ${limited.get(AccessTokenService).current()}`,
+        }),
+      ).resolves.toMatchObject({ statusCode: 200 });
+
+      await limited.close();
+    });
+
     it('serves the endpoint unguarded when token protection is turned off', async () => {
       const port = await availablePort();
       const unguarded = await Test.createTestingModule({

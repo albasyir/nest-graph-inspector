@@ -1,9 +1,10 @@
 import type http from 'node:http';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 import type { HttpServeAuthorize } from './adapters/http-serve.adapter';
+import { AccessAttemptLimiter } from './access-attempt-limiter';
 
 /**
  * Query parameter carrying the access token.
@@ -21,6 +22,21 @@ export const DEFAULT_ACCESS_TOKEN_TTL_MS = 3 * 60 * 60 * 1000;
 
 const TOKEN_PREFIX = 'ngi1';
 const SECRET_ENV_KEY = 'NEST_GRAPH_INSPECTOR_TOKEN_SECRET';
+
+/**
+ * Below this, a configured secret is worth brute forcing offline: a token's
+ * payload and signature are both readable, so anyone holding one leaked token
+ * can test candidate secrets locally, without touching the application.
+ */
+const MIN_SAFE_SECRET_LENGTH = 32;
+
+/**
+ * Rejections that mean a token was actually presented and did not check out.
+ *
+ * A missing token is not a guess, and an expired one can only be produced by
+ * something that already held a real token, so neither counts toward a lockout.
+ */
+const GUESS_REJECTIONS: ReadonlySet<string> = new Set(['malformed', 'signature']);
 
 export type AccessTokenPayload = {
   /** Issued at, epoch milliseconds. */
@@ -61,9 +77,11 @@ const REJECTION_MESSAGES: Record<AccessTokenRejection, string> = {
  */
 @Injectable()
 export class AccessTokenService {
+  private readonly logger = new Logger(AccessTokenService.name);
   private readonly enabled: boolean;
   private readonly secret: Buffer;
   readonly ttlMs: number;
+  readonly limiter: AccessAttemptLimiter;
   private issued: { token: string; payload: AccessTokenPayload } | undefined;
 
   constructor(
@@ -76,6 +94,7 @@ export class AccessTokenService {
     this.enabled = accessToken?.enabled ?? true;
     this.ttlMs = this.normalizeTtlMs(accessToken?.ttlMs);
     this.secret = this.resolveSecret(accessToken?.secret);
+    this.limiter = new AccessAttemptLimiter(accessToken?.bruteForce);
   }
 
   isEnabled(): boolean {
@@ -171,9 +190,30 @@ export class AccessTokenService {
    */
   createHttpGuard(): HttpServeAuthorize {
     return (req) => {
+      if (!this.enabled) {
+        return { ok: true };
+      }
+
+      const clientId = this.clientId(req);
+      const decision = this.limiter.check(clientId);
+      if (decision.blocked) {
+        return this.blockedResponse(decision.retryAfterMs);
+      }
+
       const result = this.authorizeRequest(req);
       if (result.ok) {
+        this.limiter.recordSuccess(clientId);
         return { ok: true };
+      }
+
+      if (GUESS_REJECTIONS.has(result.reason)) {
+        this.limiter.recordFailure(clientId);
+
+        if (this.limiter.check(clientId).blocked) {
+          this.logger.warn(
+            `Blocked ${clientId} from the graph inspector after ${this.limiter.maxFailures} invalid access tokens.`,
+          );
+        }
       }
 
       return {
@@ -192,6 +232,40 @@ export class AccessTokenService {
         },
       };
     };
+  }
+
+  private blockedResponse(retryAfterMs: number): ReturnType<HttpServeAuthorize> {
+    const retryAfterSeconds = Math.ceil(retryAfterMs / 1_000);
+
+    return {
+      ok: false,
+      response: {
+        statusCode: 429,
+        contentType: 'application/json; charset=utf-8',
+        headers: { 'retry-after': String(retryAfterSeconds) },
+        body: {
+          ok: false,
+          reason: 'blocked',
+          error: `Too many invalid graph inspector access tokens. Try again in ${retryAfterSeconds} seconds.`,
+        },
+      },
+    };
+  }
+
+  /**
+   * Identifies the client for lockout purposes.
+   *
+   * Deliberately the socket address rather than a forwarded header: a header
+   * is attacker-controlled, so trusting one would let a brute force rotate
+   * past the lockout, and would let anyone lock out an address they choose.
+   */
+  private clientId(req: http.IncomingMessage): string {
+    const address = req.socket?.remoteAddress ?? 'unknown';
+
+    // Node reports IPv4 peers on a dual-stack socket as ::ffff:127.0.0.1.
+    return address.startsWith('::ffff:')
+      ? address.slice('::ffff:'.length)
+      : address;
   }
 
   /** Appends the current token to a URL the viewer will load. */
@@ -287,7 +361,19 @@ export class AccessTokenService {
     // viewer. Without one, every process gets its own throwaway secret.
     const secret = configuredSecret ?? process.env[SECRET_ENV_KEY];
 
-    return secret ? Buffer.from(secret, 'utf8') : randomBytes(32);
+    if (!secret) {
+      return randomBytes(32);
+    }
+
+    if (this.enabled && secret.length < MIN_SAFE_SECRET_LENGTH) {
+      this.logger.warn(
+        `Graph inspector access token secret is ${secret.length} characters. ` +
+          `Use at least ${MIN_SAFE_SECRET_LENGTH}, or leave it unset for a random one: ` +
+          'a short secret can be recovered offline from a single leaked token.',
+      );
+    }
+
+    return Buffer.from(secret, 'utf8');
   }
 
   private normalizeTtlMs(ttlMs: number | undefined): number {
