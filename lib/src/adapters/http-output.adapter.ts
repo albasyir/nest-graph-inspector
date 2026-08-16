@@ -129,10 +129,18 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
    * These endpoints are token-gated, and this log line is the only place an
    * operator can pick a token up, so it is stated once rather than repeated
    * into each URL.
+   *
+   * The token is a credential, so anything that captures application logs
+   * captures it too. `accessToken.logToken: false` keeps it out, at the cost
+   * of having to mint tokens from a configured secret instead.
    */
   private accessTokenNotice(): string {
     if (!this.accessTokenService.isEnabled()) {
       return '';
+    }
+
+    if (!this.accessTokenService.isTokenLoggable()) {
+      return '. These endpoints require an access token, which is not printed because accessToken.logToken is off';
     }
 
     return `. Access token (expires at ${this.accessTokenService

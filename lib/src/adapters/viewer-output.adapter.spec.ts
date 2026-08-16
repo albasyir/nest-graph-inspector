@@ -12,6 +12,7 @@ import {
   ACCESS_TOKEN_QUERY_PARAM,
   AccessTokenService,
 } from '../access-token.service';
+import { MODULE_OPTIONS_TOKEN } from '../nest-graph-inspector.config';
 
 /** Reads back the graph endpoint the viewer link points at. */
 function decodeViewerEndpoint(message: string): URL {
@@ -115,6 +116,40 @@ describe(ViewerOutputAdapter.name, () => {
       ok: true,
     });
     expect(result.message).toContain('access token expires at');
+  });
+
+  it('leaves the token out of the viewer link when logToken is off', async () => {
+    const quiet = await Test.createTestingModule({
+      providers: [
+        ViewerOutputAdapter,
+        HttpServeAdapter,
+        DirectRunOutputAdapter,
+        RuntimeTraceRecorder,
+        AccessTokenService,
+        { provide: HttpOutputAdapter, useValue: httpOutputAdapter },
+        { provide: ProxyAdapter, useValue: proxyAdapter },
+        {
+          provide: MODULE_OPTIONS_TOKEN,
+          useValue: { accessToken: { logToken: false } },
+        },
+      ],
+    }).compile();
+
+    const result = await quiet.get(ViewerOutputAdapter).execute({} as never, {
+      type: 'viewer',
+      origin: 'http://localhost:8889',
+      path: 'graph',
+      ollama: { origin: 'http://localhost:11434', path: '/ollama' },
+    });
+    const endpoint = decodeViewerEndpoint(result.message);
+
+    expect(endpoint.searchParams.get(ACCESS_TOKEN_QUERY_PARAM)).toBeNull();
+    expect(result.message).not.toContain(
+      quiet.get(AccessTokenService).current(),
+    );
+    expect(result.message).toContain('accessToken.logToken is off');
+
+    await quiet.close();
   });
 
   it('registers the Ollama proxy on the viewer HTTP origin', async () => {

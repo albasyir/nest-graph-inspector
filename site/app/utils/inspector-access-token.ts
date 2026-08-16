@@ -42,6 +42,33 @@ export function readAccessToken(endpointUrl: string): string | undefined {
 }
 
 /**
+ * Removes the access token from a URL before it leaves the browser.
+ *
+ * The token is a live credential for the inspected application, so anything
+ * that ships a graph URL onward — analytics, error reports, logs — has to send
+ * a redacted one.
+ */
+export function redactAccessToken(endpointUrl: string): string {
+  if (!endpointUrl || !endpointUrl.includes(INSPECTOR_ACCESS_TOKEN_PARAM)) {
+    return endpointUrl
+  }
+
+  try {
+    const url = new URL(endpointUrl)
+    url.searchParams.delete(INSPECTOR_ACCESS_TOKEN_PARAM)
+
+    return url.toString()
+  } catch {
+    // Not parseable as a URL, but it still mentions the parameter, so strip it
+    // textually rather than let a token through.
+    return endpointUrl.replace(
+      new RegExp(`([?&])${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#]*&?`, 'g'),
+      '$1'
+    )
+  }
+}
+
+/**
  * Copies the access token from a graph endpoint URL onto a derived URL.
  *
  * Derived URLs (`/direct-run`, `/ollama`) are rebuilt from the endpoint origin

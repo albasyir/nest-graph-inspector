@@ -78,6 +78,16 @@ export type NestGraphInspectorAccessTokenOptions = {
   secret?: string;
 
   /**
+   * Whether the issued token is printed on startup. Defaults to `true`.
+   *
+   * The startup message is the only place a token is handed out, so turning
+   * this off means supplying your own `secret` and minting tokens yourself.
+   * Do that where application logs are shipped somewhere the token should not
+   * reach.
+   */
+  logToken?: boolean;
+
+  /**
    * Per-client lockout for repeated invalid tokens.
    *
    * Clients are identified by socket address, not by a forwarded header,

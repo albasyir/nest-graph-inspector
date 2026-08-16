@@ -13,6 +13,7 @@ import {
   AccessTokenService,
 } from '../access-token.service';
 import { MODULE_OPTIONS_TOKEN } from '../nest-graph-inspector.config';
+import type { NestGraphInspectorModuleOptions } from '../nest-graph-inspector.type';
 
 const { version: packageVersion } = require('../../package.json') as {
   version: string;
@@ -260,6 +261,27 @@ describe(HttpOutputAdapter.name, () => {
 
   describe('access token', () => {
     let outputUrl: string;
+    // Each nested module starts a real listener. They are closed from a hook
+    // so a failed assertion cannot leave one behind and hang the run.
+    const nestedModules: TestingModule[] = [];
+
+    const createModule = async (
+      options: NestGraphInspectorModuleOptions = {},
+    ) => {
+      const nested = await Test.createTestingModule({
+        providers: [
+          FileOutputAdapter,
+          HttpServeAdapter,
+          HttpOutputAdapter,
+          AccessTokenService,
+          { provide: MODULE_OPTIONS_TOKEN, useValue: options },
+        ],
+      }).compile();
+
+      nestedModules.push(nested);
+
+      return nested;
+    };
 
     beforeEach(async () => {
       const port = await availablePort();
@@ -270,6 +292,12 @@ describe(HttpOutputAdapter.name, () => {
         path: '/graph',
       });
       outputUrl = `http://127.0.0.1:${port}/graph/output.json`;
+    });
+
+    afterEach(async () => {
+      await Promise.all(
+        nestedModules.splice(0).map((nested) => nested.close()),
+      );
     });
 
     it('rejects a request that carries no token', async () => {
@@ -299,44 +327,42 @@ describe(HttpOutputAdapter.name, () => {
     });
 
     it('rejects a token that has passed its expiry', async () => {
+      // A shared secret lets the test mint a token the server will accept,
+      // so expiry is produced by minting against a past clock rather than by
+      // waiting out a short lifetime, which would race server startup.
+      const secret = 'expired-token-spec-secret-long-enough';
       const port = await availablePort();
-      const shortLived = await Test.createTestingModule({
-        providers: [
-          FileOutputAdapter,
-          HttpServeAdapter,
-          HttpOutputAdapter,
-          AccessTokenService,
-          {
-            // Long enough that the pre-expiry request is not a race, short
-            // enough to expire inside the test.
-            provide: MODULE_OPTIONS_TOKEN,
-            useValue: { accessToken: { ttlMs: 400 } },
-          },
-        ],
-      }).compile();
+      const expiring = await createModule({ accessToken: { secret } });
 
-      await shortLived.get(HttpOutputAdapter).execute({} as never, {
+      await expiring.get(HttpOutputAdapter).execute({} as never, {
         type: 'http',
         host: '127.0.0.1',
         port,
         path: '/graph',
       });
 
-      const token = shortLived.get(AccessTokenService).current();
       const url = `http://127.0.0.1:${port}/graph/output.json`;
-      const authorization = { authorization: `Bearer ${token}` };
 
-      await expect(httpGet(url, authorization)).resolves.toMatchObject({
-        statusCode: 200,
+      jest.spyOn(Date, 'now').mockReturnValue(Date.now() - 60_000);
+      const staleToken = new AccessTokenService({
+        accessToken: { secret, ttlMs: 1_000 },
+      }).current();
+      jest.restoreAllMocks();
+
+      const rejected = await httpGet(url, {
+        authorization: `Bearer ${staleToken}`,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 450));
-      const response = await httpGet(url, authorization);
+      expect(rejected.statusCode).toBe(401);
+      expect(JSON.parse(rejected.body)).toMatchObject({ reason: 'expired' });
 
-      expect(response.statusCode).toBe(401);
-      expect(JSON.parse(response.body)).toMatchObject({ reason: 'expired' });
+      // The same server accepts a token that has not expired, so the rejection
+      // is about the expiry and not about the secret.
+      const accepted = await httpGet(url, {
+        authorization: `Bearer ${expiring.get(AccessTokenService).current()}`,
+      });
 
-      await shortLived.close();
+      expect(accepted.statusCode).toBe(200);
     });
 
     it('accepts the token from the dedicated header', async () => {
@@ -361,22 +387,9 @@ describe(HttpOutputAdapter.name, () => {
 
     it('blocks a client that keeps guessing tokens', async () => {
       const port = await availablePort();
-      const limited = await Test.createTestingModule({
-        providers: [
-          FileOutputAdapter,
-          HttpServeAdapter,
-          HttpOutputAdapter,
-          AccessTokenService,
-          {
-            provide: MODULE_OPTIONS_TOKEN,
-            useValue: {
-              accessToken: {
-                bruteForce: { maxFailures: 3, blockMs: 60_000 },
-              },
-            },
-          },
-        ],
-      }).compile();
+      const limited = await createModule({
+        accessToken: { bruteForce: { maxFailures: 3, blockMs: 60_000 } },
+      });
 
       await limited.get(HttpOutputAdapter).execute({} as never, {
         type: 'http',
@@ -404,24 +417,13 @@ describe(HttpOutputAdapter.name, () => {
         authorization: `Bearer ${limited.get(AccessTokenService).current()}`,
       });
       expect(withValidToken.statusCode).toBe(429);
-
-      await limited.close();
     });
 
     it('does not count a request that presents no token as a guess', async () => {
       const port = await availablePort();
-      const limited = await Test.createTestingModule({
-        providers: [
-          FileOutputAdapter,
-          HttpServeAdapter,
-          HttpOutputAdapter,
-          AccessTokenService,
-          {
-            provide: MODULE_OPTIONS_TOKEN,
-            useValue: { accessToken: { bruteForce: { maxFailures: 2 } } },
-          },
-        ],
-      }).compile();
+      const limited = await createModule({
+        accessToken: { bruteForce: { maxFailures: 2 } },
+      });
 
       await limited.get(HttpOutputAdapter).execute({} as never, {
         type: 'http',
@@ -440,24 +442,13 @@ describe(HttpOutputAdapter.name, () => {
           authorization: `Bearer ${limited.get(AccessTokenService).current()}`,
         }),
       ).resolves.toMatchObject({ statusCode: 200 });
-
-      await limited.close();
     });
 
     it('serves the endpoint unguarded when token protection is turned off', async () => {
       const port = await availablePort();
-      const unguarded = await Test.createTestingModule({
-        providers: [
-          FileOutputAdapter,
-          HttpServeAdapter,
-          HttpOutputAdapter,
-          AccessTokenService,
-          {
-            provide: MODULE_OPTIONS_TOKEN,
-            useValue: { accessToken: { enabled: false } },
-          },
-        ],
-      }).compile();
+      const unguarded = await createModule({
+        accessToken: { enabled: false },
+      });
 
       await unguarded.get(HttpOutputAdapter).execute({} as never, {
         type: 'http',
@@ -471,8 +462,29 @@ describe(HttpOutputAdapter.name, () => {
       );
 
       expect(response.statusCode).toBe(200);
+    });
 
-      await unguarded.close();
+    it('omits the token from the startup message when logToken is off', async () => {
+      const port = await availablePort();
+      const quiet = await createModule({ accessToken: { logToken: false } });
+
+      const result = await quiet.get(HttpOutputAdapter).execute({} as never, {
+        type: 'http',
+        host: '127.0.0.1',
+        port,
+        path: '/graph',
+      });
+
+      expect(result.message).not.toContain(
+        quiet.get(AccessTokenService).current(),
+      );
+      expect(result.message).toContain('accessToken.logToken is off');
+
+      // The endpoint is still gated; the token simply has to come from
+      // somewhere other than the log.
+      await expect(
+        httpGet(`http://127.0.0.1:${port}/graph/output.json`),
+      ).resolves.toMatchObject({ statusCode: 401 });
     });
   });
 });

@@ -6,11 +6,21 @@ export {
   AccessTokenService,
   DEFAULT_ACCESS_TOKEN_TTL_MS,
 } from './access-token.service';
+export type {
+  AccessTokenPayload,
+  AccessTokenRejection,
+  AccessTokenVerification,
+} from './access-token.service';
 export {
+  AccessAttemptLimiter,
   DEFAULT_BLOCK_MS,
   DEFAULT_FAILURE_WINDOW_MS,
   DEFAULT_MAX_FAILURES,
   DEFAULT_MAX_TRACKED_CLIENTS,
+} from './access-attempt-limiter';
+export type {
+  AccessAttemptDecision,
+  AccessAttemptLimiterOptions,
 } from './access-attempt-limiter';
 export * from './types/graph-output.schema';
 export * from './types/graph-output.type';

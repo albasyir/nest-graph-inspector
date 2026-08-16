@@ -125,10 +125,27 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     const viewerLink = `${this.viewerBaseUrl}/view/${base64Origin}`;
 
     return {
-      message: this.accessTokenService.isEnabled()
-        ? `Graph Viewer is available at ${viewerLink} (access token expires at ${this.accessTokenService.currentExpiresAt().toISOString()})`
-        : `Graph Viewer is available at ${viewerLink}`,
+      message: `Graph Viewer is available at ${viewerLink}${this.accessTokenNotice()}`,
     };
+  }
+
+  /**
+   * The link above already carries the token when it may be printed. When it
+   * may not, the link is incomplete on purpose and the operator has to append
+   * a token they minted themselves.
+   */
+  private accessTokenNotice(): string {
+    if (!this.accessTokenService.isEnabled()) {
+      return '';
+    }
+
+    if (!this.accessTokenService.isTokenLoggable()) {
+      return ' (append your own access token to the endpoint, accessToken.logToken is off)';
+    }
+
+    return ` (access token expires at ${this.accessTokenService
+      .currentExpiresAt()
+      .toISOString()})`;
   }
 
   private httpOrigin(config: ViewerOutputConfig): string {

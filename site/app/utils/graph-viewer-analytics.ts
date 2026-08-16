@@ -1,3 +1,5 @@
+import { redactAccessToken } from './inspector-access-token.ts'
+
 export type LoadSource = 'initial_mount' | 'route_change' | 'manual_refresh'
 
 export function resolveGraphViewerLoadSource(hasTrackedInitialMount: boolean): LoadSource {
@@ -13,17 +15,21 @@ function parseGraphUrl(graphUrl: string) {
     }
   }
 
+  // The graph URL carries the inspector access token, which must never reach
+  // an analytics sink.
+  const safeGraphUrl = redactAccessToken(graphUrl)
+
   try {
-    const url = new URL(graphUrl)
+    const url = new URL(safeGraphUrl)
 
     return {
-      graph_url: graphUrl,
+      graph_url: safeGraphUrl,
       graph_url_host: url.host,
       graph_url_path: url.pathname
     }
   } catch {
     return {
-      graph_url: graphUrl,
+      graph_url: safeGraphUrl,
       graph_url_host: '',
       graph_url_path: ''
     }

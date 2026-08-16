@@ -192,6 +192,49 @@ describe(AccessTokenService.name, () => {
       });
     });
 
+    it('answers 429 with retry-after once the caller is locked out', () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000);
+      const service = new AccessTokenService({
+        accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
+      });
+      const guard = service.createHttpGuard();
+      const guessing = request({
+        headers: { authorization: 'Bearer ngi1.eyJhIjoxfQ.wrong' },
+      });
+
+      // The first guess is refused and is what trips the lockout.
+      expect(guard(guessing)).toMatchObject({
+        ok: false,
+        response: { statusCode: 401, body: { reason: 'signature' } },
+      });
+
+      expect(guard(guessing)).toMatchObject({
+        ok: false,
+        response: {
+          statusCode: 429,
+          headers: { 'retry-after': '30' },
+          body: { reason: 'blocked' },
+        },
+      });
+    });
+
+    it('rounds a partial second of remaining block time up', () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000);
+      const service = new AccessTokenService({
+        accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
+      });
+      const guard = service.createHttpGuard();
+      const guessing = request({
+        headers: { authorization: 'Bearer ngi1.eyJhIjoxfQ.wrong' },
+      });
+      guard(guessing);
+
+      jest.spyOn(Date, 'now').mockReturnValue(29_500);
+      expect(guard(guessing)).toMatchObject({
+        response: { headers: { 'retry-after': '2' } },
+      });
+    });
+
     it('lets a valid token through', () => {
       const service = new AccessTokenService();
       const guard = service.createHttpGuard();

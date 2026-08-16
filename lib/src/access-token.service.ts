@@ -80,6 +80,7 @@ export class AccessTokenService {
   private readonly logger = new Logger(AccessTokenService.name);
   private readonly enabled: boolean;
   private readonly secret: Buffer;
+  private readonly logToken: boolean;
   readonly ttlMs: number;
   readonly limiter: AccessAttemptLimiter;
   private issued: { token: string; payload: AccessTokenPayload } | undefined;
@@ -92,6 +93,7 @@ export class AccessTokenService {
     const accessToken = options?.accessToken;
 
     this.enabled = accessToken?.enabled ?? true;
+    this.logToken = accessToken?.logToken ?? true;
     this.ttlMs = this.normalizeTtlMs(accessToken?.ttlMs);
     this.secret = this.resolveSecret(accessToken?.secret);
     this.limiter = new AccessAttemptLimiter(accessToken?.bruteForce);
@@ -99,6 +101,11 @@ export class AccessTokenService {
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /** Whether the issued token may appear in the startup message. */
+  isTokenLoggable(): boolean {
+    return this.enabled && this.logToken;
   }
 
   /**
@@ -268,9 +275,14 @@ export class AccessTokenService {
       : address;
   }
 
-  /** Appends the current token to a URL the viewer will load. */
+  /**
+   * Appends the current token to a URL the viewer will load.
+   *
+   * Skipped when the token must stay out of logs, since the viewer link is
+   * printed: the operator supplies the token themselves in that setup.
+   */
   appendToUrl(url: URL): URL {
-    if (!this.enabled) {
+    if (!this.isTokenLoggable()) {
       return url;
     }
 

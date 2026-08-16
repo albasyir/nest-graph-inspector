@@ -168,6 +168,21 @@ describe('Graph inspector network access', () => {
       expect(response.statusCode).toBe(401);
     });
 
+    it('can still complete a CORS preflight without a token', async () => {
+      // A preflight carries no credentials of its own, so guarding it would
+      // stop the browser from ever sending the request it asks about.
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://albasyir.github.io',
+          'access-control-request-method': 'POST',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBeDefined();
+    });
+
     it('cannot invoke a provider method through direct run', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
