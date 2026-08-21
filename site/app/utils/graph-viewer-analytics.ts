@@ -36,6 +36,18 @@ function parseGraphUrl(graphUrl: string) {
   }
 }
 
+/**
+ * Replaces the encoded endpoint in a viewer route with the route template.
+ *
+ * `/view/:url` carries the base64url graph endpoint, and that endpoint carries
+ * the access token — so the raw route path is a token in disguise. Redacting
+ * here rather than at each call site means a caller passing `route.fullPath`
+ * cannot reintroduce the leak, and the page itself is still identifiable.
+ */
+function redactViewerRoute(viewerRoute: string) {
+  return viewerRoute.replace(/^(\/view)\/[^/]+/, '$1/[url]')
+}
+
 export function createGraphViewerEventProperties(options: {
   graphUrl: string
   viewerRoute: string
@@ -45,7 +57,7 @@ export function createGraphViewerEventProperties(options: {
 }) {
   const properties = {
     ...parseGraphUrl(options.graphUrl),
-    viewer_route: options.viewerRoute,
+    viewer_route: redactViewerRoute(options.viewerRoute),
     load_source: options.loadSource
   } as {
     graph_url: string

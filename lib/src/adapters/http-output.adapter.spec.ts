@@ -365,26 +365,6 @@ describe(HttpOutputAdapter.name, () => {
       expect(accepted.statusCode).toBe(200);
     });
 
-    it('accepts the token from the dedicated header', async () => {
-      const response = await httpGet(outputUrl, {
-        [ACCESS_TOKEN_HEADER]: accessTokenService.current(),
-      });
-
-      expect(response.statusCode).toBe(200);
-    });
-
-    it('accepts the token from the query parameter the viewer link carries', async () => {
-      const url = new URL(outputUrl);
-      url.searchParams.set(
-        ACCESS_TOKEN_QUERY_PARAM,
-        accessTokenService.current(),
-      );
-
-      const response = await httpGet(url.toString());
-
-      expect(response.statusCode).toBe(200);
-    });
-
     it('blocks a client that keeps guessing tokens', async () => {
       const port = await availablePort();
       const limited = await createModule({

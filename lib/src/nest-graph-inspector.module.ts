@@ -62,5 +62,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     DirectRunOutputAdapter,
     ViewerOutputAdapter,
   ],
+  // Applications need this to mint their own token when logToken is off.
+  exports: [AccessTokenService],
 })
 export class NestGraphInspectorModule extends ConfigurableModuleClass {}

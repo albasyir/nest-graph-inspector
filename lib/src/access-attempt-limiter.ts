@@ -95,10 +95,17 @@ export class AccessAttemptLimiter {
       existing !== undefined && now - existing.windowStartedAt < this.windowMs;
 
     // A fresh window starts the count over, but still runs the threshold check
-    // below: with a limit of one, the very first guess has to block.
+    // below: with a limit of one, the very first guess has to block. An active
+    // block carries over, since blockMs outlives windowMs by default and
+    // rolling the window must not hand a blocked client a clean slate.
     const record: ClientRecord = withinWindow
       ? existing
-      : { failures: 0, windowStartedAt: now, lastSeenAt: now };
+      : {
+          failures: 0,
+          windowStartedAt: now,
+          lastSeenAt: now,
+          blockedUntil: existing?.blockedUntil,
+        };
 
     record.failures += 1;
     record.lastSeenAt = now;

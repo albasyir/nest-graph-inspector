@@ -35,6 +35,10 @@ export type NestGraphInspectorBruteForceOptions = {
    * How long a blocked client is refused with `429`, in milliseconds.
    *
    * Defaults to fifteen minutes.
+   *
+   * Behind a reverse proxy every request arrives with the proxy's address, so
+   * all callers share one bucket and a single attacker can lock everyone out
+   * for this long. Lower it, or set `enabled: false`, in that topology.
    */
   blockMs?: number;
 

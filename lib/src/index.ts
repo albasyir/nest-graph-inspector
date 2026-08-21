@@ -22,6 +22,7 @@ export type {
   AccessAttemptDecision,
   AccessAttemptLimiterOptions,
 } from './access-attempt-limiter';
+export type { HttpServeAuthorize } from './adapters/http-serve.adapter';
 export * from './types/graph-output.schema';
 export * from './types/graph-output.type';
 export * from './types/direct-run.type';

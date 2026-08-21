@@ -3,8 +3,6 @@ import os from 'node:os';
 import { INestApplication, Injectable, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
-  ACCESS_TOKEN_HEADER,
-  ACCESS_TOKEN_QUERY_PARAM,
   AccessTokenService,
   NestGraphInspectorModule,
   NestGraphInspectorModuleOptions,
@@ -206,29 +204,6 @@ describe('Graph inspector network access', () => {
 
       expect(response.statusCode).toBe(200);
       expect(Object.keys(graph.modules)).toContain('VaultModule');
-    });
-
-    it.each([
-      [
-        'an Authorization bearer header',
-        () => ({ headers: { authorization: `Bearer ${token}` }, path: '' }),
-      ],
-      [
-        'the dedicated header',
-        () => ({ headers: { [ACCESS_TOKEN_HEADER]: token }, path: '' }),
-      ],
-      [
-        'the query parameter',
-        () => ({ headers: {}, path: `?${ACCESS_TOKEN_QUERY_PARAM}=${token}` }),
-      ],
-    ])('accepts the token from %s', async (_label, build) => {
-      const { headers, path } = build();
-      const response = await probe(
-        `${origin}/__graph-inspector/output.json${path}`,
-        { headers },
-      );
-
-      expect(response.statusCode).toBe(200);
     });
 
     it('runs the provider method once the token is presented', async () => {

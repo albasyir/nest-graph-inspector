@@ -6,16 +6,25 @@ import {
   DEFAULT_ACCESS_TOKEN_TTL_MS,
 } from './access-token.service';
 
-/** Minimal stand-in for an inbound request the guard inspects. */
+/**
+ * Minimal stand-in for an inbound request the guard inspects.
+ *
+ * The socket address matters: it is how the guard tells callers apart, so
+ * omitting it would put every case in one lockout bucket.
+ */
 function request(options: {
   url?: string;
   headers?: http.IncomingHttpHeaders;
+  remoteAddress?: string;
 }): http.IncomingMessage {
   return {
     url: options.url ?? '/__graph-inspector/output.json',
     headers: options.headers ?? {},
+    socket: { remoteAddress: options.remoteAddress ?? '10.0.0.1' },
   } as http.IncomingMessage;
 }
+
+const WRONG_TOKEN = { authorization: 'Bearer ngi1.eyJhIjoxfQ.wrong' };
 
 describe(AccessTokenService.name, () => {
   // Several cases drive the clock forward; leaving it frozen would silently
@@ -26,12 +35,6 @@ describe(AccessTokenService.name, () => {
     const service = new AccessTokenService();
 
     expect(service.verify(service.current())).toMatchObject({ ok: true });
-  });
-
-  it('reuses the same token until it expires', () => {
-    const service = new AccessTokenService();
-
-    expect(service.current()).toBe(service.current());
   });
 
   it('expires a token once its lifetime has passed', () => {
@@ -54,6 +57,9 @@ describe(AccessTokenService.name, () => {
     jest.spyOn(Date, 'now').mockReturnValue(1_000);
     const service = new AccessTokenService({ accessToken: { ttlMs: 100 } });
     const first = service.current();
+
+    // Stable while it is still valid.
+    expect(service.current()).toBe(first);
 
     jest.spyOn(Date, 'now').mockReturnValue(2_000);
     const second = service.current();
@@ -133,27 +139,24 @@ describe(AccessTokenService.name, () => {
       });
     });
 
-    it('reads the token from an Authorization bearer header', () => {
-      const result = service.authorizeRequest(
-        request({ headers: { authorization: `Bearer ${service.current()}` } }),
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
-    it('reads the token from the dedicated header', () => {
-      const result = service.authorizeRequest(
-        request({ headers: { [ACCESS_TOKEN_HEADER]: service.current() } }),
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
-    it('reads the token from the query parameter', () => {
-      const result = service.authorizeRequest(
-        request({
-          url: `/__graph-inspector/output.json?${ACCESS_TOKEN_QUERY_PARAM}=${service.current()}`,
+    it.each([
+      [
+        'an Authorization bearer header',
+        (token: string) => ({ headers: { authorization: `Bearer ${token}` } }),
+      ],
+      [
+        'the dedicated header',
+        (token: string) => ({ headers: { [ACCESS_TOKEN_HEADER]: token } }),
+      ],
+      [
+        'the query parameter',
+        (token: string) => ({
+          url: `/__graph-inspector/output.json?${ACCESS_TOKEN_QUERY_PARAM}=${token}`,
         }),
+      ],
+    ])('reads the token from %s', (_label, build) => {
+      const result = service.authorizeRequest(
+        request(build(service.current())),
       );
 
       expect(result.ok).toBe(true);
@@ -198,9 +201,7 @@ describe(AccessTokenService.name, () => {
         accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
       });
       const guard = service.createHttpGuard();
-      const guessing = request({
-        headers: { authorization: 'Bearer ngi1.eyJhIjoxfQ.wrong' },
-      });
+      const guessing = request({ headers: WRONG_TOKEN });
 
       // The first guess is refused and is what trips the lockout.
       expect(guard(guessing)).toMatchObject({
@@ -216,23 +217,43 @@ describe(AccessTokenService.name, () => {
           body: { reason: 'blocked' },
         },
       });
-    });
 
-    it('rounds a partial second of remaining block time up', () => {
-      jest.spyOn(Date, 'now').mockReturnValue(1_000);
-      const service = new AccessTokenService({
-        accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
-      });
-      const guard = service.createHttpGuard();
-      const guessing = request({
-        headers: { authorization: 'Bearer ngi1.eyJhIjoxfQ.wrong' },
-      });
-      guard(guessing);
-
+      // Remaining block time rounds up rather than reporting zero seconds.
       jest.spyOn(Date, 'now').mockReturnValue(29_500);
       expect(guard(guessing)).toMatchObject({
         response: { headers: { 'retry-after': '2' } },
       });
+    });
+
+    it('locks out one caller without affecting another', () => {
+      const service = new AccessTokenService({
+        accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
+      });
+      const guard = service.createHttpGuard();
+
+      guard(request({ headers: WRONG_TOKEN, remoteAddress: '10.0.0.1' }));
+
+      expect(
+        guard(request({ headers: WRONG_TOKEN, remoteAddress: '10.0.0.1' })),
+      ).toMatchObject({ response: { statusCode: 429 } });
+      expect(
+        guard(request({ headers: WRONG_TOKEN, remoteAddress: '10.0.0.2' })),
+      ).toMatchObject({ response: { statusCode: 401 } });
+    });
+
+    it('treats an IPv4-mapped address as the same caller', () => {
+      const service = new AccessTokenService({
+        accessToken: { bruteForce: { maxFailures: 1, blockMs: 30_000 } },
+      });
+      const guard = service.createHttpGuard();
+
+      guard(
+        request({ headers: WRONG_TOKEN, remoteAddress: '::ffff:10.0.0.1' }),
+      );
+
+      expect(
+        guard(request({ headers: WRONG_TOKEN, remoteAddress: '10.0.0.1' })),
+      ).toMatchObject({ response: { statusCode: 429 } });
     });
 
     it('lets a valid token through', () => {

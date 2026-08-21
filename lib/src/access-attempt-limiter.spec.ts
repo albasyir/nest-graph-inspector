@@ -67,6 +67,22 @@ describe(AccessAttemptLimiter.name, () => {
     expect(limiter.check('10.0.0.1')).toEqual({ blocked: false });
   });
 
+  it('keeps an active block when the failure window rolls over', () => {
+    at(1_000);
+    // blockMs outliving windowMs is the default shape, not an edge case.
+    const limiter = new AccessAttemptLimiter({
+      maxFailures: 1,
+      windowMs: 1_000,
+      blockMs: 60_000,
+    });
+    limiter.recordFailure('10.0.0.1');
+
+    at(2_500);
+    limiter.recordFailure('10.0.0.1');
+
+    expect(limiter.check('10.0.0.1')).toMatchObject({ blocked: true });
+  });
+
   it('forgets failures that fall outside the window', () => {
     at(1_000);
     const limiter = new AccessAttemptLimiter({

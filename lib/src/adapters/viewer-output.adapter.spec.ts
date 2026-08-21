@@ -30,6 +30,29 @@ describe(ViewerOutputAdapter.name, () => {
   let httpServeAdapter: HttpServeAdapter;
   let httpOutputAdapter: { execute: jest.Mock; normalizePath: jest.Mock };
   let proxyAdapter: { serve: jest.Mock; close: jest.Mock };
+  const nestedModules: TestingModule[] = [];
+
+  /** Nested modules serve HTTP, so cleanup runs from a hook, not inline. */
+  const createNestedModule = async (
+    options: Record<string, unknown>,
+  ): Promise<TestingModule> => {
+    const nested = await Test.createTestingModule({
+      providers: [
+        ViewerOutputAdapter,
+        HttpServeAdapter,
+        DirectRunOutputAdapter,
+        RuntimeTraceRecorder,
+        AccessTokenService,
+        { provide: HttpOutputAdapter, useValue: httpOutputAdapter },
+        { provide: ProxyAdapter, useValue: proxyAdapter },
+        { provide: MODULE_OPTIONS_TOKEN, useValue: options },
+      ],
+    }).compile();
+
+    nestedModules.push(nested);
+
+    return nested;
+  };
 
   beforeEach(async () => {
     httpOutputAdapter = {
@@ -67,7 +90,10 @@ describe(ViewerOutputAdapter.name, () => {
     httpServeAdapter = moduleRef.get(HttpServeAdapter);
   });
 
-  afterEach(() => moduleRef.close());
+  afterEach(async () => {
+    await Promise.all(nestedModules.splice(0).map((nested) => nested.close()));
+    await moduleRef.close();
+  });
 
   it('normalizes the graph endpoint before installing and encoding it', async () => {
     const result = await adapter.execute({} as never, {
@@ -119,21 +145,10 @@ describe(ViewerOutputAdapter.name, () => {
   });
 
   it('leaves the token out of the viewer link when logToken is off', async () => {
-    const quiet = await Test.createTestingModule({
-      providers: [
-        ViewerOutputAdapter,
-        HttpServeAdapter,
-        DirectRunOutputAdapter,
-        RuntimeTraceRecorder,
-        AccessTokenService,
-        { provide: HttpOutputAdapter, useValue: httpOutputAdapter },
-        { provide: ProxyAdapter, useValue: proxyAdapter },
-        {
-          provide: MODULE_OPTIONS_TOKEN,
-          useValue: { accessToken: { logToken: false } },
-        },
-      ],
-    }).compile();
+    // Tracked so cleanup survives a failed assertion; this module serves HTTP.
+    const quiet = await createNestedModule({
+      accessToken: { logToken: false },
+    });
 
     const result = await quiet.get(ViewerOutputAdapter).execute({} as never, {
       type: 'viewer',
@@ -148,8 +163,6 @@ describe(ViewerOutputAdapter.name, () => {
       quiet.get(AccessTokenService).current(),
     );
     expect(result.message).toContain('accessToken.logToken is off');
-
-    await quiet.close();
   });
 
   it('registers the Ollama proxy on the viewer HTTP origin', async () => {

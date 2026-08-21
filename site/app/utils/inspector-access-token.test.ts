@@ -62,18 +62,34 @@ const malformed = redactAccessToken(
 )
 assert.ok(!malformed.includes(TOKEN), 'malformed url leaked the token')
 
-// The analytics payload is the sink that matters most.
+// The analytics payload is the sink that matters most. The viewer route is
+// `/view/<base64url endpoint>`, so the token also reaches it encoded — asserting
+// only on the raw token would pass while the encoded one leaks.
 const properties = createGraphViewerEventProperties({
   graphUrl: ENDPOINT,
-  viewerRoute: '/view/abc',
+  viewerRoute: `/view/${encoded}/issues`,
   loadSource: 'initial_mount'
 })
+const serialized = JSON.stringify(properties)
+
+assert.ok(!serialized.includes(TOKEN), 'analytics leaked the access token')
 assert.ok(
-  !JSON.stringify(properties).includes(TOKEN),
-  'analytics properties leaked the access token'
+  !serialized.includes(encoded),
+  'analytics leaked the encoded endpoint, which contains the token'
 )
+assert.equal(properties.viewer_route, '/view/[url]/issues')
 assert.equal(properties.graph_url, 'http://0.0.0.0:53371/__graph-inspector')
 assert.equal(properties.graph_url_host, '0.0.0.0:53371')
 assert.equal(properties.graph_url_path, '/__graph-inspector')
+
+// A route with no encoded segment is left alone.
+assert.equal(
+  createGraphViewerEventProperties({
+    graphUrl: '',
+    viewerRoute: '/view',
+    loadSource: 'initial_mount'
+  }).viewer_route,
+  '/view'
+)
 
 console.log('inspector-access-token.test.ts ok')
