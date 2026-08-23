@@ -16,7 +16,7 @@
     "@iconify-json/lucide": "^1.2.113",
     "@iconify-json/simple-icons": "^1.2.86",
     "@iconify-json/vscode-icons": "^1.2.58",
-    "@langchain/core": "^1.1.49",
+    "@langchain/core": "^1.2.9",
     "@langchain/ollama": "^1.2.7",
     "@nuxt/content": "^3.14.0",
     "@nuxt/image": "^2.0.0",
