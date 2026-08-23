@@ -44,7 +44,7 @@
     "nuxt-llms": "0.2.0",
     "nuxt-og-image": "^6.4.9",
     "pinia": "^3.0.4",
-    "posthog-node": "^5.37.1",
+    "posthog-node": "^5.49.1",
     "reka-ui": "^2.10.1",
     "tailwind-variants": "^3.3.0",
     "tailwindcss": "^4.3.1",
