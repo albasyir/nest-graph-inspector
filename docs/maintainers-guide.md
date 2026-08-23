@@ -655,7 +655,7 @@ that cannot reach into a Pinia setup store.
 | `inspector-graph-session.test.ts` | Assert-based test for `inspector-graph-session.ts`, with an injected fake `Storage` |
 | `graph-inspector-version-gate.ts` | Decides when an endpoint's library version needs acknowledging before its graph is shown |
 | `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
-| `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at its origin, Direct Run |
+| `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at the root of the application's own server, Direct Run |
 | `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
 | `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
@@ -665,13 +665,15 @@ that cannot reach into a Pinia setup store.
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
-| `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, resolves the inspector mount base, encodes the `/view/:url` param |
+| `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, and resolves the mount base its sibling endpoints hang off |
 | `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |
+| `nodepod-demo-bridge.ts` | Conversions between the browser's `fetch` types and the ones the in-browser runtime speaks, and the deadline a bridged request is given |
+| `nodepod-demo-bridge.test.ts` | Assert-based test for `nodepod-demo-bridge.ts` (no framework) |
 | `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
 
 **Testing convention:** Tests here use `node:assert` with no framework, as bare
 top-level assertions. Run them with `pnpm --filter nest-graph-inspector-site run test`
-(`node --experimental-strip-types --test app/utils/*.test.ts`). A module reachable
+(`node --experimental-strip-types --test app/**/*.test.ts`). A module reachable
 from a test must use `.ts`-suffixed relative imports and no `~` alias, since Node
 resolves the import graph itself.
 
