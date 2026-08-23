@@ -590,9 +590,13 @@ that expires with the token.
 | File | What it contains |
 |---|---|
 | `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource`; redacts access tokens out of every property |
-| `inspector-access-token.ts` | The `/view/:url` codec, and the token contract shared with the library: parameter and header names, reading a token out of a bootstrap link, redacting one out of anything else |
-| `inspector-access-token-storage.ts` | The tab's single-endpoint token cache — memory plus `sessionStorage` — so a reload keeps a token the URL no longer carries |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
+| `inspector-access-token.ts` | The `/view/:url` codec, and the token contract shared with the library: parameter and header names, reading a token out of a bootstrap link, redacting one out of anything else |
+| `inspector-access-token.test.ts` | Assert-based test for `inspector-access-token.ts`, including the analytics payload as a leak sink |
+| `inspector-access-token-storage.ts` | The tab's single-endpoint token cache — memory plus `sessionStorage` — so a reload keeps a token the URL no longer carries |
+| `inspector-access-token-storage.test.ts` | Assert-based test for `inspector-access-token-storage.ts`, with an injected fake `Storage` |
+| `graph-inspector-version-gate.ts` | Decides when an endpoint's library version needs acknowledging before its graph is shown |
+| `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
