@@ -537,6 +537,14 @@ graph a tab is showing lives in the store, and in that tab's `sessionStorage` so
 a reload survives. The consequence is deliberate: a viewer URL is not shareable
 or bookmarkable, and a fresh tab on one lands on `/view`.
 
+**A viewer page also needs the credential for its graph.** The middleware sends
+a tab with no access token back to `/view`, because the token is not in the URL
+any more and the printed link is the only thing that hands one over — so holding
+one is what proves the link was the way in. The single exemption is a graph
+served from this site's own origin, which is the bundled demo fixture: static
+files with no application behind them. A library configured with
+`accessToken.enabled: false` therefore cannot be opened in the hosted viewer.
+
 **`/view/<base64url(endpoint)>` is the printed link** — the one channel that
 hands the viewer an endpoint and, with it, an access token. It is spent on
 arrival: endpoint and token go to the store, and the address bar is replaced with

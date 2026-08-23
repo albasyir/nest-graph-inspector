@@ -52,6 +52,12 @@ for the published history.
   viewer's own "Try Another URL" — and going back keeps the graph and its token.
 - An unusable path below a viewer page (`/view/navigator/anything`) returns to
   the viewer entry page instead of waiting on a spinner that never resolves.
+- Every `/view/**` page now requires the access token for the graph it would
+  show. Without one the viewer returns to `/view`, since the token is no longer
+  in the URL and the link printed by your application is the only thing that
+  hands one over. The bundled demo is exempt, being static files on the site's
+  own origin; an inspector configured with `accessToken.enabled: false` cannot be
+  opened in the hosted viewer.
 - Retrying a graph that has stopped answering no longer reports the last reason.
   A 401 is not remembered across attempts, so an application that went down is
   reported as unreachable rather than as needing an access token — and an

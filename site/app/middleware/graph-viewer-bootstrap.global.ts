@@ -1,3 +1,4 @@
+import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
 import {
   isViewerPage,
   resolveViewerBootstrap
@@ -17,11 +18,13 @@ import {
  *    aborts the pending navigation, so that route is never committed and the
  *    page is created once, against the final route.
  *
- * 2. **Make sure a viewer page has a graph.** `/view/navigator` names a view,
- *    not a graph, so on a reload the store is empty and the graph has to come
- *    back from the tab's session. When there is no session — a fresh tab, or a
- *    link someone else was sent — there is nothing to show, and the visitor
- *    belongs on `/view`.
+ * 2. **Make sure a viewer page has a graph, and may open it.** `/view/navigator`
+ *    names a view, not a graph, so on a reload the store is empty and the graph
+ *    has to come back from the tab's session. When there is no session — a fresh
+ *    tab, or a link someone else was sent — there is nothing to show. When there
+ *    is a session but no token, there is nothing to authenticate with. Either
+ *    way the visitor belongs on `/view`. The one exception is a graph served
+ *    from this site's own origin: the bundled demo, which gates nothing.
  */
 export default defineNuxtRouteMiddleware((to) => {
   // Server rendering must not spend the link: redirecting there would drop the
@@ -39,7 +42,19 @@ export default defineNuxtRouteMiddleware((to) => {
   const segments = to.path.replace(/\/+$/, '').split('/')
 
   if (segments.length === 3 && isViewerPage(segments[2] ?? '')) {
-    if (!graphStore.restoreSession()) {
+    const endpointUrl = graphStore.restoreSession()
+
+    if (!endpointUrl) {
+      return navigateTo('/view', { replace: true })
+    }
+
+    // A viewer page is not reachable without the credential for the graph it
+    // would show. The token is not in the URL any more, so the only way to hold
+    // one is to have come through the printed link — which is the point.
+    if (
+      !graphStore.hasAccessToken
+      && !canOpenWithoutAccessToken(endpointUrl, window.location.origin)
+    ) {
       return navigateTo('/view', { replace: true })
     }
 

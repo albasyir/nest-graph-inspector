@@ -193,6 +193,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const requestHeaders = computed(() => accessTokenHeaders(accessToken.value))
 
   /**
+   * Whether this tab holds a credential — not the credential itself, which
+   * stays inside the store so it can only leave as a request header.
+   */
+  const hasAccessToken = computed(() => Boolean(accessToken.value))
+
+  /**
    * `$fetch` that authenticates itself.
    *
    * The header is read per request rather than baked in, so a token captured
@@ -597,6 +603,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     // `requestHeaders`, so there is no way to put the raw credential anywhere
     // other than a request header.
     requestHeaders,
+    hasAccessToken,
     endpointUrl,
     informationUrl,
     jsonUrl,

@@ -79,3 +79,30 @@ export function accessTokenHeaders(
 ): Record<string, string> {
   return token ? { [INSPECTOR_ACCESS_TOKEN_HEADER]: token } : {}
 }
+
+/**
+ * Whether a graph may be opened with no access token at all.
+ *
+ * Only one may: a graph served from the viewer's own origin. That is the demo
+ * fixture shipped with this site — static files, nothing gated, no application
+ * behind it.
+ *
+ * Every other endpoint is somebody's running application. The printed link is
+ * the only thing that hands over a token for it, so arriving at a viewer page
+ * without one means the link was not the way in, and the viewer has nothing to
+ * authenticate with.
+ */
+export function canOpenWithoutAccessToken(
+  endpointUrl: string,
+  viewerOrigin: string
+): boolean {
+  if (!endpointUrl || !viewerOrigin) {
+    return false
+  }
+
+  try {
+    return new URL(endpointUrl).origin === viewerOrigin
+  } catch {
+    return false
+  }
+}

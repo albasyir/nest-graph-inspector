@@ -4,6 +4,7 @@ import {
   INSPECTOR_ACCESS_TOKEN_HEADER,
   INSPECTOR_ACCESS_TOKEN_PARAM,
   accessTokenHeaders,
+  canOpenWithoutAccessToken,
   readAccessToken,
   redactAccessToken
 } from './inspector-access-token.ts'
@@ -135,5 +136,46 @@ for (const page of ['/view/navigator', '/view/issues', '/view/execution-sequence
     `analytics collapsed the ${page} route`
   )
 }
+
+// A viewer page is unreachable without a credential, so this decides who is
+// exempt. Only the demo fixture is: it is static files on this site's own
+// origin, with no application behind it and nothing to authenticate to.
+const VIEWER_ORIGIN = 'https://albasyir.github.io'
+
+assert.ok(
+  canOpenWithoutAccessToken(
+    `${VIEWER_ORIGIN}/nest-graph-inspector/mock-graph`,
+    VIEWER_ORIGIN
+  ),
+  'the bundled demo must open without a token'
+)
+
+// Somebody's running application, on any other origin, may not.
+for (const endpoint of [
+  ENDPOINT,
+  'http://localhost:53371/__graph-inspector',
+  'https://albasyir.github.io.evil.example/mock-graph',
+  'http://albasyir.github.io/nest-graph-inspector/mock-graph'
+]) {
+  assert.equal(
+    canOpenWithoutAccessToken(endpoint, VIEWER_ORIGIN),
+    false,
+    `${endpoint} was let through without a token`
+  )
+}
+
+// A port or scheme difference is a different origin, so it is not exempt.
+assert.equal(
+  canOpenWithoutAccessToken('http://localhost:3000/mock-graph', 'http://localhost:3001'),
+  false
+)
+assert.ok(
+  canOpenWithoutAccessToken('http://localhost:3000/mock-graph', 'http://localhost:3000')
+)
+
+// Nothing to compare, or nothing parseable, is never exempt.
+assert.equal(canOpenWithoutAccessToken('', VIEWER_ORIGIN), false)
+assert.equal(canOpenWithoutAccessToken(ENDPOINT, ''), false)
+assert.equal(canOpenWithoutAccessToken('not a url', VIEWER_ORIGIN), false)
 
 console.log('inspector-access-token.test.ts ok')
