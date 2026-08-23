@@ -8,6 +8,18 @@ import {
   redactAccessToken
 } from '~/utils/inspector-access-token'
 import {
+  isLegacyGraphOutput,
+  isSupportedGraphOutputVersion,
+  type LegacyGraphOutput
+} from '~/utils/graph-output-support'
+import { readResponseError, readStatusCode } from '~/utils/http-error'
+import {
+  appendOutputPath,
+  normalizeSourceUrl,
+  resolveDirectRunUrl,
+  resolveOriginPath
+} from '~/utils/inspector-endpoint-url'
+import {
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
@@ -20,135 +32,12 @@ type InspectorEndpointInfo = {
   'version'?: unknown
 }
 
-type LegacyGraphOutput = Partial<GraphOutput>
-
 /** What {@link useGraphInspectorStore.probeEndpoint} found at an address. */
 export type EndpointProbe
   = | { status: 'ready', endpointUrl: string, token: string }
     | { status: 'requires-token' }
     | { status: 'legacy' }
     | { status: 'unreachable' }
-const MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION = 3
-
-function withDefaultProtocol(input: string) {
-  return input.startsWith('http://') || input.startsWith('https://')
-    ? input
-    : `http://${input}`
-}
-
-function normalizeSourceUrl(input: string) {
-  const url = new URL(withDefaultProtocol(input.trim()))
-
-  if (url.pathname === '/' || !url.pathname) {
-    url.pathname = '/__graph-inspector'
-  }
-
-  return url.toString()
-}
-
-function appendOutputPath(value: string, fileName: string) {
-  if (!value) {
-    return ''
-  }
-
-  try {
-    const url = new URL(value)
-    const path = url.pathname.replace(/\/+$/, '')
-
-    url.pathname = `${path}/${fileName}`
-    return url.toString()
-  } catch {
-    return ''
-  }
-}
-
-function resolveOriginPath(value: string, pathName: string) {
-  if (!value) {
-    return ''
-  }
-
-  try {
-    const url = new URL(value)
-    url.pathname = `/${pathName.replace(/^\/+/, '')}`
-    url.search = ''
-    url.hash = ''
-
-    return url.toString()
-  } catch {
-    return ''
-  }
-}
-
-/**
- * Where Direct Run lives for a given graph endpoint.
- *
- * A live application serves it at the origin root. A static graph is a
- * directory of files, so its Direct Run fixture sits beside them.
- */
-function resolveDirectRunUrl(value: string, isStatic: boolean) {
-  if (!value) {
-    return ''
-  }
-
-  try {
-    const url = new URL(value)
-
-    url.pathname = isStatic
-      ? `${url.pathname.replace(/\/$/, '')}/direct-run`
-      : '/direct-run'
-    url.search = ''
-    url.hash = ''
-
-    return url.toString()
-  } catch {
-    return ''
-  }
-}
-
-function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && 'version' in value
-    && 'root' in value
-    && 'modules' in value
-  )
-}
-
-function parseGraphOutputVersion(value: unknown): number | null {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    return null
-  }
-
-  const parsedVersion = Number.parseInt(String(value), 10)
-  return Number.isFinite(parsedVersion) ? parsedVersion : null
-}
-
-function isSupportedGraphOutputVersion(value: unknown): boolean {
-  const parsedVersion = parseGraphOutputVersion(value)
-  return (
-    parsedVersion !== null
-    && parsedVersion >= MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION
-  )
-}
-
-/** Message the inspector returned, in preference to a generic transport error. */
-function readResponseError(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return ''
-  }
-
-  const data = (error as { data?: unknown }).data
-  const message = (data as { error?: unknown } | undefined)?.error
-
-  return typeof message === 'string' ? message : ''
-}
-
-function readStatusCode(error: unknown): number {
-  const statusCode = (error as { statusCode?: unknown } | null)?.statusCode
-
-  return typeof statusCode === 'number' ? statusCode : 0
-}
 
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   /**

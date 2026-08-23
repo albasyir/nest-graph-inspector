@@ -586,6 +586,11 @@ fallback.
 | `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
 
+The store file holds the store. Pure helpers it used to carry — URL derivation,
+graph-output support checks, error reading — live in `site/app/utils/` instead,
+where they are auto-imported, reusable, and covered by the assert-based tests
+that cannot reach into a Pinia setup store.
+
 **`graph-inspector.ts` key responsibilities:**
 - Holds the token-free endpoint URL — the only record of which graph is being
   viewed — and mirrors it, with the token, into the tab's session.
@@ -626,6 +631,12 @@ fallback.
 | `inspector-graph-session.test.ts` | Assert-based test for `inspector-graph-session.ts`, with an injected fake `Storage` |
 | `graph-inspector-version-gate.ts` | Decides when an endpoint's library version needs acknowledging before its graph is shown |
 | `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
+| `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at its origin, Direct Run |
+| `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
+| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
+| `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
+| `http-error.ts` | Reads the reason and status out of a failed request, so the inspector's own message wins over the transport's |
+| `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
