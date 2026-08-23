@@ -10,10 +10,9 @@ definePageMeta({
 const graphStore = useGraphInspectorStore()
 const {
   graphData,
-  status,
   errorMessage,
   endpointRequiresAccessToken,
-  endpointUnreachable
+  hasLoadError
 } = storeToRefs(graphStore)
 const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
 
@@ -29,12 +28,12 @@ useSeoMeta({
 <template>
   <div class="h-full overflow-y-auto p-4 sm:p-6">
     <GraphViewerLoadingState
-      v-if="isGraphLoading || status === 'pending'"
+      v-if="isGraphLoading"
       :endpoint="endpointUrl"
     />
 
     <GraphViewerErrorState
-      v-else-if="endpointRequiresAccessToken || endpointUnreachable || status === 'error'"
+      v-else-if="hasLoadError"
       :message="errorMessage"
       :requires-access-token="endpointRequiresAccessToken"
       @retry="refresh()"

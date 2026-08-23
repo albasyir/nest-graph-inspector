@@ -58,6 +58,9 @@ for the published history.
   hands one over. The bundled demo is exempt, being static files on the site's
   own origin; an inspector configured with `accessToken.enabled: false` cannot be
   opened in the hosted viewer.
+- The graph viewer's reload button now stays busy for the whole reload rather
+  than only its middle request, and the viewer shows its loading state for the
+  whole of a reload started from the header.
 - Retrying a graph that has stopped answering no longer reports the last reason.
   A 401 is not remembered across attempts, so an application that went down is
   reported as unreachable rather than as needing an access token — and an

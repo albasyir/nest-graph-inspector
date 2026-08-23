@@ -8,7 +8,7 @@ const graphStore = useGraphInspectorStore()
 const {
   endpointUrl,
   graphIsStatic,
-  status
+  isLoading
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
 
@@ -128,8 +128,8 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-label="Reload graph"
-                  :disabled="!endpointUrl || status === 'pending'"
-                  :loading="status === 'pending'"
+                  :disabled="!endpointUrl || isLoading"
+                  :loading="isLoading"
                   @click="handleRefresh"
                 />
               </UTooltip>

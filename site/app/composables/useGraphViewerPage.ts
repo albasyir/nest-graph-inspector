@@ -31,9 +31,8 @@ export function useGraphViewerPage() {
   /** The endpoint being shown, for the loading state and the header. */
   const endpointUrl = computed(() => graphStore.endpointUrl)
 
-  // The server has no session to read, so it renders the state the browser
-  // starts in: about to load.
-  const isGraphLoading = ref(true)
+  /** The store owns this: a load can also be started from the viewer header. */
+  const isGraphLoading = computed(() => graphStore.isLoading)
 
   function trackGraphViewerEvent(
     event: string,
@@ -69,31 +68,24 @@ export function useGraphViewerPage() {
       return
     }
 
-    isGraphLoading.value = true
+    trackGraphViewerEvent('graph_viewer_load_started', {
+      loadSource,
+      isRetry
+    })
 
-    try {
-      trackGraphViewerEvent('graph_viewer_load_started', {
+    if (await graphStore.setEndpoint(endpoint)) {
+      trackGraphViewerEvent('graph_viewer_load_succeeded', {
         loadSource,
         isRetry
       })
-
-      const graphLoaded = await graphStore.setEndpoint(endpoint)
-      if (graphLoaded) {
-        await graphStore.fetchMarkdown()
-        trackGraphViewerEvent('graph_viewer_load_succeeded', {
-          loadSource,
-          isRetry
-        })
-      } else {
-        trackGraphViewerEvent('graph_viewer_load_failed', {
-          loadSource,
-          isRetry,
-          errorMessage: graphStore.errorMessage || 'Unknown error'
-        })
-      }
-    } finally {
-      isGraphLoading.value = false
+      return
     }
+
+    trackGraphViewerEvent('graph_viewer_load_failed', {
+      loadSource,
+      isRetry,
+      errorMessage: graphStore.errorMessage || 'Unknown error'
+    })
   }
 
   // One load per page, at setup. Moving between viewer pages mounts a new page

@@ -13,10 +13,9 @@ const {
   requestHeaders,
   graphData,
   graphIsStatic,
-  status,
   errorMessage,
   endpointRequiresAccessToken,
-  endpointUnreachable,
+  hasLoadError,
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
@@ -57,13 +56,13 @@ function handleExecutionSequenceOpen() {
 
 <template>
   <GraphViewerLoadingState
-    v-if="isGraphLoading || status === 'pending'"
+    v-if="isGraphLoading"
     :endpoint="endpointUrl"
   />
 
   <!-- Error State -->
   <GraphViewerErrorState
-    v-else-if="endpointRequiresAccessToken || endpointUnreachable || status === 'error'"
+    v-else-if="hasLoadError"
     :message="errorMessage"
     :requires-access-token="endpointRequiresAccessToken"
     @retry="refresh()"

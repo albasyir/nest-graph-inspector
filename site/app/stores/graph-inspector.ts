@@ -193,6 +193,16 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const requestHeaders = computed(() => accessTokenHeaders(accessToken.value))
 
   /**
+   * Whether a graph load is in flight.
+   *
+   * Owned here rather than by the page, because a load has more than one
+   * starter — the page that lands, and the reload button in the viewer header —
+   * and it spans three requests. A page-local flag saw only its own, which is
+   * why the loading state used to be a guess between two half-signals.
+   */
+  const isLoading = ref(false)
+
+  /**
    * Whether this tab holds a credential — not the credential itself, which
    * stays inside the store so it can only leave as a request header.
    */
@@ -274,6 +284,20 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       || endpointInfoError.value?.message
       || ''
   )
+  /**
+   * Whether the load failed, for any of the reasons it can fail for.
+   *
+   * The reasons differ in what the viewer should *say* — see
+   * {@link endpointRequiresAccessToken} — but not in whether it should show an
+   * error at all, and that is the question a page is asking.
+   */
+  const hasLoadError = computed(
+    () =>
+      endpointRequiresAccessToken.value
+      || endpointUnreachable.value
+      || status.value === 'error'
+  )
+
   const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
@@ -493,19 +517,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     return Boolean(graphMarkdown.value)
   }
 
+  /** Points the store at a graph and loads it. */
   async function setEndpoint(nextEndpointUrl: string, token?: string) {
     applyEndpoint(nextEndpointUrl, token)
 
-    const isValidEndpoint = await validateEndpoint()
-    if (!isValidEndpoint) {
-      return false
-    }
-
-    if (!await ensureEndpointVersionAcknowledged()) {
-      return false
-    }
-
-    return await fetchJson()
+    return await fetchGraph()
   }
 
   /**
@@ -580,22 +596,34 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     return { status: 'unreachable' }
   }
 
+  /**
+   * Loads everything the viewer shows for the current endpoint.
+   *
+   * The one place a graph load happens, so it is also the one place that knows
+   * a load is in flight.
+   */
   async function fetchGraph() {
-    const isValidEndpoint = await validateEndpoint()
-    if (!isValidEndpoint) {
-      return false
-    }
+    isLoading.value = true
 
-    if (!await ensureEndpointVersionAcknowledged()) {
-      return false
-    }
+    try {
+      const isValidEndpoint = await validateEndpoint()
+      if (!isValidEndpoint) {
+        return false
+      }
 
-    const jsonLoaded = await fetchJson()
-    if (jsonLoaded) {
-      await fetchMarkdown()
-    }
+      if (!await ensureEndpointVersionAcknowledged()) {
+        return false
+      }
 
-    return jsonLoaded
+      const jsonLoaded = await fetchJson()
+      if (jsonLoaded) {
+        await fetchMarkdown()
+      }
+
+      return jsonLoaded
+    } finally {
+      isLoading.value = false
+    }
   }
 
   return {
@@ -603,6 +631,8 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     // `requestHeaders`, so there is no way to put the raw credential anywhere
     // other than a request header.
     requestHeaders,
+    isLoading,
+    hasLoadError,
     hasAccessToken,
     endpointUrl,
     informationUrl,
