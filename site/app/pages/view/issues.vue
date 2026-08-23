@@ -12,7 +12,8 @@ const {
   graphData,
   status,
   errorMessage,
-  endpointRequiresAccessToken
+  endpointRequiresAccessToken,
+  endpointUnreachable
 } = storeToRefs(graphStore)
 const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
 
@@ -33,7 +34,7 @@ useSeoMeta({
     />
 
     <GraphViewerErrorState
-      v-else-if="endpointRequiresAccessToken || status === 'error'"
+      v-else-if="endpointRequiresAccessToken || endpointUnreachable || status === 'error'"
       :message="errorMessage"
       :requires-access-token="endpointRequiresAccessToken"
       @retry="refresh()"

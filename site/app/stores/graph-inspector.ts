@@ -265,12 +265,23 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       readResponseError(error.value)
       || readResponseError(endpointInfoError.value)
       || error.value?.message
+      || endpointInfoError.value?.message
       || ''
   )
   const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
   )
+
+  /**
+   * Whether the endpoint failed to answer at all.
+   *
+   * Distinct from an endpoint that answered with something unexpected: a graph
+   * that cannot be reached is almost always an application that is not running,
+   * and saying "no data received" for it sends the developer looking in the
+   * wrong place.
+   */
+  const endpointUnreachable = ref(false)
 
   /**
    * Whether the endpoint answered "you need a token".
@@ -300,6 +311,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     shouldShowVersionAcknowledgement.value = false
     acknowledgedVersionEndpointUrl.value = ''
     endpointRequiresAccessToken.value = false
+    endpointUnreachable.value = false
     resolveVersionAcknowledgement?.(false)
     resolveVersionAcknowledgement = undefined
   }
@@ -409,12 +421,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       return false
     }
 
+    // Every attempt starts without a verdict. `clearGraph()` only runs when the
+    // endpoint changes, so a retry against the *same* endpoint would otherwise
+    // inherit the last one — and report "access token required" for what is
+    // really an application that has stopped answering.
+    endpointRequiresAccessToken.value = false
+    endpointUnreachable.value = false
+
     await executeEndpointInfo()
 
     const isValidEndpoint = endpointInfo.value?.for === 'nest-graph-inspector'
     if (isValidEndpoint) {
       shouldShowUpdateModal.value = false
-      endpointRequiresAccessToken.value = false
       return true
     }
 
@@ -425,6 +443,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
     await executeLegacyGraph()
     shouldShowUpdateModal.value = isLegacyGraphOutput(legacyGraphData.value)
+
+    // It never answered, and it is not an older graph served in its place. That
+    // is a connection problem, not an empty graph.
+    endpointUnreachable.value = Boolean(endpointInfoError.value)
+      && !shouldShowUpdateModal.value
 
     return false
   }
@@ -585,6 +608,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     graphIsStatic,
     endpointVersion,
     endpointRequiresAccessToken,
+    endpointUnreachable,
     latestVersion,
     status,
     error,

@@ -52,6 +52,10 @@ for the published history.
   viewer's own "Try Another URL" — and going back keeps the graph and its token.
 - An unusable path below a viewer page (`/view/navigator/anything`) returns to
   the viewer entry page instead of waiting on a spinner that never resolves.
+- Retrying a graph that has stopped answering no longer reports the last reason.
+  A 401 is not remembered across attempts, so an application that went down is
+  reported as unreachable rather than as needing an access token — and an
+  endpoint that never answered says so, instead of "no data received".
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.
