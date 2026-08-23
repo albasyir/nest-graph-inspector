@@ -5,6 +5,7 @@ import {
   resolveGraphViewerLoadSource,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
+import { withAccessToken } from '~/utils/inspector-access-token'
 
 definePageMeta({
   layout: 'viewer'
@@ -124,7 +125,7 @@ const directRunUrl = computed(() => {
       : '/direct-run'
     url.search = ''
     url.hash = ''
-    return url.toString()
+    return withAccessToken(url, decodedUrl.value).toString()
   } catch {
     return undefined
   }

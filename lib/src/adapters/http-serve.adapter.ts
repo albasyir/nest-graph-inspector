@@ -2,10 +2,25 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 
+/**
+ * Decides whether a matched route may run for the given request.
+ *
+ * Returning a rejection short-circuits the route: neither `callback` nor
+ * `rawCallback` is invoked, and the supplied response is sent instead.
+ */
+export type HttpServeAuthorize = (req: http.IncomingMessage) =>
+  | { ok: true }
+  | { ok: false; response: HttpServeResponse };
+
 export type HttpServeOptions = {
   origin?: string;
   host?: string;
   port?: number;
+  /**
+   * Applied to every route in this registration that does not carry its own
+   * `authorize`.
+   */
+  authorize?: HttpServeAuthorize;
 };
 
 export type HttpServeRoute = {
@@ -20,6 +35,7 @@ export type HttpServeRoute = {
   responseHeaders?: http.OutgoingHttpHeaders;
   contentType?: string;
   statusCode?: number;
+  authorize?: HttpServeAuthorize;
 };
 
 export type HttpServeRequest = {
@@ -55,7 +71,11 @@ export class HttpServeAdapter implements OnModuleDestroy {
     for (const route of routes) {
       const key = this.routeKey(route.type, this.normalizePath(route.path));
       const routeGroup = state.routes.get(key) ?? [];
-      routeGroup.push(route);
+      routeGroup.push(
+        options.authorize && !route.authorize
+          ? { ...route, authorize: options.authorize }
+          : route,
+      );
       state.routes.set(key, routeGroup);
     }
 
@@ -176,6 +196,21 @@ export class HttpServeAdapter implements OnModuleDestroy {
       }
 
       this.sendText(res, 404, 'Not Found');
+      return;
+    }
+
+    // A preflight carries no token of its own, so authorizing it would block
+    // the request the browser is asking permission for. The actual request
+    // that follows still has to present one.
+    const authorization = this.isCorsPreflightRequest(req)
+      ? undefined
+      : route.authorize?.(req);
+    if (authorization && !authorization.ok) {
+      this.sendResult(
+        res,
+        { type: route.type, path: route.path },
+        authorization.response,
+      );
       return;
     }
 
