@@ -2,28 +2,25 @@
  * Query parameter carrying the inspector access token.
  *
  * Must match `ACCESS_TOKEN_QUERY_PARAM` in the `nest-graph-inspector` library.
+ * The viewer only ever *reads* this parameter, out of the printed link it is
+ * handed. It never puts a token back into a URL.
  */
 export const INSPECTOR_ACCESS_TOKEN_PARAM = '__inspector_token'
 
 /**
- * Decodes the graph endpoint URL carried in the `/view/:url` route segment.
+ * Request header carrying the inspector access token.
  *
- * The library encodes it with Node's `base64url` alphabet, which swaps `+`
- * and `/` for `-` and `_`. `atob` only accepts standard base64, so the
- * alphabet is translated back and the stripped padding restored first.
+ * Must match `ACCESS_TOKEN_HEADER` in the `nest-graph-inspector` library. Every
+ * request the viewer makes to the inspected application authenticates through
+ * this header, so no URL the viewer builds — or requests — carries a token.
  */
-export function decodeEndpointUrl(encoded: string): string {
-  const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
-  const paddingLength = (4 - (base64.length % 4)) % 4
-
-  return atob(base64.padEnd(base64.length + paddingLength, '='))
-}
+export const INSPECTOR_ACCESS_TOKEN_HEADER = 'x-graph-inspector-token'
 
 /**
  * Reads the access token out of a graph endpoint URL.
  *
- * The endpoint URL is the only thing the viewer is handed, so it is also where
- * the token travels.
+ * Only the bootstrap link carries one: the library embeds the token in the
+ * endpoint URL it encodes into the printed viewer link.
  */
 export function readAccessToken(endpointUrl: string): string | undefined {
   if (!endpointUrl) {
@@ -42,11 +39,11 @@ export function readAccessToken(endpointUrl: string): string | undefined {
 }
 
 /**
- * Removes the access token from a URL before it leaves the browser.
+ * Removes the access token from a URL.
  *
- * The token is a live credential for the inspected application, so anything
- * that ships a graph URL onward — analytics, error reports, logs — has to send
- * a redacted one.
+ * The token is a live credential for the inspected application, so it is
+ * stripped the moment the bootstrap link is read, and stripped again from
+ * anything that ships a graph URL onward — analytics, error reports, logs.
  */
 export function redactAccessToken(endpointUrl: string): string {
   if (!endpointUrl || !endpointUrl.includes(INSPECTOR_ACCESS_TOKEN_PARAM)) {
@@ -60,26 +57,53 @@ export function redactAccessToken(endpointUrl: string): string {
     return url.toString()
   } catch {
     // Not parseable as a URL, but it still mentions the parameter, so strip it
-    // textually rather than let a token through.
+    // textually rather than let a token through. The value ends at a query
+    // separator or at whitespace or a quote, because the input here is as
+    // likely to be a URL quoted inside an error message as a URL on its own —
+    // and cutting to the end of the line would take the message with it.
     return endpointUrl.replace(
-      new RegExp(`([?&])${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#]*&?`, 'g'),
+      new RegExp(`([?&]?)${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#\\s"']*&?`, 'g'),
       '$1'
     )
   }
 }
 
 /**
- * Copies the access token from a graph endpoint URL onto a derived URL.
+ * Headers that authenticate a request to the inspected application.
  *
- * Derived URLs (`/direct-run`, `/ollama`) are rebuilt from the endpoint origin
- * and would otherwise drop the token along with the rest of the query string.
+ * Empty when there is no token — either token protection is off, or the graph
+ * is a static fixture served from the viewer's own origin.
  */
-export function withAccessToken(url: URL, endpointUrl: string): URL {
-  const token = readAccessToken(endpointUrl)
+export function accessTokenHeaders(
+  token: string | undefined
+): Record<string, string> {
+  return token ? { [INSPECTOR_ACCESS_TOKEN_HEADER]: token } : {}
+}
 
-  if (token) {
-    url.searchParams.set(INSPECTOR_ACCESS_TOKEN_PARAM, token)
+/**
+ * Whether a graph may be opened with no access token at all.
+ *
+ * Only one may: a graph served from the viewer's own origin. That is this
+ * site's own demo, which runs in the visitor's browser and is reachable from
+ * nowhere else — its own endpoint still refuses a request without the token it
+ * printed, so nothing here is what protects it.
+ *
+ * Every other endpoint is somebody's running application, reached over the
+ * network. The printed link is the only thing that hands over a token for it,
+ * so arriving at a viewer page without one means the link was not the way in,
+ * and the viewer has nothing to authenticate with.
+ */
+export function canOpenWithoutAccessToken(
+  endpointUrl: string,
+  viewerOrigin: string
+): boolean {
+  if (!endpointUrl || !viewerOrigin) {
+    return false
   }
 
-  return url
+  try {
+    return new URL(endpointUrl).origin === viewerOrigin
+  } catch {
+    return false
+  }
 }

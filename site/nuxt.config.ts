@@ -42,6 +42,22 @@ export default defineNuxtConfig({
     }
   },
 
+  // The viewer is a browser-only surface: the graph it shows lives on the
+  // developer's own machine, and which graph a tab is on lives in that tab's
+  // session storage. A server render can see neither, so it would always render
+  // "no graph" and then disagree with the client's first paint. Rendering these
+  // routes client-side only removes that whole class of hydration mismatch, and
+  // matches how they already behave in production, where they are served as the
+  // static host's SPA fallback.
+  routeRules: {
+    // `/view/**` also matches `/view`, so the entry page needs an explicit
+    // override: it renders nothing that depends on the tab's session, and it is
+    // linked from the homepage, so it keeps its prerendered HTML, title and OG
+    // tags for crawlers and link unfurlers.
+    '/view': { ssr: true },
+    '/view/**': { ssr: false }
+  },
+
   experimental: {
     asyncContext: true
   },

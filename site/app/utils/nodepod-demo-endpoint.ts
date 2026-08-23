@@ -10,6 +10,10 @@
  * A service worker would be the runtime's preferred route, but it registers
  * with `scope: "/"`, and the documentation site is served from a subpath on
  * GitHub Pages, which cannot answer with `Service-Worker-Allowed`.
+ *
+ * These addresses are same-origin by construction, which is what lets the
+ * viewer talk to the demo with the same code it uses for an application on the
+ * developer's own machine.
  */
 
 /**
@@ -28,10 +32,6 @@ function decodeBase64Url(encoded: string): string {
   const paddingLength = (4 - (base64.length % 4)) % 4
 
   return atob(base64.padEnd(base64.length + paddingLength, '='))
-}
-
-function encodeBase64Url(value: string): string {
-  return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 function withoutTrailingSlash(path: string): string {
@@ -73,8 +73,12 @@ export function readViewerLinkEndpoint(log: string): string | null {
 
 /**
  * Rewrites an endpoint the demo application printed for itself
- * (`http://localhost:53371/__graph-inspector?…`) into the address the browser
- * can reach it at, keeping the path and the access token intact.
+ * (`http://localhost:53371/__graph-inspector`) into the address the browser can
+ * reach it at, keeping the path.
+ *
+ * The query is dropped rather than carried over: the printed link is the one
+ * thing that hands out an access token, and the viewer keeps that token in the
+ * store and sends it as a header. A URL it builds never carries one.
  */
 export function buildDemoEndpointUrl(params: {
   endpointUrl: string
@@ -85,7 +89,7 @@ export function buildDemoEndpointUrl(params: {
   const target = new URL(params.siteBaseUrl)
 
   target.pathname = `${withoutTrailingSlash(target.pathname)}/${NODEPOD_ROUTE_SEGMENT}/${port}${source.pathname}`
-  target.search = source.search
+  target.search = ''
   target.hash = ''
 
   return target.toString()
@@ -150,11 +154,4 @@ export function readDemoRequestTarget(
   }
 
   return { port, path: `/${rest.join('/')}${url.search}` }
-}
-
-/**
- * Encodes a graph endpoint for the `/view/:url` route the viewer reads it from.
- */
-export function encodeEndpointUrlForRoute(endpointUrl: string): string {
-  return encodeURIComponent(encodeBase64Url(endpointUrl))
 }

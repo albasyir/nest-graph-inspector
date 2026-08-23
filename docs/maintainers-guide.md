@@ -510,11 +510,13 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 **Purpose:** Auto-imported Vue composables.
 
-| Composable | Purpose |
+| Composable | What it does |
 |---|---|
+| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
 | `use-nodepod-demo-graph.ts` | Starts the in-browser demo the first time the element it returns scrolls into view, and exposes the graph, status label, and retry action a docs preview needs |
+| `use-nodepod-demo-session.ts` | Restarts the in-browser demo behind a restored session, because its endpoint is only answerable by the tab that started it |
 
-**What belongs here:** Per-component reactive logic that wraps a store — an intersection observer, a lifecycle hook, a derived view of shared state. Global state itself belongs in `stores/`; pure functions belong in `utils/`.
+**What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
 
 ---
 
@@ -541,11 +543,51 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
 | `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input, and starts the in-browser demo behind "Open Demo" |
-| `view/[url]/index.vue` | `/view/:url` | Main graph view; loads `GraphOutput` for the encoded URL param |
-| `view/[url]/issues.vue` | `/view/:url/issues` | Issue finder; lists circular dependency issues |
-| `view/[url]/execution-sequence.vue` | `/view/:url/execution-sequence` | Execution sequence diagram for Direct Run traces |
+| `view/navigator.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds |
+| `view/issues.vue` | `/view/issues` | Issue finder; lists circular dependency issues |
+| `view/execution-sequence.vue` | `/view/execution-sequence` | Execution sequence diagram for Direct Run traces |
+| `view/[...bootstrap].vue` | `/view/<base64url endpoint>` | Stands in for a printed link while it is spent; the middleware redirects away before it renders |
 
-**The `:url` parameter** is a base64url-encoded endpoint URL. It is decoded by the Pinia store.
+**No viewer URL identifies a graph.** `/view/navigator` names a *view*; which
+graph a tab is showing lives in the store, and in that tab's `sessionStorage` so
+a reload survives. The consequence is deliberate: a viewer URL is not shareable
+or bookmarkable, and a fresh tab on one lands on `/view`.
+
+**A viewer page also needs the credential for its graph.** The middleware sends
+a tab with no access token back to `/view`, because the token is not in the URL
+any more and the printed link is the only thing that hands one over — so holding
+one is what proves the link was the way in. The single exemption is a graph
+served from this site's own origin, which is the bundled demo fixture: static
+files with no application behind them. A library configured with
+`accessToken.enabled: false` therefore cannot be opened in the hosted viewer.
+
+**`/view/<base64url(endpoint)>` is the printed link** — the one channel that
+hands the viewer an endpoint and, with it, an access token. It is spent on
+arrival: endpoint and token go to the store, and the address bar is replaced with
+a plain `/view/<page>`. Old links carrying a second segment
+(`/view/<blob>/issues`) still land on the view they named.
+
+Two pieces spend it, because one cannot cover both consumers:
+
+| File | Job |
+|---|---|
+| `app/plugins/graph-viewer-bootstrap.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: takes custody of the link and rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` |
+| `app/middleware/graph-viewer-bootstrap.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the link is never committed. Also guards the viewer's own pages: no session means nothing to show, so it sends the visitor to `/view` |
+
+Requests then authenticate with the `x-graph-inspector-token` header, so no URL
+the viewer builds or fetches carries a token.
+
+Doing this from a page instead does not work: `onMounted` is already too late
+for PostHog's first `$pageview`. The one thing client-side code cannot undo is
+the entry the browser already wrote to its own history database for the bootstrap
+load — that expires with the token.
+
+**`/view/**` is client-rendered only** (`routeRules` in `nuxt.config.ts`). The
+server can see neither the inspected application nor the tab's session, so it
+would always render "no graph" and then disagree with the client's first paint —
+a hydration mismatch that left the nav tabs stuck disabled. This also matches how
+these routes already behave in production, where they are the static host's SPA
+fallback.
 
 **What belongs here:** Route entry points and page-level orchestration. Minimal logic; delegate to stores and composables.
 
@@ -557,23 +599,39 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Store | Purpose |
 |---|---|
-| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages encoded URL, graph data, markdown, endpoint info, and UI flags |
+| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags |
 | `nodepod-demo.ts` | Runs the demo application in the browser: downloads the payload, boots nodepod headless, spawns `node main.js`, installs the fetch bridge, and reads the graph endpoint out of the application's startup log |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
+
+The store file holds the store. Pure helpers it used to carry — URL derivation,
+graph-output support checks, error reading — live in `site/app/utils/` instead,
+where they are auto-imported, reusable, and covered by the assert-based tests
+that cannot reach into a Pinia setup store.
 
 **`nodepod-demo.ts` key responsibilities:**
 - Downloads `manifest.json`, `main.js`, and `sources.json` from `nodepod-demo/`, reporting download progress.
 - Boots the pod with `headless: true` and the environment the manifest declares.
 - Bridges `fetch` calls addressed to `<site base>/__nodepod__/<port>/…` into `pod.request(port, …)`.
-- Waits for the viewer link the application prints, which is also where the access token is handed out, and rewrites it into a bridged endpoint URL.
+- Reads the viewer link the application prints — the same bootstrap credential a developer clicks — and splits it into the bridged endpoint URL and the access token the graph store then sends as a header.
 - Serves one pod for every preview on the page and for the viewer, so the payload is downloaded and the application booted at most once per page load.
 
 **`graph-inspector.ts` key responsibilities:**
-- Decodes the base64url param into an endpoint URL.
-- Fetches `information.json` to validate the endpoint. It carries `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static`: `true` when the graph is served as files, `false` for HTTP output. `latestVersion` is the npm registry's latest package version, or `null` when the lookup is unavailable or invalid; `isLatestVersion` is an exact comparison with `version`.
+- Holds the token-free endpoint URL — the only record of which graph is being
+  viewed — and mirrors it, with the token, into the tab's session.
+- Holds the access token, and authenticates every request with it through a
+  dedicated `$fetch` instance. The token never goes into a URL.
+- Fetches `information.json` to validate the endpoint.
+- `probeEndpoint()` asks whether an address is an inspector *without* committing
+  to it, so `/view`'s poller cannot swap the endpoint out from under a viewer
+  that the visitor can still navigate Back to. It also deliberately avoids the
+  authenticating `$fetch` instance, which would hand this tab's token to whatever
+  host is being probed.
 - Fetches `output.json` (`GraphOutput`) and validates schema version ≥ 3.
 - Fetches `output.md` for the Markdown view.
 - Detects "legacy" graph outputs and shows an upgrade modal.
+- Turns a `401` into `endpointRequiresAccessToken` and drops the rejected token,
+  so a stale tab says "reopen the printed link" instead of replaying a dead
+  credential.
 
 **What belongs here:** Reactive state and async data-fetching logic that multiple components share.
 
@@ -587,8 +645,22 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | File | What it contains |
 |---|---|
-| `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource` |
+| `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource`; redacts access tokens out of every property |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
+| `inspector-access-token.ts` | The token contract shared with the library: parameter and header names, reading a token out of a printed link, redacting one out of anything else |
+| `inspector-access-token.test.ts` | Assert-based test for `inspector-access-token.ts`, including the analytics payload as a leak sink |
+| `viewer-bootstrap-link.ts` | Decodes the printed `/view/<base64url endpoint>` link and says which viewer page it should land on |
+| `viewer-bootstrap-link.test.ts` | Assert-based test for `viewer-bootstrap-link.ts` |
+| `inspector-graph-session.ts` | The tab's record of which graph it is on, and the token for it — memory plus `sessionStorage` — so a reload survives a URL that names neither |
+| `inspector-graph-session.test.ts` | Assert-based test for `inspector-graph-session.ts`, with an injected fake `Storage` |
+| `graph-inspector-version-gate.ts` | Decides when an endpoint's library version needs acknowledging before its graph is shown |
+| `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
+| `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at its origin, Direct Run |
+| `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
+| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
+| `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
+| `http-error.ts` | Reads the reason and status out of a failed request, so the inspector's own message wins over the transport's |
+| `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
@@ -597,7 +669,11 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |
 | `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
 
-**Testing convention:** Tests here use `node:assert` with no framework. Run with `node <file>.ts` (requires ts-node or tsx).
+**Testing convention:** Tests here use `node:assert` with no framework, as bare
+top-level assertions. Run them with `pnpm --filter nest-graph-inspector-site run test`
+(`node --experimental-strip-types --test app/utils/*.test.ts`). A module reachable
+from a test must use `.ts`-suffixed relative imports and no `~` alias, since Node
+resolves the import graph itself.
 
 **What belongs here:** Pure functions with no Vue/Nuxt dependencies. May import library types via `@library`.
 

@@ -3,11 +3,15 @@ import type { GraphOutput } from 'nest-graph-inspector'
 import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
-  encodeEndpointUrlForRoute,
   readDemoRequestTarget,
-  readViewerLinkEndpoint,
-  resolveInspectorMountBase
+  readViewerLinkEndpoint
 } from '~/utils/nodepod-demo-endpoint'
+import {
+  accessTokenHeaders,
+  readAccessToken,
+  redactAccessToken
+} from '~/utils/inspector-access-token'
+import { resolveDirectRunUrl } from '~/utils/inspector-endpoint-url'
 import {
   stripAnsi,
   toRequestBody,
@@ -56,8 +60,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const totalBytes = ref(0)
   const logLines = ref<string[]>([])
   const manifest = ref<DemoManifest | null>(null)
+  /** Graph endpoint of the running application, never carrying a token. */
   const endpointUrl = ref('')
-  const encodedEndpointUrl = ref('')
+  /**
+   * Token the application printed for itself. The viewer sends it as a header,
+   * exactly as it does for an application on the developer's own machine.
+   */
+  const accessToken = ref('')
   const graphOutput = ref<GraphOutput | null>(null)
 
   let pod: Nodepod | undefined
@@ -74,21 +83,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       || status.value === 'booting'
       || status.value === 'starting'
   )
-  /**
-   * Direct-run endpoint of the running application. The library mounts it at
-   * the root of the application's own server, and the access token rides along
-   * in the query the endpoint URL already carries.
-   */
-  const directRunUrl = computed(() => {
-    if (!endpointUrl.value) {
-      return ''
-    }
-
-    const url = new URL(endpointUrl.value)
-    url.pathname = `${resolveInspectorMountBase(endpointUrl.value)}/direct-run`
-
-    return url.toString()
-  })
+  /** Direct-run endpoint of the running application, and what authenticates it. */
+  const directRunUrl = computed(() => resolveDirectRunUrl(endpointUrl.value, false))
+  const requestHeaders = computed(() => accessTokenHeaders(accessToken.value))
 
   const downloadProgress = computed(() => {
     if (!totalBytes.value) {
@@ -405,13 +402,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     })
 
     const printedEndpoint = await waitForEndpoint()
-    const demoEndpoint = buildDemoEndpointUrl({
-      endpointUrl: printedEndpoint,
+
+    // The printed link is a bootstrap credential: the endpoint keeps the path,
+    // the token comes out of the URL and stays out of every URL after it.
+    endpointUrl.value = buildDemoEndpointUrl({
+      endpointUrl: redactAccessToken(printedEndpoint),
       siteBaseUrl: siteBaseUrl()
     })
-
-    endpointUrl.value = demoEndpoint
-    encodedEndpointUrl.value = encodeEndpointUrlForRoute(demoEndpoint)
+    accessToken.value = readAccessToken(printedEndpoint) ?? ''
     status.value = 'ready'
 
     return true
@@ -462,7 +460,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
         const url = new URL(endpointUrl.value)
         url.pathname = `${url.pathname.replace(/\/+$/, '')}/output.json`
 
-        const response = await fetch(url.toString())
+        const response = await fetch(url.toString(), {
+          headers: requestHeaders.value
+        })
 
         if (!response.ok) {
           throw new Error(
@@ -503,7 +503,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     graphPromise = undefined
     graphOutput.value = null
     endpointUrl.value = ''
-    encodedEndpointUrl.value = ''
+    accessToken.value = ''
     status.value = 'idle'
   }
 
@@ -513,7 +513,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     logLines,
     manifest,
     endpointUrl,
-    encodedEndpointUrl,
+    accessToken,
+    requestHeaders,
     graphOutput,
     directRunUrl,
     isRunning,

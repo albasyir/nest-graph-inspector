@@ -158,6 +158,7 @@ const props = withDefaults(
     enableBrightLine?: boolean
     collapsedModules?: string[] | string
     directRunUrl?: string
+    directRunHeaders?: Record<string, string>
     directRunDisabled?: boolean
     directRunOn?: string
     showControls?: boolean
@@ -169,6 +170,7 @@ const props = withDefaults(
     flush: false,
     flowId: undefined,
     directRunUrl: undefined,
+    directRunHeaders: undefined,
     directRunDisabled: false,
     directRunOn: undefined,
     showControls: true,
@@ -2640,6 +2642,7 @@ async function executeDirectRun(
     }
     const response = await $fetch<DirectRunResultPayload>(props.directRunUrl, {
       method: 'POST',
+      headers: props.directRunHeaders,
       body: buildDirectRunRequest(request)
     })
     const snapshot = buildDirectRunSnapshot({

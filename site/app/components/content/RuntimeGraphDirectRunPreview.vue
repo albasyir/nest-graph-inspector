@@ -70,6 +70,7 @@ function openExecutionSequence() {
           flow-id="runtime-graph-preview-direct-run"
           height="clamp(18rem, 58vh, 34rem)"
           :direct-run-url="demo.directRunUrl"
+          :direct-run-headers="demo.requestHeaders"
           :show-controls="false"
           :show-mini-map="false"
           :show-circular-dependencies="false"

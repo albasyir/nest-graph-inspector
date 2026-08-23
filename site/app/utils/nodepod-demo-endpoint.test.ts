@@ -1,10 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { strict as assert } from 'node:assert'
-import { decodeEndpointUrl } from './inspector-access-token.ts'
+import { readAccessToken } from './inspector-access-token.ts'
 import {
   NODEPOD_ROUTE_SEGMENT,
   buildDemoEndpointUrl,
-  encodeEndpointUrlForRoute,
   readDemoRequestTarget,
   readViewerLinkEndpoint,
   resolveInspectorMountBase
@@ -52,30 +51,26 @@ assert.equal(
 )
 
 // The application's own address is rewritten into one this tab can reach,
-// under whatever path the site itself is served from.
+// under whatever path the site itself is served from — and the token the
+// printed link carried is left behind, because the viewer sends it as a header.
 assert.equal(
   buildDemoEndpointUrl({ endpointUrl: DEMO_ENDPOINT, siteBaseUrl: SITE_BASE }),
-  `https://albasyir.github.io/nest-graph-inspector/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector?__inspector_token=${TOKEN}`
+  `https://albasyir.github.io/nest-graph-inspector/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 )
 assert.equal(
   buildDemoEndpointUrl({
     endpointUrl: DEMO_ENDPOINT,
     siteBaseUrl: 'http://localhost:3000/'
   }),
-  `http://localhost:3000/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector?__inspector_token=${TOKEN}`
+  `http://localhost:3000/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 )
 
-// The route segment survives a round trip through the viewer's own encoding.
 const demoEndpoint = buildDemoEndpointUrl({
   endpointUrl: DEMO_ENDPOINT,
   siteBaseUrl: SITE_BASE
 })
-assert.equal(
-  decodeEndpointUrl(
-    decodeURIComponent(encodeEndpointUrlForRoute(demoEndpoint))
-  ),
-  demoEndpoint
-)
+assert.equal(readAccessToken(demoEndpoint), undefined)
+assert.ok(!demoEndpoint.includes(TOKEN))
 
 // Sibling endpoints of the in-browser demo hang off the port segment...
 assert.equal(
@@ -90,14 +85,13 @@ assert.equal(resolveInspectorMountBase(''), '')
 
 // Requests the viewer makes are routed back to the virtual server they name.
 assert.deepEqual(
-  readDemoRequestTarget(
-    `${demoEndpoint.split('?')[0]}/output.json?__inspector_token=${TOKEN}`,
-    SITE_BASE
-  ),
-  {
-    port: 53371,
-    path: `/__graph-inspector/output.json?__inspector_token=${TOKEN}`
-  }
+  readDemoRequestTarget(`${demoEndpoint}/output.json`, SITE_BASE),
+  { port: 53371, path: '/__graph-inspector/output.json' }
+)
+// A query the viewer does add — anything but a token — travels with the request.
+assert.deepEqual(
+  readDemoRequestTarget(`${demoEndpoint}/output.json?pretty=1`, SITE_BASE),
+  { port: 53371, path: '/__graph-inspector/output.json?pretty=1' }
 )
 assert.deepEqual(
   readDemoRequestTarget(

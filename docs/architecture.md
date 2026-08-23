@@ -113,7 +113,8 @@ Key site modules:
 | `app/stores/graph-inspector.ts` | Pinia store; fetches and validates `GraphOutput` from the live endpoint |
 | `app/stores/nodepod-demo.ts` | Pinia store; downloads the demo payload, boots nodepod, spawns the demo application, and bridges requests to its virtual servers |
 | `app/composables/use-nodepod-demo-graph.ts` | Starts the demo when a docs preview scrolls into view and exposes the graph the running application reports |
-| `app/utils/nodepod-demo-endpoint.ts` | Endpoint plumbing for the in-browser demo: reads the viewer link out of the startup log, addresses the virtual servers, encodes the `/view/:url` param |
+| `app/composables/use-nodepod-demo-session.ts` | Restarts the demo behind a restored session, whose endpoint only the tab that started it can answer |
+| `app/utils/nodepod-demo-endpoint.ts` | Endpoint plumbing for the in-browser demo: reads the viewer link out of the startup log and addresses the virtual servers |
 | `app/utils/circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `app/utils/direct-run-provider.ts` | Helper types and functions for Direct Run UI |
 | `app/utils/supported-runtime.ts` | Package manager constants and install command helpers |
@@ -182,15 +183,23 @@ right after building the payload.
 3. Nodepod.boot({ files, workdir, env, headless: true })
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
 5. pod.spawn('node', ['main.js']) → the NestJS application starts
-6. The store reads the graph endpoint out of the application's own startup log
-     - the inspector prints one viewer link per run
-     - that link is also where the access token is handed out
-7. The endpoint is rewritten into a bridged URL and handed to the viewer,
-   which loads it through the same HTTP contract as any other endpoint
+6. The store reads the printed viewer link out of the application's own startup
+   log, and treats it as the bootstrap credential it is:
+     - the endpoint keeps its path, rewritten onto the bridged address
+     - the access token comes out of the URL and is handed to the graph store,
+       which sends it as a header from then on
+7. `/view` puts both in the tab's session and opens `/view/navigator`, which
+   loads the graph through the same HTTP contract as any other endpoint
 ```
 
 One pod serves every preview on the page and the viewer, so the payload is
 downloaded and the application booted at most once per page load.
+
+A viewer page names a view, not a graph, so a reload restores the endpoint from
+the tab's session — and for the demo that endpoint is answerable only by the tab
+that started it. `use-nodepod-demo-session.ts` recognises such an endpoint and
+starts the demo again, which means a new port and a new token, so it replaces
+the session rather than reusing it.
 
 ### What the demo bootstrap accommodates
 

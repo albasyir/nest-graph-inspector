@@ -1,49 +1,22 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
-import { decodeEndpointUrl } from '~/utils/inspector-access-token'
 
 const route = useRoute()
 const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
-  encodedUrl,
-  decodedUrl,
+  endpointUrl,
   graphIsStatic,
-  status
+  isLoading
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
 
-const routeEncodedUrl = computed(() => {
-  const param = route.params.url
-  const value = Array.isArray(param) ? param[0] : param
-
-  if (!value) return ''
-
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return ''
-  }
-})
-
-const currentEncodedUrl = computed(() => encodedUrl.value || routeEncodedUrl.value)
-const currentDecodedUrl = computed(() => {
-  if (decodedUrl.value) return decodedUrl.value
-  if (!currentEncodedUrl.value) return ''
-
-  try {
-    return decodeEndpointUrl(currentEncodedUrl.value)
-  } catch {
-    return ''
-  }
-})
-
-const navigatorPath = computed(() =>
-  currentEncodedUrl.value ? `/view/${currentEncodedUrl.value}` : '/view'
-)
-const issuesPath = computed(() => `${navigatorPath.value}/issues`)
-const executionSequencePath = computed(() => `${navigatorPath.value}/execution-sequence`)
+// The graph being viewed is no longer in the URL, so these paths are fixed and
+// the endpoint shown in the header comes from the store.
+const NAVIGATOR_PATH = '/view/navigator'
+const ISSUES_PATH = '/view/issues'
+const EXECUTION_SEQUENCE_PATH = '/view/execution-sequence'
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -75,23 +48,23 @@ const viewerMenuItems = computed(() => [
   {
     label: 'Navigator',
     icon: 'i-lucide-map',
-    to: navigatorPath.value,
-    active: route.path === navigatorPath.value,
-    disabled: !currentEncodedUrl.value
+    to: NAVIGATOR_PATH,
+    active: route.path === NAVIGATOR_PATH,
+    disabled: !endpointUrl.value
   },
   {
     label: 'Issues',
     icon: 'i-lucide-bug',
-    to: issuesPath.value,
-    active: route.path === issuesPath.value,
-    disabled: !currentEncodedUrl.value
+    to: ISSUES_PATH,
+    active: route.path === ISSUES_PATH,
+    disabled: !endpointUrl.value
   },
   {
     label: 'Execution Sequence',
     icon: 'i-lucide-history',
-    to: executionSequencePath.value,
-    active: route.path === executionSequencePath.value,
-    disabled: !currentEncodedUrl.value
+    to: EXECUTION_SEQUENCE_PATH,
+    active: route.path === EXECUTION_SEQUENCE_PATH,
+    disabled: !endpointUrl.value
   }
 ] satisfies NavigationMenuItem[])
 </script>
@@ -134,7 +107,7 @@ const viewerMenuItems = computed(() => [
                 </NuxtLink>
 
                 <p class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl">
-                  {{ currentDecodedUrl || 'No graph endpoint selected' }}
+                  {{ endpointUrl || 'No graph endpoint selected' }}
                 </p>
               </div>
             </div>
@@ -155,8 +128,8 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-label="Reload graph"
-                  :disabled="!currentDecodedUrl || status === 'pending'"
-                  :loading="status === 'pending'"
+                  :disabled="!endpointUrl || isLoading"
+                  :loading="isLoading"
                   @click="handleRefresh"
                 />
               </UTooltip>
@@ -166,7 +139,7 @@ const viewerMenuItems = computed(() => [
                 label="Ask AI"
                 color="neutral"
                 variant="ghost"
-                :disabled="!currentDecodedUrl"
+                :disabled="!endpointUrl"
                 @click="handleAskAi"
               />
             </div>

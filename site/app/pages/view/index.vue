@@ -47,24 +47,32 @@ async function loadExample() {
     return
   }
 
-  // The demo and this site are built from the same commit, so the version
-  // acknowledgement the viewer asks for elsewhere has nothing to add here.
-  graphStore.trustEndpointVersion(demoStore.endpointUrl)
-
   const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
-  const encodedDemoUrl = demoStore.encodedEndpointUrl
 
   posthog?.capture('graph_demo_started', {
     revision: demoStore.manifest?.revision
   })
 
   isNavigating.value = true
+
+  // The demo is a graph like any other: put it in the session, then go to a
+  // plain viewer page. The demo and this site are built from the same commit,
+  // so the version acknowledgement the viewer asks for elsewhere has nothing
+  // to add here.
+  graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
+  graphStore.trustEndpointVersion(demoStore.endpointUrl)
   await navigateTo(
-    shouldOpenExecutionSequence
-      ? `/view/${encodedDemoUrl}/execution-sequence`
-      : `/view/${encodedDemoUrl}`
+    shouldOpenExecutionSequence ? '/view/execution-sequence' : '/view/navigator'
   )
 }
+
+/**
+ * Last few lines the demo application printed, so a slow start is visibly a
+ * real application starting rather than a stalled page.
+ */
+const demoConsole = computed(() =>
+  demoStore.logLines.slice(demoStore.status === 'error' ? -25 : -6).join('\n')
+)
 
 function clearPolling() {
   if (pollingTimer.value) {
@@ -82,34 +90,56 @@ async function tryLoadGraph(pollId: number) {
   attemptCount.value += 1
 
   try {
-    const isLoaded = await graphStore.detectInputUrl(activeOrigin.value)
+    // A probe, not a load: this page must not disturb the graph the tab is
+    // already on, because the visitor can still go Back to it.
+    const probe = await graphStore.probeEndpoint(activeOrigin.value)
     if (pollId !== activePollId) {
       return
     }
 
-    if (shouldShowUpdateModal.value) {
+    if (probe.status === 'legacy') {
       clearPolling()
       return
     }
 
-    if (!isLoaded || !graphStore.encodedUrl) {
+    // The inspector answered, but it is token-gated: the only thing that hands
+    // out a token is the link printed in the application console, so there is
+    // nothing more polling can achieve here. Stopping also matters because the
+    // library counts repeated invalid tokens per client — polling an endpoint
+    // it will keep refusing is the one way this page could get itself blocked.
+    if (probe.status === 'requires-token') {
+      clearPolling()
+      isSiteDetected.value = true
+      posthog?.capture('graph_endpoint_detected', {
+        url: activeOrigin.value,
+        attempts: attemptCount.value,
+        requires_access_token: true
+      })
+      return
+    }
+
+    if (probe.status !== 'ready') {
       return
     }
 
     clearPolling()
+
+    // Only now does this become the graph the tab is on.
+    graphStore.setSession(probe.endpointUrl, probe.token)
+
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: redactAccessToken(graphStore.decodedUrl),
+        url: redactAccessToken(probe.endpointUrl),
         attempts: attemptCount.value
       })
-      await navigateTo(`/view/${graphStore.encodedUrl}`)
+      await navigateTo('/view/navigator')
       return
     }
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: redactAccessToken(graphStore.decodedUrl),
+      url: redactAccessToken(probe.endpointUrl),
       attempts: attemptCount.value
     })
   } catch {
@@ -155,14 +185,6 @@ onBeforeUnmount(() => {
   activePollId += 1
   clearPolling()
 })
-
-/**
- * Last few lines the demo application printed, so a slow start is visibly a
- * real application starting rather than a stalled page.
- */
-const demoConsole = computed(() =>
-  demoStore.logLines.slice(demoStore.status === 'error' ? -25 : -6).join('\n')
-)
 
 watch(shouldShowUpdateModal, (visible) => {
   if (visible) {
