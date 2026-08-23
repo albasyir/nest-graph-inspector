@@ -25,7 +25,7 @@ Related reading:
 | `lib/src/types/` | Public TypeScript types + JSON Schema | Library agent |
 | `demo/src/` | Demo / development app | Library agent |
 | `demo/test/` | E2E tests for the demo app | Library agent |
-| `demo/scripts/` | Mock-fixture tooling | Maintainer |
+| `demo/scripts/` | Build tooling that packages the demo for the site | Maintainer |
 | `demo/docs/` | Static HTML docs (legacy) | Maintainer |
 | `lib/dist/` | Published package build output — never edit | Tooling |
 | `demo/tmp/` | Runtime graph output — never commit | Dev only |
@@ -40,7 +40,7 @@ Related reading:
 | `site/app/utils/` | Framework-agnostic utility functions | Frontend agent |
 | `site/content/` | MDC documentation pages | Anyone |
 | `site/public/` | Static assets served as-is | Frontend agent / maintainer |
-| `site/public/mock-graph/` | "Load Example" fixture data | Maintainer (generated) |
+| `site/public/nodepod-demo/` | Generated demo payload — never commit | Tooling |
 | `site/server/` | Nitro server-side handlers | Frontend agent |
 | `site/server/mcp/tools/` | MCP tool definitions | Frontend agent |
 | `site/server/routes/` | Nitro API routes | Frontend agent |
@@ -54,7 +54,7 @@ Related reading:
 
 **What belongs here:**
 - `pnpm-workspace.yaml` — declares `library` and `site` as workspace packages.
-- `package.json` — private root manifest; holds the monorepo name and `packageManager` field only.
+- `package.json` — private root manifest; holds the monorepo name, the `packageManager` field, and the scripts that fan out across the workspace. `dev`, `build`, and `build:site` build the library and then the demo payload the site serves, so nothing downstream runs against a stale payload.
 - `pnpm-lock.yaml` — shared lockfile managed by pnpm.
 - `package-lock.json` — appears to be a secondary lockfile; its presence alongside `pnpm-lock.yaml` is unusual (see Open questions).
 - `.npmrc` — `shamefully-hoist=true`; required because some packages assume a flat `node_modules`.
@@ -102,15 +102,17 @@ Related reading:
 The verification pipeline. Runs on every pull request and every push to `main`:
 1. `verify` — lint, typecheck, test, and build the library and demo across the workspace.
 2. `library-matrix` — tests and builds `nest-graph-inspector` on Node 20, 22, and 24.
-3. `site` — builds the library, then generates the Nuxt site to catch site-breaking library changes.
+3. `site` — builds the library, builds the demo payload, then generates the Nuxt site to catch site-breaking library changes.
 
 Node version for the non-matrix jobs comes from `.nvmrc`.
+
+**The `Build demo payload` step is not optional.** The site serves the demo application as a payload the visitor's browser runs, and `site/public/nodepod-demo/` is gitignored, so a checkout has nothing to serve until `pnpm --filter nest-graph-inspector-demo run build:nodepod` has run. Every workflow that calls `nuxt generate` has that step in front of it.
 
 ### `.github/workflows/deploy-site.yml`
 
 The release pipeline. It triggers when a GitHub release is published:
 1. Checks out the release tag, installs dependencies, runs lint + typecheck + tests, derives the package version from that tag (removing a leading `v`), builds `nest-graph-inspector`, and publishes it to npm with provenance (`npm publish --provenance`, which is why the job declares `id-token: write`).
-2. After publishing succeeds, checks out the same release tag, builds the library, generates the Nuxt site with the GitHub Pages preset, and uploads the static site artifact.
+2. After publishing succeeds, checks out the same release tag, builds the library, builds the demo payload the site serves, generates the Nuxt site with the GitHub Pages preset, and uploads the static site artifact.
 3. Deploys that artifact to GitHub Pages.
 
 **Note:** A release that fails lint, typecheck, or tests is not published. Cut tags from commits that are already green on `ci.yml`.
@@ -158,7 +160,7 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 ## `lib/` and `demo/`
 
-**Purpose:** `lib/` is the published NestJS package. `demo/` is its NestJS demo and development host, including e2e tests, mock-fixture tooling, and legacy static docs.
+**Purpose:** `lib/` is the published NestJS package. `demo/` is its NestJS demo and development host, including e2e tests, the tooling that packages the demo for the documentation site, and legacy static docs.
 
 **Owner:** `library` agent (see `demo/AGENTS.md`).
 
@@ -327,6 +329,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 src/
 ├── main.ts           — bootstrap (NestFactory, listens on port 8889)
 ├── app.module.ts     — root module; imports NestGraphInspectorModule.forRoot()
+├── inspector-outputs.ts — picks the inspector outputs for the current target
 ├── user/             — User feature (UserModule, UserService, UserController, UserRepository, UserSchedule)
 ├── product/          — Product feature (circular dep with MobileModule)
 ├── order/            — Order feature (intentional forwardRef circular dep)
@@ -340,6 +343,15 @@ The demo intentionally includes:
 
 This makes the demo useful for verifying cycle detection, dependency enrichment, and Direct Run metadata.
 
+**Two run targets.** `inspector-outputs.ts` reads the `NEST_GRAPH_INSPECTOR_TARGET` environment variable and returns the outputs for that target:
+
+| Target | Outputs | Where it runs |
+|---|---|---|
+| `local` (default) | `viewer`, `markdown`, `json`, `http`; the file outputs write into `demo/tmp/graph/` | A developer machine |
+| `nodepod` | `viewer` | The documentation site, inside the visitor's browser |
+
+The `nodepod` target drops the file outputs a browser has no repository to write into. Nothing is lost by that: the viewer reads the graph, the Markdown and the Direct Run history from the running application, and the history routes answer from the in-memory trace recorder rather than from the files a JSON output would write. `main.ts` also accommodates two differences of the browser runtime for that target. It disables Express ETags, because Express hashes `Buffer.from(body, undefined)` and the runtime answers that call with a value the `etag` package rejects, which would turn every demo response into a 500. And it holds a timer open, because the runtime ends a process as soon as its event loop looks empty — a virtual HTTP server does not hold it, nor does the cross-origin `fetch` the inspector awaits during startup, so the application would exit underneath its own bootstrap.
+
 **What belongs here:**
 - Realistic feature modules that exercise library capabilities.
 - Modules that demonstrate specific scenarios (circular deps, forwardRef, JSDoc extraction).
@@ -350,7 +362,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 **Important:** `demo/src/app.module.ts` uses the path alias `nest-graph-inspector/nest-graph-inspector` which maps to `libs/nest-graph-inspector/src` via `tsconfig.json` paths.
 
-**Related:** `demo/tmp/graph/` (runtime output), `demo/scripts/mock-sync.ts` (syncs output to site fixture).
+**Related:** `demo/tmp/graph/` (runtime output), `demo/scripts/build-nodepod-payload.ts` (packages this application for the site).
 
 ---
 
@@ -372,15 +384,17 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 ### `demo/scripts/`
 
-**Purpose:** Demo development tooling. These scripts are run manually by the maintainer; they are not part of CI.
+**Purpose:** Demo build tooling.
 
 | File | What it does |
 |---|---|
-| `mock-sync.ts` | Copies `demo/tmp/graph/**` to `site/public/mock-graph/`; run after `pnpm dev` to refresh the "Load Example" fixture |
+| `build-nodepod-payload.ts` | Bundles the compiled demo application and its sources into `site/public/nodepod-demo/`, the payload the documentation site runs in the visitor's browser |
 
-**Running scripts:** `mock-sync.ts` uses ts-node-style execution from `demo/`.
+**Running scripts:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`. That script runs `nest build` first and then executes the compiled script from `demo/dist/scripts/`, so the script and the application it packages are compiled by the same pass. CI runs it before every `nuxt generate`.
 
-**What belongs here:** Scripts that touch `demo/`, `lib/`, or `site/` internals (mock-sync). Not application logic.
+**Why `nest build` first:** the bundle has to be made from the TypeScript output. Nest resolves constructor dependencies from decorator metadata, which only `tsc` emits; esbuild's job here is to stitch the emitted JavaScript into one CommonJS file. Nest's optional peers (`@nestjs/microservices`, `@nestjs/websockets`, `class-validator`, `class-transformer`) are left external so a feature the demo does not use fails exactly where it would on a real machine.
+
+**What belongs here:** Scripts that touch `demo/`, `lib/`, or `site/` internals. Not application logic.
 
 ---
 
@@ -406,11 +420,11 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 ### `demo/tmp/`
 
-**Purpose:** Runtime output directory. When `pnpm dev` is run, the demo app writes the graph here.
+**Purpose:** Runtime output directory. When the demo app runs with the `local` target, its file outputs are written here.
 
-**Contents at inspection time:** `tmp/graph/` containing `information.json`, `output.json`, `output.md`, and `direct-run/` history files.
+**Contents:** `tmp/graph/` containing `output.json`, `output.md`, `information.json`, and `direct-run/history/` trace files (the history directory sits next to the JSON output by construction).
 
-**Never commit this directory.** It is gitignored. Use `demo/scripts/mock-sync.ts` to promote outputs to the site fixture when they need to be updated.
+**Never commit this directory.** It is gitignored, and nothing downstream reads it — the documentation site runs the demo application itself rather than reading files it produced.
 
 ---
 
@@ -423,7 +437,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 **Key config files:**
 - `nuxt.config.ts` — Nuxt configuration; defines the `@library` alias, Nitro prerender rules, module registrations, analytics config.
 - `content.config.ts` — `@nuxt/content` collection definitions (`landing` and `docs`).
-- `package.json` — site-specific dependencies (Vue Flow, Monaco, LangChain, Pinia, Posthog, etc.).
+- `package.json` — site-specific dependencies (Vue Flow, Monaco, LangChain, Pinia, Posthog, `@scelar/nodepod` for the in-browser demo, etc.).
 - `tsconfig.json` — extends `.nuxt/tsconfig.json` (generated by Nuxt).
 - `eslint.config.mjs` — extends auto-generated Nuxt ESLint config.
 - `.editorconfig` — LF line endings, 2-space indent.
@@ -482,7 +496,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Component | Role |
 |---|---|
 | `PackageManagerCommand.vue` | Renders install/start commands for selected package manager |
-| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs |
+| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs; render the graph of the demo application running in the browser, started when the preview scrolls into view |
 | `RuntimeAIChatPreview.vue` | AI chat preview in docs |
 | `HeroBackground.vue` / `StarsBg.vue` | Visual elements for landing page |
 
@@ -496,7 +510,11 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 **Purpose:** Auto-imported Vue composables.
 
-**Note:** The directory exists but was empty at inspection time. Any shared stateful logic that doesn't fit in a store and needs to be reactive belongs here.
+| Composable | Purpose |
+|---|---|
+| `use-nodepod-demo-graph.ts` | Starts the in-browser demo the first time the element it returns scrolls into view, and exposes the graph, status label, and retry action a docs preview needs |
+
+**What belongs here:** Per-component reactive logic that wraps a store — an intersection observer, a lifecycle hook, a derived view of shared state. Global state itself belongs in `stores/`; pure functions belong in `utils/`.
 
 ---
 
@@ -522,7 +540,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|---|
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
-| `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input |
+| `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input, and starts the in-browser demo behind "Open Demo" |
 | `view/[url]/index.vue` | `/view/:url` | Main graph view; loads `GraphOutput` for the encoded URL param |
 | `view/[url]/issues.vue` | `/view/:url/issues` | Issue finder; lists circular dependency issues |
 | `view/[url]/execution-sequence.vue` | `/view/:url/execution-sequence` | Execution sequence diagram for Direct Run traces |
@@ -540,11 +558,19 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Store | Purpose |
 |---|---|
 | `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages encoded URL, graph data, markdown, endpoint info, and UI flags |
+| `nodepod-demo.ts` | Runs the demo application in the browser: downloads the payload, boots nodepod headless, spawns `node main.js`, installs the fetch bridge, and reads the graph endpoint out of the application's startup log |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
+
+**`nodepod-demo.ts` key responsibilities:**
+- Downloads `manifest.json`, `main.js`, and `sources.json` from `nodepod-demo/`, reporting download progress.
+- Boots the pod with `headless: true` and the environment the manifest declares.
+- Bridges `fetch` calls addressed to `<site base>/__nodepod__/<port>/…` into `pod.request(port, …)`.
+- Waits for the viewer link the application prints, which is also where the access token is handed out, and rewrites it into a bridged endpoint URL.
+- Serves one pod for every preview on the page and for the viewer, so the payload is downloaded and the application booted at most once per page load.
 
 **`graph-inspector.ts` key responsibilities:**
 - Decodes the base64url param into an endpoint URL.
-- Fetches `information.json` to validate the endpoint.
+- Fetches `information.json` to validate the endpoint. It carries `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static`: `true` when the graph is served as files, `false` for HTTP output. `latestVersion` is the npm registry's latest package version, or `null` when the lookup is unavailable or invalid; `isLatestVersion` is an exact comparison with `version`.
 - Fetches `output.json` (`GraphOutput`) and validates schema version ≥ 3.
 - Fetches `output.md` for the Markdown view.
 - Detects "legacy" graph outputs and shows an upgrade modal.
@@ -567,6 +593,8 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
+| `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, resolves the inspector mount base, encodes the `/view/:url` param |
+| `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |
 | `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
 
 **Testing convention:** Tests here use `node:assert` with no framework. Run with `node <file>.ts` (requires ts-node or tsx).
@@ -609,29 +637,27 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `favicon.ico` | Browser favicon |
 | `logo.png` | Project logo |
 | `runtime-inspector-preview.png` | Screenshot used in docs |
-| `mock-graph/` | Static fixture for "Load Example" |
+| `nodepod-demo/` | Generated payload: the demo application built for the in-browser runtime |
 
 ---
 
-#### `site/public/mock-graph/`
+#### `site/public/nodepod-demo/`
 
-**Purpose:** The static graph fixture served when users click "Load Example" in the viewer.
+**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews in the docs pages and "Open Demo" on `/view` — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
 
 **Contents:**
 
 | File | Role |
 |---|---|
-| `information.json` | Endpoint discovery; includes `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static` (`true` for static files; `false` for HTTP output). `latestVersion` is the npm registry's latest package version or `null` when unavailable or invalid; `isLatestVersion` exactly compares it with `version`. |
-| `output.json` | Full `GraphOutput` v3 JSON from the demo app |
-| `output.md` | Markdown representation of the same graph |
-| `direct-run/history/index.json` | Index of mock trace history entries |
-| `direct-run/history/<uuid>.json` | Individual mock runtime trace files |
+| `main.js` | The demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
+| `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with (including `NEST_GRAPH_INSPECTOR_TARGET=nodepod`) |
 
-**How it's generated:** Run the Nest demo app (`pnpm dev` in `demo/`), then run `demo/scripts/mock-sync.ts` to copy `demo/tmp/graph/**` here.
+**How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 
-**Never edit these files by hand.** They must reflect actual library output. Always regenerate from the demo app.
+**Never edit these files by hand, and never commit them.** The directory is gitignored (`site/.gitignore`); it is build output, and the store refuses a payload whose `payloadVersion` it does not read.
 
-`information.json` includes `for`, `version`, `latestVersion`, `isLatestVersion`, and transport-specific `is-static`: `true` for static files and `false` for HTTP output. `latestVersion` is the npm-registry version or `null` if the lookup is unavailable or invalid; `isLatestVersion` is an exact comparison with `version`.
+**Why the browser cannot reach it over the network:** the demo's HTTP servers are virtual — they answer through `pod.request(port, …)`. nodepod would normally front them with a service worker, but it registers that worker with scope `/`, and GitHub Pages serves this site from `/nest-graph-inspector/` and cannot answer with `Service-Worker-Allowed`. The pod is therefore booted headless and requests are bridged in the tab; see `site/app/utils/nodepod-demo-endpoint.ts`.
 
 ---
 
@@ -687,14 +713,15 @@ site/app/utils/
 site/app/stores/
 
 demo/src/ (demo app)
-    ↑ generates runtime graph output
-demo/tmp/graph/
-    ↑ copied by
-demo/scripts/mock-sync.ts
-    ↑ produces
-site/public/mock-graph/
-    ↑ served to
-site/app/stores/graph-inspector.ts  (via "Load Example" URL)
+    ↑ compiled by nest build, then bundled by
+demo/scripts/build-nodepod-payload.ts
+    ↑ writes
+site/public/nodepod-demo/
+    ↑ downloaded, booted, and spawned by
+site/app/stores/nodepod-demo.ts   (nodepod, in the visitor's browser)
+    ↑ endpoint of the running application handed to
+site/app/stores/graph-inspector.ts
+site/app/composables/use-nodepod-demo-graph.ts  (docs previews)
 
 lib/src/
     ↑ compiled by nest build into
@@ -721,8 +748,6 @@ site/app/pages/[...slug].vue  (for docs rendering)
 
 4. **`site/.claude/skills/`** — Directory structure exists but content was not found at inspection time. Its role in the development workflow is uncertain.
 
-5. **`site/app/composables/`** — Directory exists but was empty at inspection time. Whether composables are expected to be added here or the directory is a placeholder is not documented.
+5. **Dependabot scope** — The `dependabot.yml` watches `directory: "/"` with `package-ecosystem: "npm"`. Whether this covers `demo/package.json` and `site/package.json` in a pnpm workspace is not confirmed from config alone.
 
-6. **Dependabot scope** — The `dependabot.yml` watches `directory: "/"` with `package-ecosystem: "npm"`. Whether this covers `demo/package.json` and `site/package.json` in a pnpm workspace is not confirmed from config alone.
-
-7. **No library CI** — Library unit tests and linting have no CI pipeline. Contributors must run `cd library && pnpm test && pnpm lint` locally before opening a PR.
+6. **No library CI** — Library unit tests and linting have no CI pipeline. Contributors must run `cd library && pnpm test && pnpm lint` locally before opening a PR.

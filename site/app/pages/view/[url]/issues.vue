@@ -17,6 +17,7 @@ const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const { decodedUrl, graphData, status, errorMessage } = storeToRefs(graphStore)
 const isGraphLoading = ref(false)
+const { startupMessage, resolveEncodedUrl } = useNodepodDemoRoute()
 
 let hasTrackedInitialMount = false
 
@@ -74,7 +75,14 @@ async function loadGraphResources(
       isRetry
     })
 
-    const graphLoaded = await graphStore.setEncodedUrl(value)
+    // A demo endpoint only answers inside the tab that started the demo, so an
+    // arriving link may need one started — and then it is a different URL.
+    const endpoint = await resolveEncodedUrl(value, '/issues')
+    if (!endpoint) {
+      return
+    }
+
+    const graphLoaded = await graphStore.setEncodedUrl(endpoint)
     if (graphLoaded) {
       await graphStore.fetchMarkdown()
     }
@@ -116,6 +124,7 @@ function handleRefresh() {
     <GraphViewerLoadingState
       v-if="isGraphLoading || status === 'pending'"
       :endpoint="decodedUrl"
+      :message="startupMessage"
     />
 
     <div

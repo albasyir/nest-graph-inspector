@@ -1,28 +1,34 @@
 <script setup lang="ts">
 import type { GraphOutput } from 'nest-graph-inspector'
 
-const config = useRuntimeConfig()
-let base = config.app.baseURL || '/'
-if (!base.endsWith('/')) {
-  base += '/'
-}
+const {
+  demo,
+  previewRef,
+  graph,
+  isFailed,
+  needsManualStart,
+  statusLabel,
+  start,
+  retry
+} = useNodepodDemoGraph()
 
-const { data, status, error } = await useLazyAsyncData(
-  'runtime-graph-direct-run-preview',
-  () => $fetch<GraphOutput>(`${base}mock-graph/output.json`),
-  { server: false }
-)
-
+/**
+ * The section is about one provider, so the preview keeps that provider and
+ * drops the rest of the graph. What runs is still the real application: the
+ * dialog calls its direct-run endpoint and the method executes.
+ */
 const previewData = computed<GraphOutput | null>(() => {
-  const userModule = data.value?.modules.UserModule
-  const userService = userModule?.providers.find(provider => provider.name === 'UserService')
+  const userModule = graph.value?.modules.UserModule
+  const userService = userModule?.providers.find(
+    provider => provider.name === 'UserService'
+  )
 
-  if (!data.value || !userModule || !userService) {
+  if (!graph.value || !userModule || !userService) {
     return null
   }
 
   return {
-    ...data.value,
+    ...graph.value,
     root: 'UserModule',
     modules: {
       UserModule: {
@@ -46,24 +52,24 @@ const previewData = computed<GraphOutput | null>(() => {
   }
 })
 
-const directRunUrl = computed(() => `${base}mock-graph/direct-run`)
-
 function openExecutionSequence() {
   navigateTo('/view?preview=true&execution-sequence=true')
 }
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div
+    ref="previewRef"
+    class="space-y-3"
+  >
     <div class="overflow-hidden rounded-xl border border-default bg-default shadow-sm">
       <ClientOnly>
         <GraphViewer
-          v-if="status === 'success' && previewData"
+          v-if="previewData"
           :data="previewData"
           flow-id="runtime-graph-preview-direct-run"
           height="clamp(18rem, 58vh, 34rem)"
-          :direct-run-url="directRunUrl"
-          :direct-run-disabled="true"
+          :direct-run-url="demo.directRunUrl"
           :show-controls="false"
           :show-mini-map="false"
           :show-circular-dependencies="false"
@@ -72,17 +78,38 @@ function openExecutionSequence() {
           @execution-sequence-open="openExecutionSequence"
         />
         <UAlert
-          v-else-if="status === 'error'"
+          v-else-if="isFailed"
+          class="rounded-none"
           icon="i-lucide-triangle-alert"
           color="error"
           variant="subtle"
-          title="Could not load preview graph"
-          :description="error?.message || 'The mock graph endpoint is unavailable.'"
+          title="Could not start the demo application"
+          :description="statusLabel || 'The demo application could not be started in this browser.'"
+          :actions="[{ label: 'Try again', color: 'neutral', variant: 'subtle', onClick: retry }]"
         />
-        <USkeleton
+        <div
           v-else
-          class="h-80 w-full rounded-none"
-        />
+          class="relative"
+        >
+          <USkeleton class="h-80 w-full rounded-none" />
+          <div class="absolute inset-x-0 bottom-4 flex justify-center">
+            <UButton
+              v-if="needsManualStart"
+              icon="i-lucide-play"
+              label="Run the demo application"
+              color="neutral"
+              variant="subtle"
+              class="cursor-pointer"
+              @click="start"
+            />
+            <p
+              v-else
+              class="text-sm text-muted"
+            >
+              {{ statusLabel }}
+            </p>
+          </div>
+        </div>
 
         <template #fallback>
           <USkeleton class="h-80 w-full rounded-none" />
@@ -91,7 +118,8 @@ function openExecutionSequence() {
     </div>
 
     <p class="text-sm text-muted">
-      Select the <span class="font-medium text-highlighted">UserService</span> provider to see the static graph Direct Run dialog.
+      Select the <span class="font-medium text-highlighted">UserService</span> provider and run a
+      method: the call reaches the application running in this tab.
     </p>
   </div>
 </template>

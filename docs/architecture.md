@@ -8,15 +8,18 @@ nestjs-devtool/           ← monorepo root (pnpm workspaces)
 │   └── src/              ← all reusable library implementation
 ├── demo/                 ← Nest demo / development host
 │   ├── src/              ← demo application
+│   ├── scripts/          ← build tooling (packages the demo for the site)
 │   └── test/             ← e2e tests for the demo app
 └── site/                 ← Nuxt 4 documentation + interactive viewer
     ├── app/              ← Nuxt app directory
     ├── content/          ← MDC documentation pages
-    └── public/mock-graph/  ← static fixture used by "Load Example"
+    └── public/nodepod-demo/  ← generated demo payload the browser runs (gitignored)
 ```
 
-The root `package.json` is private and carries no scripts; it only declares the
-pnpm workspace and `packageManager` field.
+The root `package.json` is private and contains no source.  Its scripts fan out
+across the workspace: `dev`, `build`, and `build:site` each build the library
+and then the demo payload, because the site cannot serve a demo it has not been
+given.
 
 ---
 
@@ -67,9 +70,21 @@ Type definitions under `src/types/`:
 ### `demo/src` — demo / development application
 
 A plain NestJS application (`AppModule`) that imports
-`NestGraphInspectorModule.forRoot()` with multiple outputs configured.  Its
-only purpose is to provide a realistic module graph for manual testing and to
-generate the mock fixture used by the viewer.
+`NestGraphInspectorModule.forRoot()` with the outputs
+`demo/src/inspector-outputs.ts` selects.  It serves two purposes: a realistic
+module graph for manual testing, and the application the documentation site
+runs inside the visitor's browser.
+
+`inspector-outputs.ts` reads the `NEST_GRAPH_INSPECTOR_TARGET` environment
+variable and returns the outputs for that target:
+
+| Target | Outputs |
+|---|---|
+| `local` (default) | `viewer` + `markdown` + `json` + `http`; the file outputs write into `demo/tmp/graph/` |
+| `nodepod` | `viewer` only; a browser has no repository to write graph files into, and the viewer serves the graph, the Markdown and the Direct Run history straight from the running application |
+
+`demo/scripts/build-nodepod-payload.ts` packages this application for the site
+— see [The in-browser demo](#the-in-browser-demo).
 
 It is **not** part of the published package.  Do not add production logic here.
 
@@ -85,19 +100,127 @@ functions:
 2. **Interactive graph viewer** — the `/view` route that loads a `GraphOutput`
    from a live NestJS endpoint and visualises it with Vue Flow.
 
-The viewer fetches data from a user-supplied URL at runtime; it never calls the
-library directly. The site has no direct source alias to the package; all graph
-behaviour goes through the HTTP contract.
+The viewer fetches data from an endpoint URL at runtime; it never calls the
+library directly.  That endpoint is either an application the visitor is running
+themselves, or the demo application running inside the browser tab.  The site
+has no direct source alias to the package; all graph behaviour goes through the
+HTTP contract.
 
 Key site modules:
 
 | Path | Role |
 |---|---|
 | `app/stores/graph-inspector.ts` | Pinia store; fetches and validates `GraphOutput` from the live endpoint |
+| `app/stores/nodepod-demo.ts` | Pinia store; downloads the demo payload, boots nodepod, spawns the demo application, and bridges requests to its virtual servers |
+| `app/composables/use-nodepod-demo-graph.ts` | Starts the demo when a docs preview scrolls into view and exposes the graph the running application reports |
+| `app/utils/nodepod-demo-endpoint.ts` | Endpoint plumbing for the in-browser demo: reads the viewer link out of the startup log, addresses the virtual servers, encodes the `/view/:url` param |
 | `app/utils/circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `app/utils/direct-run-provider.ts` | Helper types and functions for Direct Run UI |
 | `app/utils/supported-runtime.ts` | Package manager constants and install command helpers |
-| `public/mock-graph/` | Static fixture (`output.json`, `output.md`, `information.json`) served from the site for "Load Example" |
+| `public/nodepod-demo/` | Generated demo payload (`main.js`, `sources.json`, `manifest.json`); built by `demo/scripts/build-nodepod-payload.ts` and gitignored |
+
+---
+
+## The in-browser demo
+
+Everything the site shows as a demo — the graph previews in the documentation
+pages, and "Open Demo" on `/view` — is the `demo/` application actually running,
+on the [nodepod](https://www.npmjs.com/package/@scelar/nodepod) browser-native
+Node.js runtime, in the visitor's own tab.  Nothing is captured ahead of time:
+Direct Run really invokes provider methods, runtime traces and Direct Run
+history really accumulate, and the JSDoc and parameter types in the graph come
+from the sources of the application that is answering.
+
+### The payload
+
+`demo/scripts/build-nodepod-payload.ts` writes three files into
+`site/public/nodepod-demo/`:
+
+| File | What it is |
+|---|---|
+| `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
+| `manifest.json` | Revision, working directory, entry file, and the environment the application is started with (including `NEST_GRAPH_INSPECTOR_TARGET=nodepod`) |
+
+### Two constraints shape this design
+
+1. **Decorator metadata forces a tsc-then-bundle pipeline.**  Nest resolves
+   constructor dependencies from `emitDecoratorMetadata` output, and TypeScript
+   is the only compiler in this repository that emits it.  So the payload is
+   built from the `nest build` output (`demo/dist/src/main.js`); esbuild only
+   stitches the emitted JavaScript into a single file.  Bundling the
+   TypeScript directly would produce an application whose providers cannot be
+   injected.  Nest's optional peers (`@nestjs/microservices`,
+   `@nestjs/websockets`, `class-validator`, `class-transformer`) stay external,
+   so a missing feature fails where it would fail on a real machine.
+2. **The service-worker scope rule forces a fetch bridge.**  nodepod would
+   rather serve its virtual HTTP servers through a service worker, but it
+   registers that worker with scope `/`, and GitHub Pages serves the site from
+   `/nest-graph-inspector/` and cannot answer with `Service-Worker-Allowed`.
+   The pod is therefore booted headless, and requests to the demo's servers are
+   addressed under `<site base>/__nodepod__/<port>/…` and answered in the tab by
+   a `fetch` bridge that calls `pod.request(port, …)`.
+   `site/app/utils/nodepod-demo-endpoint.ts` owns that address space and is
+   covered by `nodepod-demo-endpoint.test.ts`.
+
+### What checks it
+
+`pnpm --filter nest-graph-inspector-site run test:demo-payload`
+(`site/scripts/verify-nodepod-payload.ts`) boots the built payload on the same
+runtime — headless, on `worker_threads` instead of Web Workers — spawns it, and
+reads the graph endpoint out of the startup log with the site's own parser.
+It is the only thing that exercises the two couplings this design rests on: that
+the bundle starts at all, and that the viewer link the library prints is still
+in a shape the site can read. Every workflow that generates the site runs it
+right after building the payload.
+
+### Boot sequence
+
+```
+1. A docs preview scrolls into view, or the visitor clicks "Open Demo"
+2. nodepod-demo store downloads manifest.json, main.js, and sources.json
+3. Nodepod.boot({ files, workdir, env, headless: true })
+4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
+5. pod.spawn('node', ['main.js']) → the NestJS application starts
+6. The store reads the graph endpoint out of the application's own startup log
+     - the inspector prints one viewer link per run
+     - that link is also where the access token is handed out
+7. The endpoint is rewritten into a bridged URL and handed to the viewer,
+   which loads it through the same HTTP contract as any other endpoint
+```
+
+One pod serves every preview on the page and the viewer, so the payload is
+downloaded and the application booted at most once per page load.
+
+### What the demo bootstrap accommodates
+
+`demo/src/main.ts` does two things for the `nodepod` target and nothing for the
+`local` one, both because the browser runtime differs from Node in a way the
+demo would otherwise fall over:
+
+- **ETags are turned off.**  Express hashes `Buffer.from(body, undefined)` to
+  build one, and the runtime answers that call with a value the `etag` package
+  rejects, which turns every response from the demo's own REST routes into a
+  500.
+- **A timer keeps the process alive.**  The runtime ends a process as soon as
+  its event loop looks empty, and neither a virtual HTTP server nor an
+  in-flight cross-origin `fetch` holds it open.  The inspector awaits one during
+  startup — the npm lookup behind `latestVersion` in `information.json` — so
+  without the timer the application exits underneath its own bootstrap, before
+  it ever prints a viewer link.
+
+Known limitations, accepted deliberately:
+
+- `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
+  falls back to full per-spawn snapshots.
+- The AI chat's Ollama proxy has nothing to proxy to inside a browser, and
+  answers the way it would for an application with no Ollama running.
+- The payload is a few megabytes, downloaded once per visit.
+- The pod lives as long as the page. Nothing tears it down on a route change,
+  and the keep-alive timer means it never idles out either.
+- If the application stops after the graph has loaded, the viewer keeps showing
+  that graph while every new request to it fails; the exit line in the demo
+  console is the only signal.
 
 ---
 
@@ -167,6 +290,11 @@ generated; the library must not assume how the data will be rendered.
    types must implement this port interface.
 6. **The HTTP server is framework-independent.** `HttpServeAdapter` uses plain
    `node:http` and must not gain an Express/Fastify dependency.
+7. **The demo payload is bundled from compiled JavaScript.**
+   `demo/scripts/build-nodepod-payload.ts` must keep its entry point on the
+   `nest build` output.  Pointing the bundler at `demo/src/**` drops the
+   decorator metadata Nest resolves constructor dependencies from, and the
+   application fails to boot in the browser.
 
 ---
 

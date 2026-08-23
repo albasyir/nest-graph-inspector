@@ -6,6 +6,7 @@ import {
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
 import { withAccessToken } from '~/utils/inspector-access-token'
+import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
 
 definePageMeta({
   layout: 'viewer'
@@ -25,6 +26,7 @@ const {
   openModuleDetail
 } = storeToRefs(graphStore)
 const isGraphLoading = ref(false)
+const { startupMessage, resolveEncodedUrl } = useNodepodDemoRoute()
 let hasTrackedInitialMount = false
 
 const urlBase64 = computed(() => {
@@ -80,7 +82,14 @@ async function loadGraphResources(
       isRetry
     })
 
-    const graphLoaded = await graphStore.setEncodedUrl(value)
+    // A demo endpoint only answers inside the tab that started the demo, so an
+    // arriving link may need one started — and then it is a different URL.
+    const endpoint = await resolveEncodedUrl(value, '')
+    if (!endpoint) {
+      return
+    }
+
+    const graphLoaded = await graphStore.setEncodedUrl(endpoint)
     if (graphLoaded) {
       await graphStore.fetchMarkdown()
     }
@@ -120,9 +129,12 @@ const directRunUrl = computed(() => {
   if (!decodedUrl.value) return undefined
   try {
     const url = new URL(decodedUrl.value)
+    // A static endpoint serves direct-run history as files below the graph
+    // output, while a running application mounts the live endpoint at the root
+    // of its own server — the origin, or the demo's mount path in this tab.
     url.pathname = graphIsStatic.value
       ? `${url.pathname.replace(/\/$/, '')}/direct-run`
-      : '/direct-run'
+      : `${resolveInspectorMountBase(decodedUrl.value)}/direct-run`
     url.search = ''
     url.hash = ''
     return withAccessToken(url, decodedUrl.value).toString()
@@ -164,6 +176,7 @@ function handleExecutionSequenceOpen() {
   <GraphViewerLoadingState
     v-if="isGraphLoading || status === 'pending'"
     :endpoint="decodedUrl"
+    :message="startupMessage"
   />
 
   <!-- Error State -->

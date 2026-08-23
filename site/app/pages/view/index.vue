@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { redactAccessToken } from '~/utils/inspector-access-token'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -11,8 +12,8 @@ useSeoMeta({
 const posthog = usePostHog()
 const route = useRoute()
 const graphStore = useGraphInspectorStore()
+const demoStore = useNodepodDemoStore()
 const { shouldShowUpdateModal } = storeToRefs(graphStore)
-const config = useRuntimeConfig()
 
 const DEFAULT_ORIGIN = 'localhost:53371'
 const RETRY_INTERVAL_MS = 2500
@@ -26,21 +27,42 @@ const shouldNavigateOnLoad = ref(false)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 let activePollId = 0
 
+/**
+ * Starts the demo application inside this browser tab and opens the viewer on
+ * the endpoint it reports. There is no fixture behind it: the graph, the
+ * direct-run endpoint, and the history all come from that running application.
+ */
 async function loadExample() {
   graphStore.showCircularDependencies = true
   graphStore.openModuleDetail = true
-  let base = config.app.baseURL || '/'
-  if (!base.endsWith('/')) base += '/'
+  clearPolling()
 
-  const exampleUrl = `${window.location.origin}${base}mock-graph`
-  const encodedExampleUrl = encodeURIComponent(btoa(exampleUrl))
+  const started = await demoStore.start()
+
+  if (!started) {
+    posthog?.capture('graph_demo_start_failed', {
+      reason: demoStore.errorMessage
+    })
+
+    return
+  }
+
+  // The demo and this site are built from the same commit, so the version
+  // acknowledgement the viewer asks for elsewhere has nothing to add here.
+  graphStore.trustEndpointVersion(demoStore.endpointUrl)
+
   const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
+  const encodedDemoUrl = demoStore.encodedEndpointUrl
+
+  posthog?.capture('graph_demo_started', {
+    revision: demoStore.manifest?.revision
+  })
 
   isNavigating.value = true
   await navigateTo(
     shouldOpenExecutionSequence
-      ? `/view/${encodedExampleUrl}/execution-sequence`
-      : `/view/${encodedExampleUrl}`
+      ? `/view/${encodedDemoUrl}/execution-sequence`
+      : `/view/${encodedDemoUrl}`
   )
 }
 
@@ -78,7 +100,7 @@ async function tryLoadGraph(pollId: number) {
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: graphStore.decodedUrl,
+        url: redactAccessToken(graphStore.decodedUrl),
         attempts: attemptCount.value
       })
       await navigateTo(`/view/${graphStore.encodedUrl}`)
@@ -87,7 +109,7 @@ async function tryLoadGraph(pollId: number) {
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: graphStore.decodedUrl,
+      url: redactAccessToken(graphStore.decodedUrl),
       attempts: attemptCount.value
     })
   } catch {
@@ -121,7 +143,7 @@ function startPolling(origin: string, navigateOnLoad = false) {
 
 onMounted(() => {
   if (route.query.preview == 'true') {
-    loadExample()
+    void loadExample()
     return
   }
 
@@ -133,6 +155,14 @@ onBeforeUnmount(() => {
   activePollId += 1
   clearPolling()
 })
+
+/**
+ * Last few lines the demo application printed, so a slow start is visibly a
+ * real application starting rather than a stalled page.
+ */
+const demoConsole = computed(() =>
+  demoStore.logLines.slice(demoStore.status === 'error' ? -25 : -6).join('\n')
+)
 
 watch(shouldShowUpdateModal, (visible) => {
   if (visible) {
@@ -148,6 +178,65 @@ watch(shouldShowUpdateModal, (visible) => {
     <GraphInspectorUpdateModal />
 
     <div class="w-full max-w-3xl space-y-5">
+      <UCard
+        v-if="demoStore.isBusy || demoStore.status === 'error'"
+        :ui="{ body: 'p-5 sm:p-6 space-y-3' }"
+      >
+        <div class="flex items-start gap-3">
+          <UIcon
+            v-if="demoStore.isBusy"
+            name="i-lucide-loader-circle"
+            class="mt-0.5 size-5 shrink-0 animate-spin text-primary"
+          />
+          <UIcon
+            v-else
+            name="i-lucide-triangle-alert"
+            class="mt-0.5 size-5 shrink-0 text-error"
+          />
+          <div class="space-y-1">
+            <p class="text-sm font-medium">
+              {{ demoStore.isBusy ? demoStore.statusLabel : 'Could not start the demo application' }}
+            </p>
+            <p
+              v-if="demoStore.status === 'error'"
+              class="text-sm text-muted"
+            >
+              {{ demoStore.errorMessage }}
+            </p>
+          </div>
+        </div>
+        <UProgress
+          v-if="demoStore.status === 'downloading' && demoStore.totalBytes"
+          :model-value="Math.round(demoStore.downloadProgress * 100)"
+        />
+        <pre
+          v-if="demoConsole"
+          data-testid="demo-console"
+          class="max-h-56 overflow-auto rounded-lg bg-muted/50 p-3 text-xs text-muted whitespace-pre-wrap"
+        >{{ demoConsole }}</pre>
+        <div class="flex flex-wrap items-center gap-3">
+          <UButton
+            v-if="demoStore.status === 'error'"
+            label="Try again"
+            color="neutral"
+            variant="subtle"
+            class="cursor-pointer"
+            @click="loadExample"
+          />
+          <p class="text-xs text-muted">
+            The demo is this repository's NestJS application, running in your
+            browser on
+            <NuxtLink
+              to="https://github.com/ScelarOrg/Nodepod"
+              target="_blank"
+              class="text-primary font-medium"
+            >
+              nodepod
+            </NuxtLink>.
+          </p>
+        </div>
+      </UCard>
+
       <UAlert
         v-if="isSiteDetected"
         icon="i-lucide-circle-check"
@@ -166,7 +255,7 @@ watch(shouldShowUpdateModal, (visible) => {
             <p class="max-w-2xl text-sm sm:text-base text-muted">
               Understand your NestJS modules, providers, and dependencies as an
               interactive graph. Learn why it helps, connect your own app in
-              minutes, or explore a ready-made demo first.
+              minutes, or run the demo application right here in your browser.
             </p>
           </div>
         </template>
@@ -197,11 +286,12 @@ watch(shouldShowUpdateModal, (visible) => {
             />
             <UButton
               icon="i-lucide-flask-conical"
-              label="Open Demo"
+              :label="demoStore.isBusy ? 'Starting Demo…' : 'Open Demo'"
               size="lg"
               variant="solid"
               class="cursor-pointer"
-              :disabled="isNavigating"
+              :loading="demoStore.isBusy"
+              :disabled="isNavigating || demoStore.isBusy"
               block
               @click="loadExample"
             />

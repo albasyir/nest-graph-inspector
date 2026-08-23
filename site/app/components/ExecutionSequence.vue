@@ -276,9 +276,24 @@ function toggleTooltip(spanId: string): void {
     = activeTooltipSpanId.value === spanId ? null : spanId
 }
 
+/**
+ * Builds a history URL from the direct-run endpoint.
+ *
+ * The endpoint carries the access token in its query string, so the path has
+ * to be extended before that query rather than after it.
+ */
 function historyUrl(path: string): string {
   if (!props.directRunUrl) return ''
-  return `${props.directRunUrl.replace(/\/$/, '')}/history/${path}.json`
+
+  const separatorIndex = props.directRunUrl.search(/[?#]/)
+  const endpointPath = separatorIndex === -1
+    ? props.directRunUrl
+    : props.directRunUrl.slice(0, separatorIndex)
+  const query = separatorIndex === -1
+    ? ''
+    : props.directRunUrl.slice(separatorIndex)
+
+  return `${endpointPath.replace(/\/+$/, '')}/history/${path}.json${query}`
 }
 
 async function fetchHistoryIndex(): Promise<void> {

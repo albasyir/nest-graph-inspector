@@ -333,7 +333,15 @@ export class AccessTokenService {
   }
 
   private sign(signedPart: string): string {
-    return createHmac('sha256', this.secret).update(signedPart).digest('base64url');
+    /**
+     * The digest is encoded from a Buffer rather than by passing `base64url`
+     * to `digest()`. Both produce the same string on Node, but a runtime that
+     * ignores the encoding argument hands back raw bytes, and a token carrying
+     * raw bytes does not survive the URL it travels in.
+     */
+    return Buffer.from(
+      createHmac('sha256', this.secret).update(signedPart).digest(),
+    ).toString('base64url');
   }
 
   private signatureMatches(signedPart: string, signature: string): boolean {

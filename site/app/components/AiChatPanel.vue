@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { redactAccessToken } from '~/utils/inspector-access-token'
+
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -516,7 +518,7 @@ watch(() => props.active, (value) => {
     graphStore.fetchMarkdown()
 
     posthog?.capture('Graph AI Chat Opened', {
-      url: graphStore.decodedUrl
+      url: redactAccessToken(graphStore.decodedUrl)
     })
   }
 }, { immediate: true })

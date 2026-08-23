@@ -5,6 +5,7 @@ import {
   decodeEndpointUrl,
   withAccessToken
 } from '~/utils/inspector-access-token'
+import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -56,7 +57,12 @@ function resolveOriginPath(value: string, pathName: string) {
 
   try {
     const url = new URL(value)
-    url.pathname = `/${pathName.replace(/^\/+/, '')}`
+    // The library mounts these next to the graph endpoint, at the root of the
+    // inspected application's own server. That root is the origin for an
+    // application reached over the network, and a path prefix for the demo
+    // running inside this tab.
+    const mountBase = resolveInspectorMountBase(value)
+    url.pathname = `${mountBase}/${pathName.replace(/^\/+/, '')}`
     url.search = ''
     url.hash = ''
 
@@ -100,6 +106,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const shouldShowUpdateModal = ref(false)
   const shouldShowVersionAcknowledgement = ref(false)
   const acknowledgedVersionEndpointUrl = ref('')
+  /**
+   * Endpoint the caller vouched for. Unlike an acknowledgement, this survives
+   * loading a graph, because it is a statement about the endpoint rather than
+   * about something the visitor was shown.
+   */
+  const trustedEndpointUrl = ref('')
   const dependencyTraceEnabled = ref(false)
   const showCircularDependencies = ref(true)
   const openModuleDetail = ref(false)
@@ -201,6 +213,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     resolveVersionAcknowledgement = undefined
   }
 
+  /**
+   * Marks an endpoint as already acknowledged.
+   *
+   * The in-browser demo is built from this repository together with the site
+   * showing it, so asking the visitor to confirm that the two versions match
+   * tells them nothing they can act on.
+   */
+  function trustEndpointVersion(url: string) {
+    trustedEndpointUrl.value = url
+  }
+
   async function acknowledgeEndpointVersion() {
     acknowledgedVersionEndpointUrl.value = decodedUrl.value
     shouldShowVersionAcknowledgement.value = false
@@ -215,6 +238,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
         endpointInfo.value?.['is-static']
       )
       || acknowledgedVersionEndpointUrl.value === decodedUrl.value
+      || trustedEndpointUrl.value === decodedUrl.value
     ) {
       return true
     }
@@ -351,6 +375,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     toggleDependencyTrace,
     validateEndpoint,
     acknowledgeEndpointVersion,
+    trustEndpointVersion,
     setEncodedUrl,
     setInputUrl,
     detectInputUrl,
