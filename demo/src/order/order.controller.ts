@@ -9,7 +9,7 @@ export class OrderController {
    * Property injection using @Inject() decorator
    */
   @Inject(OrderNotificationService)
-  private readonly notificationService: OrderNotificationService;
+  private readonly notificationService!: OrderNotificationService;
 
   constructor(
     private readonly orderService: OrderService,
@@ -17,8 +17,14 @@ export class OrderController {
   ) {}
 
   @Post()
-  createOrder(@Body() body: { userId: number; productId: number; quantity: number }) {
-    return this.orderService.createOrder(body.userId, body.productId, body.quantity);
+  createOrder(
+    @Body() body: { userId: number; productId: number; quantity: number },
+  ) {
+    return this.orderService.createOrder(
+      body.userId,
+      body.productId,
+      body.quantity,
+    );
   }
 
   @Get()
@@ -32,7 +38,7 @@ export class OrderController {
   }
 
   @Get(':id/confirm')
-  async  confirmOrder(@Param('id') id: string) {
+  async confirmOrder(@Param('id') id: string) {
     const order = await this.orderService.confirmOrder(Number(id));
     if (order) {
       this.notificationService.notifyOrderShipped(order.id);

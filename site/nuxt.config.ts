@@ -33,16 +33,6 @@ export default defineNuxtConfig({
     }
   },
 
-  ogImage: {
-    enabled: true
-  },
-
-  fonts: {
-    families: [
-      { name: 'Public Sans', provider: 'none' }
-    ]
-  },
-
   runtimeConfig: {
     public: {
       posthog: {
@@ -80,6 +70,12 @@ export default defineNuxtConfig({
         braceStyle: '1tbs'
       }
     }
+  },
+
+  fonts: {
+    families: [
+      { name: 'Public Sans', provider: 'none' }
+    ]
   },
 
   icon: {
@@ -121,6 +117,10 @@ export default defineNuxtConfig({
 
   mcp: {
     name: 'Nest Graph Inspector'
+  },
+
+  ogImage: {
+    enabled: true
   },
 
   posthogConfig: {

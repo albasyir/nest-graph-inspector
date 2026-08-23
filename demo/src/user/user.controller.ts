@@ -5,8 +5,8 @@ import { UserSchedule } from './user.schedule';
 @Controller('users')
 export class UserController {
   constructor(
-    private readonly userService: UserService, 
-    private readonly userSchedule: UserSchedule
+    private readonly userService: UserService,
+    private readonly userSchedule: UserSchedule,
   ) {}
 
   @Post()

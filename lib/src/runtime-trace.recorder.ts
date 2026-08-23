@@ -309,7 +309,9 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
     if (!promises) return;
 
     promises.add(promise);
-    promise.finally(() => promises.delete(promise));
+    // Fire-and-forget cleanup: waitForPendingSpans() is what actually awaits
+    // these promises, so the rejection path is handled there, not here.
+    void promise.finally(() => promises.delete(promise));
   }
 
   private async waitForPendingSpans(traceId: string) {

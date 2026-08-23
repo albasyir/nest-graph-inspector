@@ -186,7 +186,7 @@ export class DiscoveryAdapter {
         node.moduleRef,
         node.providers,
       );
-      node.controllers = this.extractControllers(node.moduleRef, node.name);
+      node.controllers = this.extractControllers(node.moduleRef);
     });
   }
 
@@ -422,10 +422,7 @@ export class DiscoveryAdapter {
     return providerInstances;
   }
 
-  private extractControllers(
-    moduleRef: Module,
-    moduleName: string,
-  ): ModuleController[] {
+  private extractControllers(moduleRef: Module): ModuleController[] {
     return this.extractModuleMembers<ModuleController>({
       wrappers: moduleRef.controllers.values(),
       moduleRef,

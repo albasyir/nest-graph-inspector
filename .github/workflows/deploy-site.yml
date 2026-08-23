@@ -6,12 +6,14 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm provenance attestation.
+      id-token: write
     concurrency:
       group: npm-publish-${{ github.event.release.tag_name }}
       cancel-in-progress: false
@@ -24,12 +26,27 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The demo resolves nest-graph-inspector through its built entry points,
+      # so the library has to exist on disk before the type-aware checks run.
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
+
+      # Never publish a release that does not pass its own checks.
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
 
       - name: Set package version from release tag
         working-directory: lib
@@ -44,11 +61,15 @@ jobs:
         working-directory: lib
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        run: npm publish --provenance
 
   build:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,11 +79,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The site imports the library as a workspace dependency.
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
 
       - name: Generate static site
         run: pnpm exec nuxt generate

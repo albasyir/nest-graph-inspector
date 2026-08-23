@@ -1,6 +1,41 @@
 version: 2
 updates:
-  - package-ecosystem: "npm"
+  # A pnpm workspace has a package.json per project. `directory: "/"` alone
+  # only sees the root manifest, so lib/, demo/ and site/ dependencies would
+  # never be updated.
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/lib"
+      - "/demo"
+      - "/site"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      nestjs:
+        patterns:
+          - "@nestjs/*"
+      typescript-and-lint:
+        patterns:
+          - "typescript"
+          - "typescript-eslint"
+          - "eslint*"
+          - "@eslint/*"
+          - "prettier"
+          - "eslint-*"
+      jest:
+        patterns:
+          - "jest"
+          - "ts-jest"
+          - "@types/jest"
+      nuxt:
+        patterns:
+          - "nuxt"
+          - "@nuxt/*"
+          - "@nuxtjs/*"
+
+  - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: weekly

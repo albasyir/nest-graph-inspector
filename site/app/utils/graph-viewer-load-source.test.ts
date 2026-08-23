@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { strict as assert } from 'node:assert'
 import { resolveGraphViewerLoadSource } from './graph-viewer-analytics.ts'
 

@@ -94,7 +94,17 @@ export class ProxyAdapter implements ProxyGateway {
   }
 
   private targetUrl(requestUrl: string, toUrl: URL, pathPrefix?: string): URL {
-    const targetUrl = new URL(requestUrl, toUrl);
+    // `requestUrl` comes from http.IncomingMessage.url, which Node sets to the
+    // raw request target. A client that sends an absolute-form target
+    // ("GET http://elsewhere/ HTTP/1.1") would otherwise make new URL() resolve
+    // to that origin instead of `toUrl`, turning this proxy into an open relay.
+    // Only the path and query of the request may vary; the origin is fixed.
+    const requestTarget = new URL(requestUrl, toUrl);
+    const targetUrl = new URL(
+      `${requestTarget.pathname}${requestTarget.search}`,
+      toUrl,
+    );
+
     if (!pathPrefix) {
       return targetUrl;
     }

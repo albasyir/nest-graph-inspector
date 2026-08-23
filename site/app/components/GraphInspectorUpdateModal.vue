@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import PackageManagerCommand from './content/PackageManagerCommand.vue';
+import PackageManagerCommand from './content/PackageManagerCommand.vue'
 
 const graphStore = useGraphInspectorStore()
 const { shouldShowUpdateModal } = storeToRefs(graphStore)

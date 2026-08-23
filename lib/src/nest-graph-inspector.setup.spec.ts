@@ -642,7 +642,7 @@ describe(NestGraphInspectorSetup.name, () => {
       ) {}
 
       async confirmOrder() {
-        this.productService.getAllProducts();
+        void this.productService.getAllProducts();
         return this.orderRepository.updateStatus();
       }
     }

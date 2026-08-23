@@ -97,20 +97,33 @@ Related reading:
 
 **Purpose:** GitHub-specific automation and community files.
 
+### `.github/workflows/ci.yml`
+
+The verification pipeline. Runs on every pull request and every push to `main`:
+1. `verify` — lint, typecheck, test, and build the library and demo across the workspace.
+2. `library-matrix` — tests and builds `nest-graph-inspector` on Node 20, 22, and 24.
+3. `site` — builds the library, then generates the Nuxt site to catch site-breaking library changes.
+
+Node version for the non-matrix jobs comes from `.nvmrc`.
+
 ### `.github/workflows/deploy-site.yml`
 
 The release pipeline. It triggers when a GitHub release is published:
-1. Checks out the release tag, installs dependencies, derives the package version from that tag (removing a leading `v`), builds `nest-graph-inspector`, and publishes it to npm.
-2. After publishing succeeds, checks out the same release tag, generates the Nuxt site with the GitHub Pages preset, and uploads the static site artifact.
+1. Checks out the release tag, installs dependencies, runs lint + typecheck + tests, derives the package version from that tag (removing a leading `v`), builds `nest-graph-inspector`, and publishes it to npm with provenance (`npm publish --provenance`, which is why the job declares `id-token: write`).
+2. After publishing succeeds, checks out the same release tag, builds the library, generates the Nuxt site with the GitHub Pages preset, and uploads the static site artifact.
 3. Deploys that artifact to GitHub Pages.
 
-**Note:** There is no CI pipeline that runs library unit tests (`pnpm test`) or linting. Those must be run locally before merging.
+**Note:** A release that fails lint, typecheck, or tests is not published. Cut tags from commits that are already green on `ci.yml`.
 
 ### `.github/dependabot.yml`
 
-Watches `npm` packages at `/` (root) on a weekly schedule. Does not separately watch `lib/`, `demo/`, or `site/` subdirectories.
+Watches `npm` packages at `/`, `/lib`, `/demo`, and `/site` on a weekly schedule, with updates grouped by area (NestJS, TypeScript/lint, Jest, Nuxt). Also watches `github-actions` at `/` so workflow action versions stay current.
 
-**Uncertain:** Whether Dependabot picks up `demo/package.json` and `site/package.json` through the root config is not confirmed from config inspection alone.
+**Note:** In a pnpm workspace each project has its own manifest, so every workspace directory has to be listed explicitly — a lone `directory: "/"` only sees the root `package.json`.
+
+### `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md`, `.github/CODEOWNERS`
+
+Issue forms (bug report, feature request), the pull request checklist, and code ownership. Blank issues are disabled; `config.yml` routes documentation questions to the site and security reports to `SECURITY.md`.
 
 ### `.github/FUNDING.yml`
 

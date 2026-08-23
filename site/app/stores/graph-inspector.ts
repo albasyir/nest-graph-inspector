@@ -7,11 +7,11 @@ import {
 } from '~/utils/inspector-access-token'
 
 type InspectorEndpointInfo = {
-  for?: string
+  'for'?: string
   'is-static'?: boolean
-  isLatestVersion?: unknown
-  latestVersion?: string | null
-  version?: unknown
+  'isLatestVersion'?: unknown
+  'latestVersion'?: string | null
+  'version'?: unknown
 }
 
 type LegacyGraphOutput = Partial<GraphOutput>
@@ -70,11 +70,11 @@ function resolveOriginPath(value: string, pathName: string) {
 
 function isLegacyGraphOutput(value: unknown): value is LegacyGraphOutput {
   return Boolean(
-    value &&
-    typeof value === 'object' &&
-    'version' in value &&
-    'root' in value &&
-    'modules' in value,
+    value
+    && typeof value === 'object'
+    && 'version' in value
+    && 'root' in value
+    && 'modules' in value
   )
 }
 
@@ -118,38 +118,38 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   })
 
   const informationUrl = computed(() =>
-    appendOutputPath(decodedUrl.value, 'information.json'),
+    appendOutputPath(decodedUrl.value, 'information.json')
   )
   const jsonUrl = computed(() =>
-    appendOutputPath(decodedUrl.value, 'output.json'),
+    appendOutputPath(decodedUrl.value, 'output.json')
   )
   const markdownUrl = computed(() =>
-    appendOutputPath(decodedUrl.value, 'output.md'),
+    appendOutputPath(decodedUrl.value, 'output.md')
   )
   const ollamaUrl = computed(() =>
-    resolveOriginPath(decodedUrl.value, 'ollama'),
+    resolveOriginPath(decodedUrl.value, 'ollama')
   )
 
   const {
     data: endpointInfo,
     execute: executeEndpointInfo,
-    clear: clearEndpointInfo,
+    clear: clearEndpointInfo
   } = useFetch<InspectorEndpointInfo>(() => informationUrl.value, {
     key: 'graph-inspector-endpoint-info',
     immediate: false,
     server: false,
-    watch: false,
+    watch: false
   })
 
   const {
     data: legacyGraphData,
     execute: executeLegacyGraph,
-    clear: clearLegacyGraph,
+    clear: clearLegacyGraph
   } = useFetch<LegacyGraphOutput>(() => decodedUrl.value, {
     key: 'graph-inspector-legacy-graph',
     immediate: false,
     server: false,
-    watch: false,
+    watch: false
   })
 
   const {
@@ -157,24 +157,24 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     status,
     error,
     execute: executeJson,
-    clear: clearJson,
+    clear: clearJson
   } = useFetch<GraphOutput>(() => jsonUrl.value, {
     key: 'graph-inspector-json',
     immediate: false,
     server: false,
-    watch: false,
+    watch: false
   })
 
   const {
     data: graphMarkdown,
     execute: executeMarkdown,
-    clear: clearMarkdown,
+    clear: clearMarkdown
   } = useFetch<string>(() => markdownUrl.value, {
     key: 'graph-inspector-markdown',
     default: () => '',
     immediate: false,
     server: false,
-    watch: false,
+    watch: false
   })
 
   const errorMessage = computed(() => error.value?.message || '')
@@ -212,7 +212,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     if (
       !requiresVersionAcknowledgement(
         endpointInfo.value?.isLatestVersion,
-        endpointInfo.value?.['is-static'],
+        endpointInfo.value?.['is-static']
       )
       || acknowledgedVersionEndpointUrl.value === decodedUrl.value
     ) {
@@ -258,7 +258,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     const hasSupportedVersion = isSupportedGraphOutputVersion(
-      graphData.value?.version,
+      graphData.value?.version
     )
 
     shouldShowUpdateModal.value = !hasSupportedVersion
@@ -356,6 +356,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     detectInputUrl,
     fetchJson,
     fetchMarkdown,
-    fetchGraph,
+    fetchGraph
   }
 })

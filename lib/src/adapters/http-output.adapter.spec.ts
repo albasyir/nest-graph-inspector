@@ -7,11 +7,7 @@ import { FileOutputAdapter } from './file-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { createInspectorEndpointInfo } from '../inspector-endpoint-info';
 import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
-import {
-  ACCESS_TOKEN_HEADER,
-  ACCESS_TOKEN_QUERY_PARAM,
-  AccessTokenService,
-} from '../access-token.service';
+import { AccessTokenService } from '../access-token.service';
 import { MODULE_OPTIONS_TOKEN } from '../nest-graph-inspector.config';
 import type { NestGraphInspectorModuleOptions } from '../nest-graph-inspector.type';
 

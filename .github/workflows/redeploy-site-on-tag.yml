@@ -33,6 +33,10 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # The site imports the library as a workspace dependency.
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
+
       - name: Generate static site
         working-directory: site
         run: pnpm exec nuxt generate

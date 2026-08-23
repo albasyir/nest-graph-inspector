@@ -1,5 +1,31 @@
+# Dependencies
 node_modules
-dist
-.DS_Store
-demo/tmp
 .pnpm-store
+
+# Build output
+dist
+*.tsbuildinfo
+
+# Test output
+coverage
+
+# Nuxt / Nitro output
+.nuxt
+.nitro
+.output
+.data
+.cache
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Demo scratch output
+demo/tmp
+
+# Editors / OS
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json

@@ -21,13 +21,17 @@ export class OrderService {
 
   /**
    * create order
-   * 
+   *
    * @param userId the user id
    * @param productId the product id
    * @param quantity how many
    * @returns order or error
    */
-  createOrder(userId: number, productId: number, quantity: number): Order | { error: string } {
+  createOrder(
+    userId: number,
+    productId: number,
+    quantity: number,
+  ): Order | { error: string } {
     const user = this.userService.getUserById(userId);
     if (!user) {
       return { error: `User #${userId} not found` };
