@@ -35,6 +35,12 @@ for the published history.
 
 ### Fixed
 
+- The hosted graph viewer no longer keeps the inspector access token in its URL.
+  The link printed by your application is read once, the token moves into the
+  viewer's per-tab session, and every request authenticates with the
+  `x-graph-inspector-token` header instead. This also repairs AI chat and Direct
+  Run history in the viewer, whose URLs were built by appending a path onto a
+  token-bearing query string.
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.

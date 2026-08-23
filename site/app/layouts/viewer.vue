@@ -1,43 +1,30 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
-import { decodeEndpointUrl } from '~/utils/inspector-access-token'
+import { parseViewerUrlParam } from '~/utils/inspector-access-token'
 
 const route = useRoute()
 const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   encodedUrl,
-  decodedUrl,
+  endpointUrl,
   graphIsStatic,
   status
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
 
-const routeEncodedUrl = computed(() => {
-  const param = route.params.url
-  const value = Array.isArray(param) ? param[0] : param
+// Before the store is loaded the route is all there is to go on. Parsing it
+// rather than reading it raw keeps an access token out of the links built below
+// and out of the endpoint shown in the header.
+const routeParam = computed(() => parseViewerUrlParam(route.params.url))
 
-  if (!value) return ''
-
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return ''
-  }
-})
-
-const currentEncodedUrl = computed(() => encodedUrl.value || routeEncodedUrl.value)
-const currentDecodedUrl = computed(() => {
-  if (decodedUrl.value) return decodedUrl.value
-  if (!currentEncodedUrl.value) return ''
-
-  try {
-    return decodeEndpointUrl(currentEncodedUrl.value)
-  } catch {
-    return ''
-  }
-})
+const currentEncodedUrl = computed(
+  () => encodedUrl.value || routeParam.value.encoded
+)
+const currentDecodedUrl = computed(
+  () => endpointUrl.value || routeParam.value.endpointUrl
+)
 
 const navigatorPath = computed(() =>
   currentEncodedUrl.value ? `/view/${currentEncodedUrl.value}` : '/view'

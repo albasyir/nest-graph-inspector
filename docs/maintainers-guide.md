@@ -496,7 +496,11 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 **Purpose:** Auto-imported Vue composables.
 
-**Note:** The directory exists but was empty at inspection time. Any shared stateful logic that doesn't fit in a store and needs to be reactive belongs here.
+| Composable | What it does |
+|---|---|
+| `useGraphViewerRoute.ts` | Shared loader for the three `/view/:url` pages: resolves the endpoint from the route, loads the graph, and fires the PostHog load events |
+
+**What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
 
 ---
 
@@ -527,7 +531,26 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `view/[url]/issues.vue` | `/view/:url/issues` | Issue finder; lists circular dependency issues |
 | `view/[url]/execution-sequence.vue` | `/view/:url/execution-sequence` | Execution sequence diagram for Direct Run traces |
 
-**The `:url` parameter** is a base64url-encoded endpoint URL. It is decoded by the Pinia store.
+**The `:url` parameter** is a base64url-encoded endpoint URL. The library prints
+it with the access token embedded in the encoded endpoint — that link is the only
+channel that hands the viewer a token.
+
+Two pieces take the token out of it, because one cannot cover both consumers:
+
+| File | Job |
+|---|---|
+| `app/plugins/inspector-access-token.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` |
+| `app/middleware/inspector-access-token.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the token-bearing route is never committed |
+
+Requests then authenticate with the `x-graph-inspector-token` header, so no URL
+the viewer builds or fetches carries a token.
+
+Doing this from a page instead does not work: `onMounted` is already too late
+for PostHog's first `$pageview`, and rewriting a route the router owns changes
+the `:url` param, which remounts the page (pages are keyed by full path) and
+loads the graph twice. The one thing client-side code cannot undo is the entry
+the browser already wrote to its own history database for the bootstrap load —
+that expires with the token.
 
 **What belongs here:** Route entry points and page-level orchestration. Minimal logic; delegate to stores and composables.
 
@@ -539,15 +562,20 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Store | Purpose |
 |---|---|
-| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages encoded URL, graph data, markdown, endpoint info, and UI flags |
+| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
 
 **`graph-inspector.ts` key responsibilities:**
-- Decodes the base64url param into an endpoint URL.
+- Holds the token-free endpoint URL, and encodes it back into the `:url` segment.
+- Holds the access token, and authenticates every request with it through a
+  dedicated `$fetch` instance. The token never goes into a URL.
 - Fetches `information.json` to validate the endpoint.
 - Fetches `output.json` (`GraphOutput`) and validates schema version ≥ 3.
 - Fetches `output.md` for the Markdown view.
 - Detects "legacy" graph outputs and shows an upgrade modal.
+- Turns a `401` into `endpointRequiresAccessToken` and drops the rejected token,
+  so a stale tab says "reopen the printed link" instead of replaying a dead
+  credential.
 
 **What belongs here:** Reactive state and async data-fetching logic that multiple components share.
 
@@ -561,7 +589,9 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | File | What it contains |
 |---|---|
-| `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource` |
+| `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource`; redacts access tokens out of every property |
+| `inspector-access-token.ts` | The `/view/:url` codec, and the token contract shared with the library: parameter and header names, reading a token out of a bootstrap link, redacting one out of anything else |
+| `inspector-access-token-storage.ts` | The tab's single-endpoint token cache — memory plus `sessionStorage` — so a reload keeps a token the URL no longer carries |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
@@ -569,7 +599,11 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
 | `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
 
-**Testing convention:** Tests here use `node:assert` with no framework. Run with `node <file>.ts` (requires ts-node or tsx).
+**Testing convention:** Tests here use `node:assert` with no framework, as bare
+top-level assertions. Run them with `pnpm --filter nest-graph-inspector-site run test`
+(`node --experimental-strip-types --test app/utils/*.test.ts`). A module reachable
+from a test must use `.ts`-suffixed relative imports and no `~` alias, since Node
+resolves the import graph itself.
 
 **What belongs here:** Pure functions with no Vue/Nuxt dependencies. May import library types via `@library`.
 

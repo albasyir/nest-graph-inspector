@@ -12,6 +12,7 @@ const props = defineProps<{
   result?: string
   resultType?: string
   directRunUrl?: string
+  directRunHeaders?: Record<string, string>
   running?: boolean
 }>()
 
@@ -287,7 +288,9 @@ async function fetchHistoryIndex(): Promise<void> {
 
   historyIndexLoading.value = true
   try {
-    const items = await $fetch<Array<string | RuntimeTraceHistoryItem>>(url)
+    const items = await $fetch<Array<string | RuntimeTraceHistoryItem>>(url, {
+      headers: props.directRunHeaders
+    })
     const latestFirstItems = [...items].map(normalizeHistoryItem).reverse()
     const selectedTrace = historyTraces.value[selectedTraceId.value]
     historyIndex.value = selectedTraceId.value
@@ -319,7 +322,9 @@ async function fetchHistoryTrace(traceId: string): Promise<void> {
 
   loadingTraceIds.value = new Set([...loadingTraceIds.value, traceId])
   try {
-    const trace = await $fetch<RuntimeTrace>(url)
+    const trace = await $fetch<RuntimeTrace>(url, {
+      headers: props.directRunHeaders
+    })
     historyTraces.value = { ...historyTraces.value, [trace.traceId]: trace }
     activeTooltipSpanId.value = null
     historyError.value = ''
@@ -340,6 +345,7 @@ async function rerunSpan(span: RuntimeTraceSpan): Promise<void> {
   try {
     const response = await $fetch<DirectRunResultPayload>(props.directRunUrl!, {
       method: 'POST',
+      headers: props.directRunHeaders,
       body: buildDirectRunRequest({
         moduleName: span.moduleName!,
         providerName: span.className!,

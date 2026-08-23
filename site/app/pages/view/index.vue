@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import {
+  encodeEndpointUrl,
+  redactAccessToken
+} from '~/utils/inspector-access-token'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -11,7 +15,7 @@ useSeoMeta({
 const posthog = usePostHog()
 const route = useRoute()
 const graphStore = useGraphInspectorStore()
-const { shouldShowUpdateModal } = storeToRefs(graphStore)
+const { shouldShowUpdateModal, endpointRequiresAccessToken } = storeToRefs(graphStore)
 const config = useRuntimeConfig()
 
 const DEFAULT_ORIGIN = 'localhost:53371'
@@ -33,7 +37,7 @@ async function loadExample() {
   if (!base.endsWith('/')) base += '/'
 
   const exampleUrl = `${window.location.origin}${base}mock-graph`
-  const encodedExampleUrl = encodeURIComponent(btoa(exampleUrl))
+  const encodedExampleUrl = encodeEndpointUrl(exampleUrl)
   const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
 
   isNavigating.value = true
@@ -70,6 +74,22 @@ async function tryLoadGraph(pollId: number) {
       return
     }
 
+    // The inspector answered, but it is token-gated: the only thing that hands
+    // out a token is the link printed in the application console, so there is
+    // nothing more polling can achieve here. Stopping also matters because the
+    // library counts repeated invalid tokens per client — polling an endpoint
+    // it will keep refusing is the one way this page could get itself blocked.
+    if (endpointRequiresAccessToken.value) {
+      clearPolling()
+      isSiteDetected.value = true
+      posthog?.capture('graph_endpoint_detected', {
+        url: redactAccessToken(graphStore.endpointUrl),
+        attempts: attemptCount.value,
+        requires_access_token: true
+      })
+      return
+    }
+
     if (!isLoaded || !graphStore.encodedUrl) {
       return
     }
@@ -78,7 +98,7 @@ async function tryLoadGraph(pollId: number) {
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: graphStore.decodedUrl,
+        url: redactAccessToken(graphStore.endpointUrl),
         attempts: attemptCount.value
       })
       await navigateTo(`/view/${graphStore.encodedUrl}`)
@@ -87,7 +107,7 @@ async function tryLoadGraph(pollId: number) {
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: graphStore.decodedUrl,
+      url: redactAccessToken(graphStore.endpointUrl),
       attempts: attemptCount.value
     })
   } catch {

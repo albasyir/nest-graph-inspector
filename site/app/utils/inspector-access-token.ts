@@ -2,8 +2,19 @@
  * Query parameter carrying the inspector access token.
  *
  * Must match `ACCESS_TOKEN_QUERY_PARAM` in the `nest-graph-inspector` library.
+ * The viewer only ever *reads* this parameter, out of the bootstrap link the
+ * library prints. It never puts a token back into a URL.
  */
 export const INSPECTOR_ACCESS_TOKEN_PARAM = '__inspector_token'
+
+/**
+ * Request header carrying the inspector access token.
+ *
+ * Must match `ACCESS_TOKEN_HEADER` in the `nest-graph-inspector` library. Every
+ * request the viewer makes to the inspected application authenticates through
+ * this header, so no URL the viewer builds — or requests — carries a token.
+ */
+export const INSPECTOR_ACCESS_TOKEN_HEADER = 'x-graph-inspector-token'
 
 /**
  * Decodes the graph endpoint URL carried in the `/view/:url` route segment.
@@ -20,10 +31,24 @@ export function decodeEndpointUrl(encoded: string): string {
 }
 
 /**
+ * Encodes a graph endpoint URL for the `/view/:url` route segment.
+ *
+ * Emits the same `base64url` form the library prints, so a link the viewer
+ * builds is indistinguishable from one it was handed, and needs no further
+ * percent-encoding to survive a path segment.
+ */
+export function encodeEndpointUrl(endpointUrl: string): string {
+  return btoa(endpointUrl)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+/**
  * Reads the access token out of a graph endpoint URL.
  *
- * The endpoint URL is the only thing the viewer is handed, so it is also where
- * the token travels.
+ * Only the bootstrap link carries one: the library embeds the token in the
+ * endpoint URL it encodes into the printed viewer link.
  */
 export function readAccessToken(endpointUrl: string): string | undefined {
   if (!endpointUrl) {
@@ -42,11 +67,11 @@ export function readAccessToken(endpointUrl: string): string | undefined {
 }
 
 /**
- * Removes the access token from a URL before it leaves the browser.
+ * Removes the access token from a URL.
  *
- * The token is a live credential for the inspected application, so anything
- * that ships a graph URL onward — analytics, error reports, logs — has to send
- * a redacted one.
+ * The token is a live credential for the inspected application, so it is
+ * stripped the moment the bootstrap link is read, and stripped again from
+ * anything that ships a graph URL onward — analytics, error reports, logs.
  */
 export function redactAccessToken(endpointUrl: string): string {
   if (!endpointUrl || !endpointUrl.includes(INSPECTOR_ACCESS_TOKEN_PARAM)) {
@@ -60,26 +85,73 @@ export function redactAccessToken(endpointUrl: string): string {
     return url.toString()
   } catch {
     // Not parseable as a URL, but it still mentions the parameter, so strip it
-    // textually rather than let a token through.
+    // textually rather than let a token through. The value ends at a query
+    // separator or at whitespace or a quote, because the input here is as
+    // likely to be a URL quoted inside an error message as a URL on its own —
+    // and cutting to the end of the line would take the message with it.
     return endpointUrl.replace(
-      new RegExp(`([?&])${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#]*&?`, 'g'),
+      new RegExp(`([?&]?)${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#\\s"']*&?`, 'g'),
       '$1'
     )
   }
 }
 
-/**
- * Copies the access token from a graph endpoint URL onto a derived URL.
- *
- * Derived URLs (`/direct-run`, `/ollama`) are rebuilt from the endpoint origin
- * and would otherwise drop the token along with the rest of the query string.
- */
-export function withAccessToken(url: URL, endpointUrl: string): URL {
-  const token = readAccessToken(endpointUrl)
+/** Endpoint and credential recovered from a `/view/:url` route segment. */
+export type ViewerUrlParam = {
+  /** The route segment as it should appear once the token is removed. */
+  encoded: string
+  /** Graph endpoint URL, never carrying a token. */
+  endpointUrl: string
+  /** Token the segment carried, empty when it carried none. */
+  token: string
+}
 
-  if (token) {
-    url.searchParams.set(INSPECTOR_ACCESS_TOKEN_PARAM, token)
+/**
+ * Splits a `/view/:url` route segment into the endpoint to load and the
+ * credential to hold on to.
+ *
+ * The segment is a bootstrap link: it is the one channel that hands the viewer
+ * a token, and the last place that token is allowed to appear. Callers load
+ * `endpointUrl`, keep `token` in the store, and rewrite the address bar to
+ * `encoded`.
+ */
+export function parseViewerUrlParam(
+  param: string | string[] | undefined
+): ViewerUrlParam {
+  const raw = Array.isArray(param) ? param[0] : param
+  const empty: ViewerUrlParam = { encoded: '', endpointUrl: '', token: '' }
+
+  if (!raw) {
+    return empty
   }
 
-  return url
+  let decoded: string
+  try {
+    decoded = decodeEndpointUrl(decodeURIComponent(raw))
+  } catch {
+    return empty
+  }
+
+  const token = readAccessToken(decoded)
+  if (!token) {
+    // Nothing to strip, so the segment is left exactly as it arrived rather
+    // than re-encoded into an equivalent-but-different string.
+    return { encoded: raw, endpointUrl: decoded, token: '' }
+  }
+
+  const endpointUrl = redactAccessToken(decoded)
+
+  return { encoded: encodeEndpointUrl(endpointUrl), endpointUrl, token }
+}
+
+/**
+ * Headers that authenticate a request to the inspected application.
+ *
+ * Empty when there is no token — either token protection is off, or the graph
+ * is a static fixture served from the viewer's own origin.
+ */
+export function accessTokenHeaders(
+  token: string | undefined
+): Record<string, string> {
+  return token ? { [INSPECTOR_ACCESS_TOKEN_HEADER]: token } : {}
 }

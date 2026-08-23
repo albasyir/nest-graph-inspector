@@ -2,37 +2,19 @@
 import { storeToRefs } from 'pinia'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { collectCircularDependencyIssues } from '~/utils/circular-dependency-issues'
-import {
-  createGraphViewerEventProperties,
-  resolveGraphViewerLoadSource,
-  type LoadSource
-} from '~/utils/graph-viewer-analytics'
 
 definePageMeta({
   layout: 'viewer'
 })
 
-const route = useRoute()
-const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
-const { decodedUrl, graphData, status, errorMessage } = storeToRefs(graphStore)
-const isGraphLoading = ref(false)
-
-let hasTrackedInitialMount = false
-
-const urlBase64 = computed(() => {
-  const param = route.params.url
-  return Array.isArray(param) ? param[0] : param
-})
-
-const encodedUrl = computed(() => {
-  if (!urlBase64.value) return ''
-  try {
-    return decodeURIComponent(urlBase64.value)
-  } catch {
-    return ''
-  }
-})
+const {
+  graphData,
+  status,
+  errorMessage,
+  endpointRequiresAccessToken
+} = storeToRefs(graphStore)
+const { routeEndpointUrl, isGraphLoading, refresh } = useGraphViewerRoute()
 
 const issues = computed(() => collectCircularDependencyIssues(graphData.value))
 
@@ -41,122 +23,21 @@ useSeoMeta({
   ogTitle: 'Graph Issues - Nest Graph Inspector',
   description: 'Circular dependencies found in the current NestJS graph.'
 })
-
-function trackGraphViewerEvent(event: string, options: {
-  loadSource: LoadSource
-  isRetry?: boolean
-  errorMessage?: string
-}) {
-  posthog?.capture(event, createGraphViewerEventProperties({
-    graphUrl: decodedUrl.value,
-    viewerRoute: route.path,
-    loadSource: options.loadSource,
-    isRetry: options.isRetry,
-    errorMessage: options.errorMessage
-  }))
-}
-
-async function loadGraphResources(
-  value: string,
-  loadSource: 'initial_mount' | 'route_change' | 'manual_refresh',
-  isRetry = false
-) {
-  if (!value) {
-    navigateTo('/view')
-    return
-  }
-
-  isGraphLoading.value = true
-
-  try {
-    trackGraphViewerEvent('graph_viewer_load_started', {
-      loadSource,
-      isRetry
-    })
-
-    const graphLoaded = await graphStore.setEncodedUrl(value)
-    if (graphLoaded) {
-      await graphStore.fetchMarkdown()
-    }
-
-    if (graphLoaded) {
-      trackGraphViewerEvent('graph_viewer_load_succeeded', {
-        loadSource,
-        isRetry
-      })
-    } else {
-      trackGraphViewerEvent('graph_viewer_load_failed', {
-        loadSource,
-        isRetry,
-        errorMessage: errorMessage.value || 'Unknown error'
-      })
-    }
-
-    if (!graphStore.decodedUrl) {
-      navigateTo('/view')
-    }
-  } finally {
-    isGraphLoading.value = false
-  }
-}
-
-watch(encodedUrl, (value) => {
-  const loadSource = resolveGraphViewerLoadSource(hasTrackedInitialMount)
-  hasTrackedInitialMount = true
-  loadGraphResources(value, loadSource)
-}, { immediate: true })
-
-function handleRefresh() {
-  loadGraphResources(encodedUrl.value, 'manual_refresh', true)
-}
 </script>
 
 <template>
   <div class="h-full overflow-y-auto p-4 sm:p-6">
     <GraphViewerLoadingState
       v-if="isGraphLoading || status === 'pending'"
-      :endpoint="decodedUrl"
+      :endpoint="routeEndpointUrl"
     />
 
-    <div
-      v-else-if="status === 'error'"
-      class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
-      role="alert"
-    >
-      <div
-        class="flex size-16 items-center justify-center rounded-2xl bg-red-500/10"
-      >
-        <UIcon
-          name="i-lucide-alert-triangle"
-          class="size-8 text-red-500"
-        />
-      </div>
-      <div class="space-y-2 text-center">
-        <p class="text-lg font-medium">
-          Failed to fetch graph data
-        </p>
-        <p class="max-w-md text-sm text-muted">
-          {{
-            errorMessage
-              || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.'
-          }}
-        </p>
-        <div class="mt-4 flex items-center justify-center gap-2">
-          <UButton
-            icon="i-lucide-refresh-cw"
-            label="Retry"
-            variant="outline"
-            @click="handleRefresh()"
-          />
-          <UButton
-            icon="i-lucide-link"
-            label="Try Another URL"
-            variant="soft"
-            to="/view"
-          />
-        </div>
-      </div>
-    </div>
+    <GraphViewerErrorState
+      v-else-if="endpointRequiresAccessToken || status === 'error'"
+      :message="errorMessage"
+      :requires-access-token="endpointRequiresAccessToken"
+      @retry="refresh()"
+    />
 
     <div
       v-else-if="graphData"
@@ -220,7 +101,7 @@ function handleRefresh() {
           label="Retry"
           variant="outline"
           class="mt-2"
-          @click="handleRefresh()"
+          @click="refresh()"
         />
       </div>
     </div>

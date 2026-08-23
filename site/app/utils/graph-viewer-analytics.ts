@@ -74,7 +74,9 @@ export function createGraphViewerEventProperties(options: {
   }
 
   if (options.errorMessage) {
-    properties.error_message = options.errorMessage
+    // Transport errors quote the request URL they failed on, so this string is
+    // a URL in disguise and gets the same treatment as one.
+    properties.error_message = redactAccessToken(options.errorMessage)
   }
 
   return properties
