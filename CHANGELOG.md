@@ -14,6 +14,16 @@ for the published history.
 
 ### Added
 
+- The documentation site's demo is now the demo application itself, running in
+  your browser on the [nodepod](https://www.npmjs.com/package/@scelar/nodepod)
+  runtime, rather than a graph file committed into the site. Direct Run invokes
+  real provider methods, runtime traces and Direct Run history accumulate as you
+  use it, and the graph — JSDoc and Direct Run parameter types included — comes
+  from the application that is answering.
+- `pnpm --filter nest-graph-inspector-demo run build:nodepod` packages the demo
+  for that runtime, and `pnpm --filter nest-graph-inspector-site run
+  test:demo-payload` boots the packaged application headless and checks that it
+  answers. Both run in CI ahead of every site build.
 - Repository CI: lint, typecheck, tests on Node 20/22/24, and a full site build
   now run on every pull request and push to `main`.
 - `lib` is linted (ESLint + typescript-eslint) and has a `typecheck` script.
@@ -24,6 +34,9 @@ for the published history.
 
 ### Changed
 
+- The demo writes its graph files to `demo/tmp/graph/` instead of into the
+  site's public directory, and which outputs it installs depends on where it is
+  running (`demo/src/inspector-outputs.ts`).
 - `lib` and `demo` compile under TypeScript `strict`.
 - Spec files are type-checked. `ts-jest` no longer runs with `diagnostics: false`,
   so type errors in tests fail the build instead of being skipped.
@@ -35,6 +48,14 @@ for the published history.
 
 ### Fixed
 
+- The access token is built by encoding the HMAC digest buffer, rather than by
+  asking `digest()` for `base64url`. A runtime that ignores that argument hands
+  back raw bytes, and a token made of raw bytes does not survive the URL it
+  travels in. On Node the token is unchanged.
+- The npm lookup behind `latestVersion` in `information.json` is bounded to two
+  seconds. It is awaited while the inspector installs its outputs — while your
+  application is starting — so a network that neither answers nor refuses used
+  to hold up `app.listen()` with it.
 - The hosted graph viewer no longer keeps the inspector access token — or the
   graph endpoint — in its URL. The link printed by your application is spent on
   arrival, and the viewer settles on a plain `/view/navigator`, `/view/issues`,
@@ -55,9 +76,11 @@ for the published history.
 - Every `/view/**` page now requires the access token for the graph it would
   show. Without one the viewer returns to `/view`, since the token is no longer
   in the URL and the link printed by your application is the only thing that
-  hands one over. The bundled demo is exempt, being static files on the site's
-  own origin; an inspector configured with `accessToken.enabled: false` cannot be
-  opened in the hosted viewer.
+  hands one over. A graph on the site's own origin is exempt from that check —
+  which is where the bundled demo runs, though it prints and presents a token of
+  its own like any other application. An inspector configured with
+  `accessToken.enabled: false`, or with `accessToken.logToken: false`, prints a
+  link carrying no token and cannot be opened in the hosted viewer.
 - The graph viewer's reload button now stays busy for the whole reload rather
   than only its middle request, and the viewer shows its loading state for the
   whole of a reload started from the header.
@@ -68,3 +91,9 @@ for the published history.
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.
+
+### Removed
+
+- The committed graph fixture (`site/public/mock-graph/`) and
+  `demo/scripts/mock-sync.ts`, which existed to keep it in step with the demo.
+  The site runs the demo application instead.
