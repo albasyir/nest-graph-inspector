@@ -15,6 +15,7 @@ import { HttpServeAdapter } from './adapters/http-serve.adapter';
 import { DirectRunOutputAdapter } from './adapters/direct-run-output.adapter';
 import { RuntimeTraceRecorder } from './runtime-trace.recorder';
 import { SourceMetadataService } from './source-metadata.service';
+import { AccessTokenService } from './access-token.service';
 
 export const defaultOptions: NestGraphInspectorModuleOptions = {
   outputs: [
@@ -51,6 +52,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     NestGraphInspectorSetup,
     DiscoveryAdapter,
     SourceMetadataService,
+    AccessTokenService,
     JsonOutputAdapter,
     FileOutputAdapter,
     HttpServeAdapter,
@@ -60,5 +62,7 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     DirectRunOutputAdapter,
     ViewerOutputAdapter,
   ],
+  // Applications need this to mint their own token when logToken is off.
+  exports: [AccessTokenService],
 })
 export class NestGraphInspectorModule extends ConfigurableModuleClass {}

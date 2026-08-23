@@ -1,6 +1,10 @@
 import type { GraphOutput } from 'nest-graph-inspector'
 import { defineStore } from 'pinia'
 import { requiresVersionAcknowledgement } from '~/utils/graph-inspector-version-gate'
+import {
+  decodeEndpointUrl,
+  withAccessToken
+} from '~/utils/inspector-access-token'
 
 type InspectorEndpointInfo = {
   for?: string
@@ -56,7 +60,9 @@ function resolveOriginPath(value: string, pathName: string) {
     url.search = ''
     url.hash = ''
 
-    return url.toString()
+    // Everything else in the query belongs to the graph endpoint, but the
+    // access token has to survive or the derived endpoint answers 401.
+    return withAccessToken(url, value).toString()
   } catch {
     return ''
   }
@@ -105,7 +111,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     try {
-      return atob(decodeURIComponent(encodedUrl.value))
+      return decodeEndpointUrl(decodeURIComponent(encodedUrl.value))
     } catch {
       return ''
     }

@@ -1,3 +1,5 @@
+import { redactAccessToken } from './inspector-access-token.ts'
+
 export type LoadSource = 'initial_mount' | 'route_change' | 'manual_refresh'
 
 export function resolveGraphViewerLoadSource(hasTrackedInitialMount: boolean): LoadSource {
@@ -13,21 +15,37 @@ function parseGraphUrl(graphUrl: string) {
     }
   }
 
+  // The graph URL carries the inspector access token, which must never reach
+  // an analytics sink.
+  const safeGraphUrl = redactAccessToken(graphUrl)
+
   try {
-    const url = new URL(graphUrl)
+    const url = new URL(safeGraphUrl)
 
     return {
-      graph_url: graphUrl,
+      graph_url: safeGraphUrl,
       graph_url_host: url.host,
       graph_url_path: url.pathname
     }
   } catch {
     return {
-      graph_url: graphUrl,
+      graph_url: safeGraphUrl,
       graph_url_host: '',
       graph_url_path: ''
     }
   }
+}
+
+/**
+ * Replaces the encoded endpoint in a viewer route with the route template.
+ *
+ * `/view/:url` carries the base64url graph endpoint, and that endpoint carries
+ * the access token — so the raw route path is a token in disguise. Redacting
+ * here rather than at each call site means a caller passing `route.fullPath`
+ * cannot reintroduce the leak, and the page itself is still identifiable.
+ */
+function redactViewerRoute(viewerRoute: string) {
+  return viewerRoute.replace(/^(\/view)\/[^/]+/, '$1/[url]')
 }
 
 export function createGraphViewerEventProperties(options: {
@@ -39,7 +57,7 @@ export function createGraphViewerEventProperties(options: {
 }) {
   const properties = {
     ...parseGraphUrl(options.graphUrl),
-    viewer_route: options.viewerRoute,
+    viewer_route: redactViewerRoute(options.viewerRoute),
     load_source: options.loadSource
   } as {
     graph_url: string

@@ -8,6 +8,21 @@ import { ProxyAdapter } from './proxy.adapter';
 import { ViewerOutputAdapter } from './viewer-output.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
+import {
+  ACCESS_TOKEN_QUERY_PARAM,
+  AccessTokenService,
+} from '../access-token.service';
+import { MODULE_OPTIONS_TOKEN } from '../nest-graph-inspector.config';
+
+/** Reads back the graph endpoint the viewer link points at. */
+function decodeViewerEndpoint(message: string): URL {
+  const encoded = /\/view\/([A-Za-z0-9_-]+)/.exec(message)?.[1];
+  if (!encoded) {
+    throw new Error(`No viewer link found in message: ${message}`);
+  }
+
+  return new URL(Buffer.from(encoded, 'base64url').toString('utf8'));
+}
 
 describe(ViewerOutputAdapter.name, () => {
   let moduleRef: TestingModule;
@@ -15,6 +30,29 @@ describe(ViewerOutputAdapter.name, () => {
   let httpServeAdapter: HttpServeAdapter;
   let httpOutputAdapter: { execute: jest.Mock; normalizePath: jest.Mock };
   let proxyAdapter: { serve: jest.Mock; close: jest.Mock };
+  const nestedModules: TestingModule[] = [];
+
+  /** Nested modules serve HTTP, so cleanup runs from a hook, not inline. */
+  const createNestedModule = async (
+    options: Record<string, unknown>,
+  ): Promise<TestingModule> => {
+    const nested = await Test.createTestingModule({
+      providers: [
+        ViewerOutputAdapter,
+        HttpServeAdapter,
+        DirectRunOutputAdapter,
+        RuntimeTraceRecorder,
+        AccessTokenService,
+        { provide: HttpOutputAdapter, useValue: httpOutputAdapter },
+        { provide: ProxyAdapter, useValue: proxyAdapter },
+        { provide: MODULE_OPTIONS_TOKEN, useValue: options },
+      ],
+    }).compile();
+
+    nestedModules.push(nested);
+
+    return nested;
+  };
 
   beforeEach(async () => {
     httpOutputAdapter = {
@@ -36,6 +74,7 @@ describe(ViewerOutputAdapter.name, () => {
         HttpServeAdapter,
         DirectRunOutputAdapter,
         RuntimeTraceRecorder,
+        AccessTokenService,
         {
           provide: HttpOutputAdapter,
           useValue: httpOutputAdapter,
@@ -51,7 +90,10 @@ describe(ViewerOutputAdapter.name, () => {
     httpServeAdapter = moduleRef.get(HttpServeAdapter);
   });
 
-  afterEach(() => moduleRef.close());
+  afterEach(async () => {
+    await Promise.all(nestedModules.splice(0).map((nested) => nested.close()));
+    await moduleRef.close();
+  });
 
   it('normalizes the graph endpoint before installing and encoding it', async () => {
     const result = await adapter.execute({} as never, {
@@ -63,9 +105,7 @@ describe(ViewerOutputAdapter.name, () => {
         path: '/ollama',
       },
     });
-    const encodedEndpoint = Buffer.from('http://localhost:8889/graph').toString(
-      'base64url',
-    );
+    const endpoint = decodeViewerEndpoint(result.message);
 
     expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
       {},
@@ -78,7 +118,51 @@ describe(ViewerOutputAdapter.name, () => {
         httpAdapter: httpServeAdapter,
       },
     );
-    expect(result.message).toContain(`/view/${encodedEndpoint}`);
+    expect(`${endpoint.origin}${endpoint.pathname}`).toBe(
+      'http://localhost:8889/graph',
+    );
+  });
+
+  it('carries an access token in the viewer link', async () => {
+    const result = await adapter.execute({} as never, {
+      type: 'viewer',
+      origin: 'http://localhost:8889',
+      path: 'graph',
+      ollama: {
+        origin: 'http://localhost:11434',
+        path: '/ollama',
+      },
+    });
+
+    const endpoint = decodeViewerEndpoint(result.message);
+    const token = endpoint.searchParams.get(ACCESS_TOKEN_QUERY_PARAM);
+
+    expect(token).toBeTruthy();
+    expect(moduleRef.get(AccessTokenService).verify(token!)).toMatchObject({
+      ok: true,
+    });
+    expect(result.message).toContain('access token expires at');
+  });
+
+  it('leaves the token out of the viewer link when logToken is off', async () => {
+    // Tracked so cleanup survives a failed assertion; this module serves HTTP.
+    const quiet = await createNestedModule({
+      accessToken: { logToken: false },
+    });
+
+    const result = await quiet.get(ViewerOutputAdapter).execute({} as never, {
+      type: 'viewer',
+      origin: 'http://localhost:8889',
+      path: 'graph',
+      ollama: { origin: 'http://localhost:11434', path: '/ollama' },
+    });
+    const endpoint = decodeViewerEndpoint(result.message);
+
+    expect(endpoint.searchParams.get(ACCESS_TOKEN_QUERY_PARAM)).toBeNull();
+    expect(result.message).not.toContain(
+      quiet.get(AccessTokenService).current(),
+    );
+    expect(result.message).toContain('accessToken.logToken is off');
   });
 
   it('registers the Ollama proxy on the viewer HTTP origin', async () => {
@@ -106,6 +190,7 @@ describe(ViewerOutputAdapter.name, () => {
       {
         httpAdapter: httpOutputConfig.httpAdapter,
         pathPrefix: '/ollama',
+        authorize: expect.any(Function),
       },
     );
   });
@@ -143,9 +228,7 @@ describe(ViewerOutputAdapter.name, () => {
         path: '/ollama',
       },
     });
-    const encodedEndpoint = Buffer.from('http://127.0.0.1:3998/graph').toString(
-      'base64url',
-    );
+    const endpoint = decodeViewerEndpoint(result.message);
 
     expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
       {},
@@ -158,7 +241,9 @@ describe(ViewerOutputAdapter.name, () => {
         httpAdapter: httpServeAdapter,
       },
     );
-    expect(result.message).toContain(`/view/${encodedEndpoint}`);
+    expect(`${endpoint.origin}${endpoint.pathname}`).toBe(
+      'http://127.0.0.1:3998/graph',
+    );
   });
 
   it('registers the configured Ollama proxy', async () => {
@@ -250,7 +335,80 @@ describe(ViewerOutputAdapter.name, () => {
       ],
     );
   });
+
+  it('refuses to invoke a provider method without a valid token', async () => {
+    const port = await availablePort();
+    const ping = jest.fn().mockReturnValue('pong');
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      ollama: { origin: 'http://localhost:11434', path: '/ollama' },
+      directRun: {
+        path: '/direct-run',
+        instanceLookup: () => ({ ping }),
+      },
+    } as never);
+
+    const body = JSON.stringify({
+      module: 'AppModule',
+      provider: 'AppService',
+      method: 'ping',
+    });
+    const url = `http://127.0.0.1:${port}/direct-run`;
+
+    const rejected = await post(url, body);
+    expect(rejected.statusCode).toBe(401);
+    expect(JSON.parse(rejected.body)).toMatchObject({ reason: 'missing' });
+    expect(ping).not.toHaveBeenCalled();
+
+    const accepted = await post(url, body, {
+      authorization: `Bearer ${moduleRef.get(AccessTokenService).current()}`,
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(JSON.parse(accepted.body)).toMatchObject({
+      ok: true,
+      result: 'pong',
+    });
+    expect(ping).toHaveBeenCalledTimes(1);
+  });
 });
+
+function post(
+  url: string,
+  body: string,
+  headers: http.OutgoingHttpHeaders = {},
+): Promise<{ statusCode?: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+          ...headers,
+        },
+      },
+      (res) => {
+        let responseBody = '';
+
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () =>
+          resolve({ statusCode: res.statusCode, body: responseBody }),
+        );
+      },
+    );
+
+    req.on('error', reject);
+    req.end(body);
+  });
+}
 
 function availablePort(): Promise<number> {
   return new Promise((resolve, reject) => {

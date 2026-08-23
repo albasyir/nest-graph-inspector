@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
+import { decodeEndpointUrl } from '~/utils/inspector-access-token'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,7 +33,7 @@ const currentDecodedUrl = computed(() => {
   if (!currentEncodedUrl.value) return ''
 
   try {
-    return atob(currentEncodedUrl.value)
+    return decodeEndpointUrl(currentEncodedUrl.value)
   } catch {
     return ''
   }
