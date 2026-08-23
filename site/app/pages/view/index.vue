@@ -44,6 +44,11 @@ async function loadExample() {
       reason: demoStore.errorMessage
     })
 
+    // The page was watching for a local inspector before the demo was asked
+    // for, and it still is: a demo that would not start is not a reason to stop
+    // looking for the developer's own application.
+    startPolling(activeOrigin.value)
+
     return
   }
 

@@ -32,8 +32,19 @@ export function useGraphViewerPage() {
   /** The endpoint being shown, for the loading state and the header. */
   const endpointUrl = computed(() => graphStore.endpointUrl)
 
-  /** The store owns this: a load can also be started from the viewer header. */
-  const isGraphLoading = computed(() => graphStore.isLoading)
+  /**
+   * Whether the page is getting a graph on screen.
+   *
+   * Wider than the store's own load, and true from the first synchronous moment
+   * of it: a restored demo session has to have its application started again
+   * before there is an endpoint to load at all, and a page that called that
+   * "not loading" would render its empty state — and mount fetchers against the
+   * endpoint that just died — for as long as the start takes.
+   */
+  const isPreparing = ref(false)
+  const isGraphLoading = computed(
+    () => isPreparing.value || graphStore.isLoading
+  )
 
   function trackGraphViewerEvent(
     event: string,
@@ -69,33 +80,39 @@ export function useGraphViewerPage() {
       return
     }
 
-    // The in-browser demo lives in the tab that started it, so a session
-    // restored without one has to start it again — and lands on a new endpoint.
-    const endpoint = await ensureEndpoint(restored)
+    isPreparing.value = true
 
-    if (!endpoint) {
-      await navigateTo('/view')
-      return
-    }
+    try {
+      // The in-browser demo lives in the tab that started it, so a session
+      // restored without one has to start it again — on a new endpoint.
+      const endpoint = await ensureEndpoint(restored)
 
-    trackGraphViewerEvent('graph_viewer_load_started', {
-      loadSource,
-      isRetry
-    })
+      if (!endpoint) {
+        await navigateTo('/view')
+        return
+      }
 
-    if (await graphStore.setEndpoint(endpoint)) {
-      trackGraphViewerEvent('graph_viewer_load_succeeded', {
+      trackGraphViewerEvent('graph_viewer_load_started', {
         loadSource,
         isRetry
       })
-      return
-    }
 
-    trackGraphViewerEvent('graph_viewer_load_failed', {
-      loadSource,
-      isRetry,
-      errorMessage: graphStore.errorMessage || 'Unknown error'
-    })
+      if (await graphStore.setEndpoint(endpoint)) {
+        trackGraphViewerEvent('graph_viewer_load_succeeded', {
+          loadSource,
+          isRetry
+        })
+        return
+      }
+
+      trackGraphViewerEvent('graph_viewer_load_failed', {
+        loadSource,
+        isRetry,
+        errorMessage: graphStore.errorMessage || 'Unknown error'
+      })
+    } finally {
+      isPreparing.value = false
+    }
   }
 
   // One load per page, at setup. Moving between viewer pages mounts a new page

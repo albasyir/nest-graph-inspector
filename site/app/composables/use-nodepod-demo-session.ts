@@ -31,6 +31,12 @@ export function useNodepodDemoSession() {
     }
 
     if (demo.status !== 'ready' || demo.endpointUrl !== endpointUrl) {
+      // The endpoint died with the document that started the demo. Dropping it
+      // before the restart is what stops anything rendered in the meantime from
+      // building a URL out of it — and sending the old token to whatever host
+      // that URL happens to name.
+      graphStore.releaseEndpoint()
+
       if (!await demo.start()) {
         return ''
       }

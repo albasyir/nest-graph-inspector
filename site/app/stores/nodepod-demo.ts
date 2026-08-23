@@ -157,14 +157,18 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     const response = await fetch(payloadUrl('manifest.json'), {
       cache: 'no-cache'
     })
+    const parsed = response.ok
+      ? ((await response.json().catch(() => null)) as DemoManifest | null)
+      : null
 
-    if (!response.ok) {
+    // Checked rather than assumed, because a host that answers a missing file
+    // with its own page — a 404 body served as 200 — would otherwise surface as
+    // a JSON parse error, which says nothing about what is missing.
+    if (!parsed || typeof parsed.payloadVersion !== 'number') {
       throw new Error(
         `The demo payload is not published on this site (${response.status}). Build it with "pnpm --filter nest-graph-inspector-demo run build:nodepod".`
       )
     }
-
-    const parsed = (await response.json()) as DemoManifest
 
     if (parsed.payloadVersion !== SUPPORTED_PAYLOAD_VERSION) {
       throw new Error(

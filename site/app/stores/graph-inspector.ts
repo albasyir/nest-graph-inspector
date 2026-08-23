@@ -301,6 +301,20 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   /**
+   * Forgets the endpoint held in memory, without forgetting the tab's session.
+   *
+   * Used while the in-browser demo is restarted: the endpoint the tab was on
+   * died with the document that started it, and nothing may be fetched from it
+   * in the meantime — least of all with the credential that went with it. The
+   * session stays, so a failed restart can still say which graph it was.
+   */
+  function releaseEndpoint() {
+    endpoint.value = ''
+    accessToken.value = ''
+    clearGraph()
+  }
+
+  /**
    * Records the graph a printed link handed over, without loading it.
    *
    * The router layer calls this: it has to take custody of the endpoint and
@@ -563,6 +577,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     showCircularDependencies,
     openModuleDetail,
     setSession,
+    releaseEndpoint,
     restoreSession,
     toggleDependencyTrace,
     validateEndpoint,
