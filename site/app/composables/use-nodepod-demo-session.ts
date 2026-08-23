@@ -30,7 +30,7 @@ export function useNodepodDemoSession() {
       return endpointUrl
     }
 
-    if (demo.status !== 'ready' || demo.endpointUrl !== endpointUrl) {
+    if (demo.status !== 'ready') {
       // The endpoint died with the document that started the demo. Dropping it
       // before the restart is what stops anything rendered in the meantime from
       // building a URL out of it — and sending the old token to whatever host
@@ -40,9 +40,13 @@ export function useNodepodDemoSession() {
       if (!await demo.start()) {
         return ''
       }
-
-      graphStore.setSession(demo.endpointUrl, demo.accessToken)
     }
+
+    // Always the running pod's credential, never the one the session was
+    // restored with: the demo's address is the same on every boot, so matching
+    // URLs prove nothing about which pod minted the token being held — and a
+    // token the endpoint has already refused is only cleared here.
+    graphStore.setSession(demo.endpointUrl, demo.accessToken)
 
     // The demo and this site are built from the same commit, so the version
     // acknowledgement the viewer asks for elsewhere has nothing to add here.

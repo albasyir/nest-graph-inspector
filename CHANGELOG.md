@@ -88,6 +88,14 @@ for the published history.
   A 401 is not remembered across attempts, so an application that went down is
   reported as unreachable rather than as needing an access token — and an
   endpoint that never answered says so, instead of "no data received".
+- The proxy adapter no longer forwards the inspector's own access token to the
+  origin it proxies to. A caller authenticates to the inspector, and the target
+  — an Ollama server, say — has no business holding a live credential for the
+  inspected application, so the `x-graph-inspector-token` header, an
+  `Authorization: Bearer` header carrying an inspector token, and the
+  `__inspector_token` query parameter are dropped on the way out. Anything else
+  the caller sent, including an `Authorization` header for the target's own
+  authentication, still goes through.
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.

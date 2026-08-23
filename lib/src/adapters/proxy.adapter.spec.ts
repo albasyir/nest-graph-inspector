@@ -3,6 +3,10 @@ import net, { AddressInfo } from 'node:net';
 
 import { HttpServeAdapter } from './http-serve.adapter';
 import { ProxyAdapter } from './proxy.adapter';
+import {
+  ACCESS_TOKEN_HEADER,
+  ACCESS_TOKEN_QUERY_PARAM,
+} from '../access-token.service';
 
 type HttpResponse = {
   statusCode?: number;
@@ -59,6 +63,86 @@ describe(ProxyAdapter.name, () => {
     expect(JSON.parse(response.body)).toEqual({
       url: '/api/tags?limit=1',
     });
+  });
+
+  it('does not forward the inspector access token to the target origin', async () => {
+    // The caller authenticates to the inspector; the target is somewhere else
+    // entirely and has no business holding a credential for this application.
+    let received:
+      | { url?: string; headers: http.IncomingHttpHeaders }
+      | undefined;
+
+    targetServer = http.createServer((req, res) => {
+      received = { url: req.url, headers: req.headers };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: false,
+      },
+      {
+        httpAdapter: httpServeAdapter,
+        pathPrefix: '/ollama',
+      },
+    );
+    await httpServeAdapter.serve();
+
+    const response = await request(
+      `http://127.0.0.1:${viewerPort}/ollama/api/tags?${ACCESS_TOKEN_QUERY_PARAM}=ngi1.payload.signature&limit=1`,
+      {
+        headers: {
+          [ACCESS_TOKEN_HEADER]: 'ngi1.payload.signature',
+          authorization: 'Bearer ngi1.payload.signature',
+          'x-request-id': 'kept',
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(received?.headers[ACCESS_TOKEN_HEADER]).toBeUndefined();
+    expect(received?.headers.authorization).toBeUndefined();
+    expect(received?.url).toBe('/api/tags?limit=1');
+    // Everything that is not the inspector's own credential still goes through.
+    expect(received?.headers['x-request-id']).toBe('kept');
+  });
+
+  it('forwards an authorization header that is not an inspector token', async () => {
+    // A target with its own authentication still gets what it was sent.
+    let received: http.IncomingHttpHeaders | undefined;
+
+    targetServer = http.createServer((req, res) => {
+      received = req.headers;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    await listen(targetServer, 0);
+
+    const targetAddress = targetServer.address() as AddressInfo;
+    const viewerPort = await availablePort();
+
+    await proxyAdapter.serve(
+      {
+        from: `http://127.0.0.1:${viewerPort}`,
+        to: `http://127.0.0.1:${targetAddress.port}`,
+        cors: false,
+      },
+      { httpAdapter: httpServeAdapter, pathPrefix: '/ollama' },
+    );
+    await httpServeAdapter.serve();
+
+    await request(`http://127.0.0.1:${viewerPort}/ollama/api/tags`, {
+      headers: { authorization: 'Bearer ollama-key' },
+    });
+
+    expect(received?.authorization).toBe('Bearer ollama-key');
   });
 
   it('does not forward to a foreign origin sent as an absolute-form request target', async () => {

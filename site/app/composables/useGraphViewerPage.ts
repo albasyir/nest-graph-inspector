@@ -76,7 +76,7 @@ export function useGraphViewerPage() {
     const restored = graphStore.restoreSession()
 
     if (!restored) {
-      await navigateTo('/view')
+      await navigateTo('/view', { replace: true })
       return
     }
 
@@ -88,7 +88,7 @@ export function useGraphViewerPage() {
       const endpoint = await ensureEndpoint(restored)
 
       if (!endpoint) {
-        await navigateTo('/view')
+        await navigateTo('/view', { replace: true })
         return
       }
 

@@ -129,8 +129,8 @@ assert.ok(
   'the viewer link carried no access token'
 )
 
-async function call(path: string) {
-  const response = await pod.request(Number(endpointUrl.port), { path })
+async function call(path: string, headers?: Record<string, string>) {
+  const response = await pod.request(Number(endpointUrl.port), { path, headers })
 
   return {
     status: response.statusCode,
@@ -138,8 +138,12 @@ async function call(path: string) {
   }
 }
 
-const graphPath = `${endpointUrl.pathname}/output.json${endpointUrl.search}`
-const graph = await call(graphPath)
+// Authenticated with the header, because that is what the site sends: it takes
+// the token out of the printed link and never puts it back into a URL.
+const graphPath = `${endpointUrl.pathname}/output.json`
+const graph = await call(graphPath, {
+  'x-graph-inspector-token': endpointUrl.searchParams.get('__inspector_token') ?? ''
+})
 
 if (graph.status !== 200) {
   fail(`${graphPath} answered ${graph.status}`)
@@ -159,7 +163,7 @@ assert.ok(
 )
 
 // Without an access token the endpoint has to refuse, in the browser as anywhere.
-const unauthorized = await call(`${endpointUrl.pathname}/output.json`)
+const unauthorized = await call(graphPath)
 assert.equal(unauthorized.status, 401, 'the endpoint answered without a token')
 
 console.log(
