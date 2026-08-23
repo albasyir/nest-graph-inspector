@@ -21,15 +21,28 @@ export default defineNuxtRouteMiddleware((to) => {
     return
   }
 
-  const { token, encoded, endpointUrl } = parseViewerUrlParam(to.params.url)
+  const param = Array.isArray(to.params.url) ? to.params.url[0] : to.params.url
+  const { token, encoded, endpointUrl } = parseViewerUrlParam(param)
 
-  if (!token) {
+  // Undecodable: leave it alone and let the page redirect to /view.
+  if (!encoded) {
     return
   }
 
-  // The plugin normally got here first; this covers the client-side navigation
-  // case, where no plugin runs.
-  useGraphInspectorStore().rememberAccessToken(endpointUrl, token)
+  if (token) {
+    // The plugin normally got here first; this covers a client-side navigation,
+    // where no plugin runs.
+    useGraphInspectorStore().rememberAccessToken(endpointUrl, token)
+  }
+
+  // Equal only when the segment carried no token and was already canonical.
+  // Redirecting otherwise also normalises the padded standard base64 that an
+  // older build of this site minted, so the route always matches the segment
+  // the store re-encodes — which is what the viewer's own nav links compare
+  // against.
+  if (encoded === param) {
+    return
+  }
 
   const suffix = to.path.replace(/^\/view\/[^/]+/, '')
 

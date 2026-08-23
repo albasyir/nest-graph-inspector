@@ -88,13 +88,26 @@ assert.deepEqual(
 // Vue Router hands over a param array for a repeated segment.
 assert.deepEqual(parseViewerUrlParam([encoded]), bootstrap)
 
-// A token-free segment is left byte-for-byte alone, so arriving at a viewer
-// page does not bounce the address bar for nothing.
+// A canonical token-free segment comes back unchanged, so arriving at a viewer
+// page does not bounce the address bar for nothing — and parsing is idempotent,
+// which is what stops the route rewrite from looping.
 const tokenFreeSegment = encodeEndpointUrl(ENDPOINT)
 const plain = parseViewerUrlParam(tokenFreeSegment)
 assert.equal(plain.token, '')
 assert.equal(plain.endpointUrl, ENDPOINT)
 assert.equal(plain.encoded, tokenFreeSegment)
+assert.deepEqual(parseViewerUrlParam(plain.encoded), plain)
+
+// A segment minted by an older build of this site — padded standard base64 —
+// decodes to the same endpoint but is a different string. It has to canonicalise
+// to base64url, or the route and the links the store builds from that same
+// endpoint disagree and the viewer's active-tab highlight silently breaks.
+const legacySegment = Buffer.from(ENDPOINT).toString('base64')
+assert.notEqual(legacySegment, tokenFreeSegment, 'expected a padded fixture')
+const legacy = parseViewerUrlParam(legacySegment)
+assert.equal(legacy.endpointUrl, ENDPOINT)
+assert.equal(legacy.encoded, tokenFreeSegment)
+assert.equal(legacy.token, '')
 
 // Nothing to parse, and garbage, both resolve to "no endpoint" rather than throw.
 assert.deepEqual(parseViewerUrlParam(undefined), {

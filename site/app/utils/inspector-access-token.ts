@@ -133,15 +133,14 @@ export function parseViewerUrlParam(
   }
 
   const token = readAccessToken(decoded)
-  if (!token) {
-    // Nothing to strip, so the segment is left exactly as it arrived rather
-    // than re-encoded into an equivalent-but-different string.
-    return { encoded: raw, endpointUrl: decoded, token: '' }
-  }
+  const endpointUrl = token ? redactAccessToken(decoded) : decoded
 
-  const endpointUrl = redactAccessToken(decoded)
-
-  return { encoded: encodeEndpointUrl(endpointUrl), endpointUrl, token }
+  // `encoded` is always the canonical base64url form, even when there was no
+  // token to strip. An older build of this site minted padded standard base64,
+  // which decodes to the same endpoint but is a different string — and letting
+  // both forms circulate means the route and the links the store builds from
+  // the same endpoint disagree.
+  return { encoded: encodeEndpointUrl(endpointUrl), endpointUrl, token: token ?? '' }
 }
 
 /**

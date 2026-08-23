@@ -492,7 +492,9 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   return {
-    accessToken,
+    // `accessToken` itself is deliberately not exposed: callers get
+    // `requestHeaders`, so there is no way to put the raw credential anywhere
+    // other than a request header.
     requestHeaders,
     encodedUrl,
     endpointUrl,
