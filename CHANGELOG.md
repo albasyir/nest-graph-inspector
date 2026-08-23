@@ -35,6 +35,36 @@ for the published history.
 
 ### Fixed
 
+- The hosted graph viewer no longer keeps the inspector access token — or the
+  graph endpoint — in its URL. The link printed by your application is spent on
+  arrival, and the viewer settles on a plain `/view/navigator`, `/view/issues`,
+  or `/view/execution-sequence`. The endpoint and token move into the tab's
+  session, and every request authenticates with the `x-graph-inspector-token`
+  header instead. This also repairs AI chat and Direct Run history in the viewer,
+  whose URLs were built by appending a path onto a token-bearing query string.
+
+  A viewer URL is therefore no longer shareable or bookmarkable: it names a view,
+  not a graph. Reopening the printed link is how you get back to a graph, and a
+  reload keeps working within the same tab. Links carrying the old
+  `/view/<encoded>/issues` shape still land on the view they named.
+- The graph viewer's entry page no longer discards the graph a tab is on. Its
+  endpoint poller probes without committing, so visiting `/view` — or the
+  viewer's own "Try Another URL" — and going back keeps the graph and its token.
+- An unusable path below a viewer page (`/view/navigator/anything`) returns to
+  the viewer entry page instead of waiting on a spinner that never resolves.
+- Every `/view/**` page now requires the access token for the graph it would
+  show. Without one the viewer returns to `/view`, since the token is no longer
+  in the URL and the link printed by your application is the only thing that
+  hands one over. The bundled demo is exempt, being static files on the site's
+  own origin; an inspector configured with `accessToken.enabled: false` cannot be
+  opened in the hosted viewer.
+- The graph viewer's reload button now stays busy for the whole reload rather
+  than only its middle request, and the viewer shows its loading state for the
+  whole of a reload started from the header.
+- Retrying a graph that has stopped answering no longer reports the last reason.
+  A 401 is not remembered across attempts, so an application that went down is
+  reported as unreachable rather than as needing an access token — and an
+  endpoint that never answered says so, instead of "no data received".
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.

@@ -394,8 +394,15 @@ async function fetchOllama(path: string, options?: RequestInit) {
   const endpoint = getOllamaApiUrl(path)
   let response: Response
 
+  // The proxy is gated by the same access token as the rest of the inspector,
+  // and the store is the only place that token lives.
+  const headers = new Headers(options?.headers)
+  for (const [name, value] of Object.entries(graphStore.requestHeaders)) {
+    headers.set(name, value)
+  }
+
   try {
-    response = await fetch(endpoint, options)
+    response = await fetch(endpoint, { ...options, headers })
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Network request failed'
     throw new OllamaProxyRequestError(endpoint, undefined, undefined, detail)
@@ -516,7 +523,7 @@ watch(() => props.active, (value) => {
     graphStore.fetchMarkdown()
 
     posthog?.capture('Graph AI Chat Opened', {
-      url: graphStore.decodedUrl
+      url: graphStore.endpointUrl
     })
   }
 }, { immediate: true })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { redactAccessToken } from '~/utils/inspector-access-token'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -33,14 +34,15 @@ async function loadExample() {
   if (!base.endsWith('/')) base += '/'
 
   const exampleUrl = `${window.location.origin}${base}mock-graph`
-  const encodedExampleUrl = encodeURIComponent(btoa(exampleUrl))
   const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
 
   isNavigating.value = true
+
+  // The demo is a graph like any other: put it in the session, then go to a
+  // plain viewer page.
+  graphStore.setSession(exampleUrl, '')
   await navigateTo(
-    shouldOpenExecutionSequence
-      ? `/view/${encodedExampleUrl}/execution-sequence`
-      : `/view/${encodedExampleUrl}`
+    shouldOpenExecutionSequence ? '/view/execution-sequence' : '/view/navigator'
   )
 }
 
@@ -60,34 +62,56 @@ async function tryLoadGraph(pollId: number) {
   attemptCount.value += 1
 
   try {
-    const isLoaded = await graphStore.detectInputUrl(activeOrigin.value)
+    // A probe, not a load: this page must not disturb the graph the tab is
+    // already on, because the visitor can still go Back to it.
+    const probe = await graphStore.probeEndpoint(activeOrigin.value)
     if (pollId !== activePollId) {
       return
     }
 
-    if (shouldShowUpdateModal.value) {
+    if (probe.status === 'legacy') {
       clearPolling()
       return
     }
 
-    if (!isLoaded || !graphStore.encodedUrl) {
+    // The inspector answered, but it is token-gated: the only thing that hands
+    // out a token is the link printed in the application console, so there is
+    // nothing more polling can achieve here. Stopping also matters because the
+    // library counts repeated invalid tokens per client — polling an endpoint
+    // it will keep refusing is the one way this page could get itself blocked.
+    if (probe.status === 'requires-token') {
+      clearPolling()
+      isSiteDetected.value = true
+      posthog?.capture('graph_endpoint_detected', {
+        url: activeOrigin.value,
+        attempts: attemptCount.value,
+        requires_access_token: true
+      })
+      return
+    }
+
+    if (probe.status !== 'ready') {
       return
     }
 
     clearPolling()
+
+    // Only now does this become the graph the tab is on.
+    graphStore.setSession(probe.endpointUrl, probe.token)
+
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: graphStore.decodedUrl,
+        url: redactAccessToken(probe.endpointUrl),
         attempts: attemptCount.value
       })
-      await navigateTo(`/view/${graphStore.encodedUrl}`)
+      await navigateTo('/view/navigator')
       return
     }
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: graphStore.decodedUrl,
+      url: redactAccessToken(probe.endpointUrl),
       attempts: attemptCount.value
     })
   } catch {
