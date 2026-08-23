@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The demo imports nest-graph-inspector through its published entry
+      # points, so its types have to exist on disk before anything type-aware
+      # runs against the demo sources.
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
+
       - name: Lint
         run: pnpm run lint
 
