@@ -235,7 +235,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     resolveVersionAcknowledgement = undefined
   }
 
-  async function acknowledgeEndpointVersion() {
+  function acknowledgeEndpointVersion() {
     acknowledgedVersionEndpointUrl.value = endpoint.value
     shouldShowVersionAcknowledgement.value = false
     resolveVersionAcknowledgement?.(true)

@@ -32,11 +32,12 @@ assert.ok(!isViewerPage('nope'))
 // The printed link is spent on arrival: the endpoint and token come out, and
 // the visitor lands on a page whose URL says nothing about either.
 const bootstrap = resolveViewerBootstrap(`/view/${encoded}`)
-assert.equal(bootstrap?.path, '/view/navigator')
-assert.equal(bootstrap?.endpointUrl, ENDPOINT)
-assert.equal(bootstrap?.token, TOKEN)
+assert.ok(bootstrap, 'a printed link must resolve')
+assert.equal(bootstrap.path, '/view/navigator')
+assert.equal(bootstrap.endpointUrl, ENDPOINT)
+assert.equal(bootstrap.token, TOKEN)
 assert.ok(
-  !bootstrap!.path.includes(TOKEN) && !bootstrap!.path.includes(encoded),
+  !bootstrap.path.includes(TOKEN) && !bootstrap.path.includes(encoded),
   'the landing path still carries the link it was resolved from'
 )
 
