@@ -19,7 +19,7 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
-const { encodedUrl, routeEndpointUrl, isGraphLoading, refresh } = useGraphViewerRoute()
+const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -50,16 +50,14 @@ function handleDirectRunDrawerClose() {
 }
 
 function handleExecutionSequenceOpen() {
-  router.push({
-    path: `/view/${encodedUrl.value}/execution-sequence`
-  })
+  router.push('/view/execution-sequence')
 }
 </script>
 
 <template>
   <GraphViewerLoadingState
     v-if="isGraphLoading || status === 'pending'"
-    :endpoint="routeEndpointUrl"
+    :endpoint="endpointUrl"
   />
 
   <!-- Error State -->

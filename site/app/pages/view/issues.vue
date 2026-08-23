@@ -14,7 +14,7 @@ const {
   errorMessage,
   endpointRequiresAccessToken
 } = storeToRefs(graphStore)
-const { routeEndpointUrl, isGraphLoading, refresh } = useGraphViewerRoute()
+const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
 
 const issues = computed(() => collectCircularDependencyIssues(graphData.value))
 
@@ -29,7 +29,7 @@ useSeoMeta({
   <div class="h-full overflow-y-auto p-4 sm:p-6">
     <GraphViewerLoadingState
       v-if="isGraphLoading || status === 'pending'"
-      :endpoint="routeEndpointUrl"
+      :endpoint="endpointUrl"
     />
 
     <GraphViewerErrorState

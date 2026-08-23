@@ -4,9 +4,6 @@ import {
   INSPECTOR_ACCESS_TOKEN_HEADER,
   INSPECTOR_ACCESS_TOKEN_PARAM,
   accessTokenHeaders,
-  decodeEndpointUrl,
-  encodeEndpointUrl,
-  parseViewerUrlParam,
   readAccessToken,
   redactAccessToken
 } from './inspector-access-token.ts'
@@ -17,29 +14,9 @@ const TOKEN = 'ngi1.eyJpYXQiOjEsImV4cCI6Mn0.s1gn-atur_e'
 const ENDPOINT = 'http://0.0.0.0:53371/__graph-inspector'
 const BOOTSTRAP_ENDPOINT = `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}`
 
-// The library encodes the endpoint with the base64url alphabet. Whether that
-// produces '-' or '_' depends on how the origin, path, and token align, and
-// the default origin carrying a token does produce them — which plain atob
-// would reject.
+// The endpoint as the printed link carries it. Decoding that link is covered by
+// viewer-bootstrap-link.test.ts; this file is the token contract itself.
 const encoded = Buffer.from(BOOTSTRAP_ENDPOINT).toString('base64url')
-assert.ok(/[-_]/.test(encoded), 'expected a base64url-only alphabet in fixture')
-assert.equal(decodeEndpointUrl(encoded), BOOTSTRAP_ENDPOINT)
-
-// Standard base64 from btoa still decodes, so viewer links keep working.
-assert.equal(
-  decodeEndpointUrl(Buffer.from(BOOTSTRAP_ENDPOINT).toString('base64')),
-  BOOTSTRAP_ENDPOINT
-)
-
-// Encoding matches what the library prints, so a link the viewer builds and a
-// link it was handed are the same string.
-assert.equal(
-  encodeEndpointUrl(BOOTSTRAP_ENDPOINT),
-  Buffer.from(BOOTSTRAP_ENDPOINT).toString('base64url')
-)
-assert.equal(encodeEndpointUrl(ENDPOINT), Buffer.from(ENDPOINT).toString('base64url'))
-assert.ok(!encodeEndpointUrl(ENDPOINT).includes('='), 'padding must be stripped')
-assert.equal(decodeEndpointUrl(encodeEndpointUrl(ENDPOINT)), ENDPOINT)
 
 assert.equal(readAccessToken(BOOTSTRAP_ENDPOINT), TOKEN)
 assert.equal(readAccessToken(ENDPOINT), undefined)
@@ -65,66 +42,6 @@ const malformed = redactAccessToken(
   `::not-a-url::?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}`
 )
 assert.ok(!malformed.includes(TOKEN), 'malformed url leaked the token')
-
-// The route segment is the bootstrap link: it hands over the token once, and
-// the segment it is replaced with must not carry it in any form.
-const bootstrap = parseViewerUrlParam(encoded)
-assert.equal(bootstrap.token, TOKEN)
-assert.equal(bootstrap.endpointUrl, ENDPOINT)
-assert.equal(bootstrap.encoded, encodeEndpointUrl(ENDPOINT))
-assert.ok(
-  !decodeEndpointUrl(bootstrap.encoded).includes(TOKEN),
-  'rewritten route segment still decodes to a token'
-)
-assert.notEqual(bootstrap.encoded, encoded)
-
-// A percent-encoded segment — what the viewer used to build itself — decodes
-// the same way, so old links keep working.
-assert.deepEqual(
-  parseViewerUrlParam(encodeURIComponent(Buffer.from(BOOTSTRAP_ENDPOINT).toString('base64'))),
-  bootstrap
-)
-
-// Vue Router hands over a param array for a repeated segment.
-assert.deepEqual(parseViewerUrlParam([encoded]), bootstrap)
-
-// A canonical token-free segment comes back unchanged, so arriving at a viewer
-// page does not bounce the address bar for nothing — and parsing is idempotent,
-// which is what stops the route rewrite from looping.
-const tokenFreeSegment = encodeEndpointUrl(ENDPOINT)
-const plain = parseViewerUrlParam(tokenFreeSegment)
-assert.equal(plain.token, '')
-assert.equal(plain.endpointUrl, ENDPOINT)
-assert.equal(plain.encoded, tokenFreeSegment)
-assert.deepEqual(parseViewerUrlParam(plain.encoded), plain)
-
-// A segment minted by an older build of this site — padded standard base64 —
-// decodes to the same endpoint but is a different string. It has to canonicalise
-// to base64url, or the route and the links the store builds from that same
-// endpoint disagree and the viewer's active-tab highlight silently breaks.
-const legacySegment = Buffer.from(ENDPOINT).toString('base64')
-assert.notEqual(legacySegment, tokenFreeSegment, 'expected a padded fixture')
-const legacy = parseViewerUrlParam(legacySegment)
-assert.equal(legacy.endpointUrl, ENDPOINT)
-assert.equal(legacy.encoded, tokenFreeSegment)
-assert.equal(legacy.token, '')
-
-// Nothing to parse, and garbage, both resolve to "no endpoint" rather than throw.
-assert.deepEqual(parseViewerUrlParam(undefined), {
-  encoded: '',
-  endpointUrl: '',
-  token: ''
-})
-assert.deepEqual(parseViewerUrlParam(''), {
-  encoded: '',
-  endpointUrl: '',
-  token: ''
-})
-assert.deepEqual(parseViewerUrlParam('%%%'), {
-  encoded: '',
-  endpointUrl: '',
-  token: ''
-})
 
 // Requests authenticate through a header, so no derived URL has to carry a
 // token — which is what kept breaking when one was concatenated onto.

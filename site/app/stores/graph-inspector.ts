@@ -4,15 +4,14 @@ import { requiresVersionAcknowledgement } from '~/utils/graph-inspector-version-
 import {
   INSPECTOR_ACCESS_TOKEN_HEADER,
   accessTokenHeaders,
-  encodeEndpointUrl,
   readAccessToken,
   redactAccessToken
 } from '~/utils/inspector-access-token'
 import {
-  forgetAccessToken,
-  readStoredAccessToken,
-  storeAccessToken
-} from '~/utils/inspector-access-token-storage'
+  clearGraphSession,
+  readGraphSession,
+  writeGraphSession
+} from '~/utils/inspector-graph-session'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -149,9 +148,9 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   /**
    * The graph endpoint being viewed, never carrying an access token.
    *
-   * The token is taken out of the bootstrap link before the router ever sees it
-   * (see `plugins/inspector-access-token.client.ts`), so nothing built from this
-   * value — route segments, derived endpoints, analytics — can leak it.
+   * This is the only record of which graph the viewer is on: the URL says which
+   * *view* to show, not which graph. It is recovered from the printed link on
+   * arrival and from the tab's session on a reload.
    */
   const endpoint = ref('')
 
@@ -170,9 +169,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   let resolveVersionAcknowledgement: ((acknowledged: boolean) => void) | undefined
 
   const endpointUrl = computed(() => endpoint.value)
-  const encodedUrl = computed(() =>
-    endpoint.value ? encodeEndpointUrl(endpoint.value) : ''
-  )
 
   const informationUrl = computed(() =>
     appendOutputPath(endpoint.value, 'information.json')
@@ -326,27 +322,67 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     })
   }
 
-  /** Takes custody of a token read out of a bootstrap link. */
-  function rememberAccessToken(forEndpointUrl: string, token: string) {
-    if (!forEndpointUrl || !token) {
-      return
-    }
-
-    storeAccessToken(forEndpointUrl, token)
-
-    if (forEndpointUrl === endpoint.value) {
-      accessToken.value = token
-    }
-  }
-
-  /** Points the store at a graph endpoint, recovering the token it needs. */
-  function applyEndpoint(nextEndpointUrl: string) {
+  /**
+   * Points the store at a graph endpoint, and remembers it for the tab.
+   *
+   * Nothing else records which graph is being viewed, so this is also what
+   * makes a reload survivable.
+   */
+  function applyEndpoint(nextEndpointUrl: string, token?: string) {
     if (endpoint.value !== nextEndpointUrl) {
       endpoint.value = nextEndpointUrl
+      accessToken.value = ''
       clearGraph()
     }
 
-    accessToken.value = readStoredAccessToken(nextEndpointUrl)
+    if (token !== undefined) {
+      accessToken.value = token
+    }
+
+    writeGraphSession({
+      endpointUrl: nextEndpointUrl,
+      token: accessToken.value
+    })
+  }
+
+  /**
+   * Records the graph a printed link handed over, without loading it.
+   *
+   * The router layer calls this: it has to take custody of the endpoint and
+   * token before it redirects, but loading belongs to the page that lands.
+   */
+  function setSession(nextEndpointUrl: string, token: string) {
+    applyEndpoint(nextEndpointUrl, token)
+  }
+
+  /** Forgets the graph this tab was on, so `/view` starts clean. */
+  function forgetSession() {
+    endpoint.value = ''
+    accessToken.value = ''
+    clearGraph()
+    clearGraphSession()
+  }
+
+  /**
+   * Recovers the graph this tab was on, for a load that arrived without a
+   * printed link — a reload, or a viewer page opened directly.
+   *
+   * Returns the endpoint it restored, or an empty string when the tab is not
+   * on a graph at all and the caller should send the visitor back to `/view`.
+   */
+  function restoreSession(): string {
+    if (endpoint.value) {
+      return endpoint.value
+    }
+
+    const session = readGraphSession()
+    if (!session) {
+      return ''
+    }
+
+    applyEndpoint(session.endpointUrl, session.token)
+
+    return session.endpointUrl
   }
 
   /**
@@ -363,7 +399,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     accessToken.value = ''
-    forgetAccessToken(endpoint.value)
+
+    // Keep the endpoint: the viewer still has to say which graph it could not
+    // open. Only the credential is dropped.
+    writeGraphSession({ endpointUrl: endpoint.value, token: '' })
   }
 
   async function validateEndpoint() {
@@ -427,8 +466,8 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     return Boolean(graphMarkdown.value)
   }
 
-  async function setEndpoint(nextEndpointUrl: string) {
-    applyEndpoint(nextEndpointUrl)
+  async function setEndpoint(nextEndpointUrl: string, token?: string) {
+    applyEndpoint(nextEndpointUrl, token)
 
     const isValidEndpoint = await validateEndpoint()
     if (!isValidEndpoint) {
@@ -459,16 +498,13 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   async function setInputUrl(input: string) {
     const { endpointUrl: sourceUrl, token } = splitSourceUrl(input)
 
-    rememberAccessToken(sourceUrl, token ?? '')
-
-    return await setEndpoint(sourceUrl)
+    return await setEndpoint(sourceUrl, token ?? '')
   }
 
   async function detectInputUrl(input: string) {
     const { endpointUrl: sourceUrl, token } = splitSourceUrl(input)
 
-    rememberAccessToken(sourceUrl, token ?? '')
-    applyEndpoint(sourceUrl)
+    applyEndpoint(sourceUrl, token ?? '')
 
     return await validateEndpoint()
   }
@@ -496,7 +532,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     // `requestHeaders`, so there is no way to put the raw credential anywhere
     // other than a request header.
     requestHeaders,
-    encodedUrl,
     endpointUrl,
     informationUrl,
     jsonUrl,
@@ -517,8 +552,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     dependencyTraceEnabled,
     showCircularDependencies,
     openModuleDetail,
+    setSession,
+    restoreSession,
+    forgetSession,
     toggleDependencyTrace,
-    rememberAccessToken,
     validateEndpoint,
     acknowledgeEndpointVersion,
     setEndpoint,

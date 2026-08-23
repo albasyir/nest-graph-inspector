@@ -13,7 +13,7 @@ const {
   errorMessage,
   endpointRequiresAccessToken
 } = storeToRefs(graphStore)
-const { encodedUrl, routeEndpointUrl, isGraphLoading, refresh } = useGraphViewerRoute()
+const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
 
 useSeoMeta({
   title: 'Execution Sequence',
@@ -22,7 +22,7 @@ useSeoMeta({
 })
 
 function openNavigator() {
-  navigateTo(`/view/${encodedUrl.value}`)
+  navigateTo('/view/navigator')
 }
 </script>
 
@@ -30,7 +30,7 @@ function openNavigator() {
   <div class="h-full overflow-y-auto p-4 sm:p-6">
     <GraphViewerLoadingState
       v-if="isGraphLoading || status === 'pending'"
-      :endpoint="routeEndpointUrl"
+      :endpoint="endpointUrl"
     />
 
     <GraphViewerErrorState

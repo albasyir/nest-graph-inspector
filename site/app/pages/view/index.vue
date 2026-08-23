@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import {
-  encodeEndpointUrl,
-  redactAccessToken
-} from '~/utils/inspector-access-token'
+import { redactAccessToken } from '~/utils/inspector-access-token'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -37,14 +34,15 @@ async function loadExample() {
   if (!base.endsWith('/')) base += '/'
 
   const exampleUrl = `${window.location.origin}${base}mock-graph`
-  const encodedExampleUrl = encodeEndpointUrl(exampleUrl)
   const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
 
   isNavigating.value = true
+
+  // The demo is a graph like any other: put it in the session, then go to a
+  // plain viewer page.
+  graphStore.setSession(exampleUrl, '')
   await navigateTo(
-    shouldOpenExecutionSequence
-      ? `/view/${encodedExampleUrl}/execution-sequence`
-      : `/view/${encodedExampleUrl}`
+    shouldOpenExecutionSequence ? '/view/execution-sequence' : '/view/navigator'
   )
 }
 
@@ -90,7 +88,7 @@ async function tryLoadGraph(pollId: number) {
       return
     }
 
-    if (!isLoaded || !graphStore.encodedUrl) {
+    if (!isLoaded || !graphStore.endpointUrl) {
       return
     }
 
@@ -101,7 +99,7 @@ async function tryLoadGraph(pollId: number) {
         url: redactAccessToken(graphStore.endpointUrl),
         attempts: attemptCount.value
       })
-      await navigateTo(`/view/${graphStore.encodedUrl}`)
+      await navigateTo('/view/navigator')
       return
     }
 

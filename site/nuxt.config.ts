@@ -42,6 +42,18 @@ export default defineNuxtConfig({
     }
   },
 
+  // The viewer is a browser-only surface: the graph it shows lives on the
+  // developer's own machine, and which graph a tab is on lives in that tab's
+  // session storage. A server render can see neither, so it would always render
+  // "no graph" and then disagree with the client's first paint. Rendering these
+  // routes client-side only removes that whole class of hydration mismatch, and
+  // matches how they already behave in production, where they are served as the
+  // static host's SPA fallback.
+  routeRules: {
+    '/view': { ssr: false },
+    '/view/**': { ssr: false }
+  },
+
   experimental: {
     asyncContext: true
   },

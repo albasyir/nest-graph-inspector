@@ -498,7 +498,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Composable | What it does |
 |---|---|
-| `useGraphViewerRoute.ts` | Shared loader for the three `/view/:url` pages: resolves the endpoint from the route, loads the graph, and fires the PostHog load events |
+| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
 
 **What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
 
@@ -527,30 +527,43 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
 | `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input |
-| `view/[url]/index.vue` | `/view/:url` | Main graph view; loads `GraphOutput` for the encoded URL param |
-| `view/[url]/issues.vue` | `/view/:url/issues` | Issue finder; lists circular dependency issues |
-| `view/[url]/execution-sequence.vue` | `/view/:url/execution-sequence` | Execution sequence diagram for Direct Run traces |
+| `view/navigator.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds |
+| `view/issues.vue` | `/view/issues` | Issue finder; lists circular dependency issues |
+| `view/execution-sequence.vue` | `/view/execution-sequence` | Execution sequence diagram for Direct Run traces |
+| `view/[...bootstrap].vue` | `/view/<base64url endpoint>` | Stands in for a printed link while it is spent; the middleware redirects away before it renders |
 
-**The `:url` parameter** is a base64url-encoded endpoint URL. The library prints
-it with the access token embedded in the encoded endpoint — that link is the only
-channel that hands the viewer a token.
+**No viewer URL identifies a graph.** `/view/navigator` names a *view*; which
+graph a tab is showing lives in the store, and in that tab's `sessionStorage` so
+a reload survives. The consequence is deliberate: a viewer URL is not shareable
+or bookmarkable, and a fresh tab on one lands on `/view`.
 
-Two pieces take the token out of it, because one cannot cover both consumers:
+**`/view/<base64url(endpoint)>` is the printed link** — the one channel that
+hands the viewer an endpoint and, with it, an access token. It is spent on
+arrival: endpoint and token go to the store, and the address bar is replaced with
+a plain `/view/<page>`. Old links carrying a second segment
+(`/view/<blob>/issues`) still land on the view they named.
+
+Two pieces spend it, because one cannot cover both consumers:
 
 | File | Job |
 |---|---|
-| `app/plugins/inspector-access-token.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` |
-| `app/middleware/inspector-access-token.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the token-bearing route is never committed |
+| `app/plugins/graph-viewer-bootstrap.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: takes custody of the link and rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` |
+| `app/middleware/graph-viewer-bootstrap.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the link is never committed. Also guards the viewer's own pages: no session means nothing to show, so it sends the visitor to `/view` |
 
 Requests then authenticate with the `x-graph-inspector-token` header, so no URL
 the viewer builds or fetches carries a token.
 
 Doing this from a page instead does not work: `onMounted` is already too late
-for PostHog's first `$pageview`, and rewriting a route the router owns changes
-the `:url` param, which remounts the page (pages are keyed by full path) and
-loads the graph twice. The one thing client-side code cannot undo is the entry
-the browser already wrote to its own history database for the bootstrap load —
-that expires with the token.
+for PostHog's first `$pageview`. The one thing client-side code cannot undo is
+the entry the browser already wrote to its own history database for the bootstrap
+load — that expires with the token.
+
+**`/view/**` is client-rendered only** (`routeRules` in `nuxt.config.ts`). The
+server can see neither the inspected application nor the tab's session, so it
+would always render "no graph" and then disagree with the client's first paint —
+a hydration mismatch that left the nav tabs stuck disabled. This also matches how
+these routes already behave in production, where they are the static host's SPA
+fallback.
 
 **What belongs here:** Route entry points and page-level orchestration. Minimal logic; delegate to stores and composables.
 
@@ -566,7 +579,8 @@ that expires with the token.
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
 
 **`graph-inspector.ts` key responsibilities:**
-- Holds the token-free endpoint URL, and encodes it back into the `:url` segment.
+- Holds the token-free endpoint URL — the only record of which graph is being
+  viewed — and mirrors it, with the token, into the tab's session.
 - Holds the access token, and authenticates every request with it through a
   dedicated `$fetch` instance. The token never goes into a URL.
 - Fetches `information.json` to validate the endpoint.
@@ -591,10 +605,12 @@ that expires with the token.
 |---|---|
 | `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource`; redacts access tokens out of every property |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
-| `inspector-access-token.ts` | The `/view/:url` codec, and the token contract shared with the library: parameter and header names, reading a token out of a bootstrap link, redacting one out of anything else |
+| `inspector-access-token.ts` | The token contract shared with the library: parameter and header names, reading a token out of a printed link, redacting one out of anything else |
 | `inspector-access-token.test.ts` | Assert-based test for `inspector-access-token.ts`, including the analytics payload as a leak sink |
-| `inspector-access-token-storage.ts` | The tab's single-endpoint token cache — memory plus `sessionStorage` — so a reload keeps a token the URL no longer carries |
-| `inspector-access-token-storage.test.ts` | Assert-based test for `inspector-access-token-storage.ts`, with an injected fake `Storage` |
+| `viewer-bootstrap-link.ts` | Decodes the printed `/view/<base64url endpoint>` link and says which viewer page it should land on |
+| `viewer-bootstrap-link.test.ts` | Assert-based test for `viewer-bootstrap-link.ts` |
+| `inspector-graph-session.ts` | The tab's record of which graph it is on, and the token for it — memory plus `sessionStorage` — so a reload survives a URL that names neither |
+| `inspector-graph-session.test.ts` | Assert-based test for `inspector-graph-session.ts`, with an injected fake `Storage` |
 | `graph-inspector-version-gate.ts` | Decides when an endpoint's library version needs acknowledging before its graph is shown |
 | `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
