@@ -44,7 +44,7 @@ jobs:
           NITRO_PRESET: github_pages
           NUXT_APP_BASE_URL: /nest-graph-inspector/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site/.output/public
 
