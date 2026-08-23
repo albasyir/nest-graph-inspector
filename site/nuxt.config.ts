@@ -50,7 +50,11 @@ export default defineNuxtConfig({
   // matches how they already behave in production, where they are served as the
   // static host's SPA fallback.
   routeRules: {
-    '/view': { ssr: false },
+    // `/view/**` also matches `/view`, so the entry page needs an explicit
+    // override: it renders nothing that depends on the tab's session, and it is
+    // linked from the homepage, so it keeps its prerendered HTML, title and OG
+    // tags for crawlers and link unfurlers.
+    '/view': { ssr: true },
     '/view/**': { ssr: false }
   },
 

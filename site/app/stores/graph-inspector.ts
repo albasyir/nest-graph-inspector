@@ -8,7 +8,6 @@ import {
   redactAccessToken
 } from '~/utils/inspector-access-token'
 import {
-  clearGraphSession,
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
@@ -22,6 +21,13 @@ type InspectorEndpointInfo = {
 }
 
 type LegacyGraphOutput = Partial<GraphOutput>
+
+/** What {@link useGraphInspectorStore.probeEndpoint} found at an address. */
+export type EndpointProbe
+  = | { status: 'ready', endpointUrl: string, token: string }
+    | { status: 'requires-token' }
+    | { status: 'legacy' }
+    | { status: 'unreachable' }
 const MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION = 3
 
 function withDefaultProtocol(input: string) {
@@ -355,14 +361,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     applyEndpoint(nextEndpointUrl, token)
   }
 
-  /** Forgets the graph this tab was on, so `/view` starts clean. */
-  function forgetSession() {
-    endpoint.value = ''
-    accessToken.value = ''
-    clearGraph()
-    clearGraphSession()
-  }
-
   /**
    * Recovers the graph this tab was on, for a load that arrived without a
    * printed link — a reload, or a viewer page opened directly.
@@ -495,18 +493,62 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
   }
 
-  async function setInputUrl(input: string) {
+  /**
+   * Asks whether an address is a graph inspector, without committing to it.
+   *
+   * `/view` probes a guessed origin on a timer. That must not touch the graph
+   * this tab is already on: writing the probe into the store — or worse, into
+   * the tab's session — would silently swap the endpoint out from under the
+   * viewer and drop the token with it. So this reaches for the endpoint
+   * directly and reports back, and only a caller that likes the answer calls
+   * {@link setSession}.
+   *
+   * Deliberately not `inspectorFetch`: that attaches the token this tab already
+   * holds to whatever it is given, which would hand a live credential to
+   * whichever host is being probed.
+   */
+  async function probeEndpoint(input: string): Promise<EndpointProbe> {
     const { endpointUrl: sourceUrl, token } = splitSourceUrl(input)
+    const infoUrl = appendOutputPath(sourceUrl, 'information.json')
 
-    return await setEndpoint(sourceUrl, token ?? '')
-  }
+    if (!infoUrl) {
+      return { status: 'unreachable' }
+    }
 
-  async function detectInputUrl(input: string) {
-    const { endpointUrl: sourceUrl, token } = splitSourceUrl(input)
+    const headers = accessTokenHeaders(token)
 
-    applyEndpoint(sourceUrl, token ?? '')
+    try {
+      const info = await $fetch<InspectorEndpointInfo>(infoUrl, { headers })
 
-    return await validateEndpoint()
+      if (info?.for === 'nest-graph-inspector') {
+        shouldShowUpdateModal.value = false
+
+        return { status: 'ready', endpointUrl: sourceUrl, token: token ?? '' }
+      }
+    } catch (error) {
+      if (readStatusCode(error) === 401) {
+        return { status: 'requires-token' }
+      }
+
+      return { status: 'unreachable' }
+    }
+
+    // It answered, but not with the inspector's own payload. An older version
+    // served the graph itself at this path, which is worth telling the
+    // developer about rather than reporting as unreachable.
+    try {
+      const legacy = await $fetch<LegacyGraphOutput>(sourceUrl, { headers })
+
+      if (isLegacyGraphOutput(legacy)) {
+        shouldShowUpdateModal.value = true
+
+        return { status: 'legacy' }
+      }
+    } catch {
+      // Not a graph either.
+    }
+
+    return { status: 'unreachable' }
   }
 
   async function fetchGraph() {
@@ -554,13 +596,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     openModuleDetail,
     setSession,
     restoreSession,
-    forgetSession,
     toggleDependencyTrace,
     validateEndpoint,
     acknowledgeEndpointVersion,
     setEndpoint,
-    setInputUrl,
-    detectInputUrl,
+    probeEndpoint,
     fetchJson,
     fetchMarkdown,
     fetchGraph

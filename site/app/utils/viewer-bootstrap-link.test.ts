@@ -104,4 +104,19 @@ for (const path of [
   )
 }
 
+// A deeper path under a viewer page is not a link either. It matches no page, so
+// the router layer has to send it back to /view rather than strand it on the
+// bootstrap placeholder — which needs resolveViewerBootstrap to decline it.
+for (const path of [
+  '/view/navigator/anything',
+  '/view/issues/1/2',
+  '/view/execution-sequence/x'
+]) {
+  assert.equal(
+    resolveViewerBootstrap(path),
+    undefined,
+    `treated ${path} as a bootstrap link`
+  )
+}
+
 console.log('viewer-bootstrap-link.test.ts ok')

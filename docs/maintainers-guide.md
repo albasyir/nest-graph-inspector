@@ -584,6 +584,11 @@ fallback.
 - Holds the access token, and authenticates every request with it through a
   dedicated `$fetch` instance. The token never goes into a URL.
 - Fetches `information.json` to validate the endpoint.
+- `probeEndpoint()` asks whether an address is an inspector *without* committing
+  to it, so `/view`'s poller cannot swap the endpoint out from under a viewer
+  that the visitor can still navigate Back to. It also deliberately avoids the
+  authenticating `$fetch` instance, which would hand this tab's token to whatever
+  host is being probed.
 - Fetches `output.json` (`GraphOutput`) and validates schema version ≥ 3.
 - Fetches `output.md` for the Markdown view.
 - Detects "legacy" graph outputs and shows an upgrade modal.

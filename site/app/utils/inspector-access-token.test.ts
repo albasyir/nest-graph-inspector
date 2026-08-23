@@ -120,4 +120,20 @@ assert.equal(
   '/view'
 )
 
+// The viewer's own pages must survive intact: which view a load or a failure
+// happened on is the whole point of the property, and a redaction that collapsed
+// them would leave every event in one bucket while still passing the leak check
+// above.
+for (const page of ['/view/navigator', '/view/issues', '/view/execution-sequence']) {
+  assert.equal(
+    createGraphViewerEventProperties({
+      graphUrl: ENDPOINT,
+      viewerRoute: page,
+      loadSource: 'route_change'
+    }).viewer_route,
+    page,
+    `analytics collapsed the ${page} route`
+  )
+}
+
 console.log('inspector-access-token.test.ts ok')

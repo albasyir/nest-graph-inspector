@@ -14,6 +14,15 @@ import {
  * before a page is created, so by the time this runs there is an endpoint to
  * load or nothing to show at all.
  */
+/**
+ * Whether this tab has already loaded a viewer page.
+ *
+ * Module scope, not component scope: each viewer page is its own component, so
+ * a per-component flag would report every tab switch as a first arrival. A full
+ * reload resets the module, which is exactly when `initial_mount` is true again.
+ */
+let hasLoadedOnce = false
+
 export function useGraphViewerPage() {
   const route = useRoute()
   const posthog = usePostHog()
@@ -88,8 +97,9 @@ export function useGraphViewerPage() {
   }
 
   // One load per page, at setup. Moving between viewer pages mounts a new page
-  // component, so each arrival is its own initial mount.
-  void loadGraphResources(resolveGraphViewerLoadSource(false))
+  // component, so this is where a tab switch is told apart from a first arrival.
+  void loadGraphResources(resolveGraphViewerLoadSource(hasLoadedOnce))
+  hasLoadedOnce = true
 
   function refresh() {
     void loadGraphResources('manual_refresh', true)

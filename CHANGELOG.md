@@ -47,6 +47,11 @@ for the published history.
   not a graph. Reopening the printed link is how you get back to a graph, and a
   reload keeps working within the same tab. Links carrying the old
   `/view/<encoded>/issues` shape still land on the view they named.
+- The graph viewer's entry page no longer discards the graph a tab is on. Its
+  endpoint poller probes without committing, so visiting `/view` — or the
+  viewer's own "Try Another URL" — and going back keeps the graph and its token.
+- An unusable path below a viewer page (`/view/navigator/anything`) returns to
+  the viewer entry page instead of waiting on a spinner that never resolves.
 - The proxy adapter no longer forwards requests to an origin outside its
   configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.

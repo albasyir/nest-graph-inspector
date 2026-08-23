@@ -12,7 +12,7 @@ useSeoMeta({
 const posthog = usePostHog()
 const route = useRoute()
 const graphStore = useGraphInspectorStore()
-const { shouldShowUpdateModal, endpointRequiresAccessToken } = storeToRefs(graphStore)
+const { shouldShowUpdateModal } = storeToRefs(graphStore)
 const config = useRuntimeConfig()
 
 const DEFAULT_ORIGIN = 'localhost:53371'
@@ -62,12 +62,14 @@ async function tryLoadGraph(pollId: number) {
   attemptCount.value += 1
 
   try {
-    const isLoaded = await graphStore.detectInputUrl(activeOrigin.value)
+    // A probe, not a load: this page must not disturb the graph the tab is
+    // already on, because the visitor can still go Back to it.
+    const probe = await graphStore.probeEndpoint(activeOrigin.value)
     if (pollId !== activePollId) {
       return
     }
 
-    if (shouldShowUpdateModal.value) {
+    if (probe.status === 'legacy') {
       clearPolling()
       return
     }
@@ -77,26 +79,30 @@ async function tryLoadGraph(pollId: number) {
     // nothing more polling can achieve here. Stopping also matters because the
     // library counts repeated invalid tokens per client — polling an endpoint
     // it will keep refusing is the one way this page could get itself blocked.
-    if (endpointRequiresAccessToken.value) {
+    if (probe.status === 'requires-token') {
       clearPolling()
       isSiteDetected.value = true
       posthog?.capture('graph_endpoint_detected', {
-        url: redactAccessToken(graphStore.endpointUrl),
+        url: activeOrigin.value,
         attempts: attemptCount.value,
         requires_access_token: true
       })
       return
     }
 
-    if (!isLoaded || !graphStore.endpointUrl) {
+    if (probe.status !== 'ready') {
       return
     }
 
     clearPolling()
+
+    // Only now does this become the graph the tab is on.
+    graphStore.setSession(probe.endpointUrl, probe.token)
+
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: redactAccessToken(graphStore.endpointUrl),
+        url: redactAccessToken(probe.endpointUrl),
         attempts: attemptCount.value
       })
       await navigateTo('/view/navigator')
@@ -105,7 +111,7 @@ async function tryLoadGraph(pollId: number) {
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: redactAccessToken(graphStore.endpointUrl),
+      url: redactAccessToken(probe.endpointUrl),
       attempts: attemptCount.value
     })
   } catch {

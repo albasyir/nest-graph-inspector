@@ -1,4 +1,5 @@
 import { redactAccessToken } from './inspector-access-token.ts'
+import { isViewerPage } from './viewer-bootstrap-link.ts'
 
 export type LoadSource = 'initial_mount' | 'route_change' | 'manual_refresh'
 
@@ -37,14 +38,24 @@ function parseGraphUrl(graphUrl: string) {
 }
 
 /**
- * Replaces the encoded endpoint in a viewer route with the route template.
+ * Replaces an encoded endpoint in a viewer route with the route template.
  *
- * `/view/:url` carries the base64url graph endpoint, and that endpoint carries
- * the access token — so the raw route path is a token in disguise. Redacting
- * here rather than at each call site means a caller passing `route.fullPath`
- * cannot reintroduce the leak, and the page itself is still identifiable.
+ * The viewer's own pages — `/view/navigator` and friends — name a view and
+ * nothing else, so they are reported as they are: which view a load or a failure
+ * happened on is the whole point of the property.
+ *
+ * A printed link (`/view/<base64url endpoint>`) is the one route shape that is a
+ * token in disguise. Events should never fire from one, because the router
+ * redirects before a page is created, but redacting here rather than at each
+ * call site means a caller passing `route.fullPath` cannot reintroduce the leak.
  */
 function redactViewerRoute(viewerRoute: string) {
+  const [, view, segment] = viewerRoute.split('/')
+
+  if (view !== 'view' || !segment || isViewerPage(segment)) {
+    return viewerRoute
+  }
+
   return viewerRoute.replace(/^(\/view)\/[^/]+/, '$1/[url]')
 }
 

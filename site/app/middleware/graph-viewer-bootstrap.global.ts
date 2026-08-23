@@ -33,7 +33,12 @@ export default defineNuxtRouteMiddleware((to) => {
 
   const graphStore = useGraphInspectorStore()
 
-  if (isViewerPage(to.path.split('/')[2] ?? '')) {
+  // Exactly `/view/<page>`. A deeper path (`/view/navigator/anything`) matches no
+  // page, so treating it as a viewer page would leave it stranded on the
+  // bootstrap placeholder's spinner; it belongs in the redirect branch below.
+  const segments = to.path.replace(/\/+$/, '').split('/')
+
+  if (segments.length === 3 && isViewerPage(segments[2] ?? '')) {
     if (!graphStore.restoreSession()) {
       return navigateTo('/view', { replace: true })
     }
