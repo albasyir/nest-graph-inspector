@@ -107,13 +107,16 @@ const viewerMenuItems = computed(() => [
                   Graph Viewer
                 </NuxtLink>
 
-                <UBadge
-                  v-if="isDemo"
-                  label="Demo"
-                  color="primary"
-                  variant="subtle"
-                  size="sm"
-                />
+                <!-- Wrapped so the chip takes the line the endpoint would
+                     have, rather than riding up next to the title. -->
+                <div v-if="isDemo">
+                  <UBadge
+                    label="Demo"
+                    color="primary"
+                    variant="subtle"
+                    size="sm"
+                  />
+                </div>
                 <p
                   v-else
                   class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl"
