@@ -19,7 +19,10 @@ for the published history.
   runtime, rather than a graph file committed into the site. Direct Run invokes
   real provider methods, runtime traces and Direct Run history accumulate as you
   use it, and the graph — JSDoc and Direct Run parameter types included — comes
-  from the application that is answering.
+  from the application that is answering. It starts when you ask for it — a
+  preview waits behind "Run the demo application", and `/view` behind "Open
+  Demo" — and the viewer header names it "Demo" rather than showing an address
+  that only means something inside your tab.
 - `pnpm --filter nest-graph-inspector-demo run build:nodepod` packages the demo
   for that runtime, and `pnpm --filter nest-graph-inspector-site run
   test:demo-payload` boots the packaged application headless and checks that it

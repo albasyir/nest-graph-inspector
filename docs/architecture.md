@@ -112,7 +112,7 @@ Key site modules:
 |---|---|
 | `app/stores/graph-inspector.ts` | Pinia store; fetches and validates `GraphOutput` from the live endpoint |
 | `app/stores/nodepod-demo.ts` | Pinia store; downloads the demo payload, boots nodepod, spawns the demo application, and bridges requests to its virtual servers |
-| `app/composables/use-nodepod-demo-graph.ts` | Starts the demo when a docs preview scrolls into view and exposes the graph the running application reports |
+| `app/composables/use-nodepod-demo-graph.ts` | Starts the demo when a docs preview asks for it, and exposes the graph the running application reports |
 | `app/composables/use-nodepod-demo-session.ts` | Restarts the demo behind a restored session, whose endpoint only the tab that started it can answer |
 | `app/utils/nodepod-demo-endpoint.ts` | Endpoint plumbing for the in-browser demo: reads the viewer link out of the startup log and addresses the virtual servers |
 | `app/utils/circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
@@ -178,7 +178,8 @@ right after building the payload.
 ### Boot sequence
 
 ```
-1. A docs preview scrolls into view, or the visitor clicks "Open Demo"
+1. The visitor asks for it: "Run the demo application" in a docs preview, or
+   "Open Demo" on /view
 2. nodepod-demo store downloads manifest.json, main.js, and sources.json
 3. Nodepod.boot({ files, workdir, env, headless: true })
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
@@ -192,8 +193,12 @@ right after building the payload.
    loads the graph through the same HTTP contract as any other endpoint
 ```
 
-One pod serves every preview on the page and the viewer, so the payload is
-downloaded and the application booted at most once per page load.
+Nothing starts on its own. Downloading an application and booting a Node
+runtime is not something a page should decide to do because it was scrolled
+past, so every entry point is a click — and one pod then serves every preview on
+the page and the viewer, so the payload is downloaded and the application booted
+at most once per page load. A failure opens one dialog, wherever it was started
+from, carrying what the application itself printed.
 
 A viewer page names a view, not a graph, so a reload restores the endpoint from
 the tab's session — and for the demo that endpoint is answerable only by the tab

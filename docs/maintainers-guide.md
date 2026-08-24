@@ -482,6 +482,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `DirectRunSequenceDiagram.vue` | Mermaid sequence diagram for Direct Run traces |
 | `ExecutionSequence.vue` | Full execution sequence view |
 | `GraphInspectorUpdateModal.vue` | Modal shown when the graph version is unsupported |
+| `NodepodDemoErrorDialog.vue` | Mounted once for the whole app; reports a demo that would not start, with what the application printed before it stopped |
 | `JsonMonacoEditor.client.vue` | Monaco editor (client-only) for JSON viewing |
 | `AppHeader.vue` / `AppFooter.vue` / `AppLogo.vue` | Layout chrome |
 | `PageHeaderLinks.vue` | Links in page headers |
@@ -512,7 +513,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Composable | What it does |
 |---|---|
 | `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
-| `use-nodepod-demo-graph.ts` | Starts the in-browser demo the first time the element it returns scrolls into view, and exposes the graph, status label, and retry action a docs preview needs |
+| `use-nodepod-demo-graph.ts` | Starts the in-browser demo when a docs preview asks for it, and exposes the graph, status label, and idle state that preview needs |
 | `use-nodepod-demo-session.ts` | Restarts the in-browser demo behind a restored session, because its endpoint is only answerable by the tab that started it |
 
 **What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.

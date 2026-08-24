@@ -8,6 +8,7 @@ const graphStore = useGraphInspectorStore()
 const {
   endpointUrl,
   graphIsStatic,
+  isDemo,
   isLoading
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
@@ -106,7 +107,17 @@ const viewerMenuItems = computed(() => [
                   Graph Viewer
                 </NuxtLink>
 
-                <p class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl">
+                <UBadge
+                  v-if="isDemo"
+                  label="Demo"
+                  color="primary"
+                  variant="subtle"
+                  size="sm"
+                />
+                <p
+                  v-else
+                  class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl"
+                >
                   {{ endpointUrl || 'No graph endpoint selected' }}
                 </p>
               </div>

@@ -528,6 +528,20 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     exitCode = undefined
   }
 
+  /**
+   * Puts the demo back to waiting after a failure has been read.
+   *
+   * The logs stay: the dialog that showed them is the only place the visitor
+   * could have seen what the application said, and reopening it should not
+   * come back empty.
+   */
+  function dismissError() {
+    if (status.value === 'error') {
+      status.value = 'idle'
+      errorMessage.value = ''
+    }
+  }
+
   function stop() {
     disposePod()
     startPromise = undefined
@@ -556,6 +570,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     downloadProgress,
     start,
     loadGraphOutput,
+    dismissError,
     stop
   }
 })

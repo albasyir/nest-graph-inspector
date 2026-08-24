@@ -23,6 +23,7 @@ import {
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
+import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -194,6 +195,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   )
 
   const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
+
+  /**
+   * Whether the graph being viewed is this site's own demo, running in this tab.
+   *
+   * Its address is the only one the viewer invents for itself — the segment the
+   * in-browser runtime's servers are reachable under — so it is worth naming as
+   * a demo rather than showing an address that means nothing outside this tab.
+   * Every other endpoint is somebody's application, where the address is the
+   * most useful thing the header can say.
+   */
+  const isDemo = computed(() => Boolean(resolveInspectorMountBase(endpoint.value)))
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
   )
@@ -564,6 +576,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     graphData,
     graphMarkdown,
     graphIsStatic,
+    isDemo,
     endpointVersion,
     endpointRequiresAccessToken,
     endpointUnreachable,

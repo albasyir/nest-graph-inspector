@@ -79,9 +79,7 @@ async function loadExample() {
  * Last few lines the demo application printed, so a slow start is visibly a
  * real application starting rather than a stalled page.
  */
-const demoConsole = computed(() =>
-  demoStore.logLines.slice(demoStore.status === 'error' ? -25 : -6).join('\n')
-)
+const demoConsole = computed(() => demoStore.logLines.slice(-6).join('\n'))
 
 function clearPolling() {
   if (pollingTimer.value) {
@@ -210,31 +208,17 @@ watch(shouldShowUpdateModal, (visible) => {
 
     <div class="w-full max-w-3xl space-y-5">
       <UCard
-        v-if="demoStore.isBusy || demoStore.status === 'error'"
+        v-if="demoStore.isBusy"
         :ui="{ body: 'p-5 sm:p-6 space-y-3' }"
       >
-        <div class="flex items-start gap-3">
+        <div class="flex items-center gap-3">
           <UIcon
-            v-if="demoStore.isBusy"
             name="i-lucide-loader-circle"
-            class="mt-0.5 size-5 shrink-0 animate-spin text-primary"
+            class="size-5 shrink-0 animate-spin text-primary"
           />
-          <UIcon
-            v-else
-            name="i-lucide-triangle-alert"
-            class="mt-0.5 size-5 shrink-0 text-error"
-          />
-          <div class="space-y-1">
-            <p class="text-sm font-medium">
-              {{ demoStore.isBusy ? demoStore.statusLabel : 'Could not start the demo application' }}
-            </p>
-            <p
-              v-if="demoStore.status === 'error'"
-              class="text-sm text-muted"
-            >
-              {{ demoStore.errorMessage }}
-            </p>
-          </div>
+          <p class="text-sm font-medium">
+            {{ demoStore.statusLabel }}
+          </p>
         </div>
         <UProgress
           v-if="demoStore.status === 'downloading' && demoStore.totalBytes"
@@ -245,27 +229,17 @@ watch(shouldShowUpdateModal, (visible) => {
           data-testid="demo-console"
           class="max-h-56 overflow-auto rounded-lg bg-muted/50 p-3 text-xs text-muted whitespace-pre-wrap"
         >{{ demoConsole }}</pre>
-        <div class="flex flex-wrap items-center gap-3">
-          <UButton
-            v-if="demoStore.status === 'error'"
-            label="Try again"
-            color="neutral"
-            variant="subtle"
-            class="cursor-pointer"
-            @click="loadExample"
-          />
-          <p class="text-xs text-muted">
-            The demo is this repository's NestJS application, running in your
-            browser on
-            <NuxtLink
-              to="https://github.com/ScelarOrg/Nodepod"
-              target="_blank"
-              class="text-primary font-medium"
-            >
-              nodepod
-            </NuxtLink>.
-          </p>
-        </div>
+        <p class="text-xs text-muted">
+          The demo is this repository's NestJS application, running in your
+          browser on
+          <NuxtLink
+            to="https://github.com/ScelarOrg/Nodepod"
+            target="_blank"
+            class="text-primary font-medium"
+          >
+            nodepod
+          </NuxtLink>.
+        </p>
       </UCard>
 
       <UAlert

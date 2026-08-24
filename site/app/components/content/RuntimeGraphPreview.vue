@@ -69,23 +69,11 @@ const fixedBrightLineLabel = computed(() => {
   return 'UserRepository'
 })
 
-const {
-  previewRef,
-  graph,
-  isReady,
-  isFailed,
-  needsManualStart,
-  statusLabel,
-  start,
-  retry
-} = useNodepodDemoGraph()
+const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
 </script>
 
 <template>
-  <div
-    ref="previewRef"
-    class="space-y-3"
-  >
+  <div class="space-y-3">
     <ClientOnly>
       <GraphViewer
         v-if="isReady && graph"
@@ -100,15 +88,6 @@ const {
         :enable-bright-line="shouldShowBrightLine"
         default-open-module-detail
       />
-      <UAlert
-        v-else-if="isFailed"
-        icon="i-lucide-triangle-alert"
-        color="error"
-        variant="subtle"
-        title="Could not start the demo application"
-        :description="statusLabel || 'The demo application could not be started in this browser.'"
-        :actions="[{ label: 'Try again', color: 'neutral', variant: 'subtle', onClick: retry }]"
-      />
       <div
         v-else
         class="relative"
@@ -117,16 +96,21 @@ const {
           class="runtime-graph-preview__skeleton w-full rounded-xl"
           :style="{ height: props.height }"
         />
-        <div class="absolute inset-x-0 bottom-4 flex justify-center">
-          <UButton
-            v-if="needsManualStart"
-            icon="i-lucide-play"
-            label="Run the demo application"
-            color="neutral"
-            variant="subtle"
-            class="cursor-pointer"
-            @click="start"
-          />
+        <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
+          <template v-if="isIdle">
+            <UButton
+              icon="i-lucide-play"
+              label="Run the demo application"
+              color="neutral"
+              variant="subtle"
+              class="cursor-pointer"
+              @click="start"
+            />
+            <p class="max-w-sm text-sm text-muted">
+              Starts this repository's NestJS application in your browser and
+              graphs it live.
+            </p>
+          </template>
           <p
             v-else
             class="text-sm text-muted"
