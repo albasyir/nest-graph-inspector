@@ -32,7 +32,7 @@
     "@vue-flow/minimap": "^1.5.4",
     "@vue-flow/node-resizer": "^1.5.1",
     "@vueuse/core": "^14.3.0",
-    "apexcharts": "^5.16.0",
+    "apexcharts": "^6.10.0",
     "better-sqlite3": "^12.11.1",
     "h3": "1.15.11",
     "langchain": "^1.5.10",
