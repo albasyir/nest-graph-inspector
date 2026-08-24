@@ -96,27 +96,37 @@ const viewerMenuItems = computed(() => [
               </div>
 
               <div class="min-w-0 space-y-1">
-                <NuxtLink
-                  to="/"
-                  class="inline-flex items-center gap-2 text-sm font-semibold"
-                >
-                  <UIcon
-                    name="i-lucide-network"
-                    class="size-4 text-primary"
-                  />
-                  Graph Viewer
-                </NuxtLink>
+                <div class="flex min-w-0 items-center gap-2">
+                  <NuxtLink
+                    to="/"
+                    class="inline-flex items-center gap-2 text-sm font-semibold"
+                  >
+                    <UIcon
+                      name="i-lucide-network"
+                      class="size-4 text-primary"
+                    />
+                    Graph Viewer
+                  </NuxtLink>
 
-                <!-- Wrapped so the chip takes the line the endpoint would
-                     have, rather than riding up next to the title. -->
-                <div v-if="isDemo">
                   <UBadge
+                    v-if="isDemo"
                     label="Demo"
                     color="primary"
                     variant="subtle"
-                    size="sm"
+                    size="xs"
+                    class="shrink-0"
                   />
                 </div>
+
+                <!-- The second line keeps the header's shape either way: an
+                     address is what identifies somebody's application, and the
+                     demo has none worth showing outside the tab that made it. -->
+                <p
+                  v-if="isDemo"
+                  class="text-xs text-muted"
+                >
+                  Running in this browser
+                </p>
                 <p
                   v-else
                   class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl"
