@@ -42,11 +42,22 @@ export function toRequestBody(
 }
 
 /**
+ * Statuses a `Response` may not carry a body for. Handing one a body anyway —
+ * even an empty one — is a `TypeError`, so the bridge would throw instead of
+ * answering the request it was asked to bridge.
+ */
+const NULL_BODY_STATUSES = new Set([204, 205, 304])
+
+/**
  * The runtime answers with its own `Buffer`, which is a `Uint8Array` in the
  * browser but does not have to be, so the bytes are copied out defensively.
  */
-export function toResponseBody(body: unknown): BodyInit | null {
+export function toResponseBody(body: unknown, status?: number): BodyInit | null {
   if (body === null || body === undefined) {
+    return null
+  }
+
+  if (status !== undefined && NULL_BODY_STATUSES.has(status)) {
     return null
   }
 

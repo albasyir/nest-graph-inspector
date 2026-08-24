@@ -44,6 +44,23 @@ assert.deepEqual(
   new Uint8Array([104, 105])
 )
 
+// A status that may not carry a body gets none, so constructing the Response
+// cannot throw where the runtime answered with an empty buffer.
+for (const status of [204, 205, 304]) {
+  assert.equal(toResponseBody(new Uint8Array(), status), null)
+  assert.equal(toResponseBody('', status), null)
+  assert.doesNotThrow(
+    () => new Response(toResponseBody(new Uint8Array(), status), { status }),
+    `Response for ${status} rejected its body`
+  )
+}
+// Every other status keeps whatever it was given.
+assert.deepEqual(
+  toResponseBody(new Uint8Array([1]), 200),
+  new Uint8Array([1])
+)
+assert.equal(toResponseBody('{}', 404), '{}')
+
 // Headers arrive as a plain object with occasional arrays, and the transfer
 // headers that described the body on the way out must not survive.
 const headers = toResponseHeaders({

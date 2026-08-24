@@ -261,11 +261,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
           init?.signal ?? request?.signal ?? null
         )
 
-        return new Response(toResponseBody(response.body), {
-          status: response.statusCode,
-          statusText: response.statusMessage,
-          headers: toResponseHeaders(response.headers)
-        })
+        return new Response(
+          toResponseBody(response.body, response.statusCode),
+          {
+            status: response.statusCode,
+            statusText: response.statusMessage,
+            headers: toResponseHeaders(response.headers)
+          }
+        )
       } catch (error) {
         return new Response(
           error instanceof Error ? error.message : 'Demo request failed',
