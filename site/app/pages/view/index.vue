@@ -35,6 +35,10 @@ let activePollId = 0
 async function loadExample() {
   graphStore.showCircularDependencies = true
   graphStore.openModuleDetail = true
+  // Stopping the interval is not enough: a probe already awaiting an answer
+  // would still resolve during the boot and write its own endpoint over the
+  // demo's, so the poll it belongs to is retired outright.
+  activePollId += 1
   clearPolling()
 
   const started = await demoStore.start()

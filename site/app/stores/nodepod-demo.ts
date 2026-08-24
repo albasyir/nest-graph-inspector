@@ -224,6 +224,32 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   }
 
   /**
+   * The demo's own sources, which the library's source reader needs to report
+   * JSDoc and Direct Run parameter types.
+   *
+   * Checked before parsing for the same reason the manifest is: a host that
+   * answers a missing file with its own page would otherwise surface as a JSON
+   * syntax error, which tells the visitor nothing about what is missing.
+   */
+  async function fetchSources(url: string): Promise<Record<string, string>> {
+    const response = await fetch(url, { cache: 'force-cache' })
+    const parsed = response.ok
+      ? ((await response.json().catch(() => null)) as Record<
+          string,
+          string
+        > | null)
+      : null
+
+    if (!parsed) {
+      throw new Error(
+        `Could not read the demo application's sources (${response.status}).`
+      )
+    }
+
+    return parsed
+  }
+
+  /**
    * Routes the viewer's own requests to the virtual servers running in this
    * tab. Everything else is handed straight to the browser.
    */
@@ -340,9 +366,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
         payloadUrl(demoManifest.entry, demoManifest.revision),
         demoManifest.bundleBytes
       ),
-      fetch(payloadUrl(demoManifest.sources, demoManifest.revision), {
-        cache: 'force-cache'
-      }).then(response => response.json() as Promise<Record<string, string>>)
+      fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision))
     ])
 
     const files: Record<string, string> = {

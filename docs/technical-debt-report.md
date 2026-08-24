@@ -19,7 +19,6 @@
 | Medium | Graph cycle serialization is inconsistent between provider and controller cycles | Inconsistent contract / naming |
 | Medium | Documentation gives conflicting status and shape descriptions for implemented features | Missing / stale documentation |
 | Medium | `demo/docs/` and `site/content/` overlap as documentation surfaces | Overlapping directories / unclear ownership |
-| Low | Root contains both pnpm and npm lockfiles | Tooling ambiguity |
 | Low | `site/README.md` remains the Nuxt Docs Template README | Stale documentation |
 
 ---
@@ -446,30 +445,6 @@ obvious documentation source of truth.
 ---
 
 ## Low
-
-### TD-13 — Root contains both `pnpm-lock.yaml` and `package-lock.json`
-
-**Evidence**
-
-- Root `package.json` declares `packageManager: "pnpm@10.33.0"`.
-- `pnpm-workspace.yaml` defines the `lib`, `demo`, and `site` workspace packages.
-- Both `pnpm-lock.yaml` and `package-lock.json` exist at the repository root.
-
-**Impact**
-
-Two lockfile formats can create ambiguity about which package manager should be
-used to change dependencies. The GitHub Pages workflow uses pnpm, so
-`pnpm-lock.yaml` is the lockfile that CI consumes.
-
-**Related files**
-
-- `package.json`
-- `pnpm-workspace.yaml`
-- `pnpm-lock.yaml`
-- `package-lock.json`
-- `.github/workflows/deploy-site.yml`
-
----
 
 ### TD-14 — `site/README.md` is still the uncustomized Nuxt Docs Template README
 

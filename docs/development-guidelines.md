@@ -147,13 +147,18 @@ pnpm typecheck       # nuxt typecheck (vue-tsc)
 Plain Node.js test scripts exist in `site/app/utils/`:
 
 ```bash
-node site/app/utils/direct-run-provider.test.ts
-node site/app/utils/graph-viewer-load-source.test.ts
-node site/app/utils/nodepod-demo-endpoint.test.ts
+pnpm --filter nest-graph-inspector-site run test
 ```
 
-These use `node:assert` and print `ok` on success.  Run them directly with
-ts-node or after compiling.
+They are TypeScript, so they run through Node's type stripping — which is what
+the `test` script passes. Running one file on its own needs the same flag:
+
+```bash
+cd site
+node --experimental-strip-types --test app/utils/nodepod-demo-endpoint.test.ts
+```
+
+These use `node:assert` and print `ok` on success, and fail the run by throwing.
 
 ### Library dev server (for manual graph inspection)
 
