@@ -33,9 +33,10 @@ Use this area only to:
 - Reproduce bugs using realistic NestJS scenarios.
 - Change what the documentation site demonstrates — the site runs this
   application in the visitor's browser.
-- Change which outputs the demo installs per target
-  (`demo/src/inspector-outputs.ts`) or how it is packaged for the site
-  (`demo/scripts/build-nodepod-payload.ts`).
+- Change how the demo is packaged for the site
+  (`demo/scripts/build-nodepod-payload.ts`). The application itself stays an
+  ordinary NestJS project: anything the browser runtime needs differently
+  belongs in that build, not in `demo/src`.
 
 Changes here must **not** affect the library public API.  The demo app's
 `AppModule` imports `NestGraphInspectorModule.forRoot()` as any consumer would.

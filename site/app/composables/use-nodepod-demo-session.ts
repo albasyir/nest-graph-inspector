@@ -30,7 +30,10 @@ export function useNodepodDemoSession() {
       return endpointUrl
     }
 
-    if (demo.status !== 'ready') {
+    // A pod that is still running but whose token the endpoint has started
+    // refusing is as unusable as a pod that is gone: the demo's token expires
+    // on the library's own schedule, and a tab left open outlives it.
+    if (demo.status !== 'ready' || graphStore.endpointRequiresAccessToken) {
       // The endpoint died with the document that started the demo. Dropping it
       // before the restart is what stops anything rendered in the meantime from
       // building a URL out of it — and sending the old token to whatever host

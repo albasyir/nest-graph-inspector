@@ -26,6 +26,8 @@ import { readViewerLinkEndpoint } from '../app/utils/nodepod-demo-endpoint.ts'
  */
 const MAX_BUNDLE_BYTES = 24 * 1024 * 1024
 const STARTUP_TIMEOUT_MS = 120_000
+/** The port `demo/src/main.ts` listens on. */
+const APP_PORT = 8889
 
 type Manifest = {
   payloadVersion: number
@@ -129,8 +131,12 @@ assert.ok(
   'the viewer link carried no access token'
 )
 
-async function call(path: string, headers?: Record<string, string>) {
-  const response = await pod.request(Number(endpointUrl.port), { path, headers })
+async function call(
+  path: string,
+  headers?: Record<string, string>,
+  port = Number(endpointUrl.port)
+) {
+  const response = await pod.request(port, { path, headers })
 
   return {
     status: response.statusCode,
@@ -165,6 +171,16 @@ assert.ok(
 // Without an access token the endpoint has to refuse, in the browser as anywhere.
 const unauthorized = await call(graphPath)
 assert.equal(unauthorized.status, 401, 'the endpoint answered without a token')
+
+// The application's own routes, on the port `demo/src/main.ts` listens on.
+// This is what the runtime accommodations in the payload build are for: without
+// them the browser runtime answers Express's ETag hashing with something the
+// `etag` package rejects, and every one of these is a 500.
+const users = await call('/users', undefined, APP_PORT)
+
+if (users.status !== 200) {
+  fail(`GET /users answered ${users.status}: ${users.body.slice(0, 200)}`)
+}
 
 console.log(
   `nodepod payload ok: ${Object.keys(parsed.modules).length} modules, `

@@ -38,8 +38,9 @@ for the published history.
 ### Changed
 
 - The demo writes its graph files to `demo/tmp/graph/` instead of into the
-  site's public directory, and which outputs it installs depends on where it is
-  running (`demo/src/inspector-outputs.ts`).
+  site's public directory. It is otherwise an ordinary NestJS project that knows
+  nothing about running in a browser: what that runtime needs differently is
+  prepended by the payload build.
 - `lib` and `demo` compile under TypeScript `strict`.
 - Spec files are type-checked. `ts-jest` no longer runs with `diagnostics: false`,
   so type errors in tests fail the build instead of being skipped.

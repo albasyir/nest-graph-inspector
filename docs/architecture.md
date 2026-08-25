@@ -70,21 +70,16 @@ Type definitions under `src/types/`:
 ### `demo/src` — demo / development application
 
 A plain NestJS application (`AppModule`) that imports
-`NestGraphInspectorModule.forRoot()` with the outputs
-`demo/src/inspector-outputs.ts` selects.  It serves two purposes: a realistic
-module graph for manual testing, and the application the documentation site
-runs inside the visitor's browser.
+`NestGraphInspectorModule.forRoot()` with `viewer`, `markdown`, `json` and
+`http` outputs, the file ones writing into `demo/tmp/graph/`.  It serves two
+purposes: a realistic module graph for manual testing, and the application the
+documentation site runs inside the visitor's browser.
 
-`inspector-outputs.ts` reads the `NEST_GRAPH_INSPECTOR_TARGET` environment
-variable and returns the outputs for that target:
-
-| Target | Outputs |
-|---|---|
-| `local` (default) | `viewer` + `markdown` + `json` + `http`; the file outputs write into `demo/tmp/graph/` |
-| `nodepod` | `viewer` only; a browser has no repository to write graph files into, and the viewer serves the graph, the Markdown and the Direct Run history straight from the running application |
-
-`demo/scripts/build-nodepod-payload.ts` packages this application for the site
-— see [The in-browser demo](#the-in-browser-demo).
+It knows nothing about the second one, and that is deliberate: it is an
+ordinary NestJS project, copyable somewhere else and runnable there unchanged.
+Everything the browser runtime needs differently lives in
+`demo/scripts/build-nodepod-payload.ts`, which packages this application for the
+site — see [The in-browser demo](#the-in-browser-demo).
 
 It is **not** part of the published package.  Do not add production logic here.
 
@@ -141,7 +136,7 @@ from the sources of the application that is answering.
 |---|---|
 | `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
-| `manifest.json` | Revision, working directory, entry file, and the environment the application is started with (including `NEST_GRAPH_INSPECTOR_TARGET=nodepod`) |
+| `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
 
 ### Two constraints shape this design
 
@@ -206,22 +201,27 @@ that started it. `use-nodepod-demo-session.ts` recognises such an endpoint and
 starts the demo again, which means a new port and a new token, so it replaces
 the session rather than reusing it.
 
-### What the demo bootstrap accommodates
+### What the payload build accommodates
 
-`demo/src/main.ts` does two things for the `nodepod` target and nothing for the
-`local` one, both because the browser runtime differs from Node in a way the
-demo would otherwise fall over:
+The bundle is prepended with a few lines the application never sees, because the
+browser runtime differs from Node in two ways it would otherwise fall over on:
 
-- **ETags are turned off.**  Express hashes `Buffer.from(body, undefined)` to
-  build one, and the runtime answers that call with a value the `etag` package
-  rejects, which turns every response from the demo's own REST routes into a
-  500.
-- **A timer keeps the process alive.**  The runtime ends a process as soon as
-  its event loop looks empty, and neither a virtual HTTP server nor an
-  in-flight cross-origin `fetch` holds it open.  The inspector awaits one during
-  startup — the npm lookup behind `latestVersion` in `information.json` — so
-  without the timer the application exits underneath its own bootstrap, before
-  it ever prints a viewer link.
+- **Two `Buffer` implementations that do not recognise each other.**
+  `require('buffer').Buffer` is not the global one, and each one's `isBuffer`
+  rejects what the other made.  Express builds a response body with one and
+  hands it to `etag`, which checks with the other, so every response from the
+  demo's own REST routes is a 500.  The shim makes recognition symmetric and
+  changes nothing about what is created.
+- **A process ends when its event loop looks empty.**  Neither a virtual HTTP
+  server nor an in-flight cross-origin `fetch` holds it open, and the inspector
+  awaits one during startup — the npm lookup behind `latestVersion` in
+  `information.json` — so without a timer the application exits underneath its
+  own bootstrap, before it ever prints a viewer link.
+
+Both belong to the runtime, not to the application, which is why they live in
+the build rather than in `demo/src`.  `site/scripts/verify-nodepod-payload.ts`
+calls one of the demo's own routes for exactly this reason: it is what fails
+first when an accommodation stops working.
 
 Known limitations, accepted deliberately:
 

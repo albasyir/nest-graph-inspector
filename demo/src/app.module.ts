@@ -4,10 +4,6 @@ import { ProductModule } from './product/product.module';
 import { OrderModule } from './order/order.module';
 import { NestGraphInspectorModule } from 'nest-graph-inspector';
 import { UserModule } from './user/user.module';
-import {
-  resolveInspectorAccessToken,
-  resolveInspectorOutputs,
-} from './inspector-outputs';
 
 /**
  * This is playground root module
@@ -17,14 +13,14 @@ import {
   imports: [
     /**
      * Nest Graph Inspector
-     *
-     * The outputs depend on where this build runs: a developer machine writes
-     * graph files to disk, the documentation site runs the same build in the
-     * browser and only serves the viewer endpoint.
      */
     NestGraphInspectorModule.forRoot({
-      outputs: resolveInspectorOutputs(),
-      accessToken: resolveInspectorAccessToken(),
+      outputs: [
+        { type: 'viewer', host: 'localhost', port: 53371 },
+        { type: 'markdown', path: 'tmp/graph/output.md' },
+        { type: 'json', path: 'tmp/graph/output.json' },
+        { type: 'http', host: 'localhost', port: 53372, path: 'graph' },
+      ],
     }),
 
     // NestGraphInspectorModule,

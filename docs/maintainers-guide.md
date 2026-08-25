@@ -328,7 +328,6 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 src/
 ├── main.ts           — bootstrap (NestFactory, listens on port 8889)
 ├── app.module.ts     — root module; imports NestGraphInspectorModule.forRoot()
-├── inspector-outputs.ts — picks the inspector outputs for the current target
 ├── user/             — User feature (UserModule, UserService, UserController, UserRepository, UserSchedule)
 ├── product/          — Product feature (circular dep with MobileModule)
 ├── order/            — Order feature (intentional forwardRef circular dep)
@@ -342,14 +341,7 @@ The demo intentionally includes:
 
 This makes the demo useful for verifying cycle detection, dependency enrichment, and Direct Run metadata.
 
-**Two run targets.** `inspector-outputs.ts` reads the `NEST_GRAPH_INSPECTOR_TARGET` environment variable and returns the outputs for that target:
-
-| Target | Outputs | Where it runs |
-|---|---|---|
-| `local` (default) | `viewer`, `markdown`, `json`, `http`; the file outputs write into `demo/tmp/graph/` | A developer machine |
-| `nodepod` | `viewer` | The documentation site, inside the visitor's browser |
-
-The `nodepod` target drops the file outputs a browser has no repository to write into. Nothing is lost by that: the viewer reads the graph, the Markdown and the Direct Run history from the running application, and the history routes answer from the in-memory trace recorder rather than from the files a JSON output would write. `main.ts` also accommodates two differences of the browser runtime for that target. It disables Express ETags, because Express hashes `Buffer.from(body, undefined)` and the runtime answers that call with a value the `etag` package rejects, which would turn every demo response into a 500. And it holds a timer open, because the runtime ends a process as soon as its event loop looks empty — a virtual HTTP server does not hold it, nor does the cross-origin `fetch` the inspector awaits during startup, so the application would exit underneath its own bootstrap.
+**It knows nothing about the browser.** The application configures `viewer`, `markdown`, `json` and `http` outputs and nothing else — an ordinary NestJS project that would run the same way copied into another repository. What the browser runtime needs differently is prepended to the bundle by `demo/scripts/build-nodepod-payload.ts`: the runtime keeps two `Buffer` implementations whose `isBuffer` rejects what the other made, which turns every Express response into a 500, and it ends a process as soon as the event loop looks empty, which would kill the application during the inspector's own startup. Both are the runtime's, not the demo's.
 
 **What belongs here:**
 - Realistic feature modules that exercise library capabilities.
@@ -731,7 +723,7 @@ resolves the import graph itself.
 |---|---|
 | `main.js` | The demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
-| `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with (including `NEST_GRAPH_INSPECTOR_TARGET=nodepod`) |
+| `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

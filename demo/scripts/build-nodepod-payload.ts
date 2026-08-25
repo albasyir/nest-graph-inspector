@@ -8,6 +8,10 @@
  * is the only compiler in this repository that emits it; the bundler only
  * stitches the emitted JavaScript together.
  *
+ * The application itself knows nothing about any of this. It is an ordinary
+ * NestJS project that would run the same way if it were copied somewhere else,
+ * and what the browser runtime needs differently is prepended here instead.
+ *
  * Run it through `pnpm --filter nest-graph-inspector-demo run build:nodepod`,
  * which compiles this file and the application before executing it.
  */
@@ -16,11 +20,6 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-
-import {
-  INSPECTOR_TARGET_ENV,
-  NODEPOD_TARGET,
-} from '../src/inspector-outputs';
 
 /**
  * Nest requires these lazily, and only for features the demo does not use.
@@ -51,6 +50,45 @@ const IRRELEVANT_COMPILER_OPTIONS = [
 ];
 
 const WORKDIR = '/app';
+
+/**
+ * Prepended to the bundle, so the application can stay an ordinary NestJS
+ * project while the browser runtime gets what it needs.
+ *
+ * Two differences from Node, neither of which the application should have to
+ * know about:
+ *
+ * - The runtime has two `Buffer` implementations that do not recognise each
+ *   other: `require('buffer').Buffer` is not the global one, and each one's
+ *   `isBuffer` rejects what the other made. Express builds a response body with
+ *   one and hands it to `etag`, which checks with the other — so every response
+ *   from the application's own routes is a 500. Making recognition symmetric is
+ *   enough; nothing here changes what is created.
+ * - A process ends as soon as the event loop looks empty, and neither a
+ *   virtual HTTP server nor an in-flight cross-origin fetch holds it open. The
+ *   inspector awaits one during startup to report the latest published
+ *   version, so without a timer the application exits underneath its own
+ *   bootstrap. A server that runs until it is stopped is what happens on a real
+ *   machine anyway.
+ */
+const RUNTIME_ACCOMMODATIONS = `
+(() => {
+  const moduleBuffer = require('buffer').Buffer;
+  const globalBuffer = globalThis.Buffer;
+
+  if (moduleBuffer && globalBuffer && moduleBuffer !== globalBuffer) {
+    const recognisedByModule = moduleBuffer.isBuffer.bind(moduleBuffer);
+    const recognisedByGlobal = globalBuffer.isBuffer.bind(globalBuffer);
+    const isBuffer = (value) =>
+      recognisedByGlobal(value) || recognisedByModule(value);
+
+    moduleBuffer.isBuffer = isBuffer;
+    globalBuffer.isBuffer = isBuffer;
+  }
+
+  setInterval(() => undefined, 60000);
+})();
+`;
 
 type JsonObject = Record<string, unknown>;
 
@@ -152,6 +190,7 @@ async function main(): Promise<void> {
     target: 'node20',
     format: 'cjs',
     external: OPTIONAL_NEST_PEERS,
+    banner: { js: RUNTIME_ACCOMMODATIONS },
     write: false,
     logLevel: 'warning',
   });
@@ -196,7 +235,6 @@ async function main(): Promise<void> {
     entry: 'main.js',
     sources: 'sources.json',
     env: {
-      [INSPECTOR_TARGET_ENV]: NODEPOD_TARGET,
       NODE_ENV: 'development',
     },
     bundleBytes: Buffer.byteLength(bundle),
