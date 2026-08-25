@@ -157,7 +157,17 @@ if (graph.status !== 200) {
 
 const parsed = JSON.parse(graph.body) as {
   root: string
-  modules: Record<string, { providers: { name: string }[] }>
+  modules: Record<
+    string,
+    {
+      jsdoc?: string
+      providers: {
+        name: string
+        jsdoc?: string
+        directRun?: { methods: { name: string, parameterTypes: string }[] }
+      }[]
+    }
+  >
 }
 
 assert.equal(parsed.root, 'AppModule')
@@ -172,6 +182,35 @@ assert.ok(
 const unauthorized = await call(graphPath)
 assert.equal(unauthorized.status, 401, 'the endpoint answered without a token')
 
+// Source metadata, which is the quietest thing in the payload: the library
+// reads the demo's own `.ts` files with ts-morph, from the flattened tsconfig
+// the build writes beside them. If that coupling breaks nothing errors — the
+// graph simply loses its JSDoc and every parameter degrades to `unknown`.
+const documented = Object.entries(parsed.modules).filter(
+  ([, module]) => typeof module.jsdoc === 'string' && module.jsdoc.trim()
+)
+
+if (!documented.length) {
+  fail(
+    'no module carries a JSDoc comment, so ts-morph did not read the demo sources'
+  )
+}
+
+const parameterTypes = Object.values(parsed.modules)
+  .flatMap(module => module.providers)
+  .flatMap(provider => provider.directRun?.methods ?? [])
+  .map(method => method.parameterTypes)
+
+const typedFromSource = parameterTypes.filter(
+  types => types !== '[]' && !types.includes('unknown')
+)
+
+if (!typedFromSource.length) {
+  fail(
+    'every Direct Run parameter fell back to `unknown`, so ts-morph read no source types'
+  )
+}
+
 // The application's own routes, on the port `demo/src/main.ts` listens on.
 // This is what the runtime accommodations in the payload build are for: without
 // them the browser runtime answers Express's ETag hashing with something the
@@ -184,6 +223,8 @@ if (users.status !== 200) {
 
 console.log(
   `nodepod payload ok: ${Object.keys(parsed.modules).length} modules, `
+  + `${documented.length} documented, `
+  + `${typedFromSource.length}/${parameterTypes.length} parameters typed from source, `
   + `${(manifest.bundleBytes / 1024 / 1024).toFixed(1)} MB bundle, `
   + `viewer link after ${Date.now() - startedAt} ms`
 )
