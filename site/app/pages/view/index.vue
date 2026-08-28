@@ -24,8 +24,48 @@ const isRequestRunning = ref(false)
 const isNavigating = ref(false)
 const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
+/** Whether the visitor asked this page for the demo, retries included. */
+const wasDemoRequested = ref(false)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 let activePollId = 0
+
+/**
+ * Opens the viewer on the demo application running in this tab.
+ *
+ * Reached from the click that asked for the demo, and again from the retry in
+ * the error dialog — which is mounted for the whole app and can only start the
+ * application, so what asking for it was for is this page's to finish.
+ */
+async function openDemo() {
+  if (isNavigating.value) {
+    return
+  }
+
+  isNavigating.value = true
+
+  // A failed start left this page watching for a local inspector again, and
+  // stopping the interval is not enough: a probe already awaiting an answer
+  // would still resolve and write its own endpoint over the demo's, so the
+  // poll it belongs to is retired outright.
+  activePollId += 1
+  clearPolling()
+
+  posthog?.capture('graph_demo_started', {
+    revision: demoStore.manifest?.revision
+  })
+
+  // The demo is a graph like any other: put it in the session, then go to a
+  // plain viewer page. The demo and this site are built from the same commit,
+  // so the version acknowledgement the viewer asks for elsewhere has nothing
+  // to add here.
+  graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
+  graphStore.trustEndpointVersion(demoStore.endpointUrl)
+  await navigateTo(
+    route.query['execution-sequence'] === 'true'
+      ? '/view/execution-sequence'
+      : '/view/navigator'
+  )
+}
 
 /**
  * Starts the demo application inside this browser tab and opens the viewer on
@@ -35,44 +75,24 @@ let activePollId = 0
 async function loadExample() {
   graphStore.showCircularDependencies = true
   graphStore.openModuleDetail = true
-  // Stopping the interval is not enough: a probe already awaiting an answer
-  // would still resolve during the boot and write its own endpoint over the
-  // demo's, so the poll it belongs to is retired outright.
+  wasDemoRequested.value = true
   activePollId += 1
   clearPolling()
 
-  const started = await demoStore.start()
-
-  if (!started) {
-    posthog?.capture('graph_demo_start_failed', {
-      reason: demoStore.errorMessage
-    })
-
-    // The page was watching for a local inspector before the demo was asked
-    // for, and it still is: a demo that would not start is not a reason to stop
-    // looking for the developer's own application.
-    startPolling(activeOrigin.value)
+  if (await demoStore.start()) {
+    await openDemo()
 
     return
   }
 
-  const shouldOpenExecutionSequence = route.query['execution-sequence'] === 'true'
-
-  posthog?.capture('graph_demo_started', {
-    revision: demoStore.manifest?.revision
+  posthog?.capture('graph_demo_start_failed', {
+    reason: demoStore.errorMessage
   })
 
-  isNavigating.value = true
-
-  // The demo is a graph like any other: put it in the session, then go to a
-  // plain viewer page. The demo and this site are built from the same commit,
-  // so the version acknowledgement the viewer asks for elsewhere has nothing
-  // to add here.
-  graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
-  graphStore.trustEndpointVersion(demoStore.endpointUrl)
-  await navigateTo(
-    shouldOpenExecutionSequence ? '/view/execution-sequence' : '/view/navigator'
-  )
+  // The page was watching for a local inspector before the demo was asked for,
+  // and it still is: a demo that would not start is not a reason to stop
+  // looking for the developer's own application.
+  startPolling(activeOrigin.value)
 }
 
 /**
@@ -191,6 +211,15 @@ onMounted(() => {
 onBeforeUnmount(() => {
   activePollId += 1
   clearPolling()
+})
+
+// A retry from the error dialog boots the application without knowing which
+// flow it belongs to, so an application that comes up while this page is the
+// one that asked for it is the visitor still waiting to be taken to the viewer.
+watch(() => demoStore.status, (status) => {
+  if (status === 'ready' && wasDemoRequested.value) {
+    void openDemo()
+  }
 })
 
 watch(shouldShowUpdateModal, (visible) => {

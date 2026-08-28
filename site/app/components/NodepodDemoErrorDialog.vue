@@ -21,6 +21,14 @@ const isOpen = computed({
 /** The tail of the application's own console, which is where the reason is. */
 const consoleOutput = computed(() => demo.logLines.slice(-30).join('\n'))
 
+/**
+ * Starts the application again from nothing.
+ *
+ * The startup is all this dialog can offer: it is mounted for the whole app,
+ * and why the demo was asked for belongs to whoever asked. A docs preview
+ * wanted the graph, which this loads; `/view` wanted the viewer, and takes the
+ * application from running to opened itself.
+ */
 function retry() {
   demo.stop()
   void demo.loadGraphOutput()
