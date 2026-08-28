@@ -192,14 +192,19 @@ Nothing starts on its own. Downloading an application and booting a Node
 runtime is not something a page should decide to do because it was scrolled
 past, so every entry point is a click — and one pod then serves every preview on
 the page and the viewer, so the payload is downloaded and the application booted
-at most once per page load. A failure opens one dialog, wherever it was started
-from, carrying what the application itself printed.
+once for as long as that application keeps running. A failure opens one dialog,
+wherever it was started from, carrying what the application itself printed; the
+retry it offers, and the recovery below, are what boot another one.
 
 A viewer page names a view, not a graph, so a reload restores the endpoint from
 the tab's session — and for the demo that endpoint is answerable only by the tab
 that started it. `use-nodepod-demo-session.ts` recognises such an endpoint and
 starts the demo again, which means a new port and a new token, so it replaces
-the session rather than reusing it.
+the session rather than reusing it. A token the endpoint has begun refusing —
+the demo's expires on the library's own schedule, and a tab left open outlives
+it — is recovered the same way, except that the application behind it is still
+running, so it is stopped first: joining it would only hand back the credential
+that was just refused.
 
 ### What the payload build accommodates
 
