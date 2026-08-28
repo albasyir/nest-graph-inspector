@@ -72,6 +72,18 @@ export function readViewerLinkEndpoint(log: string): string | null {
 }
 
 /**
+ * Removes printed viewer links from an application log.
+ *
+ * The link the library prints is the one thing that hands out an access token,
+ * and it carries it encoded rather than as a query parameter, so stripping a
+ * token from the text does not reach it. A log written anywhere outside the tab
+ * that owns the pod — CI output, a bug report — goes through here first.
+ */
+export function redactViewerLinks(log: string): string {
+  return log.replace(VIEWER_LINK_PATTERN, '/view/<redacted>')
+}
+
+/**
  * Rewrites an endpoint the demo application printed for itself
  * (`http://localhost:53371/__graph-inspector`) into the address the browser can
  * reach it at, keeping the path.

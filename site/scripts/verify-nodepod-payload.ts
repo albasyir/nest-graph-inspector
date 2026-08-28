@@ -18,7 +18,10 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Nodepod } from '@scelar/nodepod/headless'
-import { readViewerLinkEndpoint } from '../app/utils/nodepod-demo-endpoint.ts'
+import {
+  readViewerLinkEndpoint,
+  redactViewerLinks
+} from '../app/utils/nodepod-demo-endpoint.ts'
 
 /**
  * Ceiling on the bundled application, so a dependency that doubles what every
@@ -100,7 +103,11 @@ demoProcess.on('exit', (code: number) => {
 })
 
 function fail(message: string): never {
-  console.error(`${message}\n\n--- demo application output ---\n${log}`)
+  // The log holds the printed viewer link, and CI output is public: what makes
+  // a failure diagnosable is the application's own lines, not its credential.
+  console.error(
+    `${message}\n\n--- demo application output ---\n${redactViewerLinks(log)}`
+  )
   pod.teardown()
   process.exit(1)
 }

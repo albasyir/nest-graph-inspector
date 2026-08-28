@@ -6,6 +6,7 @@ import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
   readViewerLinkEndpoint,
+  redactViewerLinks,
   resolveInspectorMountBase
 } from './nodepod-demo-endpoint.ts'
 
@@ -132,5 +133,28 @@ assert.equal(
   null
 )
 assert.equal(readDemoRequestTarget('not a url', 'also not a url'), null)
+
+// A log is diagnostic output, and the printed link inside it is a credential:
+// the token rides along base64url-encoded, so stripping a query parameter would
+// walk straight past it. What is left has to still read as the same log.
+const redacted = redactViewerLinks(log)
+assert.equal(readViewerLinkEndpoint(redacted), null)
+assert.equal(redacted.includes(TOKEN), false)
+assert.equal(
+  redacted.includes(Buffer.from(DEMO_ENDPOINT).toString('base64url')),
+  false
+)
+assert.ok(redacted.includes('[NestFactory] Starting Nest application...'))
+assert.ok(redacted.includes('(access token expires at 2026-08-23T16:12:54.997Z)'))
+assert.ok(redacted.includes(`${SITE_BASE}view/<redacted>`))
+
+// Every link goes, not just the last one, and a log without any is untouched.
+assert.equal(
+  redactViewerLinks(`${log}\n${viewerLink(restartedEndpoint)}`).includes(
+    'second.token_2'
+  ),
+  false
+)
+assert.equal(redactViewerLinks('no link here'), 'no link here')
 
 console.log('nodepod-demo-endpoint: ok')
