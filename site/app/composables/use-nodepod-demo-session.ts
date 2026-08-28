@@ -1,13 +1,14 @@
-import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
+import { resolveDemoSessionAction } from '~/utils/nodepod-demo-session'
 
 /**
  * Keeps a restored demo session usable.
  *
  * The demo's endpoint is answered by the fetch bridge of the tab that started
  * it and by nothing else, so a session restored in a new document — a reload, a
- * restored tab — names an address nothing will answer. Starting the demo again
- * mints a fresh token on a fresh port, so recovering means replacing the
- * session rather than reusing it.
+ * restored tab — names an address nothing will answer; and a tab left open long
+ * enough holds a token that address has stopped accepting. Both are recovered
+ * by running the demo again, which mints a fresh token on a fresh port, so
+ * recovering means replacing the session rather than reusing it.
  */
 export function useNodepodDemoSession() {
   const demo = useNodepodDemoStore()
@@ -26,21 +27,35 @@ export function useNodepodDemoSession() {
    * from a restarted demo, or an empty string when there is nothing to show.
    */
   async function ensureEndpoint(endpointUrl: string): Promise<string> {
-    if (!import.meta.client || !resolveInspectorMountBase(endpointUrl)) {
+    if (!import.meta.client) {
       return endpointUrl
     }
 
-    // A pod that is still running but whose token the endpoint has started
-    // refusing is as unusable as a pod that is gone: the demo's token expires
-    // on the library's own schedule, and a tab left open outlives it.
-    if (demo.status !== 'ready' || graphStore.endpointRequiresAccessToken) {
-      // The endpoint died with the document that started the demo. Dropping it
-      // before the restart is what stops anything rendered in the meantime from
-      // building a URL out of it — and sending the old token to whatever host
-      // that URL happens to name.
+    const action = resolveDemoSessionAction({
+      endpointUrl,
+      isDemoRunning: demo.status === 'ready',
+      endpointRefusedToken: graphStore.endpointRequiresAccessToken
+    })
+
+    if (action === 'pass-through') {
+      return endpointUrl
+    }
+
+    if (action !== 'reuse') {
+      // The endpoint outlived whatever could answer it. Dropping it before the
+      // boot is what stops anything rendered in the meantime from building a
+      // URL out of it — and sending the old token to whatever host that URL
+      // happens to name.
       graphStore.releaseEndpoint()
 
-      if (!await demo.start()) {
+      // A refused token is the one case where an application is still running:
+      // joining it would hand back the credential that was just refused, so it
+      // is replaced instead.
+      const started = action === 'restart'
+        ? await demo.restart()
+        : await demo.start()
+
+      if (!started) {
         return ''
       }
     }

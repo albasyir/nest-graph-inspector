@@ -448,8 +448,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
   /**
    * Starts the demo application, or joins the start already in flight. One pod
-   * serves every preview and the viewer, so the payload is downloaded and the
-   * application booted at most once per page load.
+   * serves every preview and the viewer, so nothing downloads the payload or
+   * boots the application while one is already running: a second boot needs the
+   * one before it to have failed or been stopped.
    */
   function start(): Promise<boolean> {
     if (!import.meta.client) {
@@ -552,6 +553,20 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     status.value = 'idle'
   }
 
+  /**
+   * Replaces the running application with a freshly booted one.
+   *
+   * A pod whose token the endpoint has begun refusing is as unusable as a pod
+   * that is gone, and {@link start} would hand the running one straight back,
+   * so recovering means stopping first — the boot after that mints a new token
+   * on a new port.
+   */
+  function restart(): Promise<boolean> {
+    stop()
+
+    return start()
+  }
+
   return {
     status,
     errorMessage,
@@ -569,6 +584,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     totalBytes,
     downloadProgress,
     start,
+    restart,
     loadGraphOutput,
     dismissError,
     stop
