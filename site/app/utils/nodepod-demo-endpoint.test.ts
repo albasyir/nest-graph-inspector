@@ -149,10 +149,16 @@ assert.ok(redacted.includes('(access token expires at 2026-08-23T16:12:54.997Z)'
 assert.ok(redacted.includes(`${SITE_BASE}view/<redacted>`))
 
 // Every link goes, not just the last one, and a log without any is untouched.
+// Both tokens ride base64url-encoded, so the encoding is what has to be absent:
+// neither raw token is ever in the log to begin with.
+const redactedPair = redactViewerLinks(`${log}\n${viewerLink(restartedEndpoint)}`)
+assert.equal(readViewerLinkEndpoint(redactedPair), null)
 assert.equal(
-  redactViewerLinks(`${log}\n${viewerLink(restartedEndpoint)}`).includes(
-    'second.token_2'
-  ),
+  redactedPair.includes(Buffer.from(DEMO_ENDPOINT).toString('base64url')),
+  false
+)
+assert.equal(
+  redactedPair.includes(Buffer.from(restartedEndpoint).toString('base64url')),
   false
 )
 assert.equal(redactViewerLinks('no link here'), 'no link here')
