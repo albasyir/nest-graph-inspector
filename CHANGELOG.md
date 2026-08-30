@@ -14,6 +14,14 @@ for the published history.
 
 ### Added
 
+- The viewer shows the JSDoc a class was written with. Rest the pointer on a
+  module title, a provider, or a controller and the comment above it appears
+  beside the node; a node with nothing documented shows nothing, and the ones
+  that do carry a dotted underline so you can tell them apart before hovering.
+  The card can be read and scrolled without the pointer leaving it, and "Show
+  JSDoc on hover" in the graph settings panel turns the whole thing off. The
+  graph already carried these comments — this is the first surface that renders
+  them, so no change to the library or the graph JSON was needed.
 - The documentation site's demo is now the demo application itself, running in
   your browser on the [nodepod](https://www.npmjs.com/package/@scelar/nodepod)
   runtime, rather than a graph file committed into the site. Direct Run invokes

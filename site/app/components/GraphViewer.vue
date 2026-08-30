@@ -38,6 +38,12 @@ import {
   buildDirectRunRequest,
   buildDirectRunSnapshot
 } from '~/utils/direct-run-provider'
+import {
+  hasJsDocPreview,
+  parseJsDocPreview,
+  type JsDocPreviewBlock
+} from '~/utils/jsdoc-preview'
+import { resolveHoverCardPosition } from '~/utils/hover-card-position'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -53,12 +59,36 @@ type ModuleNodeData = {
   isExpandable: boolean
   minWidth: number
   minHeight: number
+  /** Class-level JSDoc, when the library found the module's source. */
+  jsdoc?: string
 }
 
 type ItemNodeData = {
   label: string
   kind: 'controller' | 'provider'
   isExported: boolean
+  /** The module the item is declared in, shown in its JSDoc card. */
+  moduleName: string
+  /** Class-level JSDoc, when the library found the class's source. */
+  jsdoc?: string
+}
+
+/** What the JSDoc hover card is showing, and where. */
+type JsDocHoverCardState = {
+  nodeId: string
+  title: string
+  kind: 'module' | 'provider' | 'controller'
+  subtitle?: string
+  blocks: JsDocPreviewBlock[]
+  left: number
+  top: number
+  /** Which side of the node the card landed on, which it grows out of. */
+  placement: 'above' | 'below'
+  /**
+   * Position is only known once the card has been measured, so it stays hidden
+   * for the tick between being rendered and being placed.
+   */
+  isPositioned: boolean
 }
 
 type DirectRunActionRequest = {
@@ -223,6 +253,15 @@ const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
 const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
+/** How long a pointer has to rest on a node before its JSDoc appears. */
+const JSDOC_HOVER_OPEN_DELAY_MS = 240
+/**
+ * How long the card survives the pointer leaving its node.
+ *
+ * The card is scrollable and selectable, so the pointer has to be able to
+ * travel from the node onto it without the card disappearing on the way.
+ */
+const JSDOC_HOVER_CLOSE_DELAY_MS = 140
 
 function parseModuleNameList(moduleNames: string[] | string): string[] {
   return Array.isArray(moduleNames) ? moduleNames : moduleNames.split(',')
@@ -467,6 +506,8 @@ function getModuleItemDependencyGraph(
       label: provider.name,
       kind: 'provider' as const,
       isExported: mod.exports.includes(provider.name),
+      moduleName,
+      jsdoc: provider.jsdoc,
       dependencies: provider.dependencies,
       depth: 0
     })),
@@ -475,6 +516,8 @@ function getModuleItemDependencyGraph(
       label: controller.name,
       kind: 'controller' as const,
       isExported: mod.exports.includes(controller.name),
+      moduleName,
+      jsdoc: controller.jsdoc,
       dependencies: controller.dependencies,
       depth: 0
     }))
@@ -1194,7 +1237,8 @@ function buildGraph(
         isCollapsed,
         isExpandable,
         minWidth: size.width,
-        minHeight: size.height
+        minHeight: size.height,
+        jsdoc: mod.jsdoc
       },
       style: { width: `${size.width}px`, height: `${size.height}px` },
       class: node => getBrightLineNodeClass(node.id)
@@ -1247,7 +1291,9 @@ function buildGraph(
           data: {
             label: item.label,
             kind: item.kind,
-            isExported: item.isExported
+            isExported: item.isExported,
+            moduleName: item.moduleName,
+            jsdoc: item.jsdoc
           },
           style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` },
           class: node => getBrightLineNodeClass(node.id)
@@ -1392,6 +1438,9 @@ const hasInitialFixedBrightLine
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderAcrossModule = ref(false)
+const showJsDocOnHover = ref(true)
+const jsDocHoverCard = ref<JsDocHoverCardState | null>(null)
+const jsDocHoverCardRef = ref<HTMLElement | null>(null)
 const directRunStateByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>(
   {}
 )
@@ -1697,6 +1746,174 @@ function shouldShowCircularEdgeWarning(
   )
 }
 
+/**
+ * The JSDoc hover card.
+ *
+ * A node carries the comment its class was written with, and the card is where
+ * the viewer shows it: rest on a module title, a provider or a controller, and
+ * what the author documented appears beside it. Nodes with nothing documented
+ * open nothing at all, which is what makes the card worth trusting.
+ *
+ * Anchoring is done against the viewer's own box rather than the window's,
+ * because the viewer hides its overflow — see `resolveHoverCardPosition`. The
+ * card's size is only known after it renders, so it is placed on the next tick
+ * and stays invisible until then.
+ */
+let jsDocHoverOpenTimer: ReturnType<typeof setTimeout> | undefined
+let jsDocHoverCloseTimer: ReturnType<typeof setTimeout> | undefined
+let pendingJsDocHoverNodeId: string | null = null
+
+function clearJsDocHoverTimers(): void {
+  clearTimeout(jsDocHoverOpenTimer)
+  clearTimeout(jsDocHoverCloseTimer)
+  jsDocHoverOpenTimer = undefined
+  jsDocHoverCloseTimer = undefined
+}
+
+function closeJsDocHoverCard(): void {
+  clearJsDocHoverTimers()
+  pendingJsDocHoverNodeId = null
+  jsDocHoverCard.value = null
+}
+
+/**
+ * Lets go of a node, without dropping a card the pointer may be moving onto.
+ *
+ * A card opened by another node in the meantime is left alone, so a fast sweep
+ * across the graph does not close the card it just opened.
+ */
+function scheduleJsDocHoverClose(nodeId: string): void {
+  const activeNodeId = jsDocHoverCard.value?.nodeId ?? pendingJsDocHoverNodeId
+  if (activeNodeId !== nodeId) {
+    return
+  }
+
+  clearTimeout(jsDocHoverOpenTimer)
+  jsDocHoverOpenTimer = undefined
+  clearTimeout(jsDocHoverCloseTimer)
+  jsDocHoverCloseTimer = setTimeout(() => {
+    jsDocHoverCloseTimer = undefined
+    if ((jsDocHoverCard.value?.nodeId ?? pendingJsDocHoverNodeId) === nodeId) {
+      closeJsDocHoverCard()
+    }
+  }, JSDOC_HOVER_CLOSE_DELAY_MS)
+}
+
+/** Keeps the card open while the pointer is reading it. */
+function holdJsDocHoverCard(): void {
+  clearTimeout(jsDocHoverCloseTimer)
+  jsDocHoverCloseTimer = undefined
+}
+
+function positionJsDocHoverCard(nodeId: string, anchor: HTMLElement): void {
+  const state = jsDocHoverCard.value
+  const container = graphViewerRef.value
+  const card = jsDocHoverCardRef.value
+
+  if (
+    !state
+    || state.nodeId !== nodeId
+    || !container
+    || !card
+    || !anchor.isConnected
+  ) {
+    return
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const anchorRect = anchor.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  const { left, top, placement } = resolveHoverCardPosition({
+    anchor: {
+      left: anchorRect.left - containerRect.left,
+      top: anchorRect.top - containerRect.top,
+      width: anchorRect.width,
+      height: anchorRect.height
+    },
+    viewport: { width: containerRect.width, height: containerRect.height },
+    card: { width: cardRect.width, height: cardRect.height }
+  })
+
+  jsDocHoverCard.value = { ...state, left, top, placement, isPositioned: true }
+}
+
+function openJsDocHoverCard(params: {
+  event: MouseEvent
+  nodeId: string
+  title: string
+  kind: JsDocHoverCardState['kind']
+  jsdoc: string | undefined
+  subtitle?: string
+}): void {
+  if (!showJsDocOnHover.value) {
+    return
+  }
+
+  const anchor = params.event.currentTarget
+  const blocks = parseJsDocPreview(params.jsdoc)
+  if (blocks.length === 0 || !(anchor instanceof HTMLElement)) {
+    return
+  }
+
+  clearJsDocHoverTimers()
+  pendingJsDocHoverNodeId = params.nodeId
+  jsDocHoverOpenTimer = setTimeout(() => {
+    jsDocHoverOpenTimer = undefined
+    if (pendingJsDocHoverNodeId !== params.nodeId) {
+      return
+    }
+
+    jsDocHoverCard.value = {
+      nodeId: params.nodeId,
+      title: params.title,
+      kind: params.kind,
+      subtitle: params.subtitle,
+      blocks,
+      left: 0,
+      top: 0,
+      placement: 'below',
+      isPositioned: false
+    }
+
+    void nextTick(() => {
+      positionJsDocHoverCard(params.nodeId, anchor)
+    })
+  }, JSDOC_HOVER_OPEN_DELAY_MS)
+}
+
+function openModuleJsDocHoverCard(
+  event: MouseEvent,
+  data: ModuleNodeData
+): void {
+  openJsDocHoverCard({
+    event,
+    nodeId: `module-${data.label}`,
+    title: data.label,
+    kind: 'module',
+    jsdoc: data.jsdoc
+  })
+}
+
+function openItemJsDocHoverCard(
+  event: MouseEvent,
+  nodeId: string,
+  data: ItemNodeData
+): void {
+  openJsDocHoverCard({
+    event,
+    nodeId,
+    title: data.label,
+    kind: data.kind,
+    subtitle: data.moduleName,
+    jsdoc: data.jsdoc
+  })
+}
+
+/** Whether a node has a comment to show, and so an affordance to hover it. */
+function hasJsDocHoverCard(jsdoc: string | undefined): boolean {
+  return showJsDocOnHover.value && hasJsDocPreview(jsdoc)
+}
+
 function setActiveBrightLineNode(event: NodeMouseEvent): void {
   if (!props.enableBrightLine) {
     return
@@ -1723,6 +1940,11 @@ function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
   }
 }
 
+function handlePaneClick(): void {
+  closeJsDocHoverCard()
+  selectProviderNode(null)
+}
+
 function selectProviderNode(nodeId: string | null): void {
   const providerNode = nodeId ? parseProviderNodeId(nodeId) : null
 
@@ -1737,6 +1959,7 @@ function selectProviderNode(nodeId: string | null): void {
 }
 
 function handleNodeClick(event: NodeMouseEvent): void {
+  closeJsDocHoverCard()
   selectProviderNode(event.node.id)
 }
 
@@ -2797,6 +3020,8 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
 
   activeCircularTooltipEdgeId.value = null
   activeBrightLineNodeId.value = null
+  // The card is anchored to a node this rebuild may move or drop entirely.
+  closeJsDocHoverCard()
   if (
     selectedProviderNodeId.value
     && !flowNodes.value.some(node => node.id === selectedProviderNodeId.value)
@@ -2926,11 +3151,19 @@ watch(
   }
 )
 
+watch(showJsDocOnHover, () => {
+  closeJsDocHoverCard()
+})
+
 onMounted(() => {
   syncDirectRunOn()
   setTimeout(() => {
     void centerGraph(0)
   }, 200)
+})
+
+onBeforeUnmount(() => {
+  clearJsDocHoverTimers()
 })
 
 useResizeObserver(graphViewerRef, () => {
@@ -2983,6 +3216,26 @@ useResizeObserver(graphViewerRef, () => {
               v-model="showLegends"
               label="Show Legends"
             />
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showJsDocOnHover"
+                label="Show JSDoc on hover"
+              />
+              <UTooltip
+                text="Show the JSDoc comment written above a module, provider, or controller when you rest the pointer on it."
+                :delay-duration="0"
+              >
+                <UButton
+                  type="button"
+                  icon="i-lucide-circle-help"
+                  color="neutral"
+                  variant="ghost"
+                  square
+                  class="graph-viewer-settings__help"
+                  aria-label="JSDoc on hover help"
+                />
+              </UTooltip>
+            </div>
             <div
               v-if="props.enableBrightLine"
               class="graph-viewer-settings__row"
@@ -3061,6 +3314,29 @@ useResizeObserver(graphViewerRef, () => {
       </div>
     </div>
 
+    <div
+      v-if="jsDocHoverCard"
+      ref="jsDocHoverCardRef"
+      class="graph-viewer-jsdoc"
+      :class="[
+        `graph-viewer-jsdoc--${jsDocHoverCard.placement}`,
+        { 'graph-viewer-jsdoc--positioned': jsDocHoverCard.isPositioned }
+      ]"
+      :style="{
+        left: `${jsDocHoverCard.left}px`,
+        top: `${jsDocHoverCard.top}px`
+      }"
+      @mouseenter="holdJsDocHoverCard"
+      @mouseleave="closeJsDocHoverCard"
+    >
+      <JsDocHoverCard
+        :title="jsDocHoverCard.title"
+        :kind="jsDocHoverCard.kind"
+        :subtitle="jsDocHoverCard.subtitle"
+        :blocks="jsDocHoverCard.blocks"
+      />
+    </div>
+
     <VueFlow
       :id="flowId"
       v-model:nodes="flowNodes"
@@ -3082,7 +3358,9 @@ useResizeObserver(graphViewerRef, () => {
       @node-mouse-enter="setActiveBrightLineNode"
       @node-mouse-leave="clearActiveBrightLineNode"
       @node-click="handleNodeClick"
-      @pane-click="selectProviderNode(null)"
+      @node-drag-start="closeJsDocHoverCard"
+      @move-start="closeJsDocHoverCard"
+      @pane-click="handlePaneClick"
     >
       <template #edge-warning="edgeProps">
         <BaseEdge
@@ -3174,7 +3452,16 @@ useResizeObserver(graphViewerRef, () => {
             'module-subgraph--expandable': moduleProps.data.isExpandable
           }"
         >
-          <div class="module-subgraph__title">
+          <div
+            class="module-subgraph__title"
+            :class="{
+              'module-subgraph__title--documented': hasJsDocHoverCard(
+                moduleProps.data.jsdoc
+              )
+            }"
+            @mouseenter="openModuleJsDocHoverCard($event, moduleProps.data)"
+            @mouseleave="scheduleJsDocHoverClose(`module-${moduleProps.data.label}`)"
+          >
             <span class="module-subgraph__label">
               {{ moduleProps.data.label }}
             </span>
@@ -3252,7 +3539,18 @@ useResizeObserver(graphViewerRef, () => {
 
         <div
           class="mermaid-node"
-          :class="`mermaid-node--${itemProps.data.kind}`"
+          :class="[
+            `mermaid-node--${itemProps.data.kind}`,
+            {
+              'mermaid-node--documented': hasJsDocHoverCard(
+                itemProps.data.jsdoc
+              )
+            }
+          ]"
+          @mouseenter="
+            openItemJsDocHoverCard($event, itemProps.id, itemProps.data)
+          "
+          @mouseleave="scheduleJsDocHoverClose(itemProps.id)"
         >
           <span class="mermaid-node__kind">
             {{ itemProps.data.kind === "controller" ? "C" : "P" }}
@@ -3694,6 +3992,54 @@ useResizeObserver(graphViewerRef, () => {
   gap: 8px;
   font-family: "Public Sans", system-ui, sans-serif;
   pointer-events: none;
+}
+
+/*
+ * The JSDoc hover card sits above the graph but inside the viewer, which hides
+ * its own overflow — `resolveHoverCardPosition` keeps it in bounds. It is
+ * interactive on purpose: a long comment scrolls, and its text can be selected.
+ */
+.graph-viewer-jsdoc {
+  position: absolute;
+  z-index: 12;
+  width: 320px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.graph-viewer-jsdoc--above {
+  transform-origin: bottom center;
+}
+
+.graph-viewer-jsdoc--positioned {
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-viewer-jsdoc {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* A dotted underline is the only hint that a node has something to say. */
+.module-subgraph__title--documented .module-subgraph__label,
+.mermaid-node--documented .mermaid-node__label {
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 .direct-run-drawer__header {

@@ -2,6 +2,12 @@ import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { MobileService } from '../mobile/mobile.service';
 import { ProductRepository, Product } from './product.repository';
 
+/**
+ * Product use cases, and the awkward wiring the graph is meant to reveal:
+ *
+ * - it reaches into MobileService through a property-injected forwardRef
+ * - its module imports UserModule and never uses it
+ */
 @Injectable()
 export class ProductService {
   @Inject(forwardRef(() => MobileService))

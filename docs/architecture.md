@@ -487,6 +487,18 @@ Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
 for JSON editing, ApexCharts for timings, and LangChain + Ollama (through the
 library's proxy) for the AI chat panel.
 
+**The graph carries the application's own documentation.** Every module,
+provider and controller in `GraphOutput` may hold a `jsdoc` string —
+`SourceMetadataService` reads it from the sources with ts-morph — and
+`GraphViewer.vue` shows it in a hover card when the pointer rests on a module
+title or an item node. The library extracts a class's *description* only, so
+block tags such as `@param` never reach the viewer; `jsdoc-preview.ts` parses
+what does arrive into paragraphs and bullet lists, and a node with nothing
+documented opens no card and carries no dotted underline. The card is placed by
+`hover-card-position.ts` against the viewer's own box rather than the window's,
+because the viewer hides its overflow. It is on by default; "Show JSDoc on
+hover" in the graph settings panel turns it off.
+
 ### 3. The in-browser demo
 
 Everything the site shows as a demo — the previews in the documentation pages,
