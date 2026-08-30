@@ -33,8 +33,8 @@ pnpm run verify      # lint + typecheck + test + build — run this before openi
 pnpm run test        # tests in every package that defines them
 pnpm run lint        # lint every package
 pnpm run typecheck   # typecheck every package
-pnpm run build       # build the library and the demo
-pnpm run dev         # build the library, then run the demo and the site together
+pnpm run build       # build the library, and the demo as the site's browser payload
+pnpm run dev         # build both, then run the demo and the site together
 ```
 
 Per-package work:
@@ -43,8 +43,16 @@ Per-package work:
 pnpm --filter nest-graph-inspector run test
 pnpm --filter nest-graph-inspector run test:cov
 pnpm --filter nest-graph-inspector-demo run dev
+pnpm --filter nest-graph-inspector-demo run build:nodepod   # rebuild the demo the site runs in the browser
+pnpm --filter nest-graph-inspector-site run test:demo-payload  # boot that payload and check it answers
 pnpm --filter nest-graph-inspector-site run dev
 ```
+
+The site's demo is the demo application itself, running in the visitor's
+browser. It is served from `site/public/nodepod-demo/`, which is generated and
+gitignored, so running the site alone in a fresh checkout leaves the demo with
+nothing to load until `build:nodepod` has run — `pnpm run dev` from the root
+does it for you.
 
 ## Expectations for a change
 

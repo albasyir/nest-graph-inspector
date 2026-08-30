@@ -4,6 +4,10 @@ import { URL } from 'node:url';
 import { Injectable } from '@nestjs/common';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { HttpServeAuthorize } from './http-serve.adapter';
+import {
+  ACCESS_TOKEN_HEADER,
+  ACCESS_TOKEN_QUERY_PARAM,
+} from '../access-token.service';
 import type {
   ProxyCorsOptions,
   ProxyGateway,
@@ -100,6 +104,9 @@ export class ProxyAdapter implements ProxyGateway {
     // to that origin instead of `toUrl`, turning this proxy into an open relay.
     // Only the path and query of the request may vary; the origin is fixed.
     const requestTarget = new URL(requestUrl, toUrl);
+    // Same reasoning as the credential headers: a token the caller presented to
+    // the inspector must not travel on to the target in a query string either.
+    requestTarget.searchParams.delete(ACCESS_TOKEN_QUERY_PARAM);
     const targetUrl = new URL(
       `${requestTarget.pathname}${requestTarget.search}`,
       toUrl,
@@ -140,10 +147,36 @@ export class ProxyAdapter implements ProxyGateway {
     return {
       method: clientReq.method,
       headers: {
-        ...clientReq.headers,
+        ...this.withoutInspectorCredentials(clientReq.headers),
         host: targetUrl.host,
       },
     };
+  }
+
+  /**
+   * Drops the inspector's own credentials from headers on their way out.
+   *
+   * The caller authenticates to the inspector, and this adapter then speaks to
+   * somewhere else entirely. Forwarding what authenticated the caller here would
+   * hand a live credential for the inspected application to whatever host the
+   * proxy targets, which has no business holding one.
+   */
+  private withoutInspectorCredentials(
+    headers: http.IncomingHttpHeaders,
+  ): http.IncomingHttpHeaders {
+    const forwarded: http.IncomingHttpHeaders = { ...headers };
+
+    delete forwarded[ACCESS_TOKEN_HEADER];
+
+    const authorization = forwarded.authorization;
+    if (
+      typeof authorization === 'string' &&
+      /^bearer\s+ngi1\./i.test(authorization)
+    ) {
+      delete forwarded.authorization;
+    }
+
+    return forwarded;
   }
 
   private handleProxyError(

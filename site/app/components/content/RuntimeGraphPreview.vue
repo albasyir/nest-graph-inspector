@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { GraphOutput } from 'nest-graph-inspector'
-
 type BooleanProp = boolean | string
 type ModuleListProp = string[] | string
 
@@ -21,7 +19,7 @@ const props = withDefaults(defineProps<{
   showCircularDependencies: true,
   showBrightLine: true,
   collapsedModules: () => [],
-  caption: 'Interactive preview from the built-in mock graph.'
+  caption: 'Live graph of the demo application running in your browser.'
 })
 
 function parseBooleanProp(value: BooleanProp | undefined, fallback: boolean) {
@@ -71,25 +69,15 @@ const fixedBrightLineLabel = computed(() => {
   return 'UserRepository'
 })
 
-const config = useRuntimeConfig()
-let base = config.app.baseURL || '/'
-if (!base.endsWith('/')) {
-  base += '/'
-}
-
-const { data, status, error } = await useLazyAsyncData(
-  `runtime-graph-preview:${previewId.value}`,
-  () => $fetch<GraphOutput>(`${base}mock-graph/output.json`),
-  { server: false }
-)
+const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
 </script>
 
 <template>
   <div class="space-y-3">
     <ClientOnly>
       <GraphViewer
-        v-if="status === 'success' && data"
-        :data="data"
+        v-if="isReady && graph"
+        :data="graph"
         :flow-id="viewerFlowId"
         :height="props.height"
         :interactive="false"
@@ -100,19 +88,37 @@ const { data, status, error } = await useLazyAsyncData(
         :enable-bright-line="shouldShowBrightLine"
         default-open-module-detail
       />
-      <UAlert
-        v-else-if="status === 'error'"
-        icon="i-lucide-triangle-alert"
-        color="error"
-        variant="subtle"
-        title="Could not load preview graph"
-        :description="error?.message || 'The mock graph endpoint is unavailable.'"
-      />
-      <USkeleton
+      <div
         v-else
-        class="runtime-graph-preview__skeleton w-full rounded-xl"
-        :style="{ height: props.height }"
-      />
+        class="relative"
+      >
+        <USkeleton
+          class="runtime-graph-preview__skeleton w-full rounded-xl"
+          :style="{ height: props.height }"
+        />
+        <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
+          <template v-if="isIdle">
+            <UButton
+              icon="i-lucide-play"
+              label="Run the demo application"
+              color="neutral"
+              variant="subtle"
+              class="cursor-pointer"
+              @click="start"
+            />
+            <p class="max-w-sm text-sm text-muted">
+              Starts this repository's NestJS application in your browser and
+              graphs it live.
+            </p>
+          </template>
+          <p
+            v-else
+            class="text-sm text-muted"
+          >
+            {{ statusLabel }}
+          </p>
+        </div>
+      </div>
 
       <template #fallback>
         <USkeleton

@@ -6,6 +6,7 @@
  * these carry an access token — that travels as a request header — so every
  * function here builds a plain URL and nothing more.
  */
+import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
 
 function withDefaultProtocol(input: string): string {
   return input.startsWith('http://') || input.startsWith('https://')
@@ -52,7 +53,12 @@ export function appendOutputPath(value: string, fileName: string): string {
 }
 
 /**
- * A path at the endpoint's origin, rather than beneath its own path.
+ * A path at the root of the inspected application's own server, rather than
+ * beneath the graph endpoint's path.
+ *
+ * That root is the origin for an application reached over the network, and a
+ * path prefix for the in-browser demo, whose servers are addressed under a
+ * segment of this site's own origin.
  *
  * The query and fragment are dropped: what belongs to the graph endpoint does
  * not belong to a sibling service like the Ollama proxy — and leaving a query
@@ -65,7 +71,7 @@ export function resolveOriginPath(value: string, pathName: string): string {
 
   try {
     const url = new URL(value)
-    url.pathname = `/${pathName.replace(/^\/+/, '')}`
+    url.pathname = `${resolveInspectorMountBase(value)}/${pathName.replace(/^\/+/, '')}`
     url.search = ''
     url.hash = ''
 
@@ -78,8 +84,8 @@ export function resolveOriginPath(value: string, pathName: string): string {
 /**
  * Where Direct Run lives for a given graph endpoint.
  *
- * A live application serves it at the origin root. A static graph is a
- * directory of files, so its Direct Run fixture sits beside them.
+ * A live application serves it at the root of its own server. A static graph is
+ * a directory of files, so its Direct Run history sits beside them.
  */
 export function resolveDirectRunUrl(value: string, isStatic: boolean): string {
   if (!value) {
@@ -91,7 +97,7 @@ export function resolveDirectRunUrl(value: string, isStatic: boolean): string {
 
     url.pathname = isStatic
       ? `${url.pathname.replace(/\/$/, '')}/direct-run`
-      : '/direct-run'
+      : `${resolveInspectorMountBase(value)}/direct-run`
     url.search = ''
     url.hash = ''
 

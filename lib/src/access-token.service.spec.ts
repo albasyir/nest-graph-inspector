@@ -37,6 +37,31 @@ describe(AccessTokenService.name, () => {
     expect(service.verify(service.current())).toMatchObject({ ok: true });
   });
 
+  /**
+   * A token travels inside a URL, so every character it is made of has to
+   * survive that trip. A runtime that ignores the digest encoding hands back
+   * raw bytes, and a token carrying raw bytes arrives corrupted.
+   */
+  it('issues a token made only of characters a url carries unchanged', () => {
+    const token = new AccessTokenService().current();
+
+    expect(token).toMatch(/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/);
+    expect(encodeURIComponent(token)).toBe(token);
+  });
+
+  it('verifies a token that made a round trip through a url', () => {
+    const service = new AccessTokenService();
+    const url = new URL('http://localhost:53371/__graph-inspector');
+    url.searchParams.set(ACCESS_TOKEN_QUERY_PARAM, service.current());
+
+    const received = new URL(url.toString()).searchParams.get(
+      ACCESS_TOKEN_QUERY_PARAM,
+    );
+
+    expect(received).toBe(service.current());
+    expect(service.verify(received!)).toMatchObject({ ok: true });
+  });
+
   it('expires a token once its lifetime has passed', () => {
     const issuedAt = Date.parse('2026-08-15T13:00:00.000Z');
     jest.spyOn(Date, 'now').mockReturnValue(issuedAt);

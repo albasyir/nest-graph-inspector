@@ -30,6 +30,7 @@ describe('createInspectorEndpointInfo', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       'https://registry.npmjs.org/nest-graph-inspector/latest',
+      { signal: expect.any(AbortSignal) },
     );
   });
 
@@ -46,6 +47,30 @@ describe('createInspectorEndpointInfo', () => {
       isLatestVersion: false,
     });
   });
+
+  it('stops waiting on a registry that never answers', async () => {
+    // The lookup runs while the host application is starting, so a request
+    // that hangs would hang the application with it.
+    const fetch = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            );
+          }),
+      );
+    const { createInspectorEndpointInfo } = await import(
+      './inspector-endpoint-info'
+    );
+
+    await expect(createInspectorEndpointInfo(false)).resolves.toMatchObject({
+      latestVersion: null,
+      isLatestVersion: false,
+    });
+    expect(fetch.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  }, 10_000);
 
   it('returns null and false when the npm lookup is unavailable or invalid', async () => {
     const fetch = jest.spyOn(global, 'fetch');

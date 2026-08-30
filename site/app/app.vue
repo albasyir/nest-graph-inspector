@@ -41,6 +41,10 @@ provide('navigation', navigation)
         :files="files"
         :navigation="navigation"
       />
+
+      <!-- The demo can be started from a docs preview or from /view, and a
+           failure is worth the same interruption wherever it came from. -->
+      <NodepodDemoErrorDialog />
     </ClientOnly>
   </UApp>
 </template>

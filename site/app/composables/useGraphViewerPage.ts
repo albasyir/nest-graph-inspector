@@ -23,17 +23,36 @@ import {
  */
 let hasLoadedOnce = false
 
+/**
+ * Shared setup for the viewer pages: restores the session, gets a graph on
+ * screen, and reports how that went.
+ *
+ * Called at setup, so a page only has to render what it is handed.
+ */
 export function useGraphViewerPage() {
   const route = useRoute()
   const posthog = usePostHog()
   const graphStore = useGraphInspectorStore()
+  const { startupMessage, ensureEndpoint } = useNodepodDemoSession()
 
   /** The endpoint being shown, for the loading state and the header. */
   const endpointUrl = computed(() => graphStore.endpointUrl)
 
-  /** The store owns this: a load can also be started from the viewer header. */
-  const isGraphLoading = computed(() => graphStore.isLoading)
+  /**
+   * Whether the page is getting a graph on screen.
+   *
+   * Wider than the store's own load, and true from the first synchronous moment
+   * of it: a restored demo session has to have its application started again
+   * before there is an endpoint to load at all, and a page that called that
+   * "not loading" would render its empty state — and mount fetchers against the
+   * endpoint that just died — for as long as the start takes.
+   */
+  const isPreparing = ref(false)
+  const isGraphLoading = computed(
+    () => isPreparing.value || graphStore.isLoading
+  )
 
+  /** Reports a viewer event, stamped with the endpoint and route it came from. */
   function trackGraphViewerEvent(
     event: string,
     options: {
@@ -54,6 +73,13 @@ export function useGraphViewerPage() {
     )
   }
 
+  /**
+   * Brings up everything the page needs: the stored session, the demo behind it
+   * where there is one, and the graph itself.
+   *
+   * Sends the visitor back to `/view` when there is no session to restore —
+   * there is nothing for a viewer page to show without one.
+   */
   async function loadGraphResources(loadSource: LoadSource, isRetry = false) {
     // Every request goes to the inspected application on the developer's own
     // machine, which only the browser can reach.
@@ -61,31 +87,46 @@ export function useGraphViewerPage() {
       return
     }
 
-    const endpoint = graphStore.restoreSession()
+    const restored = graphStore.restoreSession()
 
-    if (!endpoint) {
-      await navigateTo('/view')
+    if (!restored) {
+      await navigateTo('/view', { replace: true })
       return
     }
 
-    trackGraphViewerEvent('graph_viewer_load_started', {
-      loadSource,
-      isRetry
-    })
+    isPreparing.value = true
 
-    if (await graphStore.setEndpoint(endpoint)) {
-      trackGraphViewerEvent('graph_viewer_load_succeeded', {
+    try {
+      // The in-browser demo lives in the tab that started it, so a session
+      // restored without one has to start it again — on a new endpoint.
+      const endpoint = await ensureEndpoint(restored)
+
+      if (!endpoint) {
+        await navigateTo('/view', { replace: true })
+        return
+      }
+
+      trackGraphViewerEvent('graph_viewer_load_started', {
         loadSource,
         isRetry
       })
-      return
-    }
 
-    trackGraphViewerEvent('graph_viewer_load_failed', {
-      loadSource,
-      isRetry,
-      errorMessage: graphStore.errorMessage || 'Unknown error'
-    })
+      if (await graphStore.setEndpoint(endpoint)) {
+        trackGraphViewerEvent('graph_viewer_load_succeeded', {
+          loadSource,
+          isRetry
+        })
+        return
+      }
+
+      trackGraphViewerEvent('graph_viewer_load_failed', {
+        loadSource,
+        isRetry,
+        errorMessage: graphStore.errorMessage || 'Unknown error'
+      })
+    } finally {
+      isPreparing.value = false
+    }
   }
 
   // One load per page, at setup. Moving between viewer pages mounts a new page
@@ -93,6 +134,7 @@ export function useGraphViewerPage() {
   void loadGraphResources(resolveGraphViewerLoadSource(hasLoadedOnce))
   hasLoadedOnce = true
 
+  /** Loads the graph again at the visitor's request. */
   function refresh() {
     void loadGraphResources('manual_refresh', true)
   }
@@ -100,6 +142,8 @@ export function useGraphViewerPage() {
   return {
     endpointUrl,
     isGraphLoading,
+    /** What the viewer is waiting on, when it is waiting on the demo. */
+    startupMessage,
     refresh
   }
 }

@@ -23,6 +23,7 @@ import {
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
+import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -58,6 +59,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const shouldShowUpdateModal = ref(false)
   const shouldShowVersionAcknowledgement = ref(false)
   const acknowledgedVersionEndpointUrl = ref('')
+  /**
+   * Endpoint the caller vouched for. Unlike an acknowledgement, this survives
+   * pointing the store at a graph, because it is a statement about the endpoint
+   * rather than about something the visitor was shown.
+   */
+  const trustedEndpointUrl = ref('')
   const dependencyTraceEnabled = ref(false)
   const showCircularDependencies = ref(true)
   const openModuleDetail = ref(false)
@@ -188,6 +195,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   )
 
   const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
+
+  /**
+   * Whether the graph being viewed is this site's own demo, running in this tab.
+   *
+   * Its address is the only one the viewer invents for itself — the segment the
+   * in-browser runtime's servers are reachable under — so it is worth naming as
+   * a demo rather than showing an address that means nothing outside this tab.
+   * Every other endpoint is somebody's application, where the address is the
+   * most useful thing the header can say.
+   */
+  const isDemo = computed(() => Boolean(resolveInspectorMountBase(endpoint.value)))
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
   )
@@ -235,6 +253,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     resolveVersionAcknowledgement = undefined
   }
 
+  /**
+   * Records that the visitor accepted the version mismatch for this endpoint,
+   * releasing whoever is waiting on {@link ensureEndpointVersionAcknowledged}.
+   */
   function acknowledgeEndpointVersion() {
     acknowledgedVersionEndpointUrl.value = endpoint.value
     shouldShowVersionAcknowledgement.value = false
@@ -242,6 +264,25 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     resolveVersionAcknowledgement = undefined
   }
 
+  /**
+   * Marks an endpoint as already acknowledged.
+   *
+   * The in-browser demo is built from this repository together with the site
+   * showing it, so asking the visitor to confirm that the two versions match
+   * tells them nothing they can act on.
+   */
+  function trustEndpointVersion(url: string) {
+    trustedEndpointUrl.value = url
+  }
+
+  /**
+   * Resolves once the endpoint's version is settled, showing the prompt only
+   * when there is something to settle.
+   *
+   * An endpoint already acknowledged in this tab, or trusted outright, passes
+   * without asking. Otherwise this waits on the visitor's answer and resolves
+   * to it — `false` when they backed out.
+   */
   async function ensureEndpointVersionAcknowledged() {
     if (
       !requiresVersionAcknowledgement(
@@ -249,6 +290,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
         endpointInfo.value?.['is-static']
       )
       || acknowledgedVersionEndpointUrl.value === endpoint.value
+      || trustedEndpointUrl.value === endpoint.value
     ) {
       return true
     }
@@ -280,6 +322,20 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       endpointUrl: nextEndpointUrl,
       token: accessToken.value
     })
+  }
+
+  /**
+   * Forgets the endpoint held in memory, without forgetting the tab's session.
+   *
+   * Used while the in-browser demo is restarted: the endpoint the tab was on
+   * died with the document that started it, and nothing may be fetched from it
+   * in the meantime — least of all with the credential that went with it. The
+   * session stays, so a failed restart can still say which graph it was.
+   */
+  function releaseEndpoint() {
+    endpoint.value = ''
+    accessToken.value = ''
+    clearGraph()
   }
 
   /**
@@ -532,6 +588,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     graphData,
     graphMarkdown,
     graphIsStatic,
+    isDemo,
     endpointVersion,
     endpointRequiresAccessToken,
     endpointUnreachable,
@@ -545,10 +602,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     showCircularDependencies,
     openModuleDetail,
     setSession,
+    releaseEndpoint,
     restoreSession,
     toggleDependencyTrace,
     validateEndpoint,
     acknowledgeEndpointVersion,
+    trustEndpointVersion,
     setEndpoint,
     probeEndpoint,
     fetchJson,

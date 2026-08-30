@@ -7,9 +7,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --filter nest-graph-inspector run build && pnpm --parallel --filter nest-graph-inspector-demo --filter nest-graph-inspector-site run dev",
-    "build": "pnpm --filter nest-graph-inspector run build && pnpm --filter nest-graph-inspector-demo run build",
-    "build:site": "pnpm --filter nest-graph-inspector-site run build",
+    "dev": "pnpm --filter nest-graph-inspector run build && pnpm --filter nest-graph-inspector-demo run build:nodepod && pnpm --parallel --filter nest-graph-inspector-demo --filter nest-graph-inspector-site run dev",
+    "build": "pnpm --filter nest-graph-inspector run build && pnpm --filter nest-graph-inspector-demo run build:nodepod",
+    "build:site": "pnpm --filter nest-graph-inspector run build && pnpm --filter nest-graph-inspector-demo run build:nodepod && pnpm --filter nest-graph-inspector-site run build",
     "test": "pnpm --recursive --if-present run test",
     "test:cov": "pnpm --filter nest-graph-inspector run test:cov",
     "lint": "pnpm --recursive --if-present run lint",

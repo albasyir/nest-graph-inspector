@@ -19,9 +19,7 @@
 | Medium | Graph cycle serialization is inconsistent between provider and controller cycles | Inconsistent contract / naming |
 | Medium | Documentation gives conflicting status and shape descriptions for implemented features | Missing / stale documentation |
 | Medium | `demo/docs/` and `site/content/` overlap as documentation surfaces | Overlapping directories / unclear ownership |
-| Low | Root contains both pnpm and npm lockfiles | Tooling ambiguity |
 | Low | `site/README.md` remains the Nuxt Docs Template README | Stale documentation |
-| Low | `site/app/composables/` exists but is empty | Unclear directory responsibility |
 
 ---
 
@@ -387,7 +385,8 @@ an open question in `docs/graph-contract.md`.
 
 1. The root `README.md` calls **Direct Run** “coming soon.”
    The repository currently implements Direct Run endpoint registration, provider
-   invocation, trace recording, histories, static mock histories, and viewer UI.
+   invocation, trace recording, persisted histories, and viewer UI, and the
+   documentation site demonstrates all of it against a running application.
 
 2. `site/content/2.configuration/2.outputs.md` describes JSON output as “the raw
    module map.” `JsonOutputAdapter.execute()` serializes `GraphOutput`, which is
@@ -447,30 +446,6 @@ obvious documentation source of truth.
 
 ## Low
 
-### TD-13 — Root contains both `pnpm-lock.yaml` and `package-lock.json`
-
-**Evidence**
-
-- Root `package.json` declares `packageManager: "pnpm@10.33.0"`.
-- `pnpm-workspace.yaml` defines the `lib`, `demo`, and `site` workspace packages.
-- Both `pnpm-lock.yaml` and `package-lock.json` exist at the repository root.
-
-**Impact**
-
-Two lockfile formats can create ambiguity about which package manager should be
-used to change dependencies. The GitHub Pages workflow uses pnpm, so
-`pnpm-lock.yaml` is the lockfile that CI consumes.
-
-**Related files**
-
-- `package.json`
-- `pnpm-workspace.yaml`
-- `pnpm-lock.yaml`
-- `package-lock.json`
-- `.github/workflows/deploy-site.yml`
-
----
-
 ### TD-14 — `site/README.md` is still the uncustomized Nuxt Docs Template README
 
 **Evidence**
@@ -493,28 +468,6 @@ and ownership information.
 
 ---
 
-### TD-15 — `site/app/composables/` has no current responsibility in implementation
-
-**Evidence**
-
-`site/app/composables/` exists but contains no files. Shared reactive logic is
-currently placed in Pinia stores or page/component code.
-
-**Impact**
-
-The directory name suggests a supported placement for composables, but the
-repository gives no project-specific convention for when logic should use it
-rather than a store or utility. This is a small ownership ambiguity rather than a
-functional defect.
-
-**Related directories**
-
-- `site/app/composables/`
-- `site/app/stores/`
-- `site/app/utils/`
-
----
-
 ## Not classified as debt
 
 The following were inspected but are not reported as problems because the current
@@ -522,10 +475,18 @@ repository provides a clear implementation-backed role:
 
 - `demo/src/` is a demo/development application and intentionally contains
   circular dependency examples used for graph inspection.
-- `demo/tmp/graph/` is generated runtime output and `demo/scripts/mock-sync.ts`
-  clearly copies it to the static site fixture.
+- `demo/tmp/graph/` is generated runtime output of the demo's `local` target; it
+  is gitignored and nothing downstream reads it.
 - `OutputAdapter` and `ProxyGateway` are useful internal seams even though custom
   extension is not currently public; the debt is the absence of a public
   registration path, not the existence of the interfaces.
-- `site/public/mock-graph/` deliberately contains generated static data and Direct
-  Run histories used by the viewer’s “Load Example” mode.
+- `site/public/nodepod-demo/` is build output, written by
+  `demo/scripts/build-nodepod-payload.ts` and gitignored. Bundling it from the
+  `nest build` output rather than from `demo/src/**` is a requirement, not an
+  oversight: Nest resolves constructor dependencies from decorator metadata,
+  which only `tsc` emits.
+- `site/app/utils/nodepod-demo-endpoint.ts` addressing the demo's virtual
+  servers under a route segment the site does not serve, instead of through a
+  service worker, is forced by scope: nodepod registers its worker with
+  `scope: "/"`, and GitHub Pages serves the site from a subpath and cannot
+  answer with `Service-Worker-Allowed`.
