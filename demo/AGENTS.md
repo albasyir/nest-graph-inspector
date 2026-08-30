@@ -1,5 +1,8 @@
 # Demo Agent Scope
 
+> **Read [`docs/architecture.md`](../docs/architecture.md) before you change anything here.**
+> It is required reading for every task in this repository, not only repo-wide ones.
+
 `demo/**` is owned by the `library` Codex agent for demo and integration work.
 
 Directory roles:
