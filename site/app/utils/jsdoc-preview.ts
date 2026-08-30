@@ -23,21 +23,30 @@ const INLINE_LINK_PATTERN = /\{@(?:link|linkcode|linkplain)[ \t]+([^}]+)\}/g
 const COMMENT_GUTTER_PATTERN = /^[ \t]*\*[ \t]?/
 
 /**
- * Whether every line is prefixed the way a raw comment block is.
+ * Strips a raw comment-block wrapper, or returns `null` when there is none.
  *
  * A leading `*` is ambiguous — it opens a comment gutter and a Markdown bullet
- * alike — so the decision is made for the comment as a whole rather than line
- * by line: a gutter runs down every line, a bullet list does not. The cost is
- * that a comment consisting of nothing but `*` bullets reads as prose; `-` is
- * the bullet that survives either way.
+ * alike — and guessing between them from the lines alone gets bullet lists
+ * wrong. The delimiters are not ambiguous, so they are what decides: only text
+ * that is literally a comment block has its gutter stripped, and a description
+ * written entirely as `*` bullets keeps every marker. The library hands over
+ * comment *text*, so this normally finds nothing; it is here so a comment read
+ * from somewhere else still renders.
  */
-function hasCommentGutter(lines: string[]): boolean {
-  const contentLines = lines.filter(line => line.trim().length > 0)
+function unwrapRawComment(comment: string): string | null {
+  const trimmed = comment.trim()
 
-  return (
-    contentLines.length > 0
-    && contentLines.every(line => COMMENT_GUTTER_PATTERN.test(line))
-  )
+  if (!trimmed.startsWith('/*') || !trimmed.endsWith('*/')) {
+    return null
+  }
+
+  return trimmed
+    .slice(2, -2)
+    // `/**` opens a doc comment; the third character belongs to the delimiter.
+    .replace(/^\*/, '')
+    .split('\n')
+    .map(line => line.replace(COMMENT_GUTTER_PATTERN, ''))
+    .join('\n')
 }
 
 /**
@@ -54,12 +63,9 @@ function renderInlineLinks(text: string): string {
   })
 }
 
-function normalizeLine(line: string, stripGutter: boolean): string {
-  const withoutGutter = stripGutter
-    ? line.replace(COMMENT_GUTTER_PATTERN, '')
-    : line
-
-  return renderInlineLinks(withoutGutter).trim()
+/** One line as the card should read it: links resolved, indentation gone. */
+function normalizeLine(line: string): string {
+  return renderInlineLinks(line).trim()
 }
 
 /** Joins a hard-wrapped paragraph back into one line the card can re-wrap. */
@@ -73,6 +79,7 @@ type PreviewParserState = {
   list: string[][]
 }
 
+/** Closes the paragraph being collected, dropping it when it is empty. */
 function flushParagraph(state: PreviewParserState): void {
   const text = joinWrappedLines(state.paragraph)
   state.paragraph = []
@@ -82,6 +89,7 @@ function flushParagraph(state: PreviewParserState): void {
   }
 }
 
+/** Closes the bullet list being collected, dropping it when it is empty. */
 function flushList(state: PreviewParserState): void {
   const items = state.list
     .map(joinWrappedLines)
@@ -108,11 +116,10 @@ export function parseJsDocPreview(
   }
 
   const state: PreviewParserState = { blocks: [], paragraph: [], list: [] }
-  const rawLines = jsdoc.replace(/\r\n?/g, '\n').split('\n')
-  const stripGutter = hasCommentGutter(rawLines)
+  const text = jsdoc.replace(/\r\n?/g, '\n')
 
-  for (const rawLine of rawLines) {
-    const line = normalizeLine(rawLine, stripGutter)
+  for (const rawLine of (unwrapRawComment(text) ?? text).split('\n')) {
+    const line = normalizeLine(rawLine)
 
     if (!line) {
       flushParagraph(state)

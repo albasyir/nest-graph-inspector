@@ -81,16 +81,54 @@ assert.deepEqual(
   ]
 )
 
-// ts-morph strips the comment gutter, but a comment read from anywhere else may
-// still carry it — and a column of asterisks is not content.
+// A list written entirely with `*` bullets is a list, not a comment gutter.
+// Nothing but the delimiters can tell the two apart, and a description carries
+// none — so every marker survives.
 assert.deepEqual(
-  parseJsDocPreview(' * OrderNotificationService has a cycle.\n * Uses forwardRef.'),
+  parseJsDocPreview('* imported modules\n* exported providers'),
+  [{ kind: 'list', items: ['imported modules', 'exported providers'] }]
+)
+
+// A description whose every line happens to start with `*` is still a list.
+assert.deepEqual(
+  parseJsDocPreview('* one'),
+  [{ kind: 'list', items: ['one'] }]
+)
+
+// ts-morph hands over comment text, not the comment — but one read from
+// anywhere else still arrives wrapped, and a column of asterisks is not
+// content. The delimiters are what say so.
+assert.deepEqual(
+  parseJsDocPreview(
+    '/**\n * OrderNotificationService has a cycle.\n * Uses forwardRef.\n */'
+  ),
   [
     {
       kind: 'paragraph',
       text: 'OrderNotificationService has a cycle. Uses forwardRef.'
     }
   ]
+)
+
+// A wrapped comment keeps its bullets too, gutter and marker being distinct.
+assert.deepEqual(
+  parseJsDocPreview('/**\n * Collects:\n * - imports\n * - exports\n */'),
+  [
+    { kind: 'paragraph', text: 'Collects:' },
+    { kind: 'list', items: ['imports', 'exports'] }
+  ] satisfies JsDocPreviewBlock[]
+)
+
+// A plain block comment is unwrapped the same way a doc comment is.
+assert.deepEqual(
+  parseJsDocPreview('/* Legacy note. */'),
+  [{ kind: 'paragraph', text: 'Legacy note.' }]
+)
+
+// An unterminated wrapper is not a wrapper, and must not lose its first line.
+assert.deepEqual(
+  parseJsDocPreview('/** Half a comment'),
+  [{ kind: 'paragraph', text: '/** Half a comment' }]
 )
 
 // Windows line endings arrive from Windows checkouts and must not survive into

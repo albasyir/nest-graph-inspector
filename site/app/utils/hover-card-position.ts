@@ -31,6 +31,12 @@ const DEFAULT_ANCHOR_OFFSET = 10
 /** Gap kept between the card and the viewer's own edges. */
 const DEFAULT_VIEWPORT_MARGIN = 8
 
+/**
+ * Keeps a coordinate between two bounds, preferring `min` when they cross.
+ *
+ * They cross whenever the card is larger than the space it has to fit in, and
+ * pinning that card to the near edge is what leaves it readable.
+ */
 function clamp(value: number, min: number, max: number): number {
   if (max < min) {
     return min
