@@ -4,7 +4,8 @@ import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
-  readViewerLinkEndpoint
+  readViewerLinkEndpoint,
+  redactViewerLinks
 } from '~/utils/nodepod-demo-endpoint'
 import {
   accessTokenHeaders,
@@ -84,6 +85,20 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * publishing itself over its successor.
    */
   const runs = createNodepodDemoRunGuard()
+
+  /**
+   * The application's output as it may be shown and copied.
+   *
+   * The startup card and the error dialog put these lines on screen, and a
+   * visitor reporting a problem copies them out of there. The link the
+   * inspector prints carries the access token base64url-encoded inside it, so
+   * a log on its way to a screenshot or a bug report goes through the same
+   * redaction the CI check uses.
+   *
+   * Redacted here rather than on the way in: {@link waitForEndpoint} reads the
+   * endpoint back out of the raw log, and a redacted one has none to read.
+   */
+  const consoleLines = computed(() => logLines.value.map(redactViewerLinks))
 
   const isRunning = computed(() => status.value === 'ready')
   const isBusy = computed(
@@ -651,6 +666,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     pod?.teardown()
     pod = undefined
     exitCode = undefined
+
+    // The endpoint and the token go with the pod that answered them: a torn
+    // down pod leaves an address nothing is listening on and a credential
+    // nothing will accept, and a startup that fails before publishing its own
+    // would otherwise leave the dead pod's still readable.
+    endpointUrl.value = ''
+    accessToken.value = ''
+
     // Whatever startup owned that pod no longer owns the store.
     runs.supersede()
   }
@@ -670,18 +693,17 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   }
 
   /**
-   * Disposes the running application and clears the session it handed out.
+   * Disposes the running application and puts the store back to waiting.
    *
-   * The endpoint and token go with the pod that answered them: keeping either
-   * would leave the viewer pointing at a port nothing is listening on.
+   * The session goes with the pod, in {@link disposePod}; what is cleared here
+   * is everything that described the demo as something the viewer could still
+   * be shown.
    */
   function stop() {
     disposePod()
     startPromise = undefined
     graphPromise = undefined
     graphOutput.value = null
-    endpointUrl.value = ''
-    accessToken.value = ''
     status.value = 'idle'
   }
 
@@ -702,7 +724,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   return {
     status,
     errorMessage,
-    logLines,
+    consoleLines,
     manifest,
     endpointUrl,
     accessToken,

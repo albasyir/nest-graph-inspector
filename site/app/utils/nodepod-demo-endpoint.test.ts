@@ -163,4 +163,18 @@ assert.equal(
 )
 assert.equal(redactViewerLinks('no link here'), 'no link here')
 
+// The store keeps the log as lines and redacts it one line at a time, which is
+// what the startup card and the error dialog are handed. A printed link never
+// spans lines, so redacting per line has to reach what redacting the whole log
+// does — otherwise the credential is gone from CI output and still on screen.
+const perLine = log.split('\n').map(redactViewerLinks)
+assert.equal(readViewerLinkEndpoint(perLine.join('\n')), null)
+assert.equal(
+  perLine.some(line =>
+    line.includes(Buffer.from(DEMO_ENDPOINT).toString('base64url'))
+  ),
+  false
+)
+assert.ok(perLine.some(line => line.includes(`${SITE_BASE}view/<redacted>`)))
+
 console.log('nodepod-demo-endpoint: ok')

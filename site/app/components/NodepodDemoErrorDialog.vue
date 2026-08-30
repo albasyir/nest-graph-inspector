@@ -19,7 +19,7 @@ const isOpen = computed({
 })
 
 /** The tail of the application's own console, which is where the reason is. */
-const consoleOutput = computed(() => demo.logLines.slice(-30).join('\n'))
+const consoleOutput = computed(() => demo.consoleLines.slice(-30).join('\n'))
 
 /**
  * Starts the application again from nothing.

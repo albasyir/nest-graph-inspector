@@ -488,7 +488,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Component | Role |
 |---|---|
 | `PackageManagerCommand.vue` | Renders install/start commands for selected package manager |
-| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs; render the graph of the demo application running in the browser, started when the preview scrolls into view |
+| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs; render the graph of the demo application running in the browser, started when the visitor selects "Run the demo application" |
 | `RuntimeAIChatPreview.vue` | AI chat preview in docs |
 | `HeroBackground.vue` / `StarsBg.vue` | Visual elements for landing page |
 

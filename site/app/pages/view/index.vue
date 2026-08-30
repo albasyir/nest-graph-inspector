@@ -99,7 +99,7 @@ async function loadExample() {
  * Last few lines the demo application printed, so a slow start is visibly a
  * real application starting rather than a stalled page.
  */
-const demoConsole = computed(() => demoStore.logLines.slice(-6).join('\n'))
+const demoConsole = computed(() => demoStore.consoleLines.slice(-6).join('\n'))
 
 function clearPolling() {
   if (pollingTimer.value) {
