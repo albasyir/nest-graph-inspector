@@ -46,6 +46,10 @@ const payloadDir = join(
   '../public/nodepod-demo'
 )
 
+/**
+ * Reads the built payload's manifest, reporting a missing payload as the build
+ * step that was skipped rather than as a file-not-found.
+ */
 async function readManifest(): Promise<Manifest> {
   try {
     return JSON.parse(
@@ -102,6 +106,11 @@ demoProcess.on('exit', (code: number) => {
   exitCode = code
 })
 
+/**
+ * Reports a failed check with the application's output, tears the pod down and
+ * exits non-zero. Every check goes through here so none of them leaves a booted
+ * pod behind or a diagnosis without the log that explains it.
+ */
 function fail(message: string): never {
   // The log holds the printed viewer link, and CI output is public: what makes
   // a failure diagnosable is the application's own lines, not its credential.
@@ -138,6 +147,10 @@ assert.ok(
   'the viewer link carried no access token'
 )
 
+/**
+ * Makes one request to a virtual server in the booted pod, defaulting to the
+ * port the printed endpoint named.
+ */
 async function call(
   path: string,
   headers?: Record<string, string>,

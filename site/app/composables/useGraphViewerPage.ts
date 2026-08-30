@@ -23,6 +23,12 @@ import {
  */
 let hasLoadedOnce = false
 
+/**
+ * Shared setup for the viewer pages: restores the session, gets a graph on
+ * screen, and reports how that went.
+ *
+ * Called at setup, so a page only has to render what it is handed.
+ */
 export function useGraphViewerPage() {
   const route = useRoute()
   const posthog = usePostHog()
@@ -46,6 +52,7 @@ export function useGraphViewerPage() {
     () => isPreparing.value || graphStore.isLoading
   )
 
+  /** Reports a viewer event, stamped with the endpoint and route it came from. */
   function trackGraphViewerEvent(
     event: string,
     options: {
@@ -66,6 +73,13 @@ export function useGraphViewerPage() {
     )
   }
 
+  /**
+   * Brings up everything the page needs: the stored session, the demo behind it
+   * where there is one, and the graph itself.
+   *
+   * Sends the visitor back to `/view` when there is no session to restore —
+   * there is nothing for a viewer page to show without one.
+   */
   async function loadGraphResources(loadSource: LoadSource, isRetry = false) {
     // Every request goes to the inspected application on the developer's own
     // machine, which only the browser can reach.
@@ -120,6 +134,7 @@ export function useGraphViewerPage() {
   void loadGraphResources(resolveGraphViewerLoadSource(hasLoadedOnce))
   hasLoadedOnce = true
 
+  /** Loads the graph again at the visitor's request. */
   function refresh() {
     void loadGraphResources('manual_refresh', true)
   }

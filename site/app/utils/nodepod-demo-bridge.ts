@@ -9,10 +9,21 @@ export const BRIDGE_TIMEOUT_MS = 30_000
 // eslint-disable-next-line no-control-regex -- ANSI colour codes are control characters
 const ANSI_PATTERN = /\u001b\[[0-9;]*m/g
 
+/**
+ * Removes the colour codes the application writes around its log lines, so the
+ * text can be matched against and shown in the startup card as it is.
+ */
 export function stripAnsi(value: string): string {
   return value.replace(ANSI_PATTERN, '')
 }
 
+/**
+ * Narrows a `fetch` body to the two shapes the runtime accepts, text or bytes.
+ *
+ * `FormData`, `Blob` and streams are rejected rather than serialised: reading
+ * them is asynchronous, and a body the bridge guessed the encoding of would
+ * reach the application as something the caller did not send.
+ */
 export function toRequestBody(
   body: BodyInit | null | undefined
 ): string | Uint8Array | undefined {
@@ -124,6 +135,10 @@ export function withDeadline<T>(
   })
 }
 
+/**
+ * Converts the runtime's plain header object into `Headers`, keeping repeated
+ * values and dropping the ones that described the body's wire encoding.
+ */
 export function toResponseHeaders(headers: unknown): Headers {
   const result = new Headers()
 

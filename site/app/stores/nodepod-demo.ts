@@ -120,6 +120,11 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     }
   })
 
+  /**
+   * Absolute URL the site itself is served from, with a trailing slash so it
+   * can be used as a base. GitHub Pages serves this site from a subpath, so
+   * the origin alone would resolve the payload against the wrong root.
+   */
   function siteBaseUrl() {
     const base = config.app.baseURL || '/'
 
@@ -129,6 +134,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     ).toString()
   }
 
+  /**
+   * URL of one file in the published payload.
+   *
+   * The revision from the manifest is carried as a query parameter so a cached
+   * bundle is never paired with the sources of a different build.
+   */
   function payloadUrl(fileName: string, revision?: string) {
     const url = new URL(`nodepod-demo/${fileName}`, siteBaseUrl())
 
@@ -139,6 +150,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     return url.toString()
   }
 
+  /**
+   * Adds a chunk of application output to the log shown in the startup card.
+   *
+   * The runtime hands over whatever it has, which may stop mid-line, so a
+   * trailing partial line is held back until the rest of it arrives. Only the
+   * most recent {@link MAX_LOG_LINES} are kept.
+   */
   function appendLog(text: string) {
     logBuffer += stripAnsi(text)
 
@@ -153,6 +171,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     logLines.value = next.slice(Math.max(0, next.length - MAX_LOG_LINES))
   }
 
+  /**
+   * Downloads the payload manifest and checks this viewer can read it.
+   *
+   * Fetched uncached, because it is the file that says which revision the
+   * cached ones must match.
+   */
   async function fetchManifest(): Promise<DemoManifest> {
     const response = await fetch(payloadUrl('manifest.json'), {
       cache: 'no-cache'
@@ -307,6 +331,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     window.fetch = bridge
   }
 
+  /**
+   * Puts the browser's own `fetch` back.
+   *
+   * Only when the bridge installed here is still the one in place: something
+   * else may have wrapped `fetch` since, and restoring over that would undo
+   * its work rather than this one's.
+   */
   function removeFetchBridge() {
     if (bridgedFetch && window.fetch === bridgedFetch && originalFetch) {
       window.fetch = originalFetch
@@ -316,6 +347,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     originalFetch = undefined
   }
 
+  /**
+   * Waits for the application to print its viewer link, and returns the graph
+   * endpoint read out of it.
+   *
+   * Polls the log rather than the port, because the link is the only place the
+   * access token is handed out. Gives up at {@link STARTUP_TIMEOUT_MS}, or as
+   * soon as the application exits.
+   */
   async function waitForEndpoint(): Promise<string> {
     const deadline = Date.now() + STARTUP_TIMEOUT_MS
 
@@ -344,6 +383,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     )
   }
 
+  /**
+   * Downloads the payload, boots the runtime, spawns the application and reads
+   * its endpoint — the whole startup, driving `status` as it goes.
+   *
+   * Resolves to whether the demo came up; the reason it did not is left in
+   * `errorMessage` rather than thrown, since every caller shows it.
+   */
   async function run(): Promise<boolean> {
     // A previous attempt may have booted a pod and installed a bridge before
     // failing; starting again on top of those would leak the pod and stack a
@@ -522,6 +568,10 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     return graphPromise
   }
 
+  /**
+   * Tears the runtime down and unbridges `fetch`, leaving no virtual server
+   * for a request to be routed to.
+   */
   function disposePod() {
     removeFetchBridge()
     pod?.teardown()
@@ -543,6 +593,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     }
   }
 
+  /**
+   * Disposes the running application and clears the session it handed out.
+   *
+   * The endpoint and token go with the pod that answered them: keeping either
+   * would leave the viewer pointing at a port nothing is listening on.
+   */
   function stop() {
     disposePod()
     startPromise = undefined

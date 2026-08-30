@@ -17,6 +17,7 @@ export function useNodepodDemoGraph() {
   /** Waiting to be asked: never started, or stopped by a failure. */
   const isIdle = computed(() => !isReady.value && !demo.isBusy)
 
+  /** Asks for the demo, booting it if this is the first preview to ask. */
   function start() {
     void demo.loadGraphOutput()
   }

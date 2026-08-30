@@ -27,6 +27,12 @@ const MOUNT_BASE_PATTERN = new RegExp(
   `^(.*/${NODEPOD_ROUTE_SEGMENT}/\\d+)(?:/|$)`
 )
 
+/**
+ * Decodes the base64url payload a viewer link carries.
+ *
+ * `atob` only reads standard base64, so the URL-safe alphabet is mapped back
+ * and the padding the encoder dropped is restored before it is handed over.
+ */
 function decodeBase64Url(encoded: string): string {
   const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
   const paddingLength = (4 - (base64.length % 4)) % 4
@@ -34,6 +40,11 @@ function decodeBase64Url(encoded: string): string {
   return atob(base64.padEnd(base64.length + paddingLength, '='))
 }
 
+/**
+ * Trims trailing slashes from a path so a segment can be appended to it
+ * without doubling the separator. The site's own base carries one; a mount
+ * path built from it must not.
+ */
 function withoutTrailingSlash(path: string): string {
   return path.replace(/\/+$/, '')
 }

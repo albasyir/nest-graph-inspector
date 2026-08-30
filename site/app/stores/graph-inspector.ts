@@ -253,6 +253,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     resolveVersionAcknowledgement = undefined
   }
 
+  /**
+   * Records that the visitor accepted the version mismatch for this endpoint,
+   * releasing whoever is waiting on {@link ensureEndpointVersionAcknowledged}.
+   */
   function acknowledgeEndpointVersion() {
     acknowledgedVersionEndpointUrl.value = endpoint.value
     shouldShowVersionAcknowledgement.value = false
@@ -271,6 +275,14 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     trustedEndpointUrl.value = url
   }
 
+  /**
+   * Resolves once the endpoint's version is settled, showing the prompt only
+   * when there is something to settle.
+   *
+   * An endpoint already acknowledged in this tab, or trusted outright, passes
+   * without asking. Otherwise this waits on the visitor's answer and resolves
+   * to it — `false` when they backed out.
+   */
   async function ensureEndpointVersionAcknowledged() {
     if (
       !requiresVersionAcknowledgement(

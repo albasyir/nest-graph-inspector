@@ -92,6 +92,13 @@ const RUNTIME_ACCOMMODATIONS = `
 
 type JsonObject = Record<string, unknown>;
 
+/**
+ * Walks up from a directory until the workspace root is under it.
+ *
+ * The script writes into `site/public` and reads `tsconfig.base.json`, neither
+ * of which is below the demo, so it has to find the root rather than assume the
+ * directory it was invoked from.
+ */
 function findRepoDir(startDir: string): string {
   let currentDir = resolve(startDir);
 
@@ -115,10 +122,20 @@ function findRepoDir(startDir: string): string {
   }
 }
 
+/**
+ * Rewrites a path with forward slashes. The payload's file map is read by a
+ * runtime in the browser, where a Windows separator is just a character.
+ */
 function toPosixPath(path: string): string {
   return path.split(sep).join('/');
 }
 
+/**
+ * Collects the demo's TypeScript sources, recursively and in a stable order.
+ *
+ * Specs are left out: the payload ships the sources so the library can read
+ * JSDoc and parameter types off them, and a test file has nothing to add there.
+ */
 async function listSourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
@@ -138,10 +155,15 @@ async function listSourceFiles(dir: string): Promise<string[]> {
   return files.flat().sort();
 }
 
+/** Reads a JSON file into a plain object. */
 async function readJsonFile(path: string): Promise<JsonObject> {
   return JSON.parse(await readFile(path, 'utf8')) as JsonObject;
 }
 
+/**
+ * Digest identifying one build of the payload. It becomes the manifest's
+ * revision, which is what keeps a cached bundle paired with its own sources.
+ */
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex');
 }
@@ -171,6 +193,10 @@ async function buildPodTsConfig(
   return `${JSON.stringify({ compilerOptions, include: ['src'] }, null, 2)}\n`;
 }
 
+/**
+ * Builds the payload: bundles the compiled demo, collects its sources, and
+ * writes the three files the site downloads into `site/public/nodepod-demo`.
+ */
 async function main(): Promise<void> {
   const repoDir = findRepoDir(process.cwd());
   const demoDir = join(repoDir, 'demo');
