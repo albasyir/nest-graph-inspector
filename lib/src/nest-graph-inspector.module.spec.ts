@@ -1,7 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
-import { NestGraphInspectorModule } from './nest-graph-inspector.module';
+import {
+  defaultOptions,
+  NestGraphInspectorModule,
+} from './nest-graph-inspector.module';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
 
 describe(NestGraphInspectorModule.name, () => {
@@ -17,10 +20,6 @@ describe(NestGraphInspectorModule.name, () => {
         {
           type: 'viewer',
           ...HttpOutputAdapter.defaultConfig,
-          ollama: {
-            origin: 'http://127.0.0.1:11434',
-            path: '/ollama',
-          },
           directRun: {
             path: '/direct-run',
           },
@@ -37,6 +36,23 @@ describe(NestGraphInspectorModule.name, () => {
         'INQUIRER',
       ],
     });
+  });
+
+  it('keeps the default viewer output to its graph and direct-run keys', () => {
+    // The default viewer output used to carry the origin and path of a local
+    // LLM daemon it relayed browser requests to. Inference now runs in the
+    // browser, so any key beyond these is a re-introduction to be caught here
+    // rather than shipped.
+    const viewerOutput = defaultOptions.outputs?.find(
+      (output) => output.type === 'viewer',
+    );
+
+    expect(viewerOutput).toBeDefined();
+    expect(Object.keys(viewerOutput ?? {})).toEqual([
+      'type',
+      ...Object.keys(HttpOutputAdapter.defaultConfig),
+      'directRun',
+    ]);
   });
 
   it('uses configured options when imported with forRoot', async () => {

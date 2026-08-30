@@ -14,6 +14,44 @@ for the published history.
 
 ### Added
 
+- The graph viewer's AI chat now runs the model inside your browser. Pick a
+  model, wait once for its weights to download into the browser cache, and every
+  answer after that is generated on your own GPU through WebGPU — no daemon, no
+  API key, nothing to install, and neither your graph nor your questions leave
+  the machine. The chat needs a WebGPU-capable browser and says so up front
+  instead of failing when you ask something; the rest of the viewer works
+  everywhere it did before.
+- The AI chat now answers on the bundled example graph, so "Load Example" is
+  enough to try it without pointing the viewer at a running application. The
+  example was excluded only because answering used to mean reaching a proxy the
+  inspected application served, and a directory of static files serves nothing.
+  Now that the model runs in the browser, the example's Markdown is all the chat
+  needs. A graph emitted by a pre-v3 library is still the one case the chat
+  stays off for.
+- The viewer's AI chat can now answer by **looking things up in the graph**
+  instead of reading an excerpt of it. In agent mode the model is given six
+  read-only tools — list the modules, describe one, find a provider, trace a
+  dependency chain, list the cycles, search the graph — and it calls them until
+  it can answer. Every tool call and its result is shown in the transcript, so a
+  slow answer is legible rather than a silence. The chat picks the mode that
+  suits the graph on screen (looking things up wins once the graph stops fitting
+  the 4096-token window; a single streamed answer is quicker on a small one) and
+  a button in the prompt footer switches it either way.
+- **Agent mode runs on every model in the list, including the recommended Qwen3
+  1.7B at about 2 GB of VRAM.** It is not restricted to the tool-tuned Hermes
+  builds. web-llm's own function-calling path does refuse anything outside a
+  five-model allowlist, so the chat does not use it: it writes the tool schemas
+  into the system prompt itself and constrains the decode with a grammar, and
+  neither of those is looked up against a model list. What the Hermes builds
+  (around 4 GB of VRAM, roughly twice the recommendation) actually buy is
+  judgement — they pick the right tool more often and give up less — so they are
+  offered as an optional upgrade and the panel says as much when a general model
+  is selected. Nothing is disabled on that basis.
+- The chat now fits the graph into the model's context window rather than
+  sending all of it. The Mermaid diagram is dropped, whole module sections are
+  kept until the budget runs out, and the model is told how many modules were
+  left out, so a large graph produces an answer that admits what it could not
+  see instead of one quietly built from a truncated prompt.
 - Repository CI: lint, typecheck, tests on Node 20/22/24, and a full site build
   now run on every pull request and push to `main`.
 - `lib` is linted (ESLint + typescript-eslint) and has a `typecheck` script.
@@ -24,6 +62,12 @@ for the published history.
 
 ### Changed
 
+- The chat now talks to a LangChain chat model rather than to `@mlc-ai/web-llm`
+  directly. This is an internal boundary with one purpose: which model answers is
+  now a constructor argument, so putting a hosted provider behind the same panel
+  later is a swap of one object instead of a rewrite. Nothing about running the
+  model in your own browser changes — that is still the default and still the
+  only provider on offer.
 - `lib` and `demo` compile under TypeScript `strict`.
 - Spec files are type-checked. `ts-jest` no longer runs with `diagnostics: false`,
   so type errors in tests fail the build instead of being skipped.
@@ -32,6 +76,21 @@ for the published history.
 - Releases run lint, typecheck, and tests before `npm publish`.
 - pnpm no longer hoists dependencies (`shamefully-hoist=false`), so a package can
   only import what it declares.
+
+### Removed
+
+- **Breaking.** The Ollama proxy is gone. The `viewer` output no longer accepts
+  an `ollama` option, `NestGraphInspectorOllamaProxyOptions` is no longer
+  exported, and the library no longer opens a proxy or forwards a request
+  anywhere. Delete the `ollama` key from your viewer output — passing it is now
+  a type error — and stop running Ollama for the chat, which runs in the browser
+  instead. Nothing else about the viewer output changes: the graph endpoint, the
+  access token, and Direct Run are untouched.
+
+  The feature never needed a server component, and the one it had was a relay:
+  an endpoint installed in your application whose job was to take a
+  caller-supplied body and send it to another origin. Removing it is the point,
+  not a side effect.
 
 ### Fixed
 

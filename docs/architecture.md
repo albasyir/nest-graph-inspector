@@ -41,16 +41,14 @@ Key internal classes:
 | `NestGraphInspectorSetup` | `OnModuleInit` service; orchestrates graph extraction and adapter dispatch |
 | `HttpServeAdapter` | Standalone Node.js HTTP server (no Express/Fastify dependency) |
 | `HttpOutputAdapter` | Registers JSON + Markdown + schema routes on an HTTP server |
-| `ViewerOutputAdapter` | Delegates to `HttpOutputAdapter` + `ProxyAdapter`; prints viewer URL |
+| `ViewerOutputAdapter` | Delegates to `HttpOutputAdapter` + `DirectRunOutputAdapter`; prints viewer URL |
 | `FileOutputAdapter` | Writes Markdown dependency graph to disk |
 | `JsonOutputAdapter` | Writes raw `GraphOutput` JSON to disk |
-| `ProxyAdapter` | Forwards Ollama AI requests from the viewer origin |
 | `DirectRunOutputAdapter` | Registers provider method execution endpoints |
 | `RuntimeTraceRecorder` | Records in-process call spans using `AsyncLocalStorage` |
 
 Port interfaces under `src/ports/`:
 - `OutputAdapter<Config>` — contract every output adapter implements.
-- `ProxyGateway` — contract for the Ollama proxy.
 
 Type definitions under `src/types/`:
 - `graph-output.type.ts` — TypeScript types for the `GraphOutput` contract.
@@ -97,7 +95,71 @@ Key site modules:
 | `app/utils/circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `app/utils/direct-run-provider.ts` | Helper types and functions for Direct Run UI |
 | `app/utils/supported-runtime.ts` | Package manager constants and install command helpers |
+| `app/composables/useWebLlmEngine.ts` | Owns the in-browser model: WebGPU support check, model catalog, download progress, streaming |
+| `app/utils/web-llm-boundary.ts` | The wire shapes the engine and the chat model both speak, declared once |
+| `app/utils/web-llm-langchain.ts` | `ChatWebLlm`: the engine dressed as a LangChain `BaseChatModel`, tool calling included |
+| `app/utils/graph-agent-tools.ts` | The six tools the agent queries the graph with |
+| `app/utils/graph-agent-run.ts` | The ReAct loop, with the cap that stops a small model looping |
+| `app/composables/useGraphAgent.ts` | Agent mode as the panel sees it |
+| `app/workers/web-llm.worker.ts` | Web worker the model runs in, so generation does not block the graph UI |
 | `public/mock-graph/` | Static fixture (`output.json`, `output.md`, `information.json`) served from the site for "Load Example" |
+
+### AI chat runs entirely in the browser
+
+The AI assistant has no server side. `@mlc-ai/web-llm` downloads model weights
+from HuggingFace into the browser's Cache API and runs inference on the visitor's
+GPU through WebGPU, inside a web worker. The library's only contribution is the
+graph Markdown the viewer already fetches from `/output.md`, which the site
+budgets down to fit the model's context window before using it as the system
+prompt. The graph, the question, and the answer never leave the machine, and
+nothing has to be installed for the feature to work — at the cost of requiring a
+WebGPU-capable browser, which the panel checks for before offering the chat.
+
+### The chat talks to a LangChain model, not to web-llm
+
+The panel never calls `@mlc-ai/web-llm`. It builds a `ChatWebLlm` — a LangChain
+`BaseChatModel` wrapping the engine — and talks to that. The indirection buys one
+thing, and it is the reason it exists: which model answers is a constructor
+argument. Putting `@langchain/openai`, `@langchain/anthropic` or a later web-llm
+release behind the same panel is a swap of one object, not a rewrite of the chat.
+In-browser inference is the right default for a tool that discusses the
+developer's own application, but it should not be the only thing this panel can
+ever do.
+
+The seam is `WebLlmStreamer` in `app/utils/web-llm-boundary.ts`: two functions,
+`streamChat` and `interrupt`. `useWebLlmEngine` fills them from web-llm and
+`ChatWebLlm` reads them, and neither knows anything else about the other — which
+is also what makes the chat model, and the entire agent loop above it, testable
+in a plain node script against a scripted engine, with no browser, no GPU and no
+downloaded weights.
+
+Tool calling is implemented on our side rather than delegated. web-llm has its
+own function-calling path, but it refuses any model outside a five-entry list of
+Hermes builds — and reading what it does once it accepts one shows the list is a
+bet, not a capability: it interpolates the tool schemas into a system prompt,
+constrains the reply with a JSON grammar, and parses the result back.
+`ChatWebLlm` does both of those directly, so tools bind to **every** model in the
+catalog, including the recommended 2 GB one. Constrained decoding is the stronger
+half of that: a fine-tune makes well-formed output likely, a grammar at the
+sampler makes it certain. What neither fixes is judgement — a 1.7B model still
+picks the wrong tool sometimes — which is what the catalog's `toolCallingQuality`
+is for, and it is a sentence the panel shows, never a condition it branches on.
+
+Agent mode exists because the context window is 4096 tokens. The plain path puts
+an excerpt of the graph Markdown in the prompt, and on a real application that
+excerpt is most of the window and still not most of the graph. The agent inverts
+it: almost no graph in the prompt, and six read-only tools the model queries for
+the part the question needs. It is the better answer for a large graph and the
+worse one for a small one, so the panel defaults by graph size and lets the
+reader switch.
+
+This replaced an HTTP proxy inside the library that forwarded chat requests from
+the viewer origin to a local Ollama daemon. Deleting it removed a
+request-forwarding relay from the library's attack surface: an endpoint installed
+in the host application whose whole job was to take a caller-supplied body and
+send it somewhere else. A feature that needs no server component should not ship
+one, and the boundary the site consumes is now exactly the graph contract and
+nothing more.
 
 ---
 
@@ -140,7 +202,7 @@ generated; the library must not assume how the data will be rendered.
      - json  → writes JSON file
      - markdown → writes Markdown file (Mermaid + text)
      - http  → registers routes on a standalone Node.js HTTP server
-     - viewer → http + Ollama proxy + Direct Run endpoints + prints viewer URL
+     - viewer → http + Direct Run endpoints + prints viewer URL
 6. Viewer site fetches /information.json (endpoint discovery)
              then fetches /output.json (GraphOutput)
              then fetches /output.md  (Markdown)

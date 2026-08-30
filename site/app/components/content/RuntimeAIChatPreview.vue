@@ -6,7 +6,7 @@
           preview
           title="Ask AI"
           :show-close="false"
-          initial-message="Hi, ask me about a NestJS module, provider, controller, or dependency path."
+          initial-message="Hi, ask me about a NestJS module, provider, controller, or dependency path. In the real viewer I run on your own GPU, in this tab."
           preview-reply="Hai!, load real project to chat with me!"
           content-class="min-h-0 px-4 sm:px-5 py-4 bg-muted/20"
           prompt-class="px-4 sm:px-5 py-4 bg-default border-t border-default"
@@ -19,7 +19,8 @@
     </div>
 
     <p class="text-sm text-muted">
-      The real viewer grounds every answer in your loaded runtime graph.
+      The real viewer grounds every answer in your loaded runtime graph, and runs the model
+      in your browser on WebGPU — nothing to install, and the graph never leaves the tab.
       <NuxtLink
         to="/view"
         class="text-primary font-medium"

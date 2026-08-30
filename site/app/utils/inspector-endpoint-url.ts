@@ -2,9 +2,9 @@
  * The URLs the viewer derives from one graph endpoint.
  *
  * Everything the viewer fetches hangs off the endpoint the printed link handed
- * over: the graph itself, its Markdown, the Ollama proxy, Direct Run. None of
- * these carry an access token — that travels as a request header — so every
- * function here builds a plain URL and nothing more.
+ * over: the graph itself, its Markdown, Direct Run. None of these carry an
+ * access token — that travels as a request header — so every function here
+ * builds a plain URL and nothing more.
  */
 
 function withDefaultProtocol(input: string): string {
@@ -45,30 +45,6 @@ export function appendOutputPath(value: string, fileName: string): string {
     const path = url.pathname.replace(/\/+$/, '')
 
     url.pathname = `${path}/${fileName}`
-    return url.toString()
-  } catch {
-    return ''
-  }
-}
-
-/**
- * A path at the endpoint's origin, rather than beneath its own path.
- *
- * The query and fragment are dropped: what belongs to the graph endpoint does
- * not belong to a sibling service like the Ollama proxy — and leaving a query
- * in place is what used to break callers that append a path onto the result.
- */
-export function resolveOriginPath(value: string, pathName: string): string {
-  if (!value) {
-    return ''
-  }
-
-  try {
-    const url = new URL(value)
-    url.pathname = `/${pathName.replace(/^\/+/, '')}`
-    url.search = ''
-    url.hash = ''
-
     return url.toString()
   } catch {
     return ''
