@@ -67,4 +67,19 @@ assert.equal(
 assert.equal(resolveDirectRunUrl('', false), '')
 assert.equal(resolveDirectRunUrl('not a url', true), '')
 
+// The in-browser demo's servers are addressed under a segment of this site's
+// own origin, so "the root of the application's own server" is a path prefix
+// there rather than the origin.
+const DEMO_ENDPOINT
+  = 'https://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/__graph-inspector'
+
+assert.equal(
+  resolveDirectRunUrl(DEMO_ENDPOINT, false),
+  'https://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/direct-run'
+)
+assert.equal(
+  appendOutputPath(DEMO_ENDPOINT, 'output.json'),
+  'https://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/__graph-inspector/output.json'
+)
+
 console.log('inspector-endpoint-url.test.ts ok')

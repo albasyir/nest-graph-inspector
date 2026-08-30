@@ -16,7 +16,7 @@ Nest Graph Inspector reads your NestJS runtime container and generates a depende
 
 This is a static preview. [**Try the interactive viewer with AI Chat →**](https://albasyir.github.io/nest-graph-inspector/view/) 
 
-> "Load Example" to see result without installing it
+> "Open Demo" runs this repository's NestJS demo application in your browser, so you can explore a real graph — and run provider methods against it — without installing anything
 
 ## Why It Matters
 

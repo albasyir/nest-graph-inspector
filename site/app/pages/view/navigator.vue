@@ -19,7 +19,8 @@ const {
   showCircularDependencies,
   openModuleDetail
 } = storeToRefs(graphStore)
-const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
+const { endpointUrl, isGraphLoading, startupMessage, refresh }
+  = useGraphViewerPage()
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -58,6 +59,7 @@ function handleExecutionSequenceOpen() {
   <GraphViewerLoadingState
     v-if="isGraphLoading"
     :endpoint="endpointUrl"
+    :message="startupMessage"
   />
 
   <!-- Error State -->

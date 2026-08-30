@@ -6,6 +6,7 @@
  * access token — that travels as a request header — so every function here
  * builds a plain URL and nothing more.
  */
+import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
 
 function withDefaultProtocol(input: string): string {
   return input.startsWith('http://') || input.startsWith('https://')
@@ -54,8 +55,8 @@ export function appendOutputPath(value: string, fileName: string): string {
 /**
  * Where Direct Run lives for a given graph endpoint.
  *
- * A live application serves it at the origin root. A static graph is a
- * directory of files, so its Direct Run fixture sits beside them.
+ * A live application serves it at the root of its own server. A static graph is
+ * a directory of files, so its Direct Run history sits beside them.
  */
 export function resolveDirectRunUrl(value: string, isStatic: boolean): string {
   if (!value) {
@@ -67,7 +68,7 @@ export function resolveDirectRunUrl(value: string, isStatic: boolean): string {
 
     url.pathname = isStatic
       ? `${url.pathname.replace(/\/$/, '')}/direct-run`
-      : '/direct-run'
+      : `${resolveInspectorMountBase(value)}/direct-run`
     url.search = ''
     url.hash = ''
 

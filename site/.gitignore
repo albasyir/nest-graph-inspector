@@ -25,3 +25,6 @@ logs
 
 # VSC
 .history
+
+# Generated demo payload: the demo application built for the in-browser runtime
+public/nodepod-demo

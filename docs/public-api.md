@@ -568,7 +568,7 @@ implementation. Not yet used externally.
 |---|---|
 | **Kind** | Type alias |
 | **Stability** | Experimental |
-| **Documented** | Partially — structure visible in mock fixture |
+| **Documented** | Partially — structure visible in the Direct Run history the library writes |
 
 The completed trace record persisted after a Direct Run execution.
 
@@ -654,7 +654,7 @@ type RuntimeTraceStartContext = {
 |---|---|
 | **Kind** | Type alias |
 | **Stability** | Experimental |
-| **Documented** | Partially — structure visible in mock fixture |
+| **Documented** | Partially — structure visible in the Direct Run history the library writes |
 
 A single recorded call within a trace.
 

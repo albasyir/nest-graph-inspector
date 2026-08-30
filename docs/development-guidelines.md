@@ -31,7 +31,12 @@ Do **not** use Express or Fastify; the HTTP layer uses plain `node:http`.
 Use this area only to:
 - Add, modify, or remove modules/providers that demonstrate library capabilities.
 - Reproduce bugs using realistic NestJS scenarios.
-- Generate updated mock graph fixtures for the site.
+- Change what the documentation site demonstrates — the site runs this
+  application in the visitor's browser.
+- Change how the demo is packaged for the site
+  (`demo/scripts/build-nodepod-payload.ts`). The application itself stays an
+  ordinary NestJS project: anything the browser runtime needs differently
+  belongs in that build, not in `demo/src`.
 
 Changes here must **not** affect the library public API.  The demo app's
 `AppModule` imports `NestGraphInspectorModule.forRoot()` as any consumer would.
@@ -42,7 +47,10 @@ Use this area when you are:
 - Adding or updating documentation pages (`site/content/**`).
 - Fixing or improving viewer UI, stores, composables, or components.
 - Adjusting how the viewer reads, validates, or renders a `GraphOutput`.
-- Changing the "Load Example" mock fixture (`site/public/mock-graph/`).
+- Changing how the site boots the in-browser demo or talks to it
+  (`site/app/stores/nodepod-demo.ts`,
+  `site/app/composables/use-nodepod-demo-graph.ts`,
+  `site/app/utils/nodepod-demo-endpoint.ts`).
 
 You may import TypeScript types from the library via the `@library` path alias,
 but **never import library runtime code** (services, decorators, DI containers).
@@ -137,15 +145,21 @@ pnpm typecheck       # nuxt typecheck (vue-tsc)
 
 ### Site utility tests (assert-based, no framework)
 
-Two plain Node.js test scripts exist in `site/app/utils/`:
+Plain Node.js test scripts exist in `site/app/utils/`:
 
 ```bash
-node site/app/utils/direct-run-provider.test.ts
-node site/app/utils/graph-viewer-load-source.test.ts
+pnpm --filter nest-graph-inspector-site run test
 ```
 
-These use `node:assert` and print `ok` on success.  Run them directly with
-ts-node or after compiling.
+They are TypeScript, so they run through Node's type stripping — which is what
+the `test` script passes. Running one file on its own needs the same flag:
+
+```bash
+cd site
+node --experimental-strip-types --test app/utils/nodepod-demo-endpoint.test.ts
+```
+
+These use `node:assert` and print `ok` on success, and fail the run by throwing.
 
 ### Library dev server (for manual graph inspection)
 
@@ -161,6 +175,27 @@ pnpm dev    # starts the demo app; viewer URL is printed to console
 cd site
 pnpm dev    # Nuxt dev server (connects to library dev for live graph)
 ```
+
+### Running the demo inside the site
+
+The site's own demo is the demo application running in the browser, so it has to
+be packaged before the site can serve it:
+
+```bash
+pnpm run dev    # from the root: builds the library, then the demo payload,
+                # then runs the demo app and the site together
+
+pnpm --filter nest-graph-inspector-demo run build:nodepod
+                # refreshes the payload on its own after a demo change
+```
+
+`build:nodepod` runs `nest build` before
+`demo/scripts/build-nodepod-payload.ts`, because the bundle has to be made from
+the TypeScript output — that is what carries the decorator metadata Nest
+resolves constructor dependencies from.  The payload is written to
+`site/public/nodepod-demo/` and is gitignored, so it must be built before
+`nuxt generate` in any fresh checkout; the CI and deploy workflows have a
+dedicated step for it.
 
 ---
 
@@ -201,13 +236,16 @@ exercises the new capability.
 Run `pnpm dev` in `demo/` and confirm the new data appears in
 `/output.json`.
 
-### 4. Regenerate the mock fixture (if the `GraphOutput` shape changes)
+### 4. Refresh the demo payload the site runs
 
-Copy the updated `output.json` from the running demo to
-`site/public/mock-graph/output.json`.  Also update `output.md` if file output
-is affected.
+```bash
+pnpm --filter nest-graph-inspector-demo run build:nodepod
+```
 
-This fixture powers the "Load Example" button in the viewer.
+The site boots this payload in the visitor's browser, so a demo change is not
+visible on the site until the payload is rebuilt.  Nothing needs to be copied
+into `site/public/` by hand — the script writes there, and the directory is
+gitignored.
 
 ### 5. Update the viewer (site)
 

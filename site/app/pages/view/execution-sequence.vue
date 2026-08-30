@@ -13,7 +13,8 @@ const {
   endpointRequiresAccessToken,
   hasLoadError
 } = storeToRefs(graphStore)
-const { endpointUrl, isGraphLoading, refresh } = useGraphViewerPage()
+const { endpointUrl, isGraphLoading, startupMessage, refresh }
+  = useGraphViewerPage()
 
 useSeoMeta({
   title: 'Execution Sequence',
@@ -31,6 +32,7 @@ function openNavigator() {
     <GraphViewerLoadingState
       v-if="isGraphLoading"
       :endpoint="endpointUrl"
+      :message="startupMessage"
     />
 
     <GraphViewerErrorState

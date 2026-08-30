@@ -21,13 +21,14 @@ for the published history.
   the machine. The chat needs a WebGPU-capable browser and says so up front
   instead of failing when you ask something; the rest of the viewer works
   everywhere it did before.
-- The AI chat now answers on the bundled example graph, so "Load Example" is
-  enough to try it without pointing the viewer at a running application. The
-  example was excluded only because answering used to mean reaching a proxy the
-  inspected application served, and a directory of static files serves nothing.
-  Now that the model runs in the browser, the example's Markdown is all the chat
-  needs. A graph emitted by a pre-v3 library is still the one case the chat
-  stays off for.
+- The AI chat now answers on any graph the viewer can show, the in-browser demo
+  and a graph read from disk included, so "Open Demo" is enough to try it
+  without pointing the viewer at an application of your own. Answering used to
+  mean reaching a proxy the inspected application served — which a demo running
+  inside your tab has no way to reach, and a directory of static files does not
+  serve at all. Now that the model runs in the browser, the graph's Markdown is
+  all the chat needs. A graph emitted by a pre-v3 library is still the one case
+  the chat stays off for.
 - The viewer's AI chat can now answer by **looking things up in the graph**
   instead of reading an excerpt of it. In agent mode the model is given six
   read-only tools — list the modules, describe one, find a provider, trace a
@@ -52,6 +53,27 @@ for the published history.
   kept until the budget runs out, and the model is told how many modules were
   left out, so a large graph produces an answer that admits what it could not
   see instead of one quietly built from a truncated prompt.
+- The viewer shows the JSDoc a class was written with. Rest the pointer on a
+  module title, a provider, or a controller and the comment above it appears
+  beside the node; a node with nothing documented shows nothing, and the ones
+  that do carry a dotted underline so you can tell them apart before hovering.
+  The card can be read and scrolled without the pointer leaving it, and "Show
+  JSDoc on hover" in the graph settings panel turns the whole thing off. The
+  graph already carried these comments — this is the first surface that renders
+  them, so no change to the library or the graph JSON was needed.
+- The documentation site's demo is now the demo application itself, running in
+  your browser on the [nodepod](https://www.npmjs.com/package/@scelar/nodepod)
+  runtime, rather than a graph file committed into the site. Direct Run invokes
+  real provider methods, runtime traces and Direct Run history accumulate as you
+  use it, and the graph — JSDoc and Direct Run parameter types included — comes
+  from the application that is answering. It starts when you ask for it — a
+  preview waits behind "Run the demo application", and `/view` behind "Open
+  Demo" — and the viewer header names it "Demo" rather than showing an address
+  that only means something inside your tab.
+- `pnpm --filter nest-graph-inspector-demo run build:nodepod` packages the demo
+  for that runtime, and `pnpm --filter nest-graph-inspector-site run
+  test:demo-payload` boots the packaged application headless and checks that it
+  answers. Both run in CI ahead of every site build.
 - Repository CI: lint, typecheck, tests on Node 20/22/24, and a full site build
   now run on every pull request and push to `main`.
 - `lib` is linted (ESLint + typescript-eslint) and has a `typecheck` script.
@@ -68,6 +90,10 @@ for the published history.
   later is a swap of one object instead of a rewrite. Nothing about running the
   model in your own browser changes — that is still the default and still the
   only provider on offer.
+- The demo writes its graph files to `demo/tmp/graph/` instead of into the
+  site's public directory. It is otherwise an ordinary NestJS project that knows
+  nothing about running in a browser: what that runtime needs differently is
+  prepended by the payload build.
 - `lib` and `demo` compile under TypeScript `strict`.
 - Spec files are type-checked. `ts-jest` no longer runs with `diagnostics: false`,
   so type errors in tests fail the build instead of being skipped.
@@ -91,9 +117,20 @@ for the published history.
   an endpoint installed in your application whose job was to take a
   caller-supplied body and send it to another origin. Removing it is the point,
   not a side effect.
+- The committed graph fixture (`site/public/mock-graph/`) and
+  `demo/scripts/mock-sync.ts`, which existed to keep it in step with the demo.
+  The site runs the demo application instead.
 
 ### Fixed
 
+- The access token is built by encoding the HMAC digest buffer, rather than by
+  asking `digest()` for `base64url`. A runtime that ignores that argument hands
+  back raw bytes, and a token made of raw bytes does not survive the URL it
+  travels in. On Node the token is unchanged.
+- The npm lookup behind `latestVersion` in `information.json` is bounded to two
+  seconds. It is awaited while the inspector installs its outputs — while your
+  application is starting — so a network that neither answers nor refuses used
+  to hold up `app.listen()` with it.
 - The hosted graph viewer no longer keeps the inspector access token — or the
   graph endpoint — in its URL. The link printed by your application is spent on
   arrival, and the viewer settles on a plain `/view/navigator`, `/view/issues`,
@@ -114,9 +151,11 @@ for the published history.
 - Every `/view/**` page now requires the access token for the graph it would
   show. Without one the viewer returns to `/view`, since the token is no longer
   in the URL and the link printed by your application is the only thing that
-  hands one over. The bundled demo is exempt, being static files on the site's
-  own origin; an inspector configured with `accessToken.enabled: false` cannot be
-  opened in the hosted viewer.
+  hands one over. A graph on the site's own origin is exempt from that check —
+  which is where the bundled demo runs, though it prints and presents a token of
+  its own like any other application. An inspector configured with
+  `accessToken.enabled: false`, or with `accessToken.logToken: false`, prints a
+  link carrying no token and cannot be opened in the hosted viewer.
 - The graph viewer's reload button now stays busy for the whole reload rather
   than only its middle request, and the viewer shows its loading state for the
   whole of a reload started from the header.
@@ -124,6 +163,5 @@ for the published history.
   A 401 is not remembered across attempts, so an application that went down is
   reported as unreachable rather than as needing an access token — and an
   endpoint that never answered says so, instead of "no data received".
-- The proxy adapter no longer forwards requests to an origin outside its
-  configured target when a client sends an absolute-form request target.
 - `demo`'s test script no longer exits non-zero when it finds no tests.
+

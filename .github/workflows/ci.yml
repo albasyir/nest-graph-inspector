@@ -94,6 +94,16 @@ jobs:
       - name: Build library
         run: pnpm --filter nest-graph-inspector run build
 
+      # The site serves the demo application as a payload the browser runs, so
+      # it has to be built before the site is generated.
+      - name: Build demo payload
+        run: pnpm --filter nest-graph-inspector-demo run build:nodepod
+
+      # Nothing else boots the payload, and the site depends on the viewer link
+      # the application prints to find its graph endpoint.
+      - name: Verify demo payload boots
+        run: pnpm --filter nest-graph-inspector-site run test:demo-payload
+
       - name: Generate static site
         working-directory: site
         run: pnpm exec nuxt generate

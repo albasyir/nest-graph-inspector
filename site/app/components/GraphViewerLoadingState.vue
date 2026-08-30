@@ -1,6 +1,8 @@
 <script setup lang="ts">
 defineProps<{
   endpoint?: string
+  /** Replaces the default sentence when something more specific is known. */
+  message?: string
 }>()
 </script>
 
@@ -24,7 +26,7 @@ defineProps<{
         Preparing graph data...
       </p>
       <p class="text-sm text-muted">
-        Fetching graph resources. The first visit can take a moment while your graph is generated.
+        {{ message || 'Fetching graph resources. The first visit can take a moment while your graph is generated.' }}
       </p>
       <p
         v-if="endpoint"

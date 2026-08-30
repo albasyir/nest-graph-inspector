@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "nuxt typecheck",
-    "test": "node --experimental-strip-types --test app/utils/*.test.ts"
+    "test": "node --experimental-strip-types --test app/**/*.test.ts",
+    "test:demo-payload": "node --experimental-strip-types scripts/verify-nodepod-payload.ts"
   },
   "dependencies": {
     "@guolao/vue-monaco-editor": "^1.6.0",
@@ -25,6 +26,7 @@
     "@nuxtjs/mdc": "^0.21.1",
     "@pinia/nuxt": "^0.11.3",
     "@posthog/nuxt": "^1.7.76",
+    "@scelar/nodepod": "^1.9.20",
     "@takumi-rs/core": "^2.5.1",
     "@vue-flow/background": "^1.3.2",
     "@vue-flow/controls": "^1.1.3",

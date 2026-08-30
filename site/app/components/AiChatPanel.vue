@@ -267,11 +267,12 @@ const selectedProviderIcon = computed(() => {
  * Whether the chat has to stay off for the graph on screen.
  *
  * Only one thing keeps it off now: a graph emitted by an old library, which is
- * missing the detail the answers would be built from. A static fixture used to
- * be excluded too, because answering meant reaching the proxy that the
- * inspected application served — which a directory of files does not. The model
- * runs in this tab now, and the Markdown it reads is just another file sitting
- * beside `output.json`, so the bundled example answers like any other graph.
+ * missing the detail the answers would be built from. A graph served from disk,
+ * and the demo running inside this tab, used to be excluded too, because
+ * answering meant reaching the proxy that the inspected application served —
+ * which neither of them serves. The model runs in this tab now, and the Markdown
+ * it reads is just another file sitting beside `output.json`, so every graph the
+ * viewer can show answers like any other.
  */
 const isChatUnavailable = computed(() => {
   return graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'

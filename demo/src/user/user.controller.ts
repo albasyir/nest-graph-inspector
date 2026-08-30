@@ -2,6 +2,11 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UserSchedule } from './user.schedule';
 
+/**
+ * REST surface for the user feature.
+ *
+ * Documented here so the viewer has a controller comment to show on hover.
+ */
 @Controller('users')
 export class UserController {
   constructor(

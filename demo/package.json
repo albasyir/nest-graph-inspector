@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "build:nodepod": "nest build && node dist/scripts/build-nodepod-payload.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"libs/**/*.ts\"",
     "start": "nest start",
     "dev": "____DEV_VIEWER_BASE_URL=http://localhost:3000 nest start --watch",
@@ -37,6 +38,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/supertest": "^7.2.1",
+    "esbuild": "^0.28.1",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",
@@ -68,6 +70,8 @@
     ],
     "coverageDirectory": "./coverage",
     "testEnvironment": "node",
-    "roots": ["<rootDir>/src/"]
+    "roots": [
+      "<rootDir>/src/"
+    ]
   }
 }

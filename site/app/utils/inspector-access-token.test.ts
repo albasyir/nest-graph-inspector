@@ -138,24 +138,24 @@ for (const page of ['/view/navigator', '/view/issues', '/view/execution-sequence
 }
 
 // A viewer page is unreachable without a credential, so this decides who is
-// exempt. Only the demo fixture is: it is static files on this site's own
-// origin, with no application behind it and nothing to authenticate to.
+// exempt. Only a graph on this site's own origin is: the demo that runs in the
+// visitor's own browser, which is reachable from nowhere else — and which
+// refuses a request without the token it printed all the same.
 const VIEWER_ORIGIN = 'https://albasyir.github.io'
+const DEMO_ENDPOINT
+  = `${VIEWER_ORIGIN}/nest-graph-inspector/__nodepod__/53371/__graph-inspector`
 
 assert.ok(
-  canOpenWithoutAccessToken(
-    `${VIEWER_ORIGIN}/nest-graph-inspector/mock-graph`,
-    VIEWER_ORIGIN
-  ),
-  'the bundled demo must open without a token'
+  canOpenWithoutAccessToken(DEMO_ENDPOINT, VIEWER_ORIGIN),
+  'the in-browser demo must open without a token'
 )
 
 // Somebody's running application, on any other origin, may not.
 for (const endpoint of [
   ENDPOINT,
   'http://localhost:53371/__graph-inspector',
-  'https://albasyir.github.io.evil.example/mock-graph',
-  'http://albasyir.github.io/nest-graph-inspector/mock-graph'
+  'https://albasyir.github.io.evil.example/__nodepod__/53371/__graph-inspector',
+  'http://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/__graph-inspector'
 ]) {
   assert.equal(
     canOpenWithoutAccessToken(endpoint, VIEWER_ORIGIN),
@@ -166,11 +166,11 @@ for (const endpoint of [
 
 // A port or scheme difference is a different origin, so it is not exempt.
 assert.equal(
-  canOpenWithoutAccessToken('http://localhost:3000/mock-graph', 'http://localhost:3001'),
+  canOpenWithoutAccessToken('http://localhost:3000/graph', 'http://localhost:3001'),
   false
 )
 assert.ok(
-  canOpenWithoutAccessToken('http://localhost:3000/mock-graph', 'http://localhost:3000')
+  canOpenWithoutAccessToken('http://localhost:3000/graph', 'http://localhost:3000')
 )
 
 // Nothing to compare, or nothing parseable, is never exempt.
