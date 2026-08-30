@@ -12,6 +12,7 @@ import {
   redactAccessToken
 } from '~/utils/inspector-access-token'
 import { resolveDirectRunUrl } from '~/utils/inspector-endpoint-url'
+import { createNodepodDemoRunGuard } from '~/utils/nodepod-demo-run-guard'
 import {
   stripAnsi,
   toRequestBody,
@@ -76,6 +77,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   let originalFetch: FetchLike | undefined
   let logBuffer = ''
   let exitCode: number | undefined
+  /**
+   * Which startup the shared state below belongs to. Tearing the pod down
+   * supersedes the run that owned it, so a run resuming afterwards can see
+   * that it is no longer the one being waited on and stand down instead of
+   * publishing itself over its successor.
+   */
+  const runs = createNodepodDemoRunGuard()
 
   const isRunning = computed(() => status.value === 'ready')
   const isBusy = computed(
@@ -349,16 +357,22 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
   /**
    * Waits for the application to print its viewer link, and returns the graph
-   * endpoint read out of it.
+   * endpoint read out of it — or `null` once this startup has been superseded.
    *
    * Polls the log rather than the port, because the link is the only place the
    * access token is handed out. Gives up at {@link STARTUP_TIMEOUT_MS}, or as
    * soon as the application exits.
    */
-  async function waitForEndpoint(): Promise<string> {
+  async function waitForEndpoint(isCurrentRun: () => boolean): Promise<string | null> {
     const deadline = Date.now() + STARTUP_TIMEOUT_MS
 
     while (Date.now() < deadline) {
+      // The log being read is the store's, and a newer startup writes to the
+      // same one: keeping the poll running would read its lines as this run's.
+      if (!isCurrentRun()) {
+        return null
+      }
+
       const endpoint = readViewerLinkEndpoint(
         [...logLines.value, logBuffer].join('\n')
       )
@@ -396,6 +410,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     // second bridge over the first.
     disposePod()
 
+    // Claimed after the teardown above, which is what superseded the run
+    // before it. Every await below is a point at which a stop or a restart can
+    // come in behind this run, and nothing it owns may be published once one
+    // has.
+    const isCurrentRun = runs.claim()
+
     status.value = 'downloading'
     errorMessage.value = ''
     logLines.value = []
@@ -405,6 +425,11 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     totalBytes.value = 0
 
     const demoManifest = await fetchManifest()
+
+    if (!isCurrentRun()) {
+      return false
+    }
+
     manifest.value = demoManifest
 
     const [bundle, sources] = await Promise.all([
@@ -414,6 +439,10 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       ),
       fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision))
     ])
+
+    if (!isCurrentRun()) {
+      return false
+    }
 
     const files: Record<string, string> = {
       [`${demoManifest.workdir}/${demoManifest.entry}`]: bundle
@@ -427,7 +456,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     const { Nodepod: NodepodRuntime } = await import('@scelar/nodepod')
 
-    pod = await NodepodRuntime.boot({
+    const booted = await NodepodRuntime.boot({
       files,
       workdir: demoManifest.workdir,
       env: {
@@ -453,17 +482,39 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       packageStore: 'memory'
     })
 
-    installFetchBridge(pod)
+    // The boot is the longest await in the startup, so it is the likeliest to
+    // be outlived. Its pod is torn down here rather than published: the store
+    // already belongs to a newer run, whose own pod would be lost by the
+    // assignment and left running with nothing pointing at it.
+    if (!isCurrentRun()) {
+      booted.teardown()
+
+      return false
+    }
+
+    pod = booted
+
+    installFetchBridge(booted)
 
     status.value = 'starting'
 
-    const demoProcess = await pod.spawn('node', [demoManifest.entry], {
+    const demoProcess = await booted.spawn('node', [demoManifest.entry], {
       cwd: demoManifest.workdir
     })
+
+    if (!isCurrentRun()) {
+      return false
+    }
 
     demoProcess.on('output', appendLog)
     demoProcess.on('error', appendLog)
     demoProcess.on('exit', (code) => {
+      // A torn-down pod's process still reports its exit, and by then the log
+      // and the status belong to whatever replaced it.
+      if (!isCurrentRun()) {
+        return
+      }
+
       exitCode = code
       appendLog(`\nDemo application exited with code ${code}\n`)
 
@@ -478,7 +529,11 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       }
     })
 
-    const printedEndpoint = await waitForEndpoint()
+    const printedEndpoint = await waitForEndpoint(isCurrentRun)
+
+    if (printedEndpoint === null || !isCurrentRun()) {
+      return false
+    }
 
     // The printed link is a bootstrap credential: the endpoint keeps the path,
     // the token comes out of the URL and stays out of every URL after it.
@@ -507,15 +562,34 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       return Promise.resolve(true)
     }
 
-    startPromise ??= run().catch((error: unknown) => {
-      status.value = 'error'
-      errorMessage.value = error instanceof Error
-        ? error.message
-        : 'The demo application could not be started.'
-      startPromise = undefined
+    if (!startPromise) {
+      const attempt = run()
+      // run() tears the previous pod down before its first await, so a claim
+      // taken here is this attempt's own.
+      const isCurrentRun = runs.claim()
 
-      return false
-    })
+      startPromise = attempt.catch((error: unknown) => {
+        // A startup that was stopped or restarted while it was failing is not
+        // the one the visitor is waiting on, and its message would land on top
+        // of whatever replaced it.
+        if (!isCurrentRun()) {
+          return false
+        }
+
+        // The failure may have come after the pod booted or the bridge went in,
+        // and nothing else will reach them: start() is the only caller, and it
+        // will not run again unless the visitor asks.
+        disposePod()
+
+        status.value = 'error'
+        errorMessage.value = error instanceof Error
+          ? error.message
+          : 'The demo application could not be started.'
+        startPromise = undefined
+
+        return false
+      })
+    }
 
     return startPromise
   }
@@ -577,6 +651,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     pod?.teardown()
     pod = undefined
     exitCode = undefined
+    // Whatever startup owned that pod no longer owns the store.
+    runs.supersede()
   }
 
   /**
