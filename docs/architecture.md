@@ -1,11 +1,11 @@
 # Architecture — Nest Graph Inspector
 
-**Read this before changing anything.** It is the map of how the three
-packages fit together, which surfaces are contracts, and which defaults are
-deliberate. Where this document and the code disagree, the code wins and this
-document is the bug — fix it in the same pull request.
+**Read this before changing anything.** It maps how the three packages fit
+together, which surfaces are contracts, and which defaults are deliberate.
+Where this document and the code disagree, the code wins and the document is
+the bug — fix it in the same pull request.
 
-Companion documents, each narrower than this one:
+Narrower companion documents:
 
 | Document | Scope |
 |---|---|
@@ -19,14 +19,14 @@ Companion documents, each narrower than this one:
 
 ## The system in one paragraph
 
-Nest Graph Inspector is a NestJS module that, once imported into a host
-application, reads the live dependency-injection container that NestJS has
-already built, turns it into a framework-agnostic JSON document called
-`GraphOutput`, and hands that document to one or more output adapters — a file
-on disk, a Markdown report, an HTTP endpoint inside the host process, or the
-hosted interactive viewer. The viewer is a separate Nuxt application that knows
-nothing about NestJS: it fetches `GraphOutput` over HTTP and renders it. The
-whole design turns on that one seam.
+Once imported into a host application, Nest Graph Inspector reads the live
+dependency-injection container NestJS already built, turns it into a
+framework-agnostic JSON document called `GraphOutput`, and hands it to one or
+more output adapters: a file on disk, a Markdown report, an HTTP endpoint
+inside the host process, or the hosted interactive viewer. The viewer is a
+separate Nuxt application that knows nothing about NestJS — it fetches
+`GraphOutput` over HTTP and renders it. The whole design turns on that one
+seam.
 
 ---
 
@@ -54,10 +54,9 @@ nest-graph-inspector/        ← monorepo root (pnpm workspace)
 └── .github/workflows/       ← CI, publish, deploy
 ```
 
-Workspace membership is declared in
-[`pnpm-workspace.yaml`](../pnpm-workspace.yaml): `demo`, `lib`, `site`. The root
-`package.json` is private and holds no source; its scripts fan out across the
-workspace, and their ordering is not cosmetic — see
+Workspace members ([`pnpm-workspace.yaml`](../pnpm-workspace.yaml)): `demo`,
+`lib`, `site`. The root `package.json` is private and holds no source; its
+scripts fan out across the workspace, and their ordering is not cosmetic — see
 [Build, test, release](#build-test-release).
 
 ---
@@ -86,24 +85,23 @@ flowchart LR
   class lib,site,demo pkg
 ```
 
-Three rules follow from this picture, and every one of them is enforceable by
-reading a `package.json`:
+Three rules follow, each enforceable by reading a `package.json`:
 
 1. **`lib/` depends on nothing in this repository.** Its only runtime
    dependency is `ts-morph`; `@nestjs/common` and `@nestjs/core` are peers. It
    must never gain a frontend dependency.
 2. **`site/` depends on `lib/` for types only.** `site/package.json` lists
-   `"nest-graph-inspector": "workspace:*"`, and the site imports from the
-   package's public entry point — `import type { GraphOutput } from
-   'nest-graph-inspector'` — never from an internal source path. At runtime the
-   site holds no NestJS code; it speaks HTTP.
-3. **`demo/` is not the library.** It consumes the package the way a user
-   would, through its built entry points. Production logic does not belong
-   here.
+   `"nest-graph-inspector": "workspace:*"`, and the site imports only from the
+   public entry point — `import type { GraphOutput } from
+   'nest-graph-inspector'` — never an internal source path. At runtime it holds
+   no NestJS code; it speaks HTTP.
+3. **`demo/` is not the library.** It consumes the package as a user would,
+   through its built entry points. Production logic does not belong here.
 
-The workspace link is why CI builds the library before anything type-aware runs
-against `demo/` or `site/`: both resolve `nest-graph-inspector` through
-`lib/dist`, which does not exist in a fresh checkout.
+Both `demo/` and `site/` resolve `nest-graph-inspector` through `lib/dist`,
+which does not exist in a fresh checkout — so CI and every root script build
+the library before anything type-aware runs against them (see
+[Build, test, release](#build-test-release)).
 
 ---
 
@@ -113,17 +111,16 @@ Changing one side of either of these alone breaks the other.
 
 ### 1. The public API — `lib/src/index.ts`
 
-Everything re-exported there is public. Adding is a feature; changing or
-removing is a breaking change. It currently exports the module and its options
-types, the graph output types and JSON Schema, the Direct Run and runtime-trace
-types, and the access-token/rate-limiter surface (`AccessTokenService`,
+Everything re-exported there is public: adding is a feature, changing or
+removing is breaking. It currently exports the module and its options types,
+the graph output types and JSON Schema, the Direct Run and runtime-trace types,
+and the access-token/rate-limiter surface (`AccessTokenService`,
 `AccessAttemptLimiter`, and their constants) so an application can mint its own
 tokens. Keep [`public-api.md`](./public-api.md) in step.
 
-Note that several classes — `NestGraphInspectorSetup`, `RuntimeTraceRecorder`,
-the adapters, the port interfaces — are reachable by deep import but are *not*
-in `index.ts`. They are internal. Treat a deep import in user code as
-unsupported.
+Several classes — `NestGraphInspectorSetup`, `RuntimeTraceRecorder`, the
+adapters, the port interfaces — are reachable by deep import but are *not* in
+`index.ts`. They are internal; treat a deep import in user code as unsupported.
 
 ### 2. The graph output JSON — `GraphOutput`
 
@@ -137,10 +134,9 @@ Produced by `lib/`, consumed by the viewer in `site/`. It is versioned:
 A breaking change to the shape must bump the library constant, update
 `GRAPH_OUTPUT_JSON_SCHEMA` (including its `$id`, which carries the version),
 raise the viewer's minimum, and update
-[`graph-contract.md`](./graph-contract.md) — in one pull request. The viewer
-shows an "update your package" modal rather than rendering a graph whose
-version it does not support, so a half-done bump is visible to users
-immediately.
+[`graph-contract.md`](./graph-contract.md) — in one pull request. Rather than
+render a graph whose version it does not support, the viewer shows an "update
+your package" modal, so a half-done bump is visible to users immediately.
 
 ---
 
@@ -148,19 +144,19 @@ immediately.
 
 ### Ports and adapters
 
-The library is organised as ports and adapters, thinly applied. Two ports exist:
+The library is ports and adapters, thinly applied. Two ports:
 
 - `OutputAdapter<Config>` (`lib/src/ports/output.adapter.ts`) —
-  `execute(graphOutput, config): Promise<{ message: string }>`. Every output
-  channel implements it. The returned `message` is logged at `debug` level by
-  `NestGraphInspectorSetup`.
+  `execute(graphOutput, config): Promise<{ message: string }>`, implemented by
+  every output channel. `NestGraphInspectorSetup` logs the returned `message`
+  at `debug` level.
 - `ProxyGateway` (`lib/src/ports/proxy.gateway.ts`) — `serve(options)` /
   `close()`, implemented by `ProxyAdapter`.
 
-Not everything under `adapters/` is an output adapter. `DiscoveryAdapter` reads
-the container, `HttpServeAdapter` is the HTTP server itself, and
-`DirectRunOutputAdapter` builds routes rather than implementing the port. The
-directory name is looser than the port.
+Not everything under `adapters/` is an output adapter — the directory name is
+looser than the port. `DiscoveryAdapter` reads the container, `HttpServeAdapter`
+is the HTTP server itself, and `DirectRunOutputAdapter` builds routes rather
+than implementing the port.
 
 ### Component inventory
 
@@ -220,26 +216,23 @@ sequenceDiagram
   Setup-->>Http: GraphOutput (cached from here on)
 ```
 
-Three properties of this sequence are worth holding onto.
-
 **Viewer outputs are lazy; every other output is eager.** The viewer installs
-its endpoints during bootstrap but resolves the graph only when a client first
-asks for it — that is what `GraphOutputSource` (a value *or* a resolver) in
-`http-output.adapter.ts` is for. Walking the container and running ts-morph over
-the sources is not something a host application should pay for at startup if
-nobody ever opens the viewer. Configure a `json`, `markdown`, or `http` output
-alongside it, though, and the container *is* walked at bootstrap, because those
-adapters need a graph to write. The result is cached in a field, so it is built
-once per process either way.
+its endpoints at bootstrap but resolves the graph on the first request — that is
+what `GraphOutputSource` (a value *or* a resolver) in `http-output.adapter.ts`
+is for: a host application should not pay to walk the container and run ts-morph
+over the sources at startup if nobody ever opens the viewer. Add a `json`,
+`markdown`, or `http` output and the container *is* walked at bootstrap,
+because those adapters need a graph to write. Either way the result is cached
+in a field and built once per process.
 
 **Outputs are dispatched in parallel.** `publishOutputs` is a `Promise.all` over
 the eager outputs, and the viewer installs run as their own `Promise.all` before
 them. No output may depend on another having run.
 
-**A failing output never fails the application.** Both `publishSingleOutput` and
-`installViewerOutput` catch, log an error, and return. An inspector that cannot
-bind its port must not stop a host application from starting — which also means
-a broken output is a log line, not a crash, and is easy to miss.
+**A failing output never fails the application.** Both `publishSingleOutput`
+and `installViewerOutput` catch, log an error, and return: an inspector that
+cannot bind its port must not stop a host application from starting. So a
+broken output is a log line, not a crash, and easy to miss.
 
 ### Discovery and enrichment
 
@@ -258,13 +251,12 @@ a broken output is a log line, not a crash, and is easy to miss.
    (`NestJSCoreModule`), so the graph does not sprout framework internals in
    every real module.
 4. **Resolve dependencies.** Constructor parameters *and* property-injected
-   `@Inject()` members are resolved from injection tokens to a
+   `@Inject()` members resolve from injection tokens to a
    `GraphOutputDependencyRef` carrying `token` plus the `providedBy` module.
 5. **Enrich from source.** `SourceMetadataService` opens the application's own
    `.ts` files with ts-morph to attach JSDoc to modules, providers, and
    controllers, and to render Direct Run parameter types as TypeScript source
-   text. This step is best-effort: no sources found means no JSDoc, not a
-   failure.
+   text. Best-effort: no sources found means no JSDoc, not a failure.
 6. **Detect cycles.** Three separate passes — modules, providers, controllers —
    each classified `direct` or `indirect`, with a canonical key so the same
    cycle is not reported once per rotation. Provider cycles carry a richer path
@@ -300,18 +292,17 @@ Everything a `viewer` output installs, on one server:
 
 `information.json` is the handshake the viewer probes with: the site treats a
 response whose `for` is `nest-graph-inspector` as proof it has found an
-inspector.
-
-Its `is-static` flag says which kind of source answered. The `markdown` output
-writes the same payload beside its file with `is-static: true`, so a graph read
-from disk is distinguishable from one served by a running application — which is
-what lets the viewer hide the things only a live process can do.
+inspector. Its `is-static` flag says which kind of source answered — the
+`markdown` output writes the same payload beside its file with
+`is-static: true`, so a graph read from disk is distinguishable from one served
+by a running application, letting the viewer hide what only a live process can
+do.
 
 `latestVersion` comes from an npm registry lookup bounded to **2 seconds**
-(`LATEST_VERSION_TIMEOUT_MS`) and memoised per process. An unbounded request
-here would hold up the host application's own startup on a network that
-blackholes rather than refuses — and, as it happens, that awaited `fetch` is
-also what keeps the in-browser demo's event loop alive long enough to boot.
+(`LATEST_VERSION_TIMEOUT_MS`) and memoised per process. Unbounded, it would
+hold up the host application's own startup on a network that blackholes rather
+than refuses — and that awaited `fetch` is also what keeps the in-browser
+demo's event loop alive long enough to boot.
 
 `HttpServeAdapter` keys routes by `"METHOD path"` and supports `*` for either
 half plus trailing-`/*` prefixes. Several outputs may register against the same
@@ -321,9 +312,9 @@ origin; the server is created once and started once.
 
 The inspector serves the shape of an application's internals from inside that
 application, and Direct Run invokes real provider methods on request. The
-defaults below are deliberate. Treat them as decisions to be questioned when
-you touch `http-serve.adapter.ts`, `proxy.adapter.ts`, or
-`direct-run-output.adapter.ts`, not as inherited noise.
+defaults below are deliberate: when you touch `http-serve.adapter.ts`,
+`proxy.adapter.ts`, or `direct-run-output.adapter.ts`, question them rather
+than treating them as inherited noise.
 
 **Access tokens are on by default.** `AccessTokenService.createHttpGuard()` is
 attached to every route the inspector registers — graph, proxy, and Direct Run
@@ -338,13 +329,12 @@ alike.
 | Transports | `Authorization: Bearer`, `x-graph-inspector-token`, `?__inspector_token=` |
 | Comparison | Constant-time (`timingSafeEqual`) |
 
-The token rides in the printed viewer link so the hosted viewer carries it into
-every follow-up request without anyone copying it by hand. That means the
-startup log holds a live credential — which is exactly why
-`accessToken.logToken: false` exists for environments that ship logs somewhere
-the token should not reach. Turning it off means supplying your own `secret`
-and minting tokens yourself, and the printed link is then deliberately
-incomplete.
+The token rides in the printed viewer link, so the hosted viewer carries it
+into every follow-up request without anyone copying it by hand — which leaves a
+live credential in the startup log. Hence `accessToken.logToken: false`, for
+environments that ship logs somewhere the token should not reach; turning it
+off means supplying your own `secret` and minting tokens yourself, and the
+printed link is then deliberately incomplete.
 
 **Brute force is capped, not merely rejected.** `AccessAttemptLimiter` keys on
 the socket's remote address — never a forwarded header, which a caller can set:
@@ -356,27 +346,27 @@ the socket's remote address — never a forwarded header, which a caller can set
 | `blockMs` | 15 minutes, answered `429` with `Retry-After` |
 | `maxTrackedClients` | 1 000, so the tracker cannot itself be grown without limit |
 
-Only a genuine *guess* counts. A request with no token, or with a real token
-that has expired, is not a guess and is not counted. Behind a reverse proxy
-every request arrives with the proxy's address, so one attacker can lock
-everyone out for `blockMs`; lower it or disable the limiter in that topology.
+Only a genuine *guess* counts: a request with no token, or with a real token
+that has expired, is not counted. Behind a reverse proxy every request arrives
+with the proxy's address, so one attacker can lock everyone out for `blockMs`;
+lower it or disable the limiter in that topology.
 
 **The Ollama proxy is hardened against being useful to an attacker.**
 `ProxyAdapter` fixes the target origin and reuses only the request's path and
-query, so an absolute-form request target cannot turn it into an open relay. It
-strips the inspector's own credentials on the way out — the
+query, so an absolute-form request target cannot turn it into an open relay. On
+the way out it strips the inspector's own credentials — the
 `x-graph-inspector-token` header, an `Authorization: Bearer ngi1.…`, and the
 `__inspector_token` query parameter — because the caller authenticated to the
 inspector, not to whatever host the proxy targets.
 
 **Two things are wide open on purpose.** The viewer's CORS policy allows every
 origin (`origins: [/.*/]`), and the default bind interface is `0.0.0.0`. The
-viewer is hosted on GitHub Pages and the inspector runs on the developer's
+viewer is hosted on GitHub Pages while the inspector runs on the developer's
 machine, so a same-origin policy would make the product impossible; the token
-guard, not the origin check, is what makes that safe. CORS preflight is
-answered without a token by design — a browser sends no credentials on a
-preflight — which `demo/test/graph-inspector-security.e2e-spec.ts` asserts
-explicitly, along with the lockout behaviour, over real TCP.
+guard, not the origin check, is what makes that safe. Preflight is answered
+without a token by design — a browser sends no credentials on a preflight —
+which `demo/test/graph-inspector-security.e2e-spec.ts` asserts explicitly,
+along with the lockout behaviour, over real TCP.
 
 ### Direct Run and runtime tracing
 
@@ -384,26 +374,26 @@ Direct Run turns the viewer into something that *does* things rather than only
 showing them: a `POST /direct-run` with `{ module, provider, method, args }`
 looks the provider instance up in the live container and calls the method.
 
-Around that call, `RuntimeTraceRecorder` builds a trace. `DiscoveryAdapter`
+Around that call `RuntimeTraceRecorder` builds a trace. `DiscoveryAdapter`
 instruments provider instances once (tracked in a `WeakSet`, so wrapping is
-never doubled), and each instrumented method opens a span. Nesting comes from
-two `AsyncLocalStorage` stores — one for the active trace, one for the span
-stack — so a call graph several providers deep is reconstructed without any
-explicit plumbing. A method that returns a promise gets its span settled when
-the promise settles; a span whose promise nobody awaited is marked rather than
-lost, which is why `RuntimeTraceStatus` has a `partial` state alongside
-`success` and `error`. Traces are kept in memory, and additionally written to
-disk when a `json` output is configured — `viewer-output.adapter.ts` derives
-the history directory from that output's path.
+never doubled), and each instrumented method opens a span. Two
+`AsyncLocalStorage` stores — one for the active trace, one for the span stack —
+give the nesting, so a call graph several providers deep is reconstructed
+without explicit plumbing. A method returning a promise gets its span settled
+when the promise settles; a span whose promise nobody awaited is marked rather
+than lost, which is why `RuntimeTraceStatus` has a `partial` state alongside
+`success` and `error`. Traces are kept in memory, and written to disk too when
+a `json` output is configured — `viewer-output.adapter.ts` derives the history
+directory from that output's path.
 
 ---
 
 ## `demo/` — development host and showcase
 
 `demo/src` is an ordinary NestJS application with four feature modules — User,
-Product, Order, Mobile — and an inspector configured with all four output types
-at once (viewer on `localhost:53371`, a second plain `http` output on
-`localhost:53372/graph`, and Markdown and JSON into `demo/tmp/graph/`).
+Product, Order, Mobile — and an inspector running all four output types at once
+(viewer on `localhost:53371`, a second plain `http` output on
+`localhost:53372/graph`, Markdown and JSON into `demo/tmp/graph/`).
 
 Its module graph is deliberately awkward, because a graph tool needs something
 worth graphing:
@@ -413,24 +403,24 @@ worth graphing:
   resolved with `forwardRef` inside `@Inject()`.
 - **A second cycle through Mobile**: `ProductModule` ⇄ `MobileModule`.
 - **A useless import**: `ProductModule` imports `UserModule` and uses nothing
-  from it — there on purpose, to check the inspector reports it.
+  from it, on purpose, to check the inspector reports it.
 - **A third-party module**: `ConfigModule.forRoot()` inside `MobileModule`, so
   the graph contains something the repository does not own.
 
-`demo/test/` holds two e2e suites: an application-level one that exercises the
-demo's own REST routes *and* then reads the token-gated graph endpoint over TCP,
-and the network-level security suite described above, which boots the real
+`demo/test/` holds two e2e suites: an application-level one exercising the
+demo's own REST routes *and* then reading the token-gated graph endpoint over
+TCP, and the network-level security suite described above, which boots the real
 module and probes it over real sockets.
 
 **Neither runs by default.** They live behind `pnpm --filter
-nest-graph-inspector-demo run test:e2e`, using their own Jest config, while the
+nest-graph-inspector-demo run test:e2e` with their own Jest config, while the
 demo's plain `test` script is scoped to `src/` and passes with no tests. Root
-`pnpm run test` — and therefore CI — does not reach them. If you change anything
-in the security surface, run `test:e2e` yourself; nothing else will.
+`pnpm run test` — and therefore CI — does not reach them. Change anything in
+the security surface and you must run `test:e2e` yourself; nothing else will.
 
-The application knows nothing about the documentation site, and that is
-deliberate: it is a NestJS project you could copy elsewhere and run unchanged.
-Everything the browser needs differently lives in the payload build.
+The application knows nothing about the documentation site, deliberately: it is
+a NestJS project you could copy elsewhere and run unchanged. Everything the
+browser needs differently lives in the payload build.
 
 ---
 
@@ -441,9 +431,9 @@ A Nuxt 4 application deployed to GitHub Pages under the base path
 
 ### 1. The documentation site
 
-MDC pages under `site/content/` rendered by `@nuxt/content` through
+MDC pages under `site/content/`, rendered by `@nuxt/content` through
 `app/pages/[...slug].vue`, with numeric directory prefixes driving navigation
-order. Beyond the pages themselves:
+order. Beyond the pages:
 
 - `server/routes/raw/[...slug].md.get.ts` serves any doc page back as raw
   Markdown, for tools and for LLM consumption.
@@ -474,14 +464,14 @@ sequenceDiagram
   Note over Tab: /view/navigator renders the graph
 ```
 
-The routing model is the part most easily got wrong. **A viewer URL names a
-view, not a graph.** `/view/<encoded>` carries a bootstrap link once, on
-arrival; `resolveViewerBootstrap` decodes it, and the tab then keeps the
-endpoint and token in `sessionStorage` under `nest-graph-inspector:session`.
-Session storage rather than local storage, deliberately: a credential scoped to
-one tab, not shared across every tab in the browser.
+**A viewer URL names a view, not a graph** — the part of the routing model
+most easily got wrong. `/view/<encoded>` carries a bootstrap link once, on
+arrival; `resolveViewerBootstrap` decodes it, and the tab keeps the endpoint
+and token in `sessionStorage` under `nest-graph-inspector:session` — session
+rather than local storage deliberately, so the credential is scoped to one tab
+instead of shared across every tab in the browser.
 
-The token never goes back into a URL. It lives in the Pinia store and leaves
+The token never goes back into a URL: it lives in the Pinia store and leaves
 only as the `x-graph-inspector-token` header, added by a `$fetch` instance that
 reads it per request. `probeEndpoint` — used by the `/view` entry page to guess
 at a local inspector — pointedly does *not* use that authenticated fetch, so
@@ -489,9 +479,9 @@ probing a host never hands it a live credential for another one.
 
 The viewer pages are `navigator` (the Vue Flow graph), `issues` (circular
 dependencies), and `execution-sequence` (Direct Run traces as a Mermaid
-sequence diagram). `nuxt.config.ts` renders `/view/**` client-side only, since
-neither the tab's session nor the developer's local endpoint exists on a
-server; `/view` itself keeps SSR so it still unfurls as a link.
+sequence diagram). `nuxt.config.ts` renders `/view/**` client-side only —
+neither the tab's session nor the developer's local endpoint exists on a server
+— while `/view` itself keeps SSR so it still unfurls as a link.
 
 Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
 for JSON editing, ApexCharts for timings, and LangChain + Ollama (through the
@@ -541,42 +531,41 @@ into `site/public/nodepod-demo/`:
 test:demo-payload` (`site/scripts/verify-nodepod-payload.ts`) boots the built
 payload on the same runtime — headless, on `worker_threads` instead of Web
 Workers — spawns it, and reads the graph endpoint out of the startup log with
-the site's own parser. It is the only thing that exercises the two couplings
-this design rests on: that the bundle starts at all, and that the viewer link
-the library prints is still in a shape the site can read. Every workflow that
+the site's own parser. It is the only thing exercising the two couplings this
+design rests on: that the bundle starts at all, and that the viewer link the
+library prints is still in a shape the site can read. Every workflow that
 generates the site runs it right after building the payload.
 
 **Boot sequence.**
 
 ```
-1. The visitor asks for it: "Run the demo application" in a docs preview, or
-   "Open Demo" on /view
+1. The visitor asks: "Run the demo application" in a docs preview, or "Open
+   Demo" on /view
 2. nodepod-demo store downloads manifest.json, main.js, and sources.json
 3. Nodepod.boot({ files, workdir, env, headless: true })
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
 5. pod.spawn('node', ['main.js']) → the NestJS application starts
 6. The store reads the printed viewer link out of the application's own startup
-   log, and treats it as the bootstrap credential it is:
-     - the endpoint keeps its path, rewritten onto the bridged address
-     - the access token comes out of the URL and is handed to the graph store,
-       which sends it as a header from then on
-7. /view puts both in the tab's session and opens /view/navigator, which
-   loads the graph through the same HTTP contract as any other endpoint
+   log and treats it as the bootstrap credential it is: the endpoint keeps its
+   path, rewritten onto the bridged address; the access token comes out of the
+   URL and goes to the graph store, which sends it as a header from then on
+7. /view puts both in the tab's session and opens /view/navigator, which loads
+   the graph through the same HTTP contract as any other endpoint
 ```
 
-Nothing starts on its own. Downloading an application and booting a Node
-runtime is not something a page should decide to do because it was scrolled
-past, so every entry point is a click — and one pod then serves every preview on
-the page and the viewer, so the payload is downloaded and the application booted
-once for as long as that application keeps running. A failure opens one dialog,
-wherever it was started from, carrying what the application itself printed; the
-retry it offers, and the recovery below, are what boot another one.
+Nothing starts on its own: downloading an application and booting a Node
+runtime is not something a page should do because it was scrolled past, so
+every entry point is a click. One pod then serves every preview on the page and
+the viewer, so the payload is downloaded and the application booted once for as
+long as it keeps running. A failure opens one dialog, wherever it was started
+from, carrying what the application itself printed; the retry it offers, and
+the recovery below, are what boot another one.
 
-A viewer page names a view, not a graph, so a reload restores the endpoint from
-the tab's session — and for the demo that endpoint is answerable only by the tab
-that started it. `use-nodepod-demo-session.ts` recognises such an endpoint and
-starts the demo again, which means a new port and a new token, so it replaces
-the session rather than reusing it. A token the endpoint has begun refusing —
+A reload restores the endpoint from the tab's session (a viewer page names a
+view, not a graph) — and for the demo that endpoint is answerable only by the
+tab that started it. `use-nodepod-demo-session.ts` recognises such an endpoint
+and starts the demo again, which means a new port and a new token, so it
+replaces the session rather than reusing it. A token the endpoint has begun refusing —
 the demo's expires on the library's own schedule, and a tab left open outlives
 it — is recovered the same way, except that the application behind it is still
 running, so it is stopped first: joining it would only hand back the credential
@@ -610,7 +599,7 @@ Known limitations, accepted deliberately:
 - The AI chat's Ollama proxy has nothing to proxy to inside a browser, and
   answers the way it would for an application with no Ollama running.
 - The payload is a few megabytes, downloaded once per visit.
-- The pod lives as long as the page. Nothing tears it down on a route change,
+- The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
   that graph while every new request to it fails; the exit line in the demo
@@ -631,8 +620,8 @@ load-bearing:
 | `dev` | library and payload, then demo and site in parallel |
 | `test` / `lint` / `typecheck` | recursive, `--if-present` |
 
-The library must be built first every time, because `demo/` and `site/` resolve
-`nest-graph-inspector` through `lib/dist`.
+The library must be built first every time
+([why](#the-three-packages-and-the-direction-of-dependency)).
 
 Test runners differ per package, on purpose: `lib/` uses Jest with specs beside
 the code (`*.spec.ts`); `site/` uses `node --test` with
@@ -665,21 +654,21 @@ in `nest-graph-inspector.type.ts`; register the class in
 `NestGraphInspectorModule`'s providers; inject it into `NestGraphInspectorSetup`
 and add it to the `outputAdapters` record its constructor builds, which is what
 maps an output's `type` to its adapter. Decide also whether the new output is
-eager or lazy — `onModuleInit` currently treats everything that is not `viewer`
-as eager. That the change lands in four places is known debt
+eager or lazy — `onModuleInit` treats everything that is not `viewer` as eager.
+Landing in four places is known debt
 ([TD-06](./technical-debt-report.md)), not a pattern to imitate elsewhere.
 
 **Adding a field to the graph.** Contract first: extend
-`graph-output.type.ts` and `graph-output.schema.ts` together, decide whether it
-is additive (no version bump) or breaking (bump `GRAPH_OUTPUT_SCHEMA_VERSION`
-and the viewer's minimum), then extraction in `discovery.ts` / `setup.ts`, then
-the demo, then the payload rebuild, then the viewer, then
+`graph-output.type.ts` and `graph-output.schema.ts` together, deciding whether
+the change is additive or breaking (if breaking, follow
+[the version rules](#2-the-graph-output-json--graphoutput)). Then extraction in
+`discovery.ts` / `setup.ts`, the demo, the payload rebuild, the viewer, and
 [`graph-contract.md`](./graph-contract.md).
 
 **Adding a viewer page.** Add the route under `site/app/pages/view/`, register
 its name in `VIEWER_PAGES` in `viewer-bootstrap-link.ts` so a bootstrap link
 can address it, and read graph data from the `graph-inspector` store rather
-than fetching directly — the store owns the token.
+than fetching directly — it owns the token.
 
 **Adding an HTTP route to the library.** Build it with
 `HttpServeAdapter.get`/`post` and register it through the same
@@ -695,12 +684,12 @@ that is never the default.
    `lib/**`.
 2. **The site has no NestJS runtime dependency.** It consumes graph data
    through the HTTP contract, and imports from `nest-graph-inspector` for types
-   only — never from an internal source path.
+   only — never an internal source path.
 3. **`demo/src` is not the library.** Changes there are demo-only and must not
    alter the public API.
-4. **`GraphOutput` is a versioned contract.** A breaking change bumps
-   `GRAPH_OUTPUT_SCHEMA_VERSION`, the JSON Schema and its `$id`, the viewer's
-   `MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION`, and `graph-contract.md` — together.
+4. **`GraphOutput` is a versioned contract.** A breaking change bumps every
+   version marker in one PR — see
+   [the version rules](#2-the-graph-output-json--graphoutput).
 5. **Output adapters are pluggable via `OutputAdapter<Config>`.** New output
    types implement the port.
 6. **The HTTP server is framework-independent.** `HttpServeAdapter` uses plain
@@ -712,14 +701,14 @@ that is never the default.
    (`pnpm --filter nest-graph-inspector-demo run test:e2e`) — CI does not.
 8. **The demo payload is bundled from compiled JavaScript.**
    `demo/scripts/build-nodepod-payload.ts` must keep its entry point on the
-   `nest build` output. Pointing the bundler at `demo/src/**` drops the
+   `nest build` output; pointing the bundler at `demo/src/**` drops the
    decorator metadata Nest resolves constructor dependencies from, and the
    application fails to boot in the browser.
 9. **The printed viewer link is a parsed interface.**
    `site/app/utils/nodepod-demo-endpoint.ts` reads the endpoint out of the
-   startup log. Change
-   the shape of that line in `viewer-output.adapter.ts` and the in-browser demo
-   stops finding its own graph — `test:demo-payload` is what catches it.
+   startup log; change the shape of that line in `viewer-output.adapter.ts` and
+   the in-browser demo stops finding its own graph — `test:demo-payload` catches
+   it.
 10. **`lib/` and `demo/` compile under `strict`, spec files included.** Do not
     weaken `tsconfig.base.json` to make a change compile.
 
@@ -727,8 +716,8 @@ that is never the default.
 
 ## Known deliberate risks
 
-These are not bugs. They are trade-offs with a reason, listed so nobody
-"fixes" one without knowing what it buys.
+These are not bugs but trade-offs with a reason, listed so nobody "fixes" one
+without knowing what it buys.
 
 | Decision | Why | Cost |
 |---|---|---|
@@ -743,13 +732,13 @@ These are not bugs. They are trade-offs with a reason, listed so nobody
 
 ## Where this document may drift
 
-Facts here that a code change can invalidate, and the file to check:
+Facts a code change can invalidate, and the file to check:
 
 - Schema version `'3'` — `lib/src/types/graph-output.schema.ts`
 - Viewer minimum version `3` — `site/app/utils/graph-output-support.ts`
 - Default host/port `0.0.0.0:53371` — `lib/src/adapters/http-output.adapter.ts`
-- Default paths `/__graph-inspector`, `/__nest-graph-inspector` — the viewer and
-  http adapters respectively
+- Default paths `/__graph-inspector` (viewer) and `/__nest-graph-inspector`
+  (http) — the respective adapters
 - Token TTL, header, and query parameter — `lib/src/access-token.service.ts`
 - Limiter defaults — `lib/src/access-attempt-limiter.ts`
 - Viewer page names — `site/app/utils/viewer-bootstrap-link.ts`

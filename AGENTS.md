@@ -13,12 +13,12 @@ Nest Graph Inspector is a pnpm workspace with three ownership areas:
 
 **Required reading, in this order:**
 
-1. [`docs/architecture.md`](./docs/architecture.md) — **mandatory, always.**
-   How the three packages fit together, which surfaces are contracts, which
-   defaults are deliberate, and the invariants a change must preserve. Read it
-   in full before your first edit of a session, even for a change that looks
-   like a one-liner. Most mistakes in this repository are made by someone who
-   changed one side of a contract described in that file.
+1. [`docs/architecture.md`](./docs/architecture.md) — **mandatory, always**, in
+   full, before your first edit of a session, even for a change that looks like
+   a one-liner. How the three packages fit together, which surfaces are
+   contracts, which defaults are deliberate, and the invariants a change must
+   preserve. Most mistakes in this repository are made by someone who changed
+   one side of a contract it describes.
 2. [`CONTRIBUTING.md`](./CONTRIBUTING.md) — the commands.
 3. [`docs/maintainers-guide.md`](./docs/maintainers-guide.md) — which directory
    a change belongs in.
@@ -35,12 +35,12 @@ Then, for whatever the change touches:
 
 `docs/architecture.md` is normative, not decorative. If your change makes any
 statement in it wrong — a default, a route, a version constant, a boundary, a
-sequence — update the document in the **same** pull request. Its final section,
-"Where this document may drift", lists the facts most likely to go stale and the
-file each one lives in; check that list before you open a PR.
+sequence — update it in the **same** pull request. Its final section, "Where
+this document may drift", lists the facts most likely to go stale and the file
+each one lives in; check that list before you open a PR.
 
-If you find the document already disagreeing with the code, the code is right
-and the document is a bug. Fix it, or say so explicitly in your summary.
+If the document already disagrees with the code, the code is right and the
+document is a bug. Fix it, or say so explicitly in your summary.
 
 ## Verifying a change
 
@@ -73,7 +73,7 @@ delegation targets and do the work directly.
 
 ## Contracts that span packages
 
-Two things are shared surfaces; changing one side alone breaks the other.
+Two shared surfaces; changing one side alone breaks the other.
 [`docs/architecture.md`](./docs/architecture.md) explains both in full.
 
 - **Public API** — everything exported from `lib/src/index.ts`. Adding is a
@@ -85,27 +85,28 @@ Two things are shared surfaces; changing one side alone breaks the other.
 
 ## Library structure
 
-- `lib/src/**`: reusable implementation
-  - `lib/src/adapters/**`: output channel implementations
-  - `lib/src/ports/**`: port interfaces the adapters implement
-  - `lib/src/types/**`: public TypeScript types and the JSON Schema
-- `demo/src/**`: demo/showcase and development application
-- `demo/test/**`: demo integration tests
-- `demo/docs/**`: legacy demo documentation
-- `demo/scripts/**`: demo development tooling
+Full tree: [`docs/architecture.md`](./docs/architecture.md#repository-layout).
+
+- `lib/src/**` — reusable implementation
+  - `lib/src/adapters/**` — output channel implementations
+  - `lib/src/ports/**` — port interfaces the adapters implement
+  - `lib/src/types/**` — public TypeScript types and the JSON Schema
+- `demo/src/**` — demo/showcase and development application
+- `demo/test/**` — demo integration tests
+- `demo/docs/**` — legacy demo documentation
+- `demo/scripts/**` — demo development tooling
 
 ## Security-sensitive defaults
 
-The inspector serves an HTTP endpoint inside the host application, and the
-Direct Run feature invokes provider methods on request. When changing anything
-under `lib/src/adapters/http-serve.adapter.ts`,
-`lib/src/adapters/proxy.adapter.ts`, or
-`lib/src/adapters/direct-run-output.adapter.ts`, treat the bind interface, the
-CORS policy, and the access token guard as deliberate decisions to be
+The inspector serves an HTTP endpoint inside the host application, and Direct
+Run invokes provider methods on request. When changing
+`lib/src/adapters/http-serve.adapter.ts`, `lib/src/adapters/proxy.adapter.ts`,
+or `lib/src/adapters/direct-run-output.adapter.ts`, treat the bind interface,
+the CORS policy, and the access token guard as deliberate decisions to be
 questioned rather than defaults to preserve — the Security architecture section
 of [`docs/architecture.md`](./docs/architecture.md) states what each one buys
 and what it costs. A change to any of them needs a matching case in
-`demo/test/graph-inspector-security.e2e-spec.ts` — and you have to run it
+`demo/test/graph-inspector-security.e2e-spec.ts`, and you have to run it
 yourself, because `pnpm run verify` does not:
 
 ```bash
