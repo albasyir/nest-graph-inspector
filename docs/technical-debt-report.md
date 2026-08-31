@@ -1,7 +1,10 @@
 # Technical Debt Report
 
 **Scope:** `lib/**` (the published npm package). `demo/**` and `site/**` were not
-audited in this pass except where a `lib/` contract reaches them.
+audited in this pass except where a `lib/` contract reaches them. Three inherited
+documentation findings that live outside `lib/` — TD-11, TD-12, TD-14 — were
+re-checked for accuracy and are retained below, but their surfaces were not
+audited afresh.
 **Last revalidated:** 2026-08-31.
 **Method:** Every finding below was read at the cited file and line. Findings
 inherited from the previous edition of this report were re-checked against
@@ -33,7 +36,7 @@ obsolete.
 | TD-06 | Adding an output type requires four coordinated edits | **Unchanged** | Still four files. Documented as an extension-point cost in `architecture.md`. |
 | TD-07 | Direct Run crosses the config boundary via casts | **Narrowed** → TD-07 below | The body-parsing casts improved; one intersection cast remains. |
 | TD-08 | Schema version duplicated as literal and constant | **Relocated and worse** → TD-08 below | The duplication the report named is fixed; a more dangerous one replaced it. |
-| TD-09 | CORS and path normalization duplicated across adapters | **Partly resolved** → TD-09 below | The `normalizePath` triplication was refuted as a real defect; the CORS duplication stands. |
+| TD-09 | CORS and path normalization duplicated across adapters | **Partly resolved** → TD-09 below | The CORS half is resolved — the second implementation went with the deleted proxy adapter. The `normalizePath` triplication was refuted as duplication, but a two-adapter coupling remains. |
 | TD-10 | Provider and module cycles use incompatible path shapes | **Unchanged** | Still asymmetric; acknowledged in `architecture.md`. |
 | TD-11 | User-facing documentation is stale | **Partly resolved** → TD-11 below | The README no longer calls Direct Run "coming soon"; `site/content/2.configuration/4.access-token.md` now exists. Two claims in `outputs.md` remain wrong. |
 | TD-12 | Documentation ownership overlaps three directories | **Weakened** | `demo/docs/` is now three files (`index.html`, `diagram.html`, `logo.png`) and no longer a competing Markdown surface. Downgraded to Low. |
@@ -230,8 +233,10 @@ so the compiler cannot relate the two either.
 
 **Impact.** Following the bump procedure that `architecture.md` documents —
 raise `GRAPH_OUTPUT_SCHEMA_VERSION` — changes the JSON Schema but leaves the
-emitted graph announcing `"3"` and `$id` pointing at `v3`. **Every test still
-passes**, because the specs assert the same literal the emitter still produces.
+emitted graph announcing `"3"` and `$id` pointing at `v3`. **The library's own Jest
+specs still pass**, because they assert the same literal the emitter still
+produces — and nothing else gates it either: the demo's e2e suites do not assert
+the schema version, and CI does not run them.
 The viewer receives a v4 graph claiming to be v3 and renders it. The documented
 upgrade path silently does not work, and the version gate that exists to make a
 half-done bump visible is what fails first.
@@ -305,9 +310,11 @@ A grep for `Logger` across that file returns nothing: the 508-line router that
 owns every 404 and 500 in the library has no logging at all.
 
 **Impact.** Both halves are inverted — the internal detail goes to the caller
-and nothing goes to the operator. The 500 also answers `text/plain` where every
-other route answers the JSON `{ ok: false, error }` envelope, so no client can
-parse inspector errors generically.
+and nothing goes to the operator. The 500 answers `text/plain`, as does the 404 at
+`http-serve.adapter.ts:198`, while every response dispatched through
+`sendResult` — including the token guard's 401 and the limiter's 429 — answers
+the JSON `{ ok: false, error }` envelope. No client can parse inspector errors
+generically.
 
 ### TD-25 — ts-morph parsing blocks the host's event loop inside a request handler
 

@@ -342,7 +342,7 @@ framework mechanism it prescribes is unavailable, and this is what replaces it.
 | Validate every request DTO with `class-validator`; enable `whitelist` / `forbidNonWhitelisted` | No `ValidationPipe` ever runs, and `class-validator` is not a dependency of `lib/` | Hand-written validation in the adapter, with the same two guarantees: reject any key outside `['module','provider','method','args']` with a 400, and validate `args` against the `parameterTypes` the library already computes. Do not add a DTO class. |
 | Terminate on invalid env/config instead of booting partially | A library must never abort a host's boot because port 53371 was taken | Terminate the affected **capability**, not the process. Output-adapter failures stay logged and swallowed. Security-relevant misconfiguration does not: a secret shorter than the documented 32-character minimum must stop being used, not merely warn. |
 | Use-case code must not import framework types | The NestJS container is this library's subject matter and its lifecycle is the inbound adapter's trigger | `@Injectable()` and `OnModuleInit` on `NestGraphInspectorSetup` are exempt. The rule still binds to the graph-building logic inside it — cycle detection and type rendering import only `lib/src/types/**`. See TD-02. |
-| Fail fast and loudly | An output failure reaching the host would abort its boot | The failure must still reach *someone who can act*, and for a library that is the importing application. An optional `onOutputError` hook, defaulting to a no-op, satisfies ECC without changing the default. |
+| Fail fast and loudly | An output failure reaching the host would abort its boot | The failure must still reach *someone who can act*, and for a library that is the importing application. Today the only channel is a log line, which `architecture.md` itself calls "easy to miss" — so this obligation is **not** currently discharged. An optional `onOutputError` hook would give a host the means to escalate; because it must default to a no-op to preserve the invariant, ECC's requirement is met only for hosts that opt in, and that residue is deliberate. |
 
 ### Where ECC does not reach
 
@@ -377,7 +377,7 @@ silence.
 ### Running a review
 
 ```bash
-pnpm run verify   # lint + typecheck + test + build, across the workspace
+pnpm run verify   # build library → lint → typecheck → test → build workspace
 ```
 
 `verify` does **not** run the demo's e2e suites. Any change to the access token,
