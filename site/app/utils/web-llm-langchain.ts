@@ -971,6 +971,12 @@ export class ChatWebLlm extends BaseChatModel<ChatWebLlmCallOptions> {
 
     const { signal } = options
 
+    // Starting a decode nobody is waiting for holds web-llm's per-model lock for
+    // a whole generation. The agent loop hands every step the caller's signal,
+    // so a step can begin already aborted — and the listener below would never
+    // fire for it, because the abort happened before there was anything to hear.
+    signal?.throwIfAborted()
+
     // The engine pushes deltas at a callback and resolves when the generation
     // is over; a LangChain model has to pull them out of a generator. This
     // buffer is the join: deltas queue up as they arrive, and the generator

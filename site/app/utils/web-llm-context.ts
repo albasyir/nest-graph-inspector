@@ -136,13 +136,17 @@ export function buildGraphContext(
     // one happens to fit. The disclosure the system prompt carries can only say
     // *how many* modules are missing, and "the first N of them" is a claim the
     // reader can check against the viewer, while a cherry-picked set is not.
-    if (used + section.length + SECTION_SEPARATOR.length > charBudget) {
+    // Only the separators `join` will actually emit are charged for. Reserving
+    // one ahead of the first part, or after the last, drops a section that fits.
+    const separatorLength = parts.length ? SECTION_SEPARATOR.length : 0
+
+    if (used + separatorLength + section.length > charBudget) {
       omittedModuleCount = sections.length - index
       break
     }
 
     parts.push(section)
-    used += section.length + SECTION_SEPARATOR.length
+    used += separatorLength + section.length
   }
 
   return {

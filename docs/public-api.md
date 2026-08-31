@@ -863,7 +863,7 @@ subpath patterns), these should be excluded.
 
 ### Port interface (deep import, not in `index.ts`)
 
-```
+```text
 nest-graph-inspector/src/ports/output.adapter     → OutputAdapter<Config>
 ```
 

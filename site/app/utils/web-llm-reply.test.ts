@@ -140,4 +140,15 @@ assert.equal(
   '### UserModule\n\n- `UserService`\n- `UserRepository`'
 )
 
+// A closed but empty `<answer>` is the model answering with nothing. Reading it
+// as "no answer tag here" falls back to the raw reply, which is the markup.
+assert.deepEqual(parseAssistantReply('<think>Nothing to say.</think><answer></answer>'), {
+  reasoning: 'Nothing to say.',
+  content: ''
+})
+assert.deepEqual(parseAssistantReply('<answer>\n\n</answer>'), {
+  reasoning: '',
+  content: ''
+})
+
 console.log('web-llm-reply.test.ts ok')

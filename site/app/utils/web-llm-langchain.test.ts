@@ -1159,6 +1159,19 @@ function settle(): Promise<void> {
   assert.ok(engine.interrupts >= 1, 'aborting should interrupt the engine')
 }
 
+// A signal that was already aborted must not start a generation at all: the
+// listener below it would never fire, and web-llm holds its per-model lock for
+// the length of a decode nobody is waiting for.
+{
+  const engine = fakeStreamer(textDeltas('Nest builds the graph.'))
+  const model = new ChatWebLlm({ engine, model: RECOMMENDED_MODEL })
+
+  await assert.rejects(
+    model.invoke([new HumanMessage('hi')], { signal: AbortSignal.abort() })
+  )
+  assert.equal(engine.calls.length, 0, 'an aborted call should never reach the engine')
+}
+
 // --- identity ----------------------------------------------------------------
 
 {

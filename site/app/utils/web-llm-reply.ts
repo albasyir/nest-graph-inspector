@@ -22,18 +22,29 @@ export type ParsedReply = {
   content: string
 }
 
-function getTaggedContent(content: string, tag: string) {
+/**
+ * The content of a closed tag, or `undefined` when the tag is not there at all.
+ *
+ * The two are worth telling apart for `<answer>`: a model that closed an empty
+ * one answered with nothing, and treating that as "no answer tag" falls back to
+ * the raw reply, which is the markup itself.
+ */
+function matchTaggedContent(content: string, tag: string): string | undefined {
   const match = content.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'i'))
 
-  return match?.[1]?.trim() || ''
+  return match ? (match[1] ?? '').trim() : undefined
+}
+
+function getTaggedContent(content: string, tag: string) {
+  return matchTaggedContent(content, tag) ?? ''
 }
 
 /** The final split, once the whole reply has arrived. */
 export function parseAssistantReply(content: string): ParsedReply {
   const reasoning = getTaggedContent(content, 'reasoning') || getTaggedContent(content, 'think')
-  const answer = getTaggedContent(content, 'answer')
+  const answer = matchTaggedContent(content, 'answer')
 
-  if (answer) {
+  if (answer !== undefined) {
     return {
       reasoning,
       content: answer

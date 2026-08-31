@@ -353,6 +353,10 @@ export async function runGraphAgent(
    * discards the id and there is nothing to be unique against. Harmless there,
    * fatal here: keying on the id alone would collapse a loop of six identical
    * calls into one, which is precisely the loop the step cap exists to show.
+   *
+   * A result is keyed by the call it answers rather than by its own message id,
+   * which `BaseMessage` leaves optional: an id-less result would key on the
+   * empty string, and every result after the first would be dropped as a repeat.
    */
   function readUpdate(message: StreamMessage): void {
     const messageId = typeof message.id === 'string' ? message.id : ''
@@ -375,19 +379,21 @@ export async function runGraphAgent(
       return
     }
 
-    if (seenToolResults.has(messageId)) {
+    const toolCallId = typeof message.tool_call_id === 'string' ? message.tool_call_id : ''
+    const callKey = callKeysByToolCallId.get(toolCallId)
+    const resultKey = callKey ?? `${messageId}:${toolCallId}`
+
+    if (seenToolResults.has(resultKey)) {
       return
     }
 
-    seenToolResults.add(messageId)
-
-    const toolCallId = typeof message.tool_call_id === 'string' ? message.tool_call_id : ''
+    seenToolResults.add(resultKey)
 
     onEvent({
       type: 'tool-result',
       // Reported under the key its call was reported under, so the panel can
       // fill in the step it already drew rather than drawing a second one.
-      id: callKeysByToolCallId.get(toolCallId) ?? toolCallId,
+      id: callKey ?? toolCallId,
       name: typeof message.name === 'string' ? message.name : 'tool',
       text: readContentText(message.content)
     })

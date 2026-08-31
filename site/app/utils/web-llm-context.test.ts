@@ -235,4 +235,31 @@ for (const nonsense of [undefined, null, 0, {}, []]) {
   assert.equal(isContextWindowOverflow(nonsense), false)
 }
 
+// Only the separators the join emits are paid for. A budget that fits the
+// heading and one section exactly keeps that section rather than dropping it.
+{
+  const heading = '# NestJS Dependency Graph'
+  const section = moduleSection('AppModule', 1)
+  const exact = [heading, '', moduleSection('AppModule', 1), '', moduleSection('UserModule', 1)].join('\n')
+  const budget = heading.length + '\n\n'.length + section.length
+
+  const context = buildGraphContext(exact, budget)
+
+  assert.equal(context.text, [heading, section].join('\n\n'))
+  assert.equal(context.omittedModuleCount, 1)
+  assert.equal(context.truncated, true)
+}
+
+// A graph with no heading of its own is all sections, and the first of them is
+// not charged for a separator that precedes nothing.
+{
+  const first = moduleSection('AppModule', 1)
+  const headless = [first, '', moduleSection('UserModule', 1)].join('\n')
+
+  const context = buildGraphContext(headless, first.length)
+
+  assert.equal(context.text, first)
+  assert.equal(context.omittedModuleCount, 1)
+}
+
 console.log('web-llm-context.test.ts ok')

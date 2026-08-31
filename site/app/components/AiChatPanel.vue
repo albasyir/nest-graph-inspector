@@ -1132,6 +1132,7 @@ async function handleSubmit(event: Event) {
       // The retry is a fresh attempt at the same question, so the lookups the
       // abandoned one made are not part of the answer that survives.
       updateAssistantMessage({
+        reasoning: '',
         reasoningStreaming: false,
         toolSteps: [],
         notice: ''
