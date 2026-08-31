@@ -15,7 +15,7 @@
 | Medium | Output extension is closed over a union, core dispatch record, DI registration, and internal-only port | Difficult-to-extend API |
 | Medium | Direct Run uses internal-only configuration injected through type intersections and casts | Difficult-to-extend API |
 | Medium | Graph schema version is duplicated as a literal and as the schema constant | Duplicated implementation |
-| Medium | CORS/preflight and URL/path normalization are implemented independently in multiple adapters | Duplicated implementation |
+| Medium | URL/path normalization is implemented independently in two adapters | Duplicated implementation |
 | Medium | Graph cycle serialization is inconsistent between provider and controller cycles | Inconsistent contract / naming |
 | Medium | Documentation gives conflicting status and shape descriptions for implemented features | Missing / stale documentation |
 | Medium | `demo/docs/` and `site/content/` overlap as documentation surfaces | Overlapping directories / unclear ownership |
@@ -305,38 +305,35 @@ values remain aligned.
 
 ---
 
-### TD-09 — CORS/preflight and path normalization are implemented independently in several adapters
+### TD-09 — Path normalization is implemented independently in two adapters
 
 **Evidence**
-
-CORS:
-
-- `HttpServeAdapter` unconditionally sets wildcard CORS headers and has its own
-  `isCorsPreflightRequest()` / `sendCorsPreflight()` implementation.
-- `ProxyAdapter` separately implements `getCorsHeaders()`, `applyCors()`,
-  `handleCorsPreflight()`, and its own `isCorsPreflightRequest()`; it supports
-  origin allowlists and credentials.
 
 Path/origin normalization:
 
 - `HttpOutputAdapter.normalizePath()`.
 - `HttpServeAdapter.normalizePath()` and `normalizeOrigin()`.
-- `ProxyAdapter.normalizePath()` and `normalizeUrl()`.
 
 The implementations do not have identical policy: `HttpOutputAdapter` leaves a
-trailing slash, `ProxyAdapter` removes one, and `HttpServeAdapter` normalizes only
-a leading slash (except `'*'`).
+trailing slash, while `HttpServeAdapter` normalizes only a leading slash (except
+`'*'`). `HttpOutputAdapter` computes the path a route is advertised under and
+`HttpServeAdapter` computes the key that path is matched by, so the two have to
+agree for a route to be reachable at the URL the viewer was given.
+
+CORS is no longer duplicated: `HttpServeAdapter` is now the only component that
+sets CORS headers or answers a preflight, since the request-forwarding adapter
+that carried the second implementation was deleted with the in-browser AI chat
+change.
 
 **Impact**
 
-HTTP and proxy behavior is spread across components that must agree at runtime.
-Path handling and CORS policy can change independently and create route or browser
-behavior differences. The split CORS policy is also relevant to TD-01.
+Path handling can change in one adapter without the other, producing a route that
+is registered under one spelling and advertised under another. The remaining
+wildcard CORS policy is covered by TD-01.
 
 **Related code**
 
 - `lib/src/adapters/http-serve.adapter.ts`
-- `lib/src/adapters/proxy.adapter.ts`
 - `lib/src/adapters/http-output.adapter.ts`
 
 ---
@@ -477,9 +474,9 @@ repository provides a clear implementation-backed role:
   circular dependency examples used for graph inspection.
 - `demo/tmp/graph/` is generated runtime output of the demo's `local` target; it
   is gitignored and nothing downstream reads it.
-- `OutputAdapter` and `ProxyGateway` are useful internal seams even though custom
-  extension is not currently public; the debt is the absence of a public
-  registration path, not the existence of the interfaces.
+- `OutputAdapter` is a useful internal seam even though custom extension is not
+  currently public; the debt is the absence of a public registration path, not
+  the existence of the interface.
 - `site/public/nodepod-demo/` is build output, written by
   `demo/scripts/build-nodepod-payload.ts` and gitignored. Bundling it from the
   `nest build` output rather than from `demo/src/**` is a requirement, not an

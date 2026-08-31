@@ -330,39 +330,37 @@ describe(NestGraphInspectorSetup.name, () => {
     ]);
   });
 
-  it("should apply default viewer Ollama proxy options", async () => {
+  it("should apply default viewer direct-run options", async () => {
     options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
 
     await service.onModuleInit();
 
+    // Matched exactly rather than with objectContaining: this merge used to
+    // also fill in the origin and path of a local LLM daemon the viewer
+    // relayed browser requests to. Inference happens in the browser now, so a
+    // key reappearing here has to fail instead of being tolerated.
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Function),
-      expect.objectContaining({
+      {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
-        ollama: {
-          origin: "http://127.0.0.1:11434",
-          path: "/ollama",
-        },
-        directRun: expect.objectContaining({
+        directRun: {
           path: "/direct-run",
+          historyDirPath: undefined,
           instanceLookup: expect.any(Function),
-        }),
-      }),
+        },
+      },
     );
   });
 
-  it("should let viewer output override default Ollama proxy options", async () => {
+  it("should let viewer output override the default direct-run path", async () => {
     options.outputs = [
       {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
-        ollama: {
-          origin: "http://localhost:11435",
-          path: "/llm",
-        },
+        directRun: { path: "/run" },
       },
     ];
 
@@ -370,19 +368,16 @@ describe(NestGraphInspectorSetup.name, () => {
 
     expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
       expect.any(Function),
-      expect.objectContaining({
+      {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
-        ollama: {
-          origin: "http://localhost:11435",
-          path: "/llm",
-        },
-        directRun: expect.objectContaining({
-          path: "/direct-run",
+        directRun: {
+          path: "/run",
+          historyDirPath: undefined,
           instanceLookup: expect.any(Function),
-        }),
-      }),
+        },
+      },
     );
   });
 

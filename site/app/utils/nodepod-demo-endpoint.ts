@@ -119,8 +119,8 @@ export function buildDemoEndpointUrl(params: {
 }
 
 /**
- * Path the inspector's sibling endpoints (`/direct-run`, `/ollama`) live under
- * for a given graph endpoint.
+ * Path the inspector's sibling endpoints (`/direct-run`) live under for a given
+ * graph endpoint.
  *
  * The library mounts them at the root of the application's own server, which
  * for the in-browser demo sits below the segment its port is addressed under.

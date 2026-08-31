@@ -144,14 +144,12 @@ your package" modal, so a half-done bump is visible to users immediately.
 
 ### Ports and adapters
 
-The library is ports and adapters, thinly applied. Two ports:
+The library is ports and adapters, thinly applied. One port:
 
 - `OutputAdapter<Config>` (`lib/src/ports/output.adapter.ts`) —
   `execute(graphOutput, config): Promise<{ message: string }>`, implemented by
   every output channel. `NestGraphInspectorSetup` logs the returned `message`
   at `debug` level.
-- `ProxyGateway` (`lib/src/ports/proxy.gateway.ts`) — `serve(options)` /
-  `close()`, implemented by `ProxyAdapter`.
 
 Not everything under `adapters/` is an output adapter — the directory name is
 looser than the port. `DiscoveryAdapter` reads the container, `HttpServeAdapter`
@@ -172,10 +170,9 @@ than implementing the port.
 | `AccessAttemptLimiter` | `access-attempt-limiter.ts` | Per-client lockout for repeated invalid tokens |
 | `HttpServeAdapter` | `adapters/http-serve.adapter.ts` | Standalone `node:http` server and router; no Express/Fastify |
 | `HttpOutputAdapter` | `adapters/http-output.adapter.ts` | Registers the four graph routes; owns the host/port defaults |
-| `ViewerOutputAdapter` | `adapters/viewer-output.adapter.ts` | Composes HTTP + proxy + Direct Run; prints the viewer link |
+| `ViewerOutputAdapter` | `adapters/viewer-output.adapter.ts` | Composes HTTP + Direct Run; prints the viewer link |
 | `FileOutputAdapter` | `adapters/file-output.adapter.ts` | Writes the Markdown report (Mermaid + prose) |
 | `JsonOutputAdapter` | `adapters/json-output.adapter.ts` | Writes raw `GraphOutput` JSON |
-| `ProxyAdapter` | `adapters/proxy.adapter.ts` | Forwards the viewer's AI-chat requests to Ollama |
 | `DirectRunOutputAdapter` | `adapters/direct-run-output.adapter.ts` | Builds the routes that invoke provider methods |
 | `createInspectorEndpointInfo` | `inspector-endpoint-info.ts` | Builds the `information.json` handshake payload |
 
@@ -274,7 +271,7 @@ broken output is a log line, not a crash, and easy to miss.
 | `json` | `{ path }` | Writes `GraphOutput` as JSON, relative to `process.cwd()` |
 | `markdown` | `{ path }` | Writes a Mermaid diagram plus a per-module report, and an `information.json` beside it |
 | `http` | `{ origin?, host?, port?, path? }` | Registers the four graph routes; default path `/__nest-graph-inspector` |
-| `viewer` | `{ origin?, host?, port?, path?, ollama?, directRun? }` | `http` + Ollama proxy + Direct Run + prints the viewer link; default path `/__graph-inspector` |
+| `viewer` | `{ origin?, host?, port?, path?, directRun? }` | `http` + Direct Run + prints the viewer link; default path `/__graph-inspector` |
 
 Everything a `viewer` output installs, on one server:
 
@@ -284,7 +281,6 @@ Everything a `viewer` output installs, on one server:
 | `GET` | `/output.json` | `GraphOutput` |
 | `GET` | `/output.schema.json` | `GRAPH_OUTPUT_JSON_SCHEMA` |
 | `GET` | `/output.md` | The Markdown report |
-| `*` | `/ollama`, `/ollama/*` | Proxied to the configured Ollama origin |
 | `POST` | `/direct-run` | Invokes `{ module, provider, method, args }` |
 | `GET` | `/direct-run/histories` | Every completed `RuntimeTrace` |
 | `GET` | `/direct-run/history/index.json` | Trace summaries |
@@ -312,13 +308,12 @@ origin; the server is created once and started once.
 
 The inspector serves the shape of an application's internals from inside that
 application, and Direct Run invokes real provider methods on request. The
-defaults below are deliberate: when you touch `http-serve.adapter.ts`,
-`proxy.adapter.ts`, or `direct-run-output.adapter.ts`, question them rather
-than treating them as inherited noise.
+defaults below are deliberate: when you touch `http-serve.adapter.ts` or
+`direct-run-output.adapter.ts`, question them rather than treating them as
+inherited noise.
 
 **Access tokens are on by default.** `AccessTokenService.createHttpGuard()` is
-attached to every route the inspector registers — graph, proxy, and Direct Run
-alike.
+attached to every route the inspector registers — graph and Direct Run alike.
 
 | Property | Value |
 |---|---|
@@ -351,13 +346,11 @@ that has expired, is not counted. Behind a reverse proxy every request arrives
 with the proxy's address, so one attacker can lock everyone out for `blockMs`;
 lower it or disable the limiter in that topology.
 
-**The Ollama proxy is hardened against being useful to an attacker.**
-`ProxyAdapter` fixes the target origin and reuses only the request's path and
-query, so an absolute-form request target cannot turn it into an open relay. On
-the way out it strips the inspector's own credentials — the
-`x-graph-inspector-token` header, an `Authorization: Bearer ngi1.…`, and the
-`__inspector_token` query parameter — because the caller authenticated to the
-inspector, not to whatever host the proxy targets.
+**The library forwards nothing.** It used to install a proxy on the viewer
+output that took a caller-supplied body and sent it to a local Ollama daemon,
+hardened against being turned into an open relay. The AI chat now runs the model
+in the visitor's browser, so that endpoint — and the request-forwarding surface
+it carried — is gone rather than defended.
 
 **Two things are wide open on purpose.** The viewer's CORS policy allows every
 origin (`origins: [/.*/]`), and the default bind interface is `0.0.0.0`. The
@@ -427,7 +420,7 @@ browser needs differently lives in the payload build.
 ## `site/` — documentation and viewer
 
 A Nuxt 4 application deployed to GitHub Pages under the base path
-`/nest-graph-inspector/`. It carries three surfaces.
+`/nest-graph-inspector/`. It carries four surfaces.
 
 ### 1. The documentation site
 
@@ -484,8 +477,8 @@ neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 
 Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
-for JSON editing, ApexCharts for timings, and LangChain + Ollama (through the
-library's proxy) for the AI chat panel.
+for JSON editing, ApexCharts for timings, and LangChain over `@mlc-ai/web-llm`
+for the AI chat panel.
 
 **The graph carries the application's own documentation.** Every module,
 provider and controller in `GraphOutput` may hold a `jsdoc` string —
@@ -608,14 +601,67 @@ Known limitations, accepted deliberately:
 
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
-- The AI chat's Ollama proxy has nothing to proxy to inside a browser, and
-  answers the way it would for an application with no Ollama running.
 - The payload is a few megabytes, downloaded once per visit.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
   that graph while every new request to it fails; the exit line in the demo
   console is the only signal.
+
+### 4. The AI chat, which runs entirely in the browser
+
+The assistant has no server side. `@mlc-ai/web-llm` downloads model weights from
+HuggingFace into the browser's Cache API and runs inference on the visitor's GPU
+through WebGPU, inside a web worker. The library's only contribution is the graph
+Markdown the viewer already fetches from `/output.md`, which the site budgets
+down to fit the model's context window before using it as the system prompt. The
+graph, the question, and the answer never leave the machine, and nothing has to
+be installed for the feature to work — at the cost of requiring a WebGPU-capable
+browser, which the panel checks for before offering the chat.
+
+**The chat talks to a LangChain model, not to web-llm.** The panel never calls
+`@mlc-ai/web-llm`. It builds a `ChatWebLlm` — a LangChain `BaseChatModel`
+wrapping the engine — and talks to that. The indirection buys one thing, and it
+is the reason it exists: which model answers is a constructor argument. Putting
+`@langchain/openai`, `@langchain/anthropic` or a later web-llm release behind the
+same panel is a swap of one object, not a rewrite of the chat. In-browser
+inference is the right default for a tool that discusses the developer's own
+application, but it should not be the only thing this panel can ever do.
+
+The seam is `WebLlmStreamer` in `app/utils/web-llm-boundary.ts`: two functions,
+`streamChat` and `interrupt`. `useWebLlmEngine` fills them from web-llm and
+`ChatWebLlm` reads them, and neither knows anything else about the other — which
+is also what makes the chat model, and the entire agent loop above it, testable
+in a plain node script against a scripted engine, with no browser, no GPU and no
+downloaded weights.
+
+**Tool calling is implemented on our side rather than delegated.** web-llm has
+its own function-calling path, but it refuses any model outside a five-entry list
+of Hermes builds — and reading what it does once it accepts one shows the list is
+a bet, not a capability: it interpolates the tool schemas into a system prompt,
+constrains the reply with a JSON grammar, and parses the result back. `ChatWebLlm`
+does both of those directly, so tools bind to **every** model in the catalog,
+including the recommended 2 GB one. Constrained decoding is the stronger half of
+that: a fine-tune makes well-formed output likely, a grammar at the sampler makes
+it certain. What neither fixes is judgement — a 1.7B model still picks the wrong
+tool sometimes — which is what the catalog's `toolCallingQuality` is for, and it
+is a sentence the panel shows, never a condition it branches on.
+
+**Agent mode exists because the context window is 4096 tokens.** The plain path
+puts an excerpt of the graph Markdown in the prompt, and on a real application
+that excerpt is most of the window and still not most of the graph. The agent
+inverts it: almost no graph in the prompt, and six read-only tools the model
+queries for the part the question needs. It is the better answer for a large
+graph and the worse one for a small one, so the panel defaults by graph size and
+lets the reader switch.
+
+This replaced an HTTP proxy inside the library that forwarded chat requests from
+the viewer origin to a local Ollama daemon. Deleting it removed a
+request-forwarding relay from the library's attack surface: an endpoint installed
+in the host application whose whole job was to take a caller-supplied body and
+send it somewhere else. A feature that needs no server component should not ship
+one, and the boundary the site consumes is now exactly the graph contract and
+nothing more.
 
 ---
 

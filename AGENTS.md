@@ -29,7 +29,7 @@ Then, for whatever the change touches:
 |---|---|
 | anything exported from `lib/src/index.ts` | [`docs/public-api.md`](./docs/public-api.md) |
 | the graph JSON, or the viewer that reads it | [`docs/graph-contract.md`](./docs/graph-contract.md) |
-| `http-serve`, `proxy`, `direct-run`, or the access token | the Security architecture section of [`docs/architecture.md`](./docs/architecture.md) |
+| `http-serve`, `direct-run`, or the access token | the Security architecture section of [`docs/architecture.md`](./docs/architecture.md) |
 
 ### Keeping the architecture document true
 
@@ -100,8 +100,8 @@ Full tree: [`docs/architecture.md`](./docs/architecture.md#repository-layout).
 
 The inspector serves an HTTP endpoint inside the host application, and Direct
 Run invokes provider methods on request. When changing
-`lib/src/adapters/http-serve.adapter.ts`, `lib/src/adapters/proxy.adapter.ts`,
-or `lib/src/adapters/direct-run-output.adapter.ts`, treat the bind interface,
+`lib/src/adapters/http-serve.adapter.ts` or
+`lib/src/adapters/direct-run-output.adapter.ts`, treat the bind interface,
 the CORS policy, and the access token guard as deliberate decisions to be
 questioned rather than defaults to preserve — the Security architecture section
 of [`docs/architecture.md`](./docs/architecture.md) states what each one buys

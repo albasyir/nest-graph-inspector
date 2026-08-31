@@ -10,7 +10,6 @@ import { FileOutputAdapter } from './adapters/file-output.adapter';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import { ViewerOutputAdapter } from './adapters/viewer-output.adapter';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
-import { ProxyAdapter } from './adapters/proxy.adapter';
 import { HttpServeAdapter } from './adapters/http-serve.adapter';
 import { DirectRunOutputAdapter } from './adapters/direct-run-output.adapter';
 import { RuntimeTraceRecorder } from './runtime-trace.recorder';
@@ -22,10 +21,6 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     {
       type: 'viewer',
       ...HttpOutputAdapter.defaultConfig,
-      ollama: {
-        origin: 'http://127.0.0.1:11434',
-        path: '/ollama',
-      },
       directRun: {
         path: '/direct-run',
       },
@@ -57,7 +52,6 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
     FileOutputAdapter,
     HttpServeAdapter,
     HttpOutputAdapter,
-    ProxyAdapter,
     RuntimeTraceRecorder,
     DirectRunOutputAdapter,
     ViewerOutputAdapter,

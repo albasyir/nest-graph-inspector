@@ -1,43 +1,27 @@
 <script setup lang="ts">
+import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
+import { estimateGraphAgentPromptChars } from '~/utils/graph-agent-run'
+import type { GraphAgentEvent, GraphAgentTurn } from '~/utils/graph-agent-run'
+import type { WebLlmCatalogModel } from '~/utils/web-llm-catalog'
+import type { WebLlmChatMessage } from '~/utils/web-llm-boundary'
+
+/** One tool the agent called, and what it got back. */
+type ChatToolStep = {
+  id: string
+  name: string
+  args: string
+  result?: string
+}
+
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   reasoning?: string
   reasoningStreaming?: boolean
-}
-
-type OllamaModel = {
-  name: string
-}
-
-type OllamaTagsResponse = {
-  models?: OllamaModel[]
-}
-
-type OllamaShowResponse = {
-  capabilities?: string[]
-}
-
-type OllamaChatMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-}
-
-type OllamaChatStreamResponse = {
-  message?: {
-    content?: string
-    thinking?: string
-  }
-  error?: string
-  done?: boolean
-}
-
-type OllamaPullStreamResponse = {
-  status?: string
-  digest?: string
-  total?: number
-  completed?: number
-  error?: string
+  /** Only in agent mode: the lookups behind the answer, in the order they happened. */
+  toolSteps?: ChatToolStep[]
+  /** Said the loop gave up rather than the model finishing. */
+  notice?: string
 }
 
 type ModelSelectItem = {
@@ -47,35 +31,37 @@ type ModelSelectItem = {
   icon?: string
   description?: string
   disabled?: boolean
-  onSelect?: () => void
 }
 
-const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
-const OLLAMA_THINKING_EFFORT = 'low'
-const OLLAMA_THINKING_FALLBACK_CHAR_LIMIT = 3000
-const DEFAULT_DOWNLOAD_MODEL = 'qwen3:4b'
-const DOWNLOADABLE_MODEL_VALUES = ['qwen3.5:4b', 'qwen3:4b', 'qwen3:8b']
+const WEB_LLM_PROVIDER = 'web-llm'
+const WEBGPU_SUPPORT_URL = 'https://caniuse.com/webgpu'
+const WEBGPU_BROWSER_HINT = 'The model runs on this device\'s GPU, so the browser has to support WebGPU — Chrome or Edge 113+, or Safari 18+.'
+const CHAT_TEMPERATURE = 0.2
+const CONTEXT_WINDOW_OVERFLOW_MESSAGE = 'This conversation no longer fits the model\'s context window. Restart the chat to clear it, then ask again — every model here has the same 4096-token window, so a smaller one will not help.'
+const THINKING_FALLBACK_CHAR_LIMIT = 3000
+/**
+ * The number of modules past which looking things up beats reading everything.
+ *
+ * Below it the whole graph fits the window with room to spare, and a single
+ * streamed answer is both faster and less likely to go wrong than a loop. Above
+ * it the excerpt starts losing modules, and an answer built from what happened
+ * to survive the truncation is worse than one built from a lookup.
+ */
+const AGENT_MODE_MODULE_THRESHOLD = 12
+const PREVIEW_MODEL_COUNT = 3
 const DEFAULT_INITIAL_MESSAGE = 'Hi, I can help you inspect this NestJS graph. Ask me to trace a dependency, explain a module, or find where a provider is used.'
 const DEFAULT_PREVIEW_REPLY = 'Hai!, load real project to chat with me!'
 
-class OllamaThinkingFallbackError extends Error {
+/**
+ * Aborts a reasoning model that keeps thinking instead of answering.
+ *
+ * A small model running on a laptop GPU can spend minutes inside `<think>` and
+ * never reach an answer. Throwing out of the delta handler stops that stream so
+ * the same question can be asked again with thinking switched off.
+ */
+class ThinkingFallbackError extends Error {
   constructor() {
-    super('Ollama thinking stream did not produce answer content quickly enough.')
-  }
-}
-
-class OllamaProxyRequestError extends Error {
-  constructor(
-    readonly endpoint: string,
-    readonly status?: number,
-    readonly statusText?: string,
-    readonly detail?: string
-  ) {
-    const statusDescription = status
-      ? `HTTP ${status}${statusText ? ` ${statusText}` : ''}`
-      : detail || 'Network request failed'
-
-    super(`Ollama proxy request to ${endpoint} failed: ${statusDescription}`)
+    super('The model kept thinking without producing answer content.')
   }
 }
 
@@ -90,7 +76,6 @@ const props = withDefaults(defineProps<{
   initialMessage?: string
   previewReply?: string
   placeholder?: string
-  disabled?: boolean
 }>(), {
   active: true,
   preview: false,
@@ -101,8 +86,7 @@ const props = withDefaults(defineProps<{
   promptClass: 'px-4 sm:px-5 py-4 bg-default',
   initialMessage: DEFAULT_INITIAL_MESSAGE,
   previewReply: DEFAULT_PREVIEW_REPLY,
-  placeholder: undefined,
-  disabled: false
+  placeholder: undefined
 })
 
 const emit = defineEmits<{
@@ -111,26 +95,29 @@ const emit = defineEmits<{
 
 const prompt = ref('')
 const isLoading = ref(false)
-const isLoadingModels = ref(false)
-const hasLoadedModels = ref(false)
-const isDownloadingRecommendedModel = ref(false)
 const modelError = ref('')
-const isOllamaUnavailable = ref(false)
-const isOllamaDaemonUnavailable = ref(false)
+const hasCheckedSupport = ref(false)
 const isProviderSelectOpen = ref(false)
 const isModelSelectOpen = ref(false)
-const isRecommendedModelDownloadPopoverOpen = ref(false)
-const recommendedModelDownloadStatus = ref('')
-const recommendedModelDownloadDigest = ref('')
-const recommendedModelDownloadTotal = ref(0)
-const recommendedModelDownloadCompleted = ref(0)
-const recommendedModelDownloadEvents = ref<string[]>([])
-const selectedDownloadModel = ref(DEFAULT_DOWNLOAD_MODEL)
-const selectedProvider = ref('')
+const isModelDownloadPopoverOpen = ref(false)
+const modelDownloadElapsedMs = ref(0)
+// There is one provider, so picking it is not a decision — and the probe that
+// tells a visitor their browser cannot run a model hangs off this choice. Left
+// empty, that probe would only run after they had already typed a question.
+const selectedProvider = ref(WEB_LLM_PROVIDER)
 const selectedModel = ref('')
-const downloadedModels = ref<string[]>([])
-const previewProvider = ref('ollama')
-const previewModel = ref(DEFAULT_DOWNLOAD_MODEL)
+/** How many turns the last message left out of the window, for the footer to own up to. */
+const droppedHistoryCount = ref(0)
+const previewProvider = ref(WEB_LLM_PROVIDER)
+/**
+ * Whether the reader has overruled the default answer mode.
+ *
+ * Kept apart from the mode itself so that the default can keep tracking the
+ * graph — a viewer that switches from a three-module example to a hundred-module
+ * application should change its mind — right up until someone says otherwise,
+ * and never after.
+ */
+const agentModeOverride = ref<boolean | undefined>(undefined)
 
 function createInitialAssistantMessage(): ChatMessage {
   return {
@@ -145,40 +132,110 @@ const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const toast = useToast()
 
+// Inference happens in this tab, so the composable owns the whole backend: the
+// WebGPU probe, the model cache, the worker, and the stream.
+const {
+  isSupported,
+  supportReason,
+  isCheckingSupport,
+  catalog,
+  cachedModelIds,
+  isLoadingCatalog,
+  hasLoadedCatalog,
+  loadedModelId,
+  isPreparingModel,
+  preparingModelId,
+  progressPercent,
+  progressLabel,
+  progressEvents,
+  isGenerating,
+  error: engineError,
+  checkSupport,
+  refreshCatalog,
+  prepareModel,
+  streamChat,
+  interrupt,
+  deleteModel,
+  dispose
+} = useWebLlmEngine()
+
+const { isRunning: isAgentRunning, runAgent } = useGraphAgent()
+
 const providerItems = [
   {
-    label: 'Ollama',
-    value: 'ollama',
-    icon: 'i-simple-icons-ollama'
+    label: 'WebLLM',
+    value: WEB_LLM_PROVIDER,
+    // The icon set has no WebLLM brand glyph, and a name that does not resolve
+    // renders as an empty box, so this uses a plain lucide icon.
+    icon: 'i-lucide-cpu'
   }
 ]
 
-const previewModelItems = DOWNLOADABLE_MODEL_VALUES.map(model => ({
-  label: model,
-  value: model,
+/**
+ * The models named on the marketing page.
+ *
+ * The catalog builder is pure, so synthetic records are enough to get the same
+ * labels the live select shows — the preview must not touch the engine, which
+ * would probe WebGPU and start a multi-gigabyte download for a visitor.
+ */
+const previewModelItems = buildWebLlmCatalog(
+  CURATED_WEB_LLM_MODEL_IDS
+    .slice(0, PREVIEW_MODEL_COUNT)
+    .map(modelId => ({ model_id: modelId }))
+).map(model => ({
+  label: model.label,
+  value: model.id,
   icon: 'i-lucide-brain',
-  description: model === DEFAULT_DOWNLOAD_MODEL ? 'Recommended' : 'Example'
+  description: model.recommended ? 'Recommended' : 'Example'
 }))
 
+const previewModel = ref(previewModelItems[0]?.value || RECOMMENDED_WEB_LLM_MODEL_ID)
+
+function describeModelId(modelId: string) {
+  return catalog.value.find(model => model.id === modelId)?.label || modelId
+}
+
+function describeModelItem(model: WebLlmCatalogModel, cached: boolean) {
+  const parts = [cached ? 'Downloaded' : 'Download']
+
+  // web-llm's figure is the GPU memory the model needs while it runs, not the
+  // bytes fetched. Showing it beside "Download" without saying so overstates
+  // the transfer and, worse, hides the number that decides whether the model
+  // will load on this machine at all.
+  if (model.vramMb) {
+    parts.push(`needs ${model.vramLabel} VRAM`)
+  }
+
+  if (model.recommended) {
+    parts.push('Recommended')
+  }
+
+  return parts.join(' · ')
+}
+
+const cachedModels = computed(() => {
+  return catalog.value.filter(model => cachedModelIds.value.includes(model.id))
+})
+
+const downloadableModels = computed(() => {
+  return catalog.value.filter(model => !cachedModelIds.value.includes(model.id))
+})
+
 const modelItems = computed<ModelSelectItem[]>(() => {
-  const downloadedModelItems: ModelSelectItem[] = downloadedModels.value.map(model => ({
-    label: model,
-    value: model,
+  const downloadedModelItems: ModelSelectItem[] = cachedModels.value.map(model => ({
+    label: model.label,
+    value: model.id,
     icon: 'i-lucide-brain',
-    description: 'Downloaded'
+    description: describeModelItem(model, true),
+    disabled: isPreparingModel.value
   }))
-  const downloadableModelItems: ModelSelectItem[] = DOWNLOADABLE_MODEL_VALUES
-    .filter(model => !downloadedModels.value.includes(model))
-    .map(model => ({
-      label: model,
-      value: `download:${model}`,
-      icon: 'i-lucide-download',
-      description: 'Download',
-      disabled: isDownloadingRecommendedModel.value,
-      onSelect: () => {
-        downloadModel(model)
-      }
-    }))
+  const downloadableModelItems: ModelSelectItem[] = downloadableModels.value.map(model => ({
+    label: model.label,
+    value: model.id,
+    icon: 'i-lucide-download',
+    description: describeModelItem(model, false),
+    disabled: isPreparingModel.value
+  }))
   const items: ModelSelectItem[] = []
 
   if (downloadedModelItems.length) {
@@ -206,12 +263,36 @@ const selectedProviderIcon = computed(() => {
   return providerItems.find(provider => provider.value === selectedProvider.value)?.icon
 })
 
-const isAIAvailable = computed(() => {
-  return props.disabled || graphStore.graphIsStatic || graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
+/**
+ * Whether the chat has to stay off for the graph on screen.
+ *
+ * Only one thing keeps it off now: a graph emitted by an old library, which is
+ * missing the detail the answers would be built from. A graph served from disk,
+ * and the demo running inside this tab, used to be excluded too, because
+ * answering meant reaching the proxy that the inspected application served —
+ * which neither of them serves. The model runs in this tab now, and the Markdown
+ * it reads is just another file sitting beside `output.json`, so every graph the
+ * viewer can show answers like any other.
+ */
+const isChatUnavailable = computed(() => {
+  return graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
 })
 
+/** True only once the probe has actually run and failed. */
+const isWebGpuUnavailable = computed(() => hasCheckedSupport.value && !isSupported.value)
+
+const isStreaming = computed(() => isLoading.value || isGenerating.value || isAgentRunning.value)
+
 const chatMessages = computed(() => messages.value.map((message, index) => {
-  const shouldRenderReasoning = Boolean(message.reasoning || message.reasoningStreaming)
+  // A bubble with no text of its own still has something to show: the reasoning
+  // as it streams, the lookups the agent made, or the sentence saying the loop
+  // gave up. Any of them is reason enough to render the message.
+  const shouldRenderReasoning = Boolean(
+    message.reasoning
+    || message.reasoningStreaming
+    || message.toolSteps?.length
+    || message.notice
+  )
 
   return {
     id: `message-${index}`,
@@ -225,17 +306,31 @@ const chatMessages = computed(() => messages.value.map((message, index) => {
       : [],
     metadata: {
       reasoning: message.reasoning,
-      reasoningStreaming: message.reasoningStreaming
+      reasoningStreaming: message.reasoningStreaming,
+      toolSteps: message.toolSteps,
+      notice: message.notice
     }
   }
 }))
 
-const shouldShowRecommendedModelDownload = computed(() => {
-  return selectedProvider.value === 'ollama'
-    && hasLoadedModels.value
-    && !isLoadingModels.value
-    && !isOllamaUnavailable.value
-    && !downloadedModels.value.length
+const recommendedModel = computed(() => {
+  return catalog.value.find(model => model.recommended)
+    || catalog.value.find(model => model.id === RECOMMENDED_WEB_LLM_MODEL_ID)
+})
+
+/** The model the download button and the download toast act on. */
+const downloadTargetModelId = computed(() => {
+  return selectedModel.value || recommendedModel.value?.id || RECOMMENDED_WEB_LLM_MODEL_ID
+})
+
+const downloadTargetLabel = computed(() => describeModelId(downloadTargetModelId.value))
+
+const shouldOfferRecommendedModel = computed(() => {
+  return selectedProvider.value === WEB_LLM_PROVIDER
+    && hasLoadedCatalog.value
+    && !isLoadingCatalog.value
+    && isSupported.value
+    && !cachedModelIds.value.length
 })
 
 const promptPlaceholder = computed(() => {
@@ -247,7 +342,7 @@ const promptPlaceholder = computed(() => {
     return 'Ask about your NestJS graph...'
   }
 
-  return isAIAvailable.value ? 'DISABLED: Use a live supported graph' : 'Ask about this graph...'
+  return isChatUnavailable.value ? 'DISABLED: Upgrade the library to answer on this graph' : 'Ask about this graph...'
 })
 
 const isChatSubmitDisabled = computed(() => {
@@ -255,40 +350,191 @@ const isChatSubmitDisabled = computed(() => {
     return isLoading.value
   }
 
-  return isAIAvailable.value || isLoading.value || isDownloadingRecommendedModel.value
+  return isChatUnavailable.value || isStreaming.value || isPreparingModel.value || isCheckingSupport.value
 })
-const isPromptDisabled = computed(() => isLoading.value || isDownloadingRecommendedModel.value)
-const isChatControlDisabled = computed(() => !props.preview && isAIAvailable.value)
+const isPromptDisabled = computed(() => isStreaming.value || isPreparingModel.value)
+const isChatControlDisabled = computed(() => !props.preview && isChatUnavailable.value)
 
-const recommendedModelDownloadProgress = computed(() => {
-  if (!recommendedModelDownloadTotal.value) {
-    return 0
+/**
+ * The graph text the model will actually see.
+ *
+ * Every curated model has a 4096-token context window, so a large graph is
+ * budgeted down before it is handed over. The panel reads the same context the
+ * system prompt is built from to be able to say what was left out.
+ */
+const graphContext = computed(() => buildGraphContext(graphStore.graphMarkdown || ''))
+
+const systemPrompt = computed(() => buildWebLlmSystemPrompt(graphStore.graphMarkdown || ''))
+
+/**
+ * How many modules the graph has, as the panel counts them.
+ *
+ * Straight off the JSON rather than off the Markdown, because the JSON is what
+ * the tools answer from and the count is only used to decide which of the two
+ * answering modes suits this graph.
+ */
+const graphModuleCount = computed(() => Object.keys(graphStore.graphData?.modules || {}).length)
+
+/**
+ * Which mode suits this graph, before anyone has said otherwise.
+ *
+ * Agent mode queries the graph instead of reading it, which is the only thing
+ * that works once the graph stops fitting the context window — but it costs
+ * several model turns for a question a small graph answers in one, so the
+ * bundled three-module example stays on the plain path.
+ */
+const prefersAgentMode = computed(() => {
+  return graphContext.value.truncated || graphModuleCount.value > AGENT_MODE_MODULE_THRESHOLD
+})
+
+const isAgentMode = computed({
+  get: () => agentModeOverride.value ?? prefersAgentMode.value,
+  set: (value: boolean) => {
+    agentModeOverride.value = value
+  }
+})
+
+/**
+ * Whether the chosen model was fine-tuned on a tool-call format.
+ *
+ * A hint and never a gate. Every model here can call a tool: the chat writes
+ * the tool schemas into the system prompt itself and constrains the decode with
+ * a grammar, and neither of those is looked up against a model list. What a
+ * fine-tune buys is judgement — picking the right tool, and giving up less —
+ * which is worth saying out loud and worth nothing as a condition.
+ */
+const isSelectedModelToolTuned = computed(() => modelIsToolTuned(selectedModel.value))
+
+const agentQualityHint = computed(() => {
+  if (!isAgentMode.value || !selectedModel.value || isSelectedModelToolTuned.value) {
+    return ''
   }
 
-  return Math.min(
-    100,
-    Math.round((recommendedModelDownloadCompleted.value / recommendedModelDownloadTotal.value) * 100)
-  )
+  return `${describeModelId(selectedModel.value)} can call these tools, but it was not fine-tuned to choose between them, so it may pick the wrong lookup and need another turn. The Hermes models in the list choose better, at 3.9 to 4.8 GB of VRAM against the 2.0 GB the recommendation needs.`
 })
 
-const recommendedModelDownloadCompletedLabel = computed(() => {
-  return formatBytes(recommendedModelDownloadCompleted.value)
+const graphTruncationHint = computed(() => {
+  const omitted = graphContext.value.omittedModuleCount
+
+  return omitted === 1
+    ? 'This graph is larger than the model\'s context window, so 1 module was left out of what the model can see.'
+    : `This graph is larger than the model's context window, so ${omitted} modules were left out of what the model can see.`
 })
 
-const recommendedModelDownloadTotalLabel = computed(() => {
-  return formatBytes(recommendedModelDownloadTotal.value)
+const droppedHistoryHint = computed(() => {
+  const dropped = droppedHistoryCount.value
+
+  return dropped === 1
+    ? 'The conversation outgrew the model\'s context window, so the oldest message was left out of the last answer. Restart the chat to start clean.'
+    : `The conversation outgrew the model's context window, so the ${dropped} oldest messages were left out of the last answer. Restart the chat to start clean.`
 })
 
-function formatBytes(value: number) {
-  if (!value) {
-    return '0 B'
+/**
+ * The one line under the prompt.
+ *
+ * A missing GPU means nothing can be answered at all, so it outranks both notes
+ * about something being trimmed. Between those two, the dropped turns are the
+ * newer surprise — the graph excerpt has been the same since the panel opened.
+ */
+const footerHint = computed(() => {
+  if (props.preview) {
+    return ''
   }
 
-  const units = ['B', 'KB', 'MB', 'GB']
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  const amount = value / 1024 ** exponent
+  if (isWebGpuUnavailable.value) {
+    const reason = modelError.value || supportReason.value
 
-  return `${amount.toFixed(amount >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`
+    return reason ? `${reason} ${WEBGPU_BROWSER_HINT}` : WEBGPU_BROWSER_HINT
+  }
+
+  if (droppedHistoryCount.value) {
+    return droppedHistoryHint.value
+  }
+
+  // The truncation note belongs to the plain path only. Agent mode never sends
+  // the graph excerpt at all — it looks the graph up instead — so warning that
+  // part of the excerpt was left out would be describing a prompt nobody built.
+  if (isAgentMode.value) {
+    return agentQualityHint.value
+  }
+
+  if (graphContext.value.truncated) {
+    return graphTruncationHint.value
+  }
+
+  return ''
+})
+
+const footerHintIcon = computed(() => {
+  return isWebGpuUnavailable.value ? 'i-lucide-triangle-alert' : 'i-lucide-info'
+})
+
+const footerHintClass = computed(() => {
+  return isWebGpuUnavailable.value ? 'text-error' : 'text-muted'
+})
+
+/** What the download popover says above the progress bar. */
+const modelDownloadTitle = computed(() => {
+  if (isPreparingModel.value) {
+    return `Preparing ${describeModelId(preparingModelId.value)}`
+  }
+
+  if (loadedModelId.value) {
+    return `${describeModelId(loadedModelId.value)} is loaded and cached in this browser`
+  }
+
+  return `${downloadTargetLabel.value} downloads once and stays cached in this browser`
+})
+
+const modelDownloadElapsedLabel = computed(() => {
+  const totalSeconds = Math.max(0, Math.round(modelDownloadElapsedMs.value / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return minutes ? `${minutes}m ${seconds}s elapsed` : `${seconds}s elapsed`
+})
+
+/** Weights are cached per browser, so removing them is the only way to get the disk space back. */
+const canRemoveSelectedModel = computed(() => {
+  const modelId = selectedModel.value
+
+  return Boolean(modelId)
+    && !isPreparingModel.value
+    && cachedModelIds.value.includes(modelId)
+    && loadedModelId.value !== modelId
+})
+
+function resolveWebLlmErrorKind(error: unknown): WebLlmErrorKind {
+  return error instanceof WebLlmError ? error.kind : 'generate'
+}
+
+function describeWebLlmError(kind: WebLlmErrorKind) {
+  switch (kind) {
+    case 'unsupported':
+      return supportReason.value || WEBGPU_BROWSER_HINT
+    case 'catalog':
+      return 'Couldn\'t list the models this browser can run. Refresh the model list and try again.'
+    case 'load':
+      return 'The model download didn\'t finish. Check the connection and try again — whatever already downloaded is kept.'
+    case 'generate':
+      return 'The model stopped before it finished answering. Try again, or pick a smaller model.'
+  }
+}
+
+/**
+ * The message to show for a failed engine call.
+ *
+ * The composable sets `error` to a user-facing sentence for the failures it owns
+ * — the WebGPU probe, the catalog, and loading a model — so that wins there. A
+ * generation failure leaves it untouched, and repeating whatever it held last
+ * would name the wrong problem.
+ */
+function readWebLlmDiagnostic(kind: WebLlmErrorKind) {
+  if (kind !== 'generate' && engineError.value) {
+    return engineError.value
+  }
+
+  return describeWebLlmError(kind)
 }
 
 function showProviderSelectionToast() {
@@ -300,19 +546,19 @@ function showProviderSelectionToast() {
   })
 }
 
-function showOllamaUnavailableToast(context?: string) {
+function showWebGpuUnavailableToast(context?: string) {
   toast.add({
-    title: 'Ollama unavailable',
+    title: 'WebGPU unavailable',
     description: context
-      ? `Please install Ollama and start it before selecting a model. ${context}`
-      : 'Please install Ollama and start it before selecting a model.',
+      ? `${context} ${WEBGPU_BROWSER_HINT}`
+      : WEBGPU_BROWSER_HINT,
     icon: 'i-lucide-triangle-alert',
     color: 'error',
     actions: [{
-      label: 'Install Ollama',
+      label: 'Check browser support',
       color: 'neutral',
       variant: 'outline',
-      to: OLLAMA_DOWNLOAD_URL,
+      to: WEBGPU_SUPPORT_URL,
       target: '_blank',
       rel: 'noopener noreferrer',
       external: true
@@ -320,9 +566,18 @@ function showOllamaUnavailableToast(context?: string) {
   })
 }
 
-function showOllamaProxyErrorToast(description: string) {
+function showModelDownloadErrorToast(description: string) {
   toast.add({
-    title: 'Connection problem',
+    title: 'Model download problem',
+    description,
+    icon: 'i-lucide-triangle-alert',
+    color: 'error'
+  })
+}
+
+function showGenerationErrorToast(description: string) {
+  toast.add({
+    title: 'Generation problem',
     description,
     icon: 'i-lucide-triangle-alert',
     color: 'error'
@@ -332,7 +587,7 @@ function showOllamaProxyErrorToast(description: string) {
 function showModelSelectionToast() {
   toast.add({
     title: 'Select model',
-    description: 'Choose a downloaded Ollama model before sending this message.',
+    description: 'Choose a model to run in this browser before sending this message.',
     icon: 'i-lucide-triangle-alert',
     color: 'error'
   })
@@ -348,174 +603,162 @@ function showModelErrorToast(description: string) {
 }
 
 function showRecommendedModelToast() {
+  const vram = recommendedModel.value?.vramMb
+    ? ` It needs about ${recommendedModel.value.vramLabel} of GPU memory to run.`
+    : ''
+
   toast.add({
-    title: 'No completion model found',
-    description: `Download ${selectedDownloadModel.value} to start chatting.`,
+    title: 'No model downloaded yet',
+    description: `Download ${downloadTargetLabel.value} to this browser to start chatting.${vram}`,
     icon: 'i-lucide-download',
     color: 'neutral',
     actions: [{
-      label: `Download ${selectedDownloadModel.value}`,
+      label: `Download ${downloadTargetLabel.value}`,
       color: 'neutral',
       variant: 'outline',
       onClick: (event?: Event) => {
         event?.stopPropagation()
-        isRecommendedModelDownloadPopoverOpen.value = true
-        downloadModel(selectedDownloadModel.value)
+        handleModelDownloadClick()
       }
     }]
   })
 }
 
-function handleRecommendedModelDownloadClick() {
-  isRecommendedModelDownloadPopoverOpen.value = true
+async function ensureWebGpuSupport() {
+  const supported = await checkSupport()
+  hasCheckedSupport.value = true
 
-  if (!isDownloadingRecommendedModel.value) {
-    downloadModel(selectedDownloadModel.value)
-  }
-}
-
-function hasCompletionCapability(capabilities?: string[]) {
-  const normalizedCapabilities = capabilities?.map(capability => capability.toLowerCase()) || []
-
-  return normalizedCapabilities.includes('completion')
-}
-
-function getOllamaApiUrl(path: string) {
-  if (!graphStore.ollamaUrl) {
-    throw new Error('Ollama proxy URL is unavailable because the graph endpoint is not loaded.')
+  if (!supported) {
+    modelError.value = supportReason.value || WEBGPU_BROWSER_HINT
+    showWebGpuUnavailableToast(supportReason.value)
   }
 
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`
-
-  return `${graphStore.ollamaUrl}${normalizedPath}`
+  return supported
 }
 
-async function fetchOllama(path: string, options?: RequestInit) {
-  const endpoint = getOllamaApiUrl(path)
-  let response: Response
-
-  // The proxy is gated by the same access token as the rest of the inspector,
-  // and the store is the only place that token lives.
-  const headers = new Headers(options?.headers)
-  for (const [name, value] of Object.entries(graphStore.requestHeaders)) {
-    headers.set(name, value)
-  }
-
-  try {
-    response = await fetch(endpoint, { ...options, headers })
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Network request failed'
-    throw new OllamaProxyRequestError(endpoint, undefined, undefined, detail)
-  }
-
-  if (!response.ok) {
-    throw new OllamaProxyRequestError(endpoint, response.status, response.statusText)
-  }
-
-  return response
-}
-
-function isOllamaUnavailableError(error: unknown): error is OllamaProxyRequestError {
-  return error instanceof OllamaProxyRequestError && error.status === 502
-}
-
-function getOllamaUnavailableDiagnostic(_error: OllamaProxyRequestError) {
-  return 'The graph inspector could not reach Ollama.'
-}
-
-function getOllamaProxyDiagnostic(error: unknown) {
-  if (error instanceof OllamaProxyRequestError) {
-    if (error.status) {
-      return 'The AI service is not available from this graph. Check that the graph inspector is set up and running, then try again.'
-    }
-
-    return 'Couldn\'t connect to the graph inspector. Make sure it is running, then try again.'
-  }
-
-  return 'Couldn\'t connect to the AI assistant. Try again after checking the graph inspector.'
-}
-
-async function loadModelCapabilities(model: string) {
-  const response = await fetchOllama('/api/show', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ model })
-  })
-
-  return await response.json() as OllamaShowResponse
-}
-
-async function loadDownloadedModels() {
-  if (!import.meta.client || isLoadingModels.value || selectedProvider.value !== 'ollama') {
+async function loadModelCatalog() {
+  if (props.preview || !import.meta.client || isLoadingCatalog.value) {
     return
   }
 
-  isLoadingModels.value = true
-  hasLoadedModels.value = false
   modelError.value = ''
-  isOllamaUnavailable.value = false
-  isOllamaDaemonUnavailable.value = false
+
+  if (!await ensureWebGpuSupport()) {
+    selectedModel.value = ''
+    return
+  }
+
+  await refreshCatalog()
+
+  // `refreshCatalog` reports failure through `error` instead of throwing, so a
+  // chunk that would not load or a cache that refused the question is only
+  // named there. Falling through to the empty-catalog branch would blame the
+  // build for a connection problem and give the visitor no reason to retry.
+  if (!hasLoadedCatalog.value) {
+    const diagnostic = engineError.value || describeWebLlmError('catalog')
+
+    selectedModel.value = ''
+    modelError.value = diagnostic
+    showModelErrorToast(diagnostic)
+    return
+  }
+
+  if (!catalog.value.length) {
+    selectedModel.value = ''
+    modelError.value = 'None of the in-browser models are available in this build.'
+    showModelErrorToast(modelError.value)
+    return
+  }
+
+  const cached = cachedModelIds.value
+
+  if (!cached.length) {
+    selectedModel.value = ''
+    modelError.value = 'No model has been downloaded to this browser yet.'
+    showRecommendedModelToast()
+    return
+  }
+
+  if (!cached.includes(selectedModel.value)) {
+    selectedModel.value = cached[0] || ''
+  }
+}
+
+/** Fetches the weights, compiles the shaders, and leaves the model on the GPU. */
+async function ensureModelReady(modelId: string) {
+  if (props.preview || !import.meta.client || isPreparingModel.value) {
+    return false
+  }
+
+  if (loadedModelId.value === modelId) {
+    return true
+  }
+
+  isModelDownloadPopoverOpen.value = true
 
   try {
-    const response = await fetchOllama('/api/tags')
-    const data = await response.json() as OllamaTagsResponse
-    const models = data.models?.map(model => model.name).filter(Boolean) || []
-    const modelsWithCapabilities = await Promise.all(models.map(async (model) => {
-      try {
-        const details = await loadModelCapabilities(model)
+    await prepareModel(modelId)
 
-        return {
-          model,
-          capabilities: details.capabilities
-        }
-      } catch {
-        return {
-          model,
-          capabilities: []
-        }
-      }
-    }))
-    const completionModels = modelsWithCapabilities
-      .filter(({ capabilities }) => hasCompletionCapability(capabilities))
-      .map(({ model }) => model)
+    posthog?.capture('Graph AI Model Loaded', {
+      url: graphStore.endpointUrl,
+      model: modelId
+    })
 
-    downloadedModels.value = completionModels
-    hasLoadedModels.value = true
-
-    if (!completionModels.length) {
-      selectedModel.value = ''
-      modelError.value = 'No downloaded Ollama models with the completion capability found.'
-      showRecommendedModelToast()
-      return
-    }
-
-    if (!completionModels.includes(selectedModel.value)) {
-      selectedModel.value = completionModels[0] || ''
-    }
+    return true
   } catch (error) {
-    selectedModel.value = ''
-    downloadedModels.value = []
-    hasLoadedModels.value = false
+    const diagnostic = readWebLlmDiagnostic(resolveWebLlmErrorKind(error))
 
-    const ollamaUnavailable = isOllamaUnavailableError(error)
-    const diagnostic = ollamaUnavailable
-      ? getOllamaUnavailableDiagnostic(error)
-      : getOllamaProxyDiagnostic(error)
-
-    isOllamaUnavailable.value = true
-    isOllamaDaemonUnavailable.value = ollamaUnavailable
     modelError.value = diagnostic
+    showModelDownloadErrorToast(diagnostic)
 
-    if (ollamaUnavailable) {
-      showOllamaUnavailableToast(diagnostic)
-    } else {
-      showOllamaProxyErrorToast(diagnostic)
-    }
-  } finally {
-    isLoadingModels.value = false
+    return false
   }
+}
+
+function handleModelDownloadClick() {
+  isModelDownloadPopoverOpen.value = true
+
+  if (isPreparingModel.value) {
+    return
+  }
+
+  const modelId = downloadTargetModelId.value
+
+  if (selectedModel.value === modelId) {
+    void ensureModelReady(modelId)
+    return
+  }
+
+  selectedModel.value = modelId
+
+  // The `selectedModel` watch only downloads a model that is missing from the
+  // cache; this button is an explicit request, so a cached one is warmed here.
+  if (cachedModelIds.value.includes(modelId)) {
+    void ensureModelReady(modelId)
+  }
+}
+
+async function handleRemoveSelectedModel() {
+  const modelId = selectedModel.value
+
+  if (!modelId) {
+    return
+  }
+
+  const label = describeModelId(modelId)
+
+  selectedModel.value = ''
+
+  try {
+    await deleteModel(modelId)
+    await refreshCatalog()
+  } catch {
+    showModelErrorToast(`Couldn't remove ${label} from this browser.`)
+  }
+}
+
+function handleRefreshModels() {
+  void loadModelCatalog()
 }
 
 watch(() => props.active, (value) => {
@@ -532,313 +775,125 @@ function closePanel() {
   emit('close')
 }
 
+/**
+ * Cuts a run short.
+ *
+ * Interrupting the engine only ends the generation that is decoding; an agent
+ * loop would carry on to its next turn with an empty answer. The signal is what
+ * stops the loop itself.
+ */
+let agentRun: AbortController | undefined
+
+function abandonAgentRun() {
+  agentRun?.abort()
+  agentRun = undefined
+}
+
 function restartChat() {
+  if (!props.preview) {
+    abandonAgentRun()
+    interrupt()
+  }
+
   prompt.value = ''
   isLoading.value = false
+  droppedHistoryCount.value = 0
   messages.value = [createInitialAssistantMessage()]
 }
 
 watch(selectedProvider, (provider) => {
   selectedModel.value = ''
-  downloadedModels.value = []
-  hasLoadedModels.value = false
   modelError.value = ''
-  isOllamaUnavailable.value = false
-  isOllamaDaemonUnavailable.value = false
+  hasCheckedSupport.value = false
 
-  if (provider === 'ollama') {
-    loadDownloadedModels()
+  if (provider === WEB_LLM_PROVIDER) {
+    void loadModelCatalog()
   }
 })
 
-watch(selectedModel, (model) => {
-  if (model?.startsWith('download:')) {
-    selectedModel.value = ''
-    downloadModel(model.slice('download:'.length))
+/**
+ * Probes WebGPU and reads the model list as the panel opens, before anything has
+ * been typed.
+ *
+ * A browser that cannot run a model has to say so up front — being told only
+ * after asking a question is exactly what the requirements page promises will
+ * not happen. It waits for the graph rather than for a provider, because there
+ * is only one provider to pick, while a static or too-old graph turns the chat
+ * off entirely and warning about a GPU nobody was going to use is noise.
+ */
+watch(isChatUnavailable, (unavailable) => {
+  if (unavailable || props.preview || hasCheckedSupport.value || !selectedProvider.value) {
     return
   }
 
-  if (model) {
-    modelError.value = ''
-  }
-})
+  void loadModelCatalog()
+}, { immediate: true })
 
-function resetRecommendedModelDownloadProgress() {
-  recommendedModelDownloadStatus.value = 'Preparing download'
-  recommendedModelDownloadDigest.value = ''
-  recommendedModelDownloadTotal.value = 0
-  recommendedModelDownloadCompleted.value = 0
-  recommendedModelDownloadEvents.value = []
-}
-
-function parseOllamaPullLine(line: string) {
-  try {
-    return JSON.parse(line) as OllamaPullStreamResponse
-  } catch {
-    return null
-  }
-}
-
-function updateRecommendedModelDownloadProgress(chunk: OllamaPullStreamResponse) {
-  if (chunk.error) {
-    throw new Error(chunk.error)
-  }
-
-  if (chunk.status) {
-    recommendedModelDownloadStatus.value = chunk.status
-
-    const event = chunk.digest
-      ? `${chunk.status} ${chunk.digest.slice(0, 18)}`
-      : chunk.status
-
-    if (recommendedModelDownloadEvents.value.at(-1) !== event) {
-      recommendedModelDownloadEvents.value = [
-        ...recommendedModelDownloadEvents.value.slice(-5),
-        event
-      ]
-    }
-  }
-
-  if (chunk.digest) {
-    recommendedModelDownloadDigest.value = chunk.digest
-  }
-
-  if (typeof chunk.total === 'number') {
-    recommendedModelDownloadTotal.value = chunk.total
-  }
-
-  if (typeof chunk.completed === 'number') {
-    recommendedModelDownloadCompleted.value = chunk.completed
-  }
-}
-
-async function streamRecommendedModelDownload(response: Response) {
-  if (!response.body) {
-    throw new Error('Ollama did not return a readable download stream.')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let pending = ''
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-
-      if (done) {
-        break
-      }
-
-      pending += decoder.decode(value, { stream: true })
-      const lines = pending.split('\n')
-      pending = lines.pop() || ''
-
-      for (const line of lines) {
-        const chunk = parseOllamaPullLine(line.trim())
-        if (chunk) {
-          updateRecommendedModelDownloadProgress(chunk)
-        }
-      }
-    }
-
-    pending += decoder.decode()
-
-    const chunk = parseOllamaPullLine(pending.trim())
-    if (chunk) {
-      updateRecommendedModelDownloadProgress(chunk)
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {})
-    throw error
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-async function downloadModel(model: string) {
-  if (!import.meta.client || isDownloadingRecommendedModel.value || selectedProvider.value !== 'ollama') {
+watch(selectedModel, (modelId) => {
+  if (!modelId) {
     return
   }
 
-  selectedDownloadModel.value = model
-  isDownloadingRecommendedModel.value = true
-  isRecommendedModelDownloadPopoverOpen.value = true
-  resetRecommendedModelDownloadProgress()
   modelError.value = ''
-  isOllamaUnavailable.value = false
-  isOllamaDaemonUnavailable.value = false
 
-  try {
-    const response = await fetchOllama('/api/pull', {
-      method: 'POST',
-      body: JSON.stringify({
-        model,
-        stream: true
-      })
-    })
-
-    await streamRecommendedModelDownload(response)
-    recommendedModelDownloadStatus.value = 'success'
-    await loadDownloadedModels()
-  } catch (error) {
-    const ollamaUnavailable = isOllamaUnavailableError(error)
-    const diagnostic = ollamaUnavailable
-      ? getOllamaUnavailableDiagnostic(error)
-      : getOllamaProxyDiagnostic(error)
-
-    isOllamaUnavailable.value = ollamaUnavailable
-    isOllamaDaemonUnavailable.value = ollamaUnavailable
-    modelError.value = diagnostic
-    recommendedModelDownloadStatus.value = 'Download failed'
-
-    if (ollamaUnavailable) {
-      showOllamaUnavailableToast(diagnostic)
-    } else {
-      showOllamaProxyErrorToast(diagnostic)
-    }
-  } finally {
-    isDownloadingRecommendedModel.value = false
+  // Picking a model is what starts its download: in-browser inference has no
+  // separate pull step, so fetching the weights and handing them to the GPU is
+  // one operation. A model already in the cache is loaded on the first message
+  // instead, which keeps switching between downloaded models free.
+  if (!cachedModelIds.value.includes(modelId)) {
+    void ensureModelReady(modelId)
   }
-}
-
-const systemPrompt = computed(() => {
-  return [
-    '# Nest Graph Inspector AI Assistant',
-    '',
-    '## Instructions',
-    '',
-    '- Use only the dependency graph markdown below as your source of truth.',
-    '- Help users understand NestJS modules, imports, exports, controllers, providers, and dependency paths.',
-    '- When the graph does not contain enough information, say what is missing instead of guessing.',
-    '- Keep answers concise and mention exact module/provider/controller names from the graph.',
-    '- Format user-facing answers with GitHub-flavored Markdown.',
-    '- Do not return JSON.',
-    '- Keep any model thinking brief, then provide the final answer.',
-    '',
-    '## Dependency Graph Markdown',
-    '',
-    graphStore.graphMarkdown || '_No graph markdown is available yet._'
-  ].join('\n')
 })
 
-function getContentText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content
-  }
+let modelDownloadTimer: ReturnType<typeof setInterval> | undefined
 
-  if (Array.isArray(content)) {
-    return content.map((part) => {
-      if (typeof part === 'string') {
-        return part
-      }
-
-      if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-        return part.text
-      }
-
-      return ''
-    }).join('')
-  }
-
-  return ''
-}
-
-function getTaggedContent(content: string, tag: string) {
-  const match = content.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'i'))
-
-  return match?.[1]?.trim() || ''
-}
-
-function parseAssistantReply(content: string) {
-  const reasoning = getTaggedContent(content, 'reasoning') || getTaggedContent(content, 'think')
-  const answer = getTaggedContent(content, 'answer')
-
-  if (answer) {
-    return {
-      reasoning,
-      content: answer
-    }
-  }
-
-  return {
-    reasoning,
-    content: content
-      .replace(/<reasoning>[\s\S]*?<\/reasoning>/i, '')
-      .replace(/<think>[\s\S]*?<\/think>/i, '')
-      .trim()
+function stopModelDownloadTimer() {
+  if (modelDownloadTimer !== undefined) {
+    clearInterval(modelDownloadTimer)
+    modelDownloadTimer = undefined
   }
 }
 
-function parseStreamingAssistantReply(content: string) {
-  const lowerContent = content.toLowerCase()
-  const reasoningOpenTag = '<reasoning>'
-  const reasoningCloseTag = '</reasoning>'
-  const thinkOpenTag = '<think>'
-  const thinkCloseTag = '</think>'
-  const answerOpenTag = '<answer>'
-  const answerCloseTag = '</answer>'
-  const reasoningOpenIndex = lowerContent.indexOf(reasoningOpenTag)
-  const reasoningCloseIndex = lowerContent.indexOf(reasoningCloseTag)
-  const thinkOpenIndex = lowerContent.indexOf(thinkOpenTag)
-  const thinkCloseIndex = lowerContent.indexOf(thinkCloseTag)
-  const answerOpenIndex = lowerContent.indexOf(answerOpenTag)
-  const answerCloseIndex = lowerContent.indexOf(answerCloseTag)
-  const activeReasoningOpenTag = reasoningOpenIndex === -1 ? thinkOpenTag : reasoningOpenTag
-  const activeReasoningCloseTag = reasoningOpenIndex === -1 ? thinkCloseTag : reasoningCloseTag
-  const activeReasoningOpenIndex = reasoningOpenIndex === -1 ? thinkOpenIndex : reasoningOpenIndex
-  const activeReasoningCloseIndex = reasoningOpenIndex === -1 ? thinkCloseIndex : reasoningCloseIndex
+/**
+ * Times the load in the panel.
+ *
+ * WebLLM reports elapsed time on every progress event, but the composable only
+ * forwards the percentage and the label, and a multi-gigabyte download with no
+ * clock at all reads as a hang.
+ */
+watch(isPreparingModel, (preparing) => {
+  stopModelDownloadTimer()
 
-  const reasoning = activeReasoningOpenIndex === -1
-    ? ''
-    : content
-        .slice(
-          activeReasoningOpenIndex + activeReasoningOpenTag.length,
-          activeReasoningCloseIndex === -1 ? content.length : activeReasoningCloseIndex
-        )
-        .trim()
-
-  if (answerOpenIndex !== -1) {
-    return {
-      reasoning,
-      content: content
-        .slice(
-          answerOpenIndex + answerOpenTag.length,
-          answerCloseIndex === -1 ? content.length : answerCloseIndex
-        )
-        .trim()
-    }
+  if (!preparing) {
+    return
   }
 
-  if (activeReasoningCloseIndex !== -1) {
-    return {
-      reasoning,
-      content: content
-        .slice(activeReasoningCloseIndex + activeReasoningCloseTag.length)
-        .replace(new RegExp(answerOpenTag, 'gi'), '')
-        .replace(new RegExp(answerCloseTag, 'gi'), '')
-        .trim()
-    }
+  const startedAt = Date.now()
+  modelDownloadElapsedMs.value = 0
+  modelDownloadTimer = setInterval(() => {
+    modelDownloadElapsedMs.value = Date.now() - startedAt
+  }, 1000)
+})
+
+// Closing the drawer unmounts the panel, which is when the GPU memory and the
+// inference worker have to go back.
+onScopeDispose(() => {
+  stopModelDownloadTimer()
+
+  if (!props.preview) {
+    abandonAgentRun()
+    void dispose()
   }
+})
 
-  return {
-    reasoning,
-    content: activeReasoningOpenIndex === -1
-      ? content
-          .replace(new RegExp(answerOpenTag, 'gi'), '')
-          .replace(new RegExp(answerCloseTag, 'gi'), '')
-          .trim()
-      : ''
-  }
-}
-
-function getStreamReasoningText(chunk: unknown) {
-  const additionalKwargs = (chunk as { additional_kwargs?: Record<string, unknown> }).additional_kwargs
-  const reasoningContent = additionalKwargs?.reasoning_content
-
-  return typeof reasoningContent === 'string' ? reasoningContent : ''
-}
-
-function getAgentMessages(): OllamaChatMessage[] {
+/**
+ * The conversation as a model should see it.
+ *
+ * The greeting is dropped: it is the panel introducing itself, not something
+ * anyone said, and a model that reads it starts answering as though it had
+ * already offered to trace something.
+ */
+function getConversationTurns(): GraphAgentTurn[] {
   return messages.value
     .filter((message, index) => !(index === 0 && message.role === 'assistant'))
     .filter(message => message.content.trim())
@@ -846,101 +901,6 @@ function getAgentMessages(): OllamaChatMessage[] {
       role: message.role,
       content: message.content
     }))
-}
-
-function parseOllamaStreamLine(line: string) {
-  try {
-    return JSON.parse(line) as OllamaChatStreamResponse
-  } catch {
-    return null
-  }
-}
-
-async function streamOllamaChat(
-  model: string,
-  modelMessages: OllamaChatMessage[],
-  think: boolean | 'low' | 'medium' | 'high',
-  onChunk: (chunk: OllamaChatStreamResponse) => void
-) {
-  const response = await fetchOllama('/api/chat', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      messages: modelMessages,
-      stream: true,
-      think,
-      options: {
-        temperature: 0.2
-      }
-    })
-  })
-
-  if (!response.body) {
-    throw new Error('Ollama did not return a readable stream.')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let pending = ''
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-
-      if (done) {
-        break
-      }
-
-      pending += decoder.decode(value, { stream: true })
-      const lines = pending.split('\n')
-      pending = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmedLine = line.trim()
-        if (!trimmedLine) {
-          continue
-        }
-
-        const chunk = parseOllamaStreamLine(trimmedLine)
-        if (!chunk) {
-          continue
-        }
-
-        if (chunk.error) {
-          throw new Error(chunk.error)
-        }
-
-        onChunk(chunk)
-
-        if (chunk.done) {
-          return
-        }
-      }
-    }
-
-    pending += decoder.decode()
-
-    const finalLine = pending.trim()
-    if (finalLine) {
-      const chunk = parseOllamaStreamLine(finalLine)
-
-      if (chunk?.error) {
-        throw new Error(chunk.error)
-      }
-
-      if (chunk) {
-        onChunk(chunk)
-      }
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {})
-    throw error
-  } finally {
-    reader.releaseLock()
-  }
 }
 
 async function handleSubmit(event: Event) {
@@ -967,20 +927,17 @@ async function handleSubmit(event: Event) {
     return
   }
 
-  if (isOllamaUnavailable.value) {
-    if (isOllamaDaemonUnavailable.value) {
-      showOllamaUnavailableToast(modelError.value)
-    } else {
-      showOllamaProxyErrorToast(modelError.value || 'Unable to load Ollama models. Check that the graph inspector is running, then try again.')
-    }
+  if (isWebGpuUnavailable.value) {
+    showWebGpuUnavailableToast(supportReason.value)
     return
   }
 
   if (!selectedModel.value) {
     isModelSelectOpen.value = true
-    if (modelError.value && !shouldShowRecommendedModelDownload.value) {
+
+    if (modelError.value && !shouldOfferRecommendedModel.value) {
       showModelErrorToast(modelError.value)
-    } else if (shouldShowRecommendedModelDownload.value) {
+    } else if (shouldOfferRecommendedModel.value) {
       showRecommendedModelToast()
     } else {
       showModelSelectionToast()
@@ -1020,78 +977,180 @@ async function handleSubmit(event: Event) {
   }
 
   try {
-    await graphStore.fetchMarkdown()
+    const useAgent = isAgentMode.value
 
-    const modelMessages: OllamaChatMessage[] = [
-      {
-        role: 'system',
-        content: systemPrompt.value
-      },
-      ...getAgentMessages()
-    ]
+    // Only what the chosen mode reads. The plain path answers from the Markdown
+    // excerpt; agent mode never sees it, because its tools query the JSON.
+    await (useAgent ? graphStore.fetchJson() : graphStore.fetchMarkdown())
 
-    let streamedContent = ''
-    const handleOllamaChunk = (chunk: OllamaChatStreamResponse, fallbackOnLongThinking: boolean) => {
-      const reasoningDelta = chunk.message?.thinking || getStreamReasoningText(chunk)
-      const contentDelta = getContentText(chunk.message?.content)
+    const modelId = selectedModel.value
 
-      if (reasoningDelta) {
-        const currentReasoning = getAssistantMessage()?.reasoning || ''
-        const nextReasoning = `${currentReasoning}${reasoningDelta}`
-
-        updateAssistantMessage({
-          reasoning: nextReasoning
-        })
-
-        if (
-          fallbackOnLongThinking
-          && !streamedContent
-          && nextReasoning.length >= OLLAMA_THINKING_FALLBACK_CHAR_LIMIT
-        ) {
-          throw new OllamaThinkingFallbackError()
-        }
-      }
-
-      if (contentDelta) {
-        streamedContent += contentDelta
-
-        const parsedReply = parseStreamingAssistantReply(streamedContent)
-        if (parsedReply.reasoning && !reasoningDelta) {
-          updateAssistantMessage({
-            reasoning: parsedReply.reasoning
-          })
-        }
-
-        updateAssistantMessage({
-          content: parsedReply.content
-        })
-      }
+    // `streamChat` would load the model itself, but going through the panel's
+    // own path shows the progress popover for a load that can take minutes and
+    // reports a failed download as a download problem rather than as a failed
+    // answer.
+    if (loadedModelId.value !== modelId && !await ensureModelReady(modelId)) {
+      updateAssistantMessage({
+        reasoning: '',
+        reasoningStreaming: false,
+        content: modelError.value || describeWebLlmError('load')
+      })
+      return
     }
 
-    try {
-      await streamOllamaChat(selectedModel.value, modelMessages, OLLAMA_THINKING_EFFORT, (chunk) => {
-        handleOllamaChunk(chunk, true)
-      })
-    } catch (error) {
-      if (!(error instanceof OllamaThinkingFallbackError)) {
-        throw error
+    isModelDownloadPopoverOpen.value = false
+
+    let streamedContent = ''
+
+    // A reasoning model streams its thinking inline, wrapped in `<think>`, so
+    // reasoning and answer are both recovered from the same text.
+    const renderStreamedReply = (fallbackOnLongThinking: boolean) => {
+      const parsedReply = parseStreamingAssistantReply(streamedContent)
+
+      if (parsedReply.reasoning) {
+        updateAssistantMessage({
+          reasoning: parsedReply.reasoning
+        })
       }
 
       updateAssistantMessage({
-        reasoningStreaming: false
+        content: parsedReply.content
+      })
+
+      if (
+        fallbackOnLongThinking
+        && !parsedReply.content
+        && parsedReply.reasoning.length >= THINKING_FALLBACK_CHAR_LIMIT
+      ) {
+        throw new ThinkingFallbackError()
+      }
+    }
+
+    const handleAgentEvent = (event: GraphAgentEvent, fallbackOnLongThinking: boolean) => {
+      // The agent reports the whole of the current turn rather than the newest
+      // fragment, because a turn that follows a tool result replaces the one
+      // before it — appending would render a reply that argues with itself.
+      if (event.type === 'answer') {
+        streamedContent = event.text
+        renderStreamedReply(fallbackOnLongThinking)
+        return
+      }
+
+      if (event.type === 'stopped') {
+        updateAssistantMessage({ notice: event.text })
+        return
+      }
+
+      const steps = getAssistantMessage()?.toolSteps ?? []
+
+      if (event.type === 'tool-call') {
+        updateAssistantMessage({
+          toolSteps: [...steps, { id: event.id, name: event.name, args: event.args }]
+        })
+        return
+      }
+
+      updateAssistantMessage({
+        toolSteps: steps.map(step => (step.id === event.id ? { ...step, result: event.text } : step))
+      })
+    }
+
+    // Only the most recent turns that still fit beside the system prompt. The
+    // window is 4096 tokens on every curated model and web-llm refuses a prompt
+    // over it rather than trimming, so an unbudgeted history means the chat
+    // works for a while and then stops working for good.
+    //
+    // Agent mode reserves more than its system prompt costs, because the loop
+    // adds to the same window as it runs: the tool schemas, the assistant turn
+    // that made each call, and the lookup that answered it.
+    const budgetTurns = () => {
+      const history = budgetChatHistory(
+        getConversationTurns(),
+        useAgent
+          ? estimateGraphAgentPromptChars(graphStore.graphData)
+          : systemPrompt.value.length
+      )
+
+      droppedHistoryCount.value = history.droppedMessageCount
+
+      return history.messages
+    }
+
+    const runPlainTurn = async (enableThinking: boolean) => {
+      const modelMessages: WebLlmChatMessage[] = [
+        {
+          role: 'system',
+          content: systemPrompt.value
+        },
+        ...budgetTurns()
+      ]
+
+      await streamChat(modelId, modelMessages, { enableThinking, temperature: CHAT_TEMPERATURE }, (delta) => {
+        streamedContent += delta.content ?? ''
+        renderStreamedReply(enableThinking)
+      })
+    }
+
+    const runAgentTurn = async (enableThinking: boolean) => {
+      // The engine is handed over as the two functions a chat model needs, and
+      // nothing more. That is the whole boundary: `ChatWebLlm` sits behind
+      // LangChain's `BaseChatModel`, so putting a hosted provider here later is
+      // a swap of one object rather than a rewrite of this panel.
+      agentRun = new AbortController()
+
+      await runAgent(
+        {
+          engine: { streamChat, interrupt },
+          modelId,
+          graph: graphStore.graphData,
+          messages: budgetTurns(),
+          temperature: CHAT_TEMPERATURE,
+          enableThinking,
+          signal: agentRun.signal
+        },
+        (event) => {
+          handleAgentEvent(event, enableThinking)
+        }
+      )
+    }
+
+    const runTurn = useAgent ? runAgentTurn : runPlainTurn
+
+    try {
+      await runTurn(true)
+    } catch (error) {
+      if (!(error instanceof ThinkingFallbackError)) {
+        throw error
+      }
+
+      // The abandoned run has to be told it is abandoned before a second one
+      // starts. `runGraphAgent` cancels its own stream on the way out, and this
+      // is the belt to that pair of braces: two loops decoding for one question
+      // would queue behind each other on web-llm's per-model lock.
+      abandonAgentRun()
+
+      // The retry is a fresh attempt at the same question, so the lookups the
+      // abandoned one made are not part of the answer that survives.
+      updateAssistantMessage({
+        reasoning: '',
+        reasoningStreaming: false,
+        toolSteps: [],
+        notice: ''
       })
 
       streamedContent = ''
 
-      await streamOllamaChat(selectedModel.value, modelMessages, false, (chunk) => {
-        handleOllamaChunk(chunk, false)
-      })
+      await runTurn(false)
     }
 
     const parsedReply = parseAssistantReply(streamedContent)
 
     const finalMessage = getAssistantMessage()
-    const finalContent = finalMessage?.content || parsedReply.content || 'I could not produce a response from Ollama.'
+    const finalContent = finalMessage?.content
+      || parsedReply.content
+      // A loop that gave up already said so in its own words, and adding a
+      // second sentence about producing no response would contradict it.
+      || (finalMessage?.notice ? '' : 'I could not produce a response with this model.')
 
     if (!finalMessage?.reasoning && parsedReply.reasoning) {
       updateAssistantMessage({
@@ -1103,26 +1162,48 @@ async function handleSubmit(event: Event) {
       reasoningStreaming: false,
       content: finalContent
     })
-  } catch (error) {
-    const ollamaUnavailable = isOllamaUnavailableError(error)
-    const diagnostic = ollamaUnavailable
-      ? getOllamaUnavailableDiagnostic(error)
-      : getOllamaProxyDiagnostic(error)
 
-    if (ollamaUnavailable) {
-      isOllamaUnavailable.value = true
-      isOllamaDaemonUnavailable.value = true
-      showOllamaUnavailableToast(diagnostic)
+    posthog?.capture('Graph AI Answer Completed', {
+      url: graphStore.endpointUrl,
+      model: modelId,
+      mode: useAgent ? 'agent' : 'chat',
+      toolCalls: getAssistantMessage()?.toolSteps?.length || 0
+    })
+  } catch (error) {
+    // A restart or a closed drawer aborted the run. The transcript it was
+    // writing into is already gone, so there is nothing to report and nobody to
+    // report it to.
+    if (error instanceof Error && error.name === 'AbortError') {
+      return
+    }
+
+    const kind = resolveWebLlmErrorKind(error)
+    // The window overflow has to be named for what it is. It reads as a
+    // generation failure, and the generic advice for one — try again, pick a
+    // smaller model — cannot work here: a retry sends the same conversation,
+    // and every model on offer has the same 4096-token window.
+    const diagnostic = isContextWindowOverflow(error)
+      ? CONTEXT_WINDOW_OVERFLOW_MESSAGE
+      : readWebLlmDiagnostic(kind)
+
+    if (kind === 'unsupported') {
+      hasCheckedSupport.value = true
+      modelError.value = diagnostic
+      showWebGpuUnavailableToast(supportReason.value)
+    } else if (kind === 'load') {
+      modelError.value = diagnostic
+      showModelDownloadErrorToast(diagnostic)
+    } else {
+      showGenerationErrorToast(diagnostic)
     }
 
     updateAssistantMessage({
       reasoning: '',
       reasoningStreaming: false,
-      content: ollamaUnavailable
-        ? `Ollama is unavailable. ${diagnostic}`
-        : diagnostic
+      content: diagnostic
     })
   } finally {
+    agentRun = undefined
     isLoading.value = false
   }
 }
@@ -1151,7 +1232,7 @@ async function handleSubmit(event: Event) {
           color="neutral"
           variant="ghost"
           size="sm"
-          :disabled="isLoading || isChatControlDisabled"
+          :disabled="isChatControlDisabled"
           aria-label="Restart chat"
           @click="restartChat"
         />
@@ -1177,7 +1258,7 @@ async function handleSubmit(event: Event) {
     >
       <UChatMessages
         :messages="chatMessages"
-        :status="isLoading ? 'streaming' : 'ready'"
+        :status="isStreaming ? 'streaming' : 'ready'"
         :assistant="{ side: 'left', variant: 'naked' }"
         :user="{ side: 'right', variant: 'soft' }"
         compact
@@ -1194,11 +1275,56 @@ async function handleSubmit(event: Event) {
             :auto-close-delay="1000"
           />
 
+          <!--
+            The lookups behind the answer, shown as they happen. A ReAct loop is
+            otherwise a long silence with a paragraph at the end, and a reader
+            who cannot see which tool ran has no way to tell a slow answer from
+            a model going round in circles.
+          -->
+          <div
+            v-if="message.metadata?.toolSteps?.length"
+            class="my-1 space-y-1"
+          >
+            <details
+              v-for="step in message.metadata.toolSteps"
+              :key="step.id"
+              class="rounded-md border border-default bg-elevated/50 px-2 py-1.5 text-xs"
+            >
+              <summary class="flex cursor-pointer items-center gap-1.5 text-muted marker:content-['']">
+                <UIcon
+                  :name="step.result ? 'i-lucide-check' : 'i-lucide-loader-circle'"
+                  class="size-3.5 shrink-0"
+                  :class="step.result ? 'text-success' : 'animate-spin'"
+                />
+                <span class="font-mono">{{ step.name }}</span>
+                <span
+                  v-if="step.args"
+                  class="truncate font-mono opacity-70"
+                >{{ step.args }}</span>
+              </summary>
+              <pre
+                v-if="step.result"
+                class="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-muted"
+              >{{ step.result }}</pre>
+            </details>
+          </div>
+
           <MDC
             v-if="message.content"
             :value="message.content"
             tag="div"
           />
+
+          <p
+            v-if="message.metadata?.notice"
+            class="mt-1 flex items-start gap-1.5 text-xs text-muted"
+          >
+            <UIcon
+              name="i-lucide-circle-slash"
+              class="mt-0.5 size-3.5 shrink-0"
+            />
+            <span>{{ message.metadata.notice }}</span>
+          </p>
         </template>
       </UChatMessages>
 
@@ -1216,149 +1342,192 @@ async function handleSubmit(event: Event) {
         >
           <UChatPromptSubmit
             color="neutral"
-            :status="isLoading ? 'submitted' : 'ready'"
+            :status="isStreaming ? 'submitted' : 'ready'"
             :disabled="isChatSubmitDisabled"
           />
 
           <template #footer>
-            <UFieldGroup v-if="props.preview">
-              <USelect
-                v-model="previewProvider"
-                :items="providerItems"
-                icon="i-simple-icons-ollama"
-                class="min-w-0 flex-1"
-                placeholder="Select provider"
-                variant="ghost"
-                :ui="{ content: 'min-w-fit' }"
+            <div class="min-w-0 space-y-2">
+              <p
+                v-if="footerHint"
+                class="flex items-start gap-1.5 text-xs"
+                :class="footerHintClass"
               >
-                <template #content-top>
-                  <p class="px-2 py-1.5 text-xs font-medium text-muted">
-                    Mock Provider
-                  </p>
-                </template>
-              </USelect>
-              <USelect
-                v-model="previewModel"
-                :items="previewModelItems"
-                icon="i-lucide-brain"
-                class="min-w-0 flex-1"
-                placeholder="Select model"
-                variant="ghost"
-                :ui="{ content: 'min-w-fit' }"
-              />
-              <UButton
-                type="button"
-                icon="i-lucide-refresh-cw"
-                color="neutral"
-                variant="ghost"
-                disabled
-                aria-label="Refresh preview models"
-              />
-            </UFieldGroup>
-            <UFieldGroup v-else>
-              <USelect
-                v-model="selectedProvider"
-                v-model:open="isProviderSelectOpen"
-                :items="providerItems"
-                :icon="selectedProviderIcon"
-                :disabled="isChatControlDisabled"
-                class="min-w-0 flex-1"
-                placeholder="Select provider"
-                variant="ghost"
-                :ui="{ content: 'min-w-fit' }"
-              >
-                <template #content-top>
-                  <p class="px-2 py-1.5 text-xs font-medium text-muted">
-                    {{ selectedProvider ? 'Change Provider' : 'Select Provider' }}
-                  </p>
-                </template>
-              </USelect>
-              <USelect
-                v-model="selectedModel"
-                v-model:open="isModelSelectOpen"
-                :items="modelItems"
-                :loading="isLoadingModels || isDownloadingRecommendedModel"
-                :disabled="isChatControlDisabled || !selectedProvider"
-                icon="i-lucide-brain"
-                class="min-w-0 flex-1"
-                placeholder="Select model"
-                variant="ghost"
-                :ui="{ content: 'min-w-fit' }"
-              />
-              <UPopover
-                v-model:open="isRecommendedModelDownloadPopoverOpen"
-                :content="{ side: 'top', align: 'end', sideOffset: 8 }"
-                arrow
-              >
+                <UIcon
+                  :name="footerHintIcon"
+                  class="mt-0.5 size-3.5 shrink-0"
+                />
+                <span>{{ footerHint }}</span>
+              </p>
+
+              <UFieldGroup v-if="props.preview">
+                <USelect
+                  v-model="previewProvider"
+                  :items="providerItems"
+                  icon="i-lucide-cpu"
+                  class="min-w-0 flex-1"
+                  placeholder="Select provider"
+                  variant="ghost"
+                  :ui="{ content: 'min-w-fit' }"
+                >
+                  <template #content-top>
+                    <p class="px-2 py-1.5 text-xs font-medium text-muted">
+                      Mock Provider
+                    </p>
+                  </template>
+                </USelect>
+                <USelect
+                  v-model="previewModel"
+                  :items="previewModelItems"
+                  icon="i-lucide-brain"
+                  class="min-w-0 flex-1"
+                  placeholder="Select model"
+                  variant="ghost"
+                  :ui="{ content: 'min-w-fit' }"
+                />
                 <UButton
                   type="button"
-                  icon="i-lucide-download"
+                  icon="i-lucide-refresh-cw"
                   color="neutral"
                   variant="ghost"
-                  :disabled="isChatControlDisabled"
-                  :aria-label="`Download ${selectedDownloadModel}`"
-                  @click="handleRecommendedModelDownloadClick"
+                  disabled
+                  aria-label="Refresh preview models"
                 />
+              </UFieldGroup>
+              <UFieldGroup v-else>
+                <USelect
+                  v-model="selectedProvider"
+                  v-model:open="isProviderSelectOpen"
+                  :items="providerItems"
+                  :icon="selectedProviderIcon"
+                  :disabled="isChatControlDisabled"
+                  class="min-w-0 flex-1"
+                  placeholder="Select provider"
+                  variant="ghost"
+                  :ui="{ content: 'min-w-fit' }"
+                >
+                  <template #content-top>
+                    <p class="px-2 py-1.5 text-xs font-medium text-muted">
+                      {{ selectedProvider ? 'Change Provider' : 'Select Provider' }}
+                    </p>
+                  </template>
+                </USelect>
+                <USelect
+                  v-model="selectedModel"
+                  v-model:open="isModelSelectOpen"
+                  :items="modelItems"
+                  :loading="isCheckingSupport || isLoadingCatalog || isPreparingModel"
+                  :disabled="isChatControlDisabled || !selectedProvider || isWebGpuUnavailable"
+                  icon="i-lucide-brain"
+                  class="min-w-0 flex-1"
+                  placeholder="Select model"
+                  variant="ghost"
+                  :ui="{ content: 'min-w-fit' }"
+                />
+                <!--
+                  Agent mode runs on every model in the list, the recommended
+                  2 GB one included, so this is a choice about the question and
+                  never about the hardware: looking things up beats reading a
+                  truncated excerpt on a large graph, and costs several turns
+                  for a question a small graph answers in one.
+                -->
+                <UTooltip :text="isAgentMode ? 'Answering by looking things up in the graph. Click to answer from a graph excerpt instead.' : 'Answering from a graph excerpt. Click to let the model look things up with tools.'">
+                  <UButton
+                    type="button"
+                    icon="i-lucide-wrench"
+                    :color="isAgentMode ? 'primary' : 'neutral'"
+                    :variant="isAgentMode ? 'soft' : 'ghost'"
+                    :disabled="isChatControlDisabled || isStreaming"
+                    :aria-pressed="isAgentMode"
+                    aria-label="Look things up with tools"
+                    @click="isAgentMode = !isAgentMode"
+                  />
+                </UTooltip>
+                <UPopover
+                  v-model:open="isModelDownloadPopoverOpen"
+                  :content="{ side: 'top', align: 'end', sideOffset: 8 }"
+                  arrow
+                >
+                  <UButton
+                    type="button"
+                    icon="i-lucide-download"
+                    color="neutral"
+                    variant="ghost"
+                    :disabled="isChatControlDisabled"
+                    :aria-label="`Download ${downloadTargetLabel}`"
+                    @click="handleModelDownloadClick"
+                  />
 
-                <template #content>
-                  <div class="w-72 space-y-3 p-3 text-sm">
-                    <div class="space-y-1">
-                      <p class="font-medium text-highlighted">
-                        Download model
-                      </p>
-                      <p class="text-muted">
-                        {{ recommendedModelDownloadStatus || 'Ready to download' }}
-                      </p>
-                    </div>
+                  <template #content>
+                    <div class="w-72 space-y-3 p-3 text-sm">
+                      <div class="space-y-1">
+                        <p class="font-medium text-highlighted">
+                          Download model
+                        </p>
+                        <p class="text-muted">
+                          {{ modelDownloadTitle }}
+                        </p>
+                      </div>
 
-                    <div class="space-y-1.5">
-                      <div class="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          class="h-full rounded-full bg-primary transition-all"
-                          :style="{ width: `${recommendedModelDownloadProgress}%` }"
+                      <div class="space-y-1.5">
+                        <div class="h-2 overflow-hidden rounded-full bg-muted">
+                          <div
+                            class="h-full rounded-full bg-primary transition-all"
+                            :style="{ width: `${progressPercent}%` }"
+                          />
+                        </div>
+                        <div class="flex items-center justify-between gap-2 text-xs text-muted">
+                          <span>{{ progressPercent }}%</span>
+                          <span>{{ modelDownloadElapsedLabel }}</span>
+                        </div>
+                      </div>
+
+                      <p class="truncate text-xs text-muted">
+                        {{ progressLabel || 'Ready to download' }}
+                      </p>
+
+                      <div
+                        v-if="progressEvents.length"
+                        class="space-y-1 border-t border-default pt-2"
+                      >
+                        <p
+                          v-for="(event, index) in progressEvents"
+                          :key="`${index}-${event}`"
+                          class="truncate text-xs text-muted"
+                        >
+                          {{ event }}
+                        </p>
+                      </div>
+
+                      <div
+                        v-if="canRemoveSelectedModel"
+                        class="border-t border-default pt-2"
+                      >
+                        <UButton
+                          type="button"
+                          icon="i-lucide-trash-2"
+                          color="neutral"
+                          variant="ghost"
+                          size="xs"
+                          :label="`Remove ${downloadTargetLabel} from this browser`"
+                          @click="handleRemoveSelectedModel"
                         />
                       </div>
-                      <div class="flex items-center justify-between gap-2 text-xs text-muted">
-                        <span>{{ recommendedModelDownloadProgress }}%</span>
-                        <span>
-                          {{ recommendedModelDownloadCompletedLabel }} / {{ recommendedModelDownloadTotalLabel }}
-                        </span>
-                      </div>
                     </div>
-
-                    <p
-                      v-if="recommendedModelDownloadDigest"
-                      class="truncate text-xs text-muted"
-                    >
-                      {{ recommendedModelDownloadDigest }}
-                    </p>
-
-                    <div
-                      v-if="recommendedModelDownloadEvents.length"
-                      class="space-y-1 border-t border-default pt-2"
-                    >
-                      <p
-                        v-for="event in recommendedModelDownloadEvents"
-                        :key="event"
-                        class="truncate text-xs text-muted"
-                      >
-                        {{ event }}
-                      </p>
-                    </div>
-                  </div>
-                </template>
-              </UPopover>
-              <UButton
-                type="button"
-                icon="i-lucide-refresh-cw"
-                color="neutral"
-                variant="ghost"
-                :loading="isLoadingModels"
-                :disabled="isChatControlDisabled || isLoading || isDownloadingRecommendedModel || !selectedProvider"
-                aria-label="Refresh Ollama models"
-                @click="() => loadDownloadedModels()"
-              />
-            </UFieldGroup>
+                  </template>
+                </UPopover>
+                <UButton
+                  type="button"
+                  icon="i-lucide-refresh-cw"
+                  color="neutral"
+                  variant="ghost"
+                  :loading="isCheckingSupport || isLoadingCatalog"
+                  :disabled="isChatControlDisabled || isStreaming || isPreparingModel || !selectedProvider"
+                  aria-label="Refresh WebLLM models"
+                  @click="handleRefreshModels"
+                />
+              </UFieldGroup>
+            </div>
           </template>
         </UChatPrompt>
       </template>

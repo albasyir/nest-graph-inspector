@@ -2,8 +2,7 @@ import { strict as assert } from 'node:assert'
 import {
   appendOutputPath,
   normalizeSourceUrl,
-  resolveDirectRunUrl,
-  resolveOriginPath
+  resolveDirectRunUrl
 } from './inspector-endpoint-url.ts'
 
 const ENDPOINT = 'http://0.0.0.0:53371/__graph-inspector'
@@ -40,23 +39,6 @@ assert.equal(
 assert.equal(appendOutputPath('', 'output.json'), '')
 assert.equal(appendOutputPath('not a url', 'output.json'), '')
 
-// A sibling service at the origin, not under the endpoint's own path.
-assert.equal(resolveOriginPath(ENDPOINT, 'ollama'), 'http://0.0.0.0:53371/ollama')
-assert.equal(resolveOriginPath(ENDPOINT, '/ollama'), 'http://0.0.0.0:53371/ollama')
-assert.equal(resolveOriginPath(ENDPOINT, '///ollama'), 'http://0.0.0.0:53371/ollama')
-
-// The query and fragment must be dropped. Callers append a path onto this
-// result, so a surviving query would put that path inside a parameter value —
-// which is exactly the bug that broke AI chat when a token lived in the URL.
-const derived = resolveOriginPath(`${ENDPOINT}?token=secret#frag`, 'ollama')
-assert.equal(derived, 'http://0.0.0.0:53371/ollama')
-assert.ok(!derived.includes('secret'))
-assert.ok(!derived.includes('?') && !derived.includes('#'))
-assert.equal(`${derived}/api/tags`, 'http://0.0.0.0:53371/ollama/api/tags')
-
-assert.equal(resolveOriginPath('', 'ollama'), '')
-assert.equal(resolveOriginPath('not a url', 'ollama'), '')
-
 // A live application serves Direct Run at its origin root...
 assert.equal(resolveDirectRunUrl(ENDPOINT, false), 'http://0.0.0.0:53371/direct-run')
 
@@ -71,7 +53,9 @@ assert.equal(
   'http://localhost:3000/mock-graph/direct-run'
 )
 
-// Same reasoning as above: the history URLs are built by appending to this.
+// The query and fragment must be dropped: the history URLs are built by
+// appending a path onto this result, and a surviving query would put that path
+// inside a parameter value instead.
 const directRun = resolveDirectRunUrl(`${ENDPOINT}?token=secret#frag`, false)
 assert.equal(directRun, 'http://0.0.0.0:53371/direct-run')
 assert.ok(!directRun.includes('secret'))
@@ -92,10 +76,6 @@ const DEMO_ENDPOINT
 assert.equal(
   resolveDirectRunUrl(DEMO_ENDPOINT, false),
   'https://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/direct-run'
-)
-assert.equal(
-  resolveOriginPath(DEMO_ENDPOINT, 'ollama'),
-  'https://albasyir.github.io/nest-graph-inspector/__nodepod__/53371/ollama'
 )
 assert.equal(
   appendOutputPath(DEMO_ENDPOINT, 'output.json'),

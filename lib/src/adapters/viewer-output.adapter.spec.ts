@@ -4,7 +4,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { HttpOutputAdapter } from './http-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
-import { ProxyAdapter } from './proxy.adapter';
 import { ViewerOutputAdapter } from './viewer-output.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
@@ -29,7 +28,6 @@ describe(ViewerOutputAdapter.name, () => {
   let adapter: ViewerOutputAdapter;
   let httpServeAdapter: HttpServeAdapter;
   let httpOutputAdapter: { execute: jest.Mock; normalizePath: jest.Mock };
-  let proxyAdapter: { serve: jest.Mock; close: jest.Mock };
   const nestedModules: TestingModule[] = [];
 
   /** Nested modules serve HTTP, so cleanup runs from a hook, not inline. */
@@ -44,7 +42,6 @@ describe(ViewerOutputAdapter.name, () => {
         RuntimeTraceRecorder,
         AccessTokenService,
         { provide: HttpOutputAdapter, useValue: httpOutputAdapter },
-        { provide: ProxyAdapter, useValue: proxyAdapter },
         { provide: MODULE_OPTIONS_TOKEN, useValue: options },
       ],
     }).compile();
@@ -63,10 +60,6 @@ describe(ViewerOutputAdapter.name, () => {
         path.startsWith('/') ? path : `/${path}`,
       ),
     };
-    proxyAdapter = {
-      serve: jest.fn(),
-      close: jest.fn(),
-    };
 
     moduleRef = await Test.createTestingModule({
       providers: [
@@ -78,10 +71,6 @@ describe(ViewerOutputAdapter.name, () => {
         {
           provide: HttpOutputAdapter,
           useValue: httpOutputAdapter,
-        },
-        {
-          provide: ProxyAdapter,
-          useValue: proxyAdapter,
         },
       ],
     }).compile();
@@ -100,10 +89,6 @@ describe(ViewerOutputAdapter.name, () => {
       type: 'viewer',
       origin: 'http://localhost:8889',
       path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
     });
     const endpoint = decodeViewerEndpoint(result.message);
 
@@ -128,10 +113,6 @@ describe(ViewerOutputAdapter.name, () => {
       type: 'viewer',
       origin: 'http://localhost:8889',
       path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
     });
 
     const endpoint = decodeViewerEndpoint(result.message);
@@ -154,7 +135,6 @@ describe(ViewerOutputAdapter.name, () => {
       type: 'viewer',
       origin: 'http://localhost:8889',
       path: 'graph',
-      ollama: { origin: 'http://localhost:11434', path: '/ollama' },
     });
     const endpoint = decodeViewerEndpoint(result.message);
 
@@ -165,68 +145,12 @@ describe(ViewerOutputAdapter.name, () => {
     expect(result.message).toContain('accessToken.logToken is off');
   });
 
-  it('registers the Ollama proxy on the viewer HTTP origin', async () => {
-    await adapter.execute({} as never, {
-      type: 'viewer',
-      host: '127.0.0.1',
-      port: 3998,
-      path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
-    });
-
-    const httpOutputConfig = httpOutputAdapter.execute.mock.calls[0][1];
-
-    expect(proxyAdapter.serve).toHaveBeenCalledWith(
-      {
-        from: 'http://127.0.0.1:3998',
-        to: 'http://localhost:11434',
-        cors: {
-          origins: [expect.any(RegExp)],
-        },
-      },
-      {
-        httpAdapter: httpOutputConfig.httpAdapter,
-        pathPrefix: '/ollama',
-        authorize: expect.any(Function),
-      },
-    );
-  });
-
-  it('allows every browser origin through the proxy allow-list', async () => {
-    await adapter.execute({} as never, {
-      type: 'viewer',
-      host: '127.0.0.1',
-      port: 3998,
-      path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
-    });
-
-    const cors = proxyAdapter.serve.mock.calls[0][0].cors;
-    const [allOrigins] = cors.origins;
-
-    expect(cors.origins).toHaveLength(1);
-    expect(allOrigins).toBeInstanceOf(RegExp);
-    expect((allOrigins as RegExp).test('http://localhost:5173')).toBe(true);
-    expect((allOrigins as RegExp).test('https://viewer.example')).toBe(true);
-    expect((allOrigins as RegExp).test('null')).toBe(true);
-  });
-
   it('passes native HTTP host and port options to the HTTP output adapter', async () => {
     const result = await adapter.execute({} as never, {
       type: 'viewer',
       host: '127.0.0.1',
       port: 3998,
       path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
     });
     const endpoint = decodeViewerEndpoint(result.message);
 
@@ -246,51 +170,6 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
-  it('registers the configured Ollama proxy', async () => {
-    await adapter.execute({} as never, {
-      type: 'viewer',
-      path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11435',
-        path: '/llm',
-      },
-    });
-
-    expect(proxyAdapter.serve).toHaveBeenCalledWith(
-      expect.objectContaining({
-        from: 'http://0.0.0.0:53371',
-        to: 'http://localhost:11435',
-      }),
-      expect.objectContaining({
-        httpAdapter: httpServeAdapter,
-        pathPrefix: '/llm',
-      }),
-    );
-  });
-
-  it('uses configured origin for the default Ollama proxy origin', async () => {
-    await adapter.execute({} as never, {
-      type: 'viewer',
-      origin: 'http://localhost:53371',
-      path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
-    });
-
-    expect(proxyAdapter.serve).toHaveBeenCalledWith(
-      expect.objectContaining({
-        from: 'http://localhost:53371',
-        to: 'http://localhost:11434',
-      }),
-      expect.objectContaining({
-        httpAdapter: httpServeAdapter,
-        pathPrefix: '/ollama',
-      }),
-    );
-  });
-
   it('registers the direct-run route when configured', async () => {
     const port = await availablePort();
     const registerSpy = jest.spyOn(httpServeAdapter, 'register');
@@ -300,10 +179,6 @@ describe(ViewerOutputAdapter.name, () => {
       host: '127.0.0.1',
       port,
       path: 'graph',
-      ollama: {
-        origin: 'http://localhost:11434',
-        path: '/ollama',
-      },
       directRun: {
         path: '/direct-run',
         instanceLookup: () => ({ ping: () => 'pong' }),
@@ -336,6 +211,41 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
+  it('registers only the graph and direct-run routes on the viewer origin', async () => {
+    const port = await availablePort();
+    const registerSpy = jest.spyOn(httpServeAdapter, 'register');
+
+    // The viewer output used to relay browser requests to a local LLM daemon
+    // through an extra registration on this same origin. Inference now runs in
+    // the browser, so the adapter needs no relay collaborator at all and the
+    // origin carries only the graph endpoint and direct run. The graph
+    // endpoint itself is installed through the stubbed HttpOutputAdapter, so
+    // the one registration seen here is direct run's.
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      directRun: {
+        path: '/direct-run',
+        instanceLookup: () => ({ ping: () => 'pong' }),
+      },
+    } as never);
+
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+    expect(
+      registerSpy.mock.calls.flatMap(([, routes]) =>
+        routes.map((route) => route.path),
+      ),
+    ).toEqual([
+      '/direct-run',
+      '/direct-run/histories',
+      '/direct-run/history/index.json',
+      '/direct-run/history/*',
+    ]);
+    expect(httpOutputAdapter.execute).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses to invoke a provider method without a valid token', async () => {
     const port = await availablePort();
     const ping = jest.fn().mockReturnValue('pong');
@@ -345,7 +255,6 @@ describe(ViewerOutputAdapter.name, () => {
       host: '127.0.0.1',
       port,
       path: 'graph',
-      ollama: { origin: 'http://localhost:11434', path: '/ollama' },
       directRun: {
         path: '/direct-run',
         instanceLookup: () => ({ ping }),

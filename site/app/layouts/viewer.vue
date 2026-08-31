@@ -7,7 +7,6 @@ const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   endpointUrl,
-  graphIsStatic,
   isDemo,
   isLoading
 } = storeToRefs(graphStore)
@@ -180,9 +179,6 @@ const viewerMenuItems = computed(() => [
       </div>
     </UDashboardPanel>
 
-    <AiChatDrawer
-      v-model:open="aiChatOpen"
-      :disabled="graphIsStatic"
-    />
+    <AiChatDrawer v-model:open="aiChatOpen" />
   </UDashboardGroup>
 </template>

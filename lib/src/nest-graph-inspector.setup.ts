@@ -205,10 +205,6 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
     return {
       ...output,
-      ollama: {
-        ...defaultViewerOutput.ollama,
-        ...output.ollama,
-      },
       directRun: this.mergeViewerDirectRunOptions(
         defaultViewerOutput.directRun,
         output.directRun,

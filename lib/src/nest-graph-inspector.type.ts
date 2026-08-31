@@ -1,10 +1,5 @@
 import { Type } from '@nestjs/common';
 
-export type NestGraphInspectorOllamaProxyOptions = {
-  origin?: string;
-  path?: string;
-};
-
 export type NestGraphInspectorViewerDirectRunOptions = {
   path?: string;
 };
@@ -107,7 +102,6 @@ export type NestGraphInspectorOutput =
       host?: string;
       port?: number;
       path?: string;
-      ollama?: NestGraphInspectorOllamaProxyOptions;
       directRun?: NestGraphInspectorViewerDirectRunOptions;
     }
   | { type: 'markdown'; path: string }
@@ -134,8 +128,8 @@ export interface NestGraphInspectorModuleOptions {
    * - `type: 'http'` serves the module map from a native HTTP server on the
    *   given host, port, and route path, plus raw JSON and markdown at
    *   `/output.json` and `/output.md` under that path
-   * - `type: 'viewer'` installs graph, Ollama proxy, and direct-run endpoints
-   *   without scanning the Nest container during bootstrap. A client requests
+   * - `type: 'viewer'` installs graph and direct-run endpoints without
+   *   scanning the Nest container during bootstrap. A client requests
    *   `GET {path}/output.json` to discover and cache the graph; that endpoint
    *   responds with the existing GraphOutput JSON shape. `GET {path}/output.md`
    *   resolves the same graph if it has not already been requested. If origin

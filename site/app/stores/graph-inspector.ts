@@ -16,8 +16,7 @@ import { readResponseError, readStatusCode } from '~/utils/http-error'
 import {
   appendOutputPath,
   normalizeSourceUrl,
-  resolveDirectRunUrl,
-  resolveOriginPath
+  resolveDirectRunUrl
 } from '~/utils/inspector-endpoint-url'
 import {
   readGraphSession,
@@ -80,9 +79,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   )
   const markdownUrl = computed(() =>
     appendOutputPath(endpoint.value, 'output.md')
-  )
-  const ollamaUrl = computed(() =>
-    resolveOriginPath(endpoint.value, 'ollama')
   )
 
   /** Headers every request to the inspected application has to carry. */
@@ -583,7 +579,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     informationUrl,
     jsonUrl,
     markdownUrl,
-    ollamaUrl,
     directRunUrl,
     graphData,
     graphMarkdown,

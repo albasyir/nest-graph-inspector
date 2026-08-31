@@ -1,13 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
 import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
-
-import type { ProxyCorsOptions } from '../ports/proxy.gateway';
-import {
-  GraphOutputSource,
-  HttpOutputAdapter,
-} from './http-output.adapter';
-import { ProxyAdapter } from './proxy.adapter';
+import { GraphOutputSource, HttpOutputAdapter } from './http-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -33,7 +27,6 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
 
   constructor(
     private readonly httpOutputAdapter: HttpOutputAdapter,
-    private readonly proxyAdapter: ProxyAdapter,
     private readonly httpServeAdapter: HttpServeAdapter,
     private readonly directRunOutputAdapter: DirectRunOutputAdapter,
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
@@ -48,7 +41,6 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     const path = this.httpOutputAdapter.normalizePath(
       config.path ?? '/__graph-inspector',
     );
-    const ollama = this.ollamaProxyOptions(config);
 
     await this.httpOutputAdapter.execute(graphOutput, {
       type: 'http',
@@ -58,18 +50,6 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       path,
       httpAdapter: this.httpServeAdapter,
     });
-    await this.proxyAdapter.serve(
-      {
-        from: this.httpOrigin(config),
-        to: ollama.origin,
-        cors: this.viewerCorsOptions(),
-      },
-      {
-        httpAdapter: this.httpServeAdapter,
-        pathPrefix: ollama.path,
-        authorize: this.accessTokenService.createHttpGuard(),
-      },
-    );
 
     if (internalConfig.directRun?.path) {
       this.httpServeAdapter.register(
@@ -154,25 +134,6 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     return (
       config.origin ?? `http://${config.host ?? host}:${config.port ?? port}`
     );
-  }
-
-  private ollamaProxyOptions(
-    config: ViewerOutputConfig,
-  ): Required<NonNullable<ViewerOutputConfig['ollama']>> {
-    const origin = config.ollama?.origin;
-    const path = config.ollama?.path;
-
-    if (!origin || !path) {
-      throw new Error('Viewer output requires Ollama proxy origin and path');
-    }
-
-    return { origin, path };
-  }
-
-  private viewerCorsOptions(): ProxyCorsOptions {
-    return {
-      origins: [/.*/],
-    };
   }
 
   private async writeHistoryFiles(

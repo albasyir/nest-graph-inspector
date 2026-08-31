@@ -159,11 +159,23 @@ describe('Graph inspector network access', () => {
       ['direct run', 'POST', '/direct-run'],
       ['the direct run history', 'GET', '/direct-run/histories'],
       ['the direct run history index', 'GET', '/direct-run/history/index.json'],
-      ['the Ollama proxy', 'GET', '/ollama/api/tags'],
     ])('is refused %s', async (_label, method, path) => {
       const response = await probe(`${origin}${path}`, { method });
 
       expect(response.statusCode).toBe(401);
+    });
+
+    it('finds no request-forwarding relay to reach at all', async () => {
+      // The viewer used to run its AI chat through a proxy the library opened
+      // to a local Ollama daemon, mounted here under /ollama. Inference now
+      // happens in the visitor's browser, so that relay was deleted rather
+      // than merely guarded. 404 is the assertion that matters: a 401 would
+      // mean the route still exists and only the token stands in front of it.
+      const response = await probe(`${origin}/ollama/api/tags`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(404);
     });
 
     it('can still complete a CORS preflight without a token', async () => {

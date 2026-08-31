@@ -33,7 +33,7 @@ Shipping speed depends on confidence. Teams need runtime visibility to trace imp
 - **Dependency Graph** visualize modules, providers, controllers, imports, and dependency edges from the running app
 - **Circular Detection** surface circular relationships early so teams can resolve risky loops before release
 - **Relation Focus** focus provider/module pairs to see how they relate and where dependencies connect
-- **Context-Aware AI Assistant** ask graph and trace questions in plain language with context-aware answers, always free in the viewer
+- **Context-Aware AI Assistant** ask graph and trace questions in plain language and get answers grounded in the loaded graph — the model runs in your browser on WebGPU, so it stays free and the graph never leaves your machine
 - **Process Sequence** generate sequence diagrams from an entry point to completion flow
 - **Direct Run** execute runtime-resolved services and functions directly from graph context
 
