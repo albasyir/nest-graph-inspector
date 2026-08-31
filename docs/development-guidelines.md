@@ -265,13 +265,125 @@ Update `docs/graph-contract.md` if the contract changed.
 
 ---
 
-## Open questions
+## Coding standards
 
-- There is no monorepo-level `pnpm-workspace.yaml`; workspace membership is
-  inferred by convention. Confirm whether `lib/`, `demo/`, and `site/` are
-  officially in the same pnpm workspace.
-- The `demo/test/app.e2e-spec.ts` e2e test appears to be a scaffold
-  remnant.  It should either be updated to test the real demo app behaviour or
-  removed.
-- No CI pipeline runs the library unit tests automatically (`.github/workflows/`
-  only contains `deploy-site.yml`).  Contributors must run `pnpm test` locally.
+This project adopts the **ECC coding standards** as its baseline. They are not
+a project-specific invention and nothing here should be read as one: the source
+of truth is the ECC plugin as installed, principally
+
+- `skills/coding-standards/SKILL.md` — naming, immutability, KISS/DRY/YAGNI, error handling
+- `agents/typescript-reviewer.md` — the CRITICAL/HIGH/MEDIUM rubric for TypeScript
+- `skills/nestjs-patterns/SKILL.md` — NestJS structure and conventions
+- `skills/hexagonal-architecture/SKILL.md` — ports and adapters
+- `skills/api-design/SKILL.md` and `skills/error-handling/SKILL.md` — the HTTP surface
+
+Where an ECC rule and [`architecture.md`](./architecture.md) disagree,
+`architecture.md` wins — it is normative for this repository — and the
+disagreement belongs in the carve-out list below rather than being resolved
+silently in either direction.
+
+A conformance pass over `lib/**` in August 2026 measured the package against
+those documents: **51 ECC rules were confirmed satisfied**, and the deviations
+that survived adversarial verification are filed in
+[`technical-debt-report.md`](./technical-debt-report.md).
+
+### Carve-outs — ECC rules that do not apply to `lib/**`
+
+`lib/` is a library imported into someone else's NestJS application. Several
+ECC rules assume a standalone application that owns its own `main.ts`. These
+four are formally not applicable **to `lib/**` only** — `demo/src/**` is a real
+application and follows the ECC rules as written.
+
+**Project structure.** ECC's NestJS project-structure template (`src/main.ts`,
+`src/app.module.ts`, `src/common/{filters,guards,interceptors,pipes}`,
+`src/config/`, `src/modules/<feature>/{dto,entities}`) does not apply to
+`lib/**`: it describes an application that owns its process and its Nest request
+pipeline, whereas `nest-graph-inspector` is a single-entry-module published
+library laid out as ports and adapters. The template's transferable intents —
+domain code inside the module, types beside the code that owns them, one
+auditable composition root — remain binding and are already satisfied by that
+layout.
+
+**Global bootstrap registrations.** ECC's "bootstrap with a single global
+`ValidationPipe`, `ClassSerializerInterceptor`, and `useGlobalFilters(...)`"
+cannot be adopted: this package has no bootstrap and must not acquire one.
+Registering a global pipe or filter from a library would change how the *host's
+own controllers* behave, which a diagnostic tool has no right to do.
+
+**Response DTOs for Direct Run.** ECC's "use dedicated response DTOs or
+serializers instead of returning ORM entities directly" does not apply to the
+return value of `POST /direct-run` or the `/direct-run/history*` routes: the
+endpoint exists to return whatever the invoked host provider method returned, so
+the open `result` field is the feature rather than a leak, and the rule's
+stable-contract obligation is discharged by the `DirectRunResult` envelope that
+wraps it. The adjacent obligation to avoid leaking internal fields is **not**
+carved out and continues to bind wherever the library retains that value,
+re-serves it to a later caller, or writes it to disk.
+
+**Resource naming and URL versioning.** ECC's plural-collection-noun and
+`/api/v1/` rules do not apply to the inspector route table: those paths are a
+versioned cross-package contract between `lib/` and the viewer in `site/`,
+parsed out of the printed startup line under invariant 9 and asserted literally
+in `site/app/utils/inspector-endpoint-url.test.ts`, and the API is already
+versioned by `GRAPH_OUTPUT_SCHEMA_VERSION` against the viewer's
+`MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION`. What still binds: a **new** inspector
+route must match the conventions of the existing table rather than inventing a
+third style.
+
+### Mechanism substitutions — ECC's intent binds, its mechanism does not
+
+These are not exemptions. The rule's obligation applies in full; only the
+framework mechanism it prescribes is unavailable, and this is what replaces it.
+
+| ECC rule | Why the mechanism fails here | What discharges it instead |
+|---|---|---|
+| `@Catch()` exception filter registered with `useGlobalFilters` | Needs an Express `Response` via `ArgumentsHost`; invariant 6 keeps the inspector on plain `node:http` | The single catch in `HttpServeAdapter.handleRequest` **is** this library's exception filter. It must answer the same JSON `{ ok: false, error }` envelope as every other route, return a generic message, and log the real error. Today it does none of these — see TD-24. |
+| `@UseGuards(...)` / `CanActivate` / `@Roles` | Same — no Nest request pipeline | A `HttpServeAuthorize` function registered through `register({ authorize: accessTokenService.createHttpGuard() }, …)`. The rule's request-context half still binds: that function must return the verified `AccessTokenPayload` and the router must expose it to route callbacks, so a Direct Run audit line can attribute an invocation. |
+| Validate every request DTO with `class-validator`; enable `whitelist` / `forbidNonWhitelisted` | No `ValidationPipe` ever runs, and `class-validator` is not a dependency of `lib/` | Hand-written validation in the adapter, with the same two guarantees: reject any key outside `['module','provider','method','args']` with a 400, and validate `args` against the `parameterTypes` the library already computes. Do not add a DTO class. |
+| Terminate on invalid env/config instead of booting partially | A library must never abort a host's boot because port 53371 was taken | Terminate the affected **capability**, not the process. Output-adapter failures stay logged and swallowed. Security-relevant misconfiguration does not: a secret shorter than the documented 32-character minimum must stop being used, not merely warn. |
+| Use-case code must not import framework types | The NestJS container is this library's subject matter and its lifecycle is the inbound adapter's trigger | `@Injectable()` and `OnModuleInit` on `NestGraphInspectorSetup` are exempt. The rule still binds to the graph-building logic inside it — cycle detection and type rendering import only `lib/src/types/**`. See TD-02. |
+| Fail fast and loudly | An output failure reaching the host would abort its boot | The failure must still reach *someone who can act*, and for a library that is the importing application. An optional `onOutputError` hook, defaulting to a no-op, satisfies ECC without changing the default. |
+
+### Where ECC does not reach
+
+Adopting a ready-made standard buys consistency, not coverage. The August 2026
+pass produced one clear example, and it is worth knowing before treating ECC
+conformance as sufficient.
+
+The most dangerous latent defect found in `lib/**` — TD-08, where bumping
+`GRAPH_OUTPUT_SCHEMA_VERSION` silently fails to change the emitted graph while
+every test still passes — was raised by the conformance pass and then
+**correctly refuted** as an ECC finding. ECC's "HIGH — Type Safety" block
+contains exactly four bullets (`any`, non-null assertions, unsafe `as` casts,
+relaxed compiler settings) and none of them requires a contract field with one
+known value to be typed as a literal. The verifier's conclusion was that the fix
+"would be a genuine improvement — but it is a design suggestion, not an instance
+of any ECC rule."
+
+That is the correct call about ECC and the wrong outcome for this repository.
+Two practical consequences:
+
+1. **A clean ECC pass is a floor, not a verdict.** Contract-integrity questions —
+   can the type system catch a version drift, can a test detect one — sit
+   outside the rubric and need their own review.
+2. **When a refuted finding is still real, file it on its own evidence** rather
+   than dropping it because no rule covers it. TD-08 is filed that way, and
+   this section is why.
+
+If a rule this project needs turns out to be missing from ECC repeatedly, the
+answer is a short project-specific supplement here — not a fork of ECC, and not
+silence.
+
+### Running a review
+
+```bash
+pnpm run verify   # lint + typecheck + test + build, across the workspace
+```
+
+`verify` does **not** run the demo's e2e suites. Any change to the access token,
+the CORS policy, the bind interface, or the Direct Run surface additionally
+requires a case in `demo/test/graph-inspector-security.e2e-spec.ts` and:
+
+```bash
+pnpm --filter nest-graph-inspector-demo run test:e2e
+```
