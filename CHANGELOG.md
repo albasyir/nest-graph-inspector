@@ -12,6 +12,8 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-06
+
 ### Added
 
 - The graph viewer's AI chat now runs the model inside your browser. Pick a
