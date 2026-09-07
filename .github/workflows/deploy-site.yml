@@ -17,6 +17,14 @@ jobs:
     concurrency:
       group: npm-publish-${{ github.event.release.tag_name }}
       cancel-in-progress: false
+    # actions/setup-node's registry-url writes an .npmrc holding the literal
+    # ${NODE_AUTH_TOKEN} and points NPM_CONFIG_USERCONFIG at it, so every later
+    # pnpm step reads that file and warns when the variable is undefined. An
+    # empty default satisfies the expansion. The publish step overrides it with
+    # the real secret, so the live token never reaches `pnpm install` and the
+    # dependency lifecycle scripts it runs.
+    env:
+      NODE_AUTH_TOKEN: ''
     steps:
       - uses: actions/checkout@v7
         with:
