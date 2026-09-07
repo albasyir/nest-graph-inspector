@@ -18,6 +18,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # lib/package.json sets publishConfig.provenance, so every publish
+      # attests — flag or no flag — and npm fails outright without this.
+      id-token: write
     # actions/setup-node's registry-url writes an .npmrc holding the literal
     # ${NODE_AUTH_TOKEN} and points NPM_CONFIG_USERCONFIG at it, so every later
     # pnpm step reads that file and warns when the variable is undefined. An
