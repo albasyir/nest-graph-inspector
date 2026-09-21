@@ -15,7 +15,7 @@
   "dependencies": {
     "@guolao/vue-monaco-editor": "^1.6.0",
     "@iconify-json/lucide": "^1.2.113",
-    "@iconify-json/simple-icons": "^1.2.86",
+    "@iconify-json/simple-icons": "^1.2.93",
     "@iconify-json/vscode-icons": "^1.2.58",
     "@langchain/core": "^1.2.9",
     "@mlc-ai/web-llm": "^0.2.84",
