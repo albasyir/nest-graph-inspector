@@ -46,6 +46,48 @@ const runtimeTraceInstrumentationByInstance = new WeakMap<
   RuntimeTraceInstrumentation
 >();
 
+/**
+ * Prototypes shared by every object of their kind. Wrapping a method found
+ * here would patch it for the entire process — every array, every promise —
+ * not just the provider being instrumented, so these are refused before any
+ * `defineProperty` call reaches them.
+ */
+const BUILTIN_PROTOTYPES = new Set<object>(
+  [
+    Object.prototype,
+    Array.prototype,
+    Function.prototype,
+    Map.prototype,
+    Set.prototype,
+    WeakMap.prototype,
+    WeakSet.prototype,
+    Promise.prototype,
+    Error.prototype,
+    RegExp.prototype,
+    Date.prototype,
+    String.prototype,
+    Number.prototype,
+    Boolean.prototype,
+    Symbol.prototype,
+  ].filter((prototype): prototype is object => !!prototype),
+);
+
+/**
+ * The traced wrapper replaces the original method on the shared prototype,
+ * so anything reading the wrapper's own source — parameter names via
+ * `Function.prototype.toString`, for instance — sees the wrapper's signature
+ * instead of the method it wraps. This recovers the original.
+ */
+export type AnyFunction = (...args: unknown[]) => unknown;
+
+export const originalTracedMethods = new WeakMap<AnyFunction, AnyFunction>();
+
+export function getOriginalTracedMethod(
+  method: AnyFunction,
+): AnyFunction | undefined {
+  return originalTracedMethods.get(method);
+}
+
 @Injectable()
 export class DiscoveryAdapter {
   private readonly ignoreProvider: string[];
@@ -267,7 +309,11 @@ export class DiscoveryAdapter {
     runtimeTraceInstrumentationByInstance.set(param.instance, instrumentation);
 
     const prototype = Object.getPrototypeOf(param.instance) as object | null;
-    if (!prototype || runtimeTraceInstrumentedPrototypes.has(prototype)) {
+    if (
+      !prototype ||
+      BUILTIN_PROTOTYPES.has(prototype) ||
+      runtimeTraceInstrumentedPrototypes.has(prototype)
+    ) {
       return;
     }
 
@@ -302,6 +348,7 @@ export class DiscoveryAdapter {
         );
       };
       Object.defineProperty(tracedMethod, "length", { value: method.length });
+      originalTracedMethods.set(tracedMethod, method);
 
       Object.defineProperty(prototype, methodName, {
         configurable: true,

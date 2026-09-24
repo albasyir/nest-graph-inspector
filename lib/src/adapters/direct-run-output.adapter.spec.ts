@@ -369,6 +369,7 @@ describe(DirectRunOutputAdapter.name, () => {
           '/direct-run',
           () => instance,
           () => new Set(['ping']),
+          { allowUnsafeMethods: false },
         ),
       ],
     );
@@ -387,6 +388,36 @@ describe(DirectRunOutputAdapter.name, () => {
     }
   });
 
+  it('invokes methods not advertised by allowedMethodsLookup by default (permissive mode)', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      { host: '127.0.0.1', port },
+      [
+        adapter.createRoute(
+          '/direct-run',
+          () => provider({ secretMethod: () => 'internal' }),
+          () => new Set(['ping']),
+        ),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'PingProvider',
+      method: 'secretMethod',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(parseJson(response.body)).toMatchObject({
+      ok: true,
+      method: 'secretMethod',
+      result: 'internal',
+    });
+  });
+
   it('limits JSON bodies by encoded bytes and decodes split UTF-8 safely', async () => {
     const port = await availablePort();
     const httpServeAdapter = moduleRef.get(HttpServeAdapter);
@@ -398,6 +429,7 @@ describe(DirectRunOutputAdapter.name, () => {
           '/direct-run',
           () => provider({ ping: (value: string) => value }),
           () => new Set(['ping']),
+          { maxBodySizeBytes: 1024 * 1024 },
         ),
       ],
     );

@@ -22,6 +22,8 @@ type ViewerOutputInternalConfig = ViewerOutputConfig & {
       providerName: string,
     ) => ReadonlySet<string> | undefined;
     historyDirPath?: string;
+    allowUnsafeMethods?: boolean;
+    maxBodySizeBytes?: number;
   };
 };
 
@@ -85,6 +87,10 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
                 moduleName,
                 providerName,
               ),
+            {
+              allowUnsafeMethods: internalConfig.directRun.allowUnsafeMethods,
+              maxBodySizeBytes: internalConfig.directRun.maxBodySizeBytes,
+            },
             internalConfig.directRun.historyDirPath
               ? (trace) =>
                   this.writeHistoryFiles(

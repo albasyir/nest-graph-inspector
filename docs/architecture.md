@@ -365,35 +365,63 @@ along with the lockout behaviour, over real TCP.
 
 Direct Run turns the viewer into something that *does* things rather than only
 showing them: a `POST /direct-run` with `{ module, provider, method, args }`
-looks the provider instance up in the live container and calls only the exact
-public prototype method advertised for that module/provider in its `directRun`
-metadata. Constructors, Nest lifecycle hooks, inherited methods,
-instance-shadowed methods, and TypeScript-`private` methods are refused. Since
-`private` is erased at compile time and a "private" method is an ordinary
-callable prototype member at runtime, that last check is the one exclusion
-`SourceMetadataService` — not the runtime shape of the object — has to make,
-by reading the method's modifiers from the application's own sources; a method
-whose source cannot be found is not treated as private. `directRun.enabled`
-defaults to `true`; setting it to `false` omits all Direct Run and
-trace-history routes.
+looks the provider instance up in the live container and calls a method on it.
+Which methods are callable depends on `directRun.allowUnsafeMethods`:
 
-Direct Run reads at most **1 MiB of encoded request bytes**. Oversized payloads
-receive a generic `413` response, and UTF-8 is decoded across chunk boundaries
-before JSON is parsed.
+- **Permissive (default, `true`).** Any callable method found on the
+  provider's instance or prototype chain may be invoked, including ones
+  TypeScript marks `private` or `protected` — that keyword is erased at
+  compile time and is not a runtime boundary. Only `constructor` is refused
+  outright, because invoking it as a plain method call is not a provider
+  "method" in any sense a caller intends. This favors local development
+  ergonomics: the default assumes Direct Run is reached by a trusted
+  developer, not exposed to the open internet.
+- **Strict (`false`).** Only the exact public prototype method advertised for
+  that module/provider in its `directRun` metadata may be invoked, and only
+  when it is not shadowed on the instance. Constructors, Nest lifecycle hooks,
+  inherited methods, instance-shadowed methods, and TypeScript-`private` or
+  `-protected` methods are refused. Since `private`/`protected` are erased at
+  compile time and such a method is an ordinary callable prototype member at
+  runtime, that exclusion is the one check `SourceMetadataService` — not the
+  runtime shape of the object — has to make, by reading the method's
+  modifiers from the application's own sources; a method whose source cannot
+  be found, or whose class name resolves ambiguously across the application's
+  sources, is not treated as public. The graph's `directRun` metadata only
+  ever advertises methods confirmed public this way, regardless of which mode
+  is active, so the metadata itself never grows to include unsafe methods.
+
+`directRun.enabled` defaults to `true`; setting it to `false` omits all
+Direct Run and trace-history routes. Both `allowUnsafeMethods` and
+`maxBodySizeBytes` (below) can be set module-wide via
+`NestGraphInspectorModuleOptions.directRun`, or per `viewer` output via that
+output's own `directRun`, which wins when both are set.
+
+Direct Run reads at most `directRun.maxBodySizeBytes` of encoded request
+bytes, **50 MiB by default**; `0` or a negative number removes the limit.
+Oversized payloads receive a generic `413` response, and UTF-8 is decoded
+across chunk boundaries before JSON is parsed.
 
 Around that call `RuntimeTraceRecorder` builds a trace. `DiscoveryAdapter`
 instruments provider prototypes once (tracked in a `WeakSet`, so wrapping is
 never doubled) while preserving each method's arity, and each instrumented
-method opens a span. Two
-`AsyncLocalStorage` stores — one for the active trace, one for the span stack —
-give the nesting, so a call graph several providers deep is reconstructed
-without explicit plumbing. A method returning a promise gets its span settled
-when the promise settles; a span whose promise nobody awaited is marked rather
-than lost, which is why `RuntimeTraceStatus` has a `partial` state alongside
-`success` and `error`. At most 100 completed traces are retained in memory;
-the oldest insertion is evicted first. Traces are written to disk too when a
-`json` output is configured — `viewer-output.adapter.ts` derives the history
-directory from that output's path and rewrites its index from current memory.
+method opens a span. A `BUILTIN_PROTOTYPES` guard in `discovery.ts` refuses to
+instrument prototypes shared by every object of their kind — `Object.prototype`,
+`Array.prototype`, `Function.prototype`, `Map.prototype`, `Promise.prototype`,
+and the rest of the built-ins — before any `defineProperty` call reaches them,
+because wrapping a method found there would patch it for the entire process,
+not just the provider being instrumented; a provider whose prototype chain
+bottoms out at one of these (a plain object literal, an array, a bare
+function) is left uninstrumented rather than corrupting a shared prototype.
+Two `AsyncLocalStorage` stores — one for the active trace, one for the span
+stack — give the nesting, so a call graph several providers deep is
+reconstructed without explicit plumbing. A method returning a promise gets its
+span settled when the promise settles; a span whose promise nobody awaited is
+marked rather than lost, which is why `RuntimeTraceStatus` has a `partial`
+state alongside `success` and `error`. At most 100 completed traces are
+retained in memory; the oldest insertion is evicted first. Traces are written
+to disk too when a `json` output is configured — `viewer-output.adapter.ts`
+derives the history directory from that output's path and rewrites its index
+from current memory.
 
 ---
 
@@ -798,7 +826,7 @@ without knowing what it buys.
 | Default bind `0.0.0.0` | The viewer is hosted elsewhere and must reach the developer's machine | The endpoint is reachable from the local network; the token is what protects it |
 | Wildcard CORS on the viewer output | A hosted viewer on a fixed origin cannot be same-origin with an arbitrary developer machine | Any page can *attempt* a request; none succeeds without the token |
 | The token is printed in the startup log | It is the only handoff point, and copying it by hand would make the product unusable | Log shipping captures a live credential — `accessToken.logToken: false` is the escape hatch |
-| Direct Run invokes real methods | The trace is only honest if the call is real | An authenticated caller can run only public methods advertised in that provider's Direct Run metadata; it remains a development tool, not a production one |
+| Direct Run invokes real methods | The trace is only honest if the call is real | In the default permissive mode, an authenticated caller can run any callable method on a provider, including ones TypeScript marks `private`; set `directRun.allowUnsafeMethods: false` to restrict calls to the public methods advertised in that provider's Direct Run metadata. It remains a development tool, not a production one |
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
 

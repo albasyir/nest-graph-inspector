@@ -348,6 +348,8 @@ describe(NestGraphInspectorSetup.name, () => {
         directRun: {
           enabled: true,
           path: "/direct-run",
+          allowUnsafeMethods: true,
+          maxBodySizeBytes: 52428800,
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),
@@ -377,6 +379,65 @@ describe(NestGraphInspectorSetup.name, () => {
         directRun: {
           enabled: true,
           path: "/run",
+          allowUnsafeMethods: true,
+          maxBodySizeBytes: 52428800,
+          historyDirPath: undefined,
+          instanceLookup: expect.any(Function),
+          allowedMethodsLookup: expect.any(Function),
+        },
+      },
+    );
+  });
+
+  it("should let module-level directRun options override the built-in defaults", async () => {
+    options.directRun = { allowUnsafeMethods: false, maxBodySizeBytes: 1024 };
+    options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        type: "viewer",
+        host: "127.0.0.1",
+        port: 3998,
+        directRun: {
+          enabled: true,
+          path: "/direct-run",
+          allowUnsafeMethods: false,
+          maxBodySizeBytes: 1024,
+          historyDirPath: undefined,
+          instanceLookup: expect.any(Function),
+          allowedMethodsLookup: expect.any(Function),
+        },
+      },
+    );
+  });
+
+  it("should let a viewer output's own directRun options override the module-level defaults", async () => {
+    options.directRun = { allowUnsafeMethods: false, maxBodySizeBytes: 1024 };
+    options.outputs = [
+      {
+        type: "viewer",
+        host: "127.0.0.1",
+        port: 3998,
+        directRun: { allowUnsafeMethods: true },
+      },
+    ];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        type: "viewer",
+        host: "127.0.0.1",
+        port: 3998,
+        directRun: {
+          enabled: true,
+          path: "/direct-run",
+          allowUnsafeMethods: true,
+          maxBodySizeBytes: 1024,
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),

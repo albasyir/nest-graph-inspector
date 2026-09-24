@@ -11,6 +11,32 @@ export type NestGraphInspectorViewerDirectRunOptions = {
   enabled?: boolean;
 
   path?: string;
+
+  /**
+   * Whether Direct Run may invoke any callable method it finds on a
+   * provider's prototype or instance, rather than only the public methods
+   * advertised in that provider's Direct Run metadata.
+   *
+   * Defaults to `true` — permissive, for local development ergonomics: an
+   * authenticated caller can run any method, including ones TypeScript marks
+   * `private` or `protected`, since that keyword is erased at compile time
+   * and unenforceable at runtime anyway. Set to `false` to enforce the
+   * stricter allowlist instead: only methods `SourceMetadataService` can
+   * confirm are public on the application's own sources, excluding
+   * constructors, Nest lifecycle hooks, and instance-shadowed methods. Turn
+   * this off before exposing Direct Run outside a trusted development
+   * environment.
+   */
+  allowUnsafeMethods?: boolean;
+
+  /**
+   * Upper bound on a Direct Run request body, in encoded bytes.
+   *
+   * Defaults to 50 MiB. A request over the limit is refused with `413`
+   * before it is parsed as JSON. Set to `0` or a negative number to remove
+   * the limit.
+   */
+  maxBodySizeBytes?: number;
 };
 
 export type NestGraphInspectorBruteForceOptions = {
@@ -187,4 +213,12 @@ export interface NestGraphInspectorModuleOptions {
    * Defaults to `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']`.
    */
   nestCoreProviders?: string[];
+
+  /**
+   * Module-wide Direct Run defaults, applied to every `viewer` output that
+   * does not set its own `directRun.allowUnsafeMethods` or
+   * `directRun.maxBodySizeBytes`. A `viewer` output's own `directRun` still
+   * wins where it sets a value.
+   */
+  directRun?: NestGraphInspectorViewerDirectRunOptions;
 }

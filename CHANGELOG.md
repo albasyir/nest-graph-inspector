@@ -14,6 +14,27 @@ for the published history.
 
 ### Added
 
+- Direct Run's `allowUnsafeMethods` and `maxBodySizeBytes` are now configurable
+  per `viewer` output, or module-wide via `NestGraphInspectorModuleOptions.directRun`.
+  `allowUnsafeMethods` defaults to `true`: any callable method on a provider's
+  instance or prototype chain may be invoked, including ones TypeScript marks
+  `private` or `protected`, favoring local development ergonomics over strict
+  enforcement. Set it to `false` to restrict calls to the exact public methods
+  advertised in that provider's Direct Run metadata. `maxBodySizeBytes` bounds
+  the encoded request body Direct Run reads and defaults to 50 MiB, up from
+  the previous fixed 1 MiB limit; set it to `0` or a negative number to remove
+  the limit.
+- `DiscoveryAdapter`'s runtime-trace instrumentation refuses to wrap prototypes
+  shared by every object of their kind — `Object.prototype`, `Array.prototype`,
+  `Function.prototype`, `Map.prototype`, `Promise.prototype`, and the rest of
+  the built-ins — before any `defineProperty` call reaches them, so a provider
+  whose prototype chain bottoms out at a plain object literal, array, or bare
+  function is left uninstrumented instead of patching a shared prototype for
+  the entire process.
+- Each instrumented method's original, unwrapped implementation is now kept in
+  a `WeakMap` so it can be recovered after tracing wraps it, fixing Direct
+  Run's parameter-name extraction, which previously read the wrapper's own
+  `(...args)` signature instead of the original method's parameter names.
 - The graph viewer's AI chat now runs the model inside your browser. Pick a
   model, wait once for its weights to download into the browser cache, and every
   answer after that is generated on your own GPU through WebGPU — no daemon, no

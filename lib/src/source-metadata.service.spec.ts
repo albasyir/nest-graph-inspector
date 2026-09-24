@@ -50,7 +50,7 @@ describe(SourceMetadataService.name, () => {
     expect(buildClassIndexesSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("identifies TypeScript-private methods so callers can exclude them from direct run", () => {
+  it("identifies which methods are safe to advertise and invoke as Direct Run public methods", () => {
     const project = new Project({ useInMemoryFileSystem: true });
     project.createSourceFile(
       "private-source.ts",
@@ -60,7 +60,7 @@ describe(SourceMetadataService.name, () => {
             return "internal";
           }
 
-          protectedMethod(): string {
+          protected protectedMethod(): string {
             return "internal-ish";
           }
 
@@ -75,27 +75,71 @@ describe(SourceMetadataService.name, () => {
     jest.spyOn(internals, "createProject").mockReturnValue(project);
 
     expect(
-      service.isPrivateMethod("ProviderWithMixedVisibility", "secretMethod"),
+      service.isPublicMethod("ProviderWithMixedVisibility", "publicMethod"),
     ).toBe(true);
     expect(
-      service.isPrivateMethod(
+      service.isPublicMethod("ProviderWithMixedVisibility", "secretMethod"),
+    ).toBe(false);
+    expect(
+      service.isPublicMethod(
         "ProviderWithMixedVisibility",
         "protectedMethod",
       ),
     ).toBe(false);
-    expect(
-      service.isPrivateMethod("ProviderWithMixedVisibility", "publicMethod"),
-    ).toBe(false);
   });
 
-  it("treats a method with no discoverable source as not private", () => {
+  it("fails closed for an unknown class or an unknown method", () => {
     const project = new Project({ useInMemoryFileSystem: true });
+    project.createSourceFile(
+      "known-source.ts",
+      `
+        class KnownProvider {
+          publicMethod(): string {
+            return "exposed";
+          }
+        }
+      `,
+    );
     const service = new SourceMetadataService();
     const internals = service as unknown as SourceMetadataServiceInternals;
     jest.spyOn(internals, "createProject").mockReturnValue(project);
 
-    expect(service.isPrivateMethod("UnknownClass", "unknownMethod")).toBe(
+    expect(service.isPublicMethod("UnknownClass", "unknownMethod")).toBe(
       false,
     );
+    expect(service.isPublicMethod("KnownProvider", "unknownMethod")).toBe(
+      false,
+    );
+  });
+
+  it("fails closed when the class name is ambiguous across the application's sources", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    project.createSourceFile(
+      "ambiguous-a.ts",
+      `
+        class AmbiguousProvider {
+          publicMethod(): string {
+            return "a";
+          }
+        }
+      `,
+    );
+    project.createSourceFile(
+      "ambiguous-b.ts",
+      `
+        class AmbiguousProvider {
+          publicMethod(): string {
+            return "b";
+          }
+        }
+      `,
+    );
+    const service = new SourceMetadataService();
+    const internals = service as unknown as SourceMetadataServiceInternals;
+    jest.spyOn(internals, "createProject").mockReturnValue(project);
+
+    expect(
+      service.isPublicMethod("AmbiguousProvider", "publicMethod"),
+    ).toBe(false);
   });
 });
