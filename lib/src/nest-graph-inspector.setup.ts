@@ -35,6 +35,7 @@ import { Node, Project, SyntaxKind, Type as TsMorphType } from "ts-morph";
 import type { NestGraphInspectorViewerDirectRunOptions } from "./nest-graph-inspector.type";
 import { RuntimeTraceRecorder } from "./runtime-trace.recorder";
 import { SourceMetadataService } from "./source-metadata.service";
+import { getOriginalTracedMethod } from "./adapters/discovery";
 
 type DependencyNodeKind = "provider" | "controller";
 type DependencyNode = {
@@ -51,6 +52,15 @@ const MAX_TYPE_RENDER_MEMBERS = 50;
 const MAX_TYPE_RENDER_LENGTH = 8_000;
 const MAX_TYPE_PROPERTY_NAME_LENGTH = 160;
 const MIN_TYPE_RENDER_LENGTH = "unknown".length;
+const DIRECT_RUN_EXCLUDED_METHODS = new Set([
+  "constructor",
+  "onModuleInit",
+  "onApplicationBootstrap",
+  "onModuleDestroy",
+  "beforeApplicationShutdown",
+  "onApplicationShutdown",
+]);
+const DEFAULT_DIRECT_RUN_MAX_BODY_SIZE_BYTES = 50 * 1024 * 1024;
 
 type TypeRenderState = {
   activeTypes: Set<TsMorphType>;
@@ -213,19 +223,46 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   }
 
   private mergeViewerDirectRunOptions(
-    defaultOptions?: NestGraphInspectorViewerDirectRunOptions,
+    defaultViewerOutputOptions?: NestGraphInspectorViewerDirectRunOptions,
     outputOptions?: NestGraphInspectorViewerDirectRunOptions,
   ) {
-    const path = outputOptions?.path ?? defaultOptions?.path;
+    // Precedence, most specific first: the output's own `directRun`, then the
+    // module-wide `directRun` default, then the library's built-in default
+    // (which only ever sets `path`), then the hardcoded, permissive-by-default
+    // fallback.
+    const moduleOptions = this.options.directRun;
+    const enabled =
+      outputOptions?.enabled ??
+      moduleOptions?.enabled ??
+      defaultViewerOutputOptions?.enabled ??
+      true;
+    const path =
+      outputOptions?.path ?? moduleOptions?.path ?? defaultViewerOutputOptions?.path;
     if (!path) {
       return undefined;
     }
 
+    const allowUnsafeMethods =
+      outputOptions?.allowUnsafeMethods ??
+      moduleOptions?.allowUnsafeMethods ??
+      defaultViewerOutputOptions?.allowUnsafeMethods ??
+      true;
+    const maxBodySizeBytes =
+      outputOptions?.maxBodySizeBytes ??
+      moduleOptions?.maxBodySizeBytes ??
+      defaultViewerOutputOptions?.maxBodySizeBytes ??
+      DEFAULT_DIRECT_RUN_MAX_BODY_SIZE_BYTES;
+
     return {
+      enabled,
       path,
+      allowUnsafeMethods,
+      maxBodySizeBytes,
       historyDirPath: this.getDirectRunHistoryDirPath(),
       instanceLookup: (moduleName: string, providerName: string) =>
         this.findDirectRunProviderInstance(moduleName, providerName),
+      allowedMethodsLookup: (moduleName: string, providerName: string) =>
+        this.getDirectRunAllowedMethods(moduleName, providerName),
     };
   }
 
@@ -367,6 +404,16 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return moduleInstances?.get(providerName);
   }
 
+  private getDirectRunAllowedMethods(
+    moduleName: string,
+    providerName: string,
+  ): ReadonlySet<string> | undefined {
+    const metadata = this.resolveDirectRunProviderMeta(providerName, moduleName);
+    return metadata
+      ? new Set(metadata.methods.map((method) => method.name))
+      : undefined;
+  }
+
   private getDirectRunProviderInstances(): Map<string, Map<string, unknown>> {
     const tree = this.discovery.scan();
     if (this.directRunProviderInstances?.tree === tree) {
@@ -406,8 +453,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return [];
     }
 
+    const className =
+      typeof instance === "function" ? instance.name : instance.constructor?.name;
+
     const methods = Object.getOwnPropertyNames(prototype)
-      .filter((name) => name !== "constructor")
+      .filter((name) => !DIRECT_RUN_EXCLUDED_METHODS.has(name))
+      .filter(
+        (name) =>
+          !!className && this.sourceMetadata.isPublicMethod(className, name),
+      )
       .map((name) => {
         const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
         const method = descriptor?.value;
@@ -464,9 +518,13 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     methodName: string,
     method: (...args: unknown[]) => unknown,
   ): string {
+    // Runtime tracing wraps this method on its shared prototype, so its own
+    // source is the wrapper's `(...args)` signature, not the original
+    // parameter names. Read the wrapped original back for those names.
+    const originalMethod = getOriginalTracedMethod(method) ?? method;
     const runtimeNames = this.extractMethodParameterNamesFromFunctionSource(
       methodName,
-      method,
+      originalMethod,
     );
     if (!runtimeNames?.length) {
       return "[]";

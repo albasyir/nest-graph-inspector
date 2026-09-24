@@ -30,13 +30,70 @@ export type ModuleTree = {
   children: ModuleTree[];
 };
 
+type RuntimeTraceMetadata = {
+  moduleName: string;
+  className: string;
+  type: RuntimeTraceSpanType;
+};
+
+type RuntimeTraceInstrumentation = RuntimeTraceMetadata & {
+  recorder: RuntimeTraceRecorder;
+};
+
+const runtimeTraceInstrumentedPrototypes = new WeakSet<object>();
+const runtimeTraceInstrumentationByInstance = new WeakMap<
+  object,
+  RuntimeTraceInstrumentation
+>();
+
+/**
+ * Prototypes shared by every object of their kind. Wrapping a method found
+ * here would patch it for the entire process — every array, every promise —
+ * not just the provider being instrumented, so these are refused before any
+ * `defineProperty` call reaches them.
+ */
+const BUILTIN_PROTOTYPES = new Set<object>(
+  [
+    Object.prototype,
+    Array.prototype,
+    Function.prototype,
+    Map.prototype,
+    Set.prototype,
+    WeakMap.prototype,
+    WeakSet.prototype,
+    Promise.prototype,
+    Error.prototype,
+    RegExp.prototype,
+    Date.prototype,
+    String.prototype,
+    Number.prototype,
+    Boolean.prototype,
+    Symbol.prototype,
+  ].filter((prototype): prototype is object => !!prototype),
+);
+
+/**
+ * The traced wrapper replaces the original method on the shared prototype,
+ * so anything reading the wrapper's own source — parameter names via
+ * `Function.prototype.toString`, for instance — sees the wrapper's signature
+ * instead of the method it wraps. This recovers the original.
+ */
+export type AnyFunction = (...args: unknown[]) => unknown;
+
+export const originalTracedMethods = new WeakMap<AnyFunction, AnyFunction>();
+
+export function getOriginalTracedMethod(
+  method: AnyFunction,
+): AnyFunction | undefined {
+  return originalTracedMethods.get(method);
+}
+
 @Injectable()
 export class DiscoveryAdapter {
   private readonly ignoreProvider: string[];
   private readonly ignoreImport: string[];
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
-  private readonly runtimeTraceInstrumentedInstances = new WeakSet<object>();
   private cachedTree: ModuleTree | undefined;
 
   constructor(
@@ -243,16 +300,24 @@ export class DiscoveryAdapter {
     className: string;
     type: RuntimeTraceSpanType;
   }): void {
-    if (this.runtimeTraceInstrumentedInstances.has(param.instance)) {
-      return;
-    }
-
-    this.runtimeTraceInstrumentedInstances.add(param.instance);
+    const instrumentation = {
+      moduleName: param.moduleName,
+      className: param.className,
+      type: param.type,
+      recorder: this.runtimeTraceRecorder,
+    };
+    runtimeTraceInstrumentationByInstance.set(param.instance, instrumentation);
 
     const prototype = Object.getPrototypeOf(param.instance) as object | null;
-    if (!prototype) {
+    if (
+      !prototype ||
+      BUILTIN_PROTOTYPES.has(prototype) ||
+      runtimeTraceInstrumentedPrototypes.has(prototype)
+    ) {
       return;
     }
+
+    runtimeTraceInstrumentedPrototypes.add(prototype);
 
     for (const methodName of Object.getOwnPropertyNames(prototype)) {
       if (methodName === "constructor") {
@@ -265,21 +330,30 @@ export class DiscoveryAdapter {
         continue;
       }
 
-      Object.defineProperty(param.instance, methodName, {
+      const tracedMethod = function (this: object, ...args: unknown[]) {
+        const currentInstrumentation =
+          runtimeTraceInstrumentationByInstance.get(this) ?? instrumentation;
+        const { recorder, ...metadata } = currentInstrumentation;
+
+        return recorder.recordSpan(
+          {
+            name: `${metadata.className}.${methodName}`,
+            type: metadata.type,
+            moduleName: metadata.moduleName,
+            className: metadata.className,
+            methodName,
+            args: recorder.previewValue(args),
+          },
+          () => method.apply(this, args),
+        );
+      };
+      Object.defineProperty(tracedMethod, "length", { value: method.length });
+      originalTracedMethods.set(tracedMethod, method);
+
+      Object.defineProperty(prototype, methodName, {
         configurable: true,
         writable: true,
-        value: (...args: unknown[]) =>
-          this.runtimeTraceRecorder.recordSpan(
-            {
-              name: `${param.className}.${methodName}`,
-              type: param.type,
-              moduleName: param.moduleName,
-              className: param.className,
-              methodName,
-              args: this.runtimeTraceRecorder.previewValue(args),
-            },
-            () => method.apply(param.instance, args),
-          ),
+        value: tracedMethod,
       });
     }
   }

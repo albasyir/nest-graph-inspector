@@ -21,6 +21,7 @@ export class SourceMetadataService {
     | {
         topLevel: Map<string, ClassDeclaration>;
         all: Map<string, ClassDeclaration>;
+        ambiguous: Set<string>;
       }
     | undefined;
   private readonly classJsDocCache = new Map<string, string | undefined>();
@@ -59,17 +60,49 @@ export class SourceMetadataService {
     return method;
   }
 
+  /**
+   * Whether a method is safe to advertise and invoke as a Direct Run public
+   * method: it must resolve to exactly one declared method on an
+   * unambiguous class, and that method must carry neither `private` nor
+   * `protected`. Fail-closed throughout — a method that cannot be found, or
+   * whose class name resolves to more than one declaration across the
+   * application's sources, is not public.
+   */
+  isPublicMethod(className: string, methodName: string): boolean {
+    const method = this.getInstanceMethod(className, methodName);
+    if (!method) {
+      return false;
+    }
+
+    return !(
+      method.hasModifier(SyntaxKind.PrivateKeyword) ||
+      method.hasModifier(SyntaxKind.ProtectedKeyword)
+    );
+  }
+
   private getTopLevelClass(className: string): ClassDeclaration | undefined {
     return this.getClassIndexes().topLevel.get(className);
   }
 
+  /**
+   * `undefined` both when no class of this name was found and when more
+   * than one class shares it — a caller cannot tell which declaration it
+   * would be reading, so treating the name as unresolved is the only safe
+   * choice for a check that gates method invocation.
+   */
   private getClass(className: string): ClassDeclaration | undefined {
-    return this.getClassIndexes().all.get(className);
+    const indexes = this.getClassIndexes();
+    if (indexes.ambiguous.has(className)) {
+      return undefined;
+    }
+
+    return indexes.all.get(className);
   }
 
   private getClassIndexes(): {
     topLevel: Map<string, ClassDeclaration>;
     all: Map<string, ClassDeclaration>;
+    ambiguous: Set<string>;
   } {
     if (!this.classIndexes) {
       this.classIndexes = this.buildClassIndexes();
@@ -81,14 +114,20 @@ export class SourceMetadataService {
   private buildClassIndexes(): {
     topLevel: Map<string, ClassDeclaration>;
     all: Map<string, ClassDeclaration>;
+    ambiguous: Set<string>;
   } {
     const topLevel = new Map<string, ClassDeclaration>();
     const all = new Map<string, ClassDeclaration>();
+    const ambiguous = new Set<string>();
 
     for (const sourceFile of this.getProject().getSourceFiles()) {
       for (const classDeclaration of sourceFile.getClasses()) {
         const name = classDeclaration.getName();
-        if (name && !topLevel.has(name)) {
+        if (!name) {
+          continue;
+        }
+
+        if (!topLevel.has(name)) {
           topLevel.set(name, classDeclaration);
         }
       }
@@ -97,13 +136,19 @@ export class SourceMetadataService {
         SyntaxKind.ClassDeclaration,
       )) {
         const name = classDeclaration.getName();
-        if (name && !all.has(name)) {
+        if (!name) {
+          continue;
+        }
+
+        if (!all.has(name)) {
           all.set(name, classDeclaration);
+        } else if (all.get(name) !== classDeclaration) {
+          ambiguous.add(name);
         }
       }
     }
 
-    return { topLevel, all };
+    return { topLevel, all, ambiguous };
   }
 
   private getProject(): Project {
