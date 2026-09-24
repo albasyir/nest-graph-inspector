@@ -1,6 +1,15 @@
 import { Type } from '@nestjs/common';
 
 export type NestGraphInspectorViewerDirectRunOptions = {
+  /**
+   * Whether to register Direct Run routes for this viewer output.
+   *
+   * Defaults to `true`. Set to `false` to serve the graph without exposing
+   * provider invocation or runtime-trace history routes. The viewer graph
+   * also omits Direct Run metadata, so it cannot advertise those routes.
+   */
+  enabled?: boolean;
+
   path?: string;
 };
 

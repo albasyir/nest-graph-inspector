@@ -51,6 +51,14 @@ const MAX_TYPE_RENDER_MEMBERS = 50;
 const MAX_TYPE_RENDER_LENGTH = 8_000;
 const MAX_TYPE_PROPERTY_NAME_LENGTH = 160;
 const MIN_TYPE_RENDER_LENGTH = "unknown".length;
+const DIRECT_RUN_EXCLUDED_METHODS = new Set([
+  "constructor",
+  "onModuleInit",
+  "onApplicationBootstrap",
+  "onModuleDestroy",
+  "beforeApplicationShutdown",
+  "onApplicationShutdown",
+]);
 
 type TypeRenderState = {
   activeTypes: Set<TsMorphType>;
@@ -216,16 +224,20 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     defaultOptions?: NestGraphInspectorViewerDirectRunOptions,
     outputOptions?: NestGraphInspectorViewerDirectRunOptions,
   ) {
+    const enabled = outputOptions?.enabled ?? defaultOptions?.enabled ?? true;
     const path = outputOptions?.path ?? defaultOptions?.path;
     if (!path) {
       return undefined;
     }
 
     return {
+      enabled,
       path,
       historyDirPath: this.getDirectRunHistoryDirPath(),
       instanceLookup: (moduleName: string, providerName: string) =>
         this.findDirectRunProviderInstance(moduleName, providerName),
+      allowedMethodsLookup: (moduleName: string, providerName: string) =>
+        this.getDirectRunAllowedMethods(moduleName, providerName),
     };
   }
 
@@ -367,6 +379,16 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return moduleInstances?.get(providerName);
   }
 
+  private getDirectRunAllowedMethods(
+    moduleName: string,
+    providerName: string,
+  ): ReadonlySet<string> | undefined {
+    const metadata = this.resolveDirectRunProviderMeta(providerName, moduleName);
+    return metadata
+      ? new Set(metadata.methods.map((method) => method.name))
+      : undefined;
+  }
+
   private getDirectRunProviderInstances(): Map<string, Map<string, unknown>> {
     const tree = this.discovery.scan();
     if (this.directRunProviderInstances?.tree === tree) {
@@ -406,8 +428,15 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       return [];
     }
 
+    const className =
+      typeof instance === "function" ? instance.name : instance.constructor?.name;
+
     const methods = Object.getOwnPropertyNames(prototype)
-      .filter((name) => name !== "constructor")
+      .filter((name) => !DIRECT_RUN_EXCLUDED_METHODS.has(name))
+      .filter(
+        (name) =>
+          !className || !this.sourceMetadata.isPrivateMethod(className, name),
+      )
       .map((name) => {
         const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
         const method = descriptor?.value;

@@ -59,6 +59,21 @@ export class SourceMetadataService {
     return method;
   }
 
+  /**
+   * TypeScript's `private` is erased at compile time, so a "private" method
+   * is an ordinary callable prototype member at runtime; this is the only
+   * way to recover the declared visibility. Best-effort like the rest of
+   * this service: a method whose source cannot be found is not treated as
+   * private.
+   */
+  isPrivateMethod(className: string, methodName: string): boolean {
+    return (
+      this.getInstanceMethod(className, methodName)?.hasModifier(
+        SyntaxKind.PrivateKeyword,
+      ) ?? false
+    );
+  }
+
   private getTopLevelClass(className: string): ClassDeclaration | undefined {
     return this.getClassIndexes().topLevel.get(className);
   }

@@ -49,4 +49,53 @@ describe(SourceMetadataService.name, () => {
     expect(createProjectSpy).toHaveBeenCalledTimes(1);
     expect(buildClassIndexesSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("identifies TypeScript-private methods so callers can exclude them from direct run", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    project.createSourceFile(
+      "private-source.ts",
+      `
+        class ProviderWithMixedVisibility {
+          private secretMethod(): string {
+            return "internal";
+          }
+
+          protectedMethod(): string {
+            return "internal-ish";
+          }
+
+          publicMethod(): string {
+            return "exposed";
+          }
+        }
+      `,
+    );
+    const service = new SourceMetadataService();
+    const internals = service as unknown as SourceMetadataServiceInternals;
+    jest.spyOn(internals, "createProject").mockReturnValue(project);
+
+    expect(
+      service.isPrivateMethod("ProviderWithMixedVisibility", "secretMethod"),
+    ).toBe(true);
+    expect(
+      service.isPrivateMethod(
+        "ProviderWithMixedVisibility",
+        "protectedMethod",
+      ),
+    ).toBe(false);
+    expect(
+      service.isPrivateMethod("ProviderWithMixedVisibility", "publicMethod"),
+    ).toBe(false);
+  });
+
+  it("treats a method with no discoverable source as not private", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const service = new SourceMetadataService();
+    const internals = service as unknown as SourceMetadataServiceInternals;
+    jest.spyOn(internals, "createProject").mockReturnValue(project);
+
+    expect(service.isPrivateMethod("UnknownClass", "unknownMethod")).toBe(
+      false,
+    );
+  });
 });

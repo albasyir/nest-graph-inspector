@@ -30,13 +30,28 @@ export type ModuleTree = {
   children: ModuleTree[];
 };
 
+type RuntimeTraceMetadata = {
+  moduleName: string;
+  className: string;
+  type: RuntimeTraceSpanType;
+};
+
+type RuntimeTraceInstrumentation = RuntimeTraceMetadata & {
+  recorder: RuntimeTraceRecorder;
+};
+
+const runtimeTraceInstrumentedPrototypes = new WeakSet<object>();
+const runtimeTraceInstrumentationByInstance = new WeakMap<
+  object,
+  RuntimeTraceInstrumentation
+>();
+
 @Injectable()
 export class DiscoveryAdapter {
   private readonly ignoreProvider: string[];
   private readonly ignoreImport: string[];
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
-  private readonly runtimeTraceInstrumentedInstances = new WeakSet<object>();
   private cachedTree: ModuleTree | undefined;
 
   constructor(
@@ -243,16 +258,20 @@ export class DiscoveryAdapter {
     className: string;
     type: RuntimeTraceSpanType;
   }): void {
-    if (this.runtimeTraceInstrumentedInstances.has(param.instance)) {
-      return;
-    }
-
-    this.runtimeTraceInstrumentedInstances.add(param.instance);
+    const instrumentation = {
+      moduleName: param.moduleName,
+      className: param.className,
+      type: param.type,
+      recorder: this.runtimeTraceRecorder,
+    };
+    runtimeTraceInstrumentationByInstance.set(param.instance, instrumentation);
 
     const prototype = Object.getPrototypeOf(param.instance) as object | null;
-    if (!prototype) {
+    if (!prototype || runtimeTraceInstrumentedPrototypes.has(prototype)) {
       return;
     }
+
+    runtimeTraceInstrumentedPrototypes.add(prototype);
 
     for (const methodName of Object.getOwnPropertyNames(prototype)) {
       if (methodName === "constructor") {
@@ -265,21 +284,29 @@ export class DiscoveryAdapter {
         continue;
       }
 
-      Object.defineProperty(param.instance, methodName, {
+      const tracedMethod = function (this: object, ...args: unknown[]) {
+        const currentInstrumentation =
+          runtimeTraceInstrumentationByInstance.get(this) ?? instrumentation;
+        const { recorder, ...metadata } = currentInstrumentation;
+
+        return recorder.recordSpan(
+          {
+            name: `${metadata.className}.${methodName}`,
+            type: metadata.type,
+            moduleName: metadata.moduleName,
+            className: metadata.className,
+            methodName,
+            args: recorder.previewValue(args),
+          },
+          () => method.apply(this, args),
+        );
+      };
+      Object.defineProperty(tracedMethod, "length", { value: method.length });
+
+      Object.defineProperty(prototype, methodName, {
         configurable: true,
         writable: true,
-        value: (...args: unknown[]) =>
-          this.runtimeTraceRecorder.recordSpan(
-            {
-              name: `${param.className}.${methodName}`,
-              type: param.type,
-              moduleName: param.moduleName,
-              className: param.className,
-              methodName,
-              args: this.runtimeTraceRecorder.previewValue(args),
-            },
-            () => method.apply(param.instance, args),
-          ),
+        value: tracedMethod,
       });
     }
   }

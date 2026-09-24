@@ -218,8 +218,11 @@ type DirectRunProviderMethod = {
 }
 ```
 
-Both fields on `DirectRunProviderMethod` are required.  `methods` may be an
-empty array if a provider has no public methods.
+Both fields on `DirectRunProviderMethod` are required. `methods` contains the
+provider's eligible public methods declared directly on its prototype; it
+excludes `constructor`, Nest lifecycle hooks, and TypeScript-`private` methods
+(detected from the application's own sources, since `private` does not survive
+compilation). `directRun` is omitted when a provider has no eligible methods.
 
 `parameterTypes` is a raw TypeScript signature string extracted by ts-morph.
 It is used by the viewer's Direct Run UI for documentation; it is not parsed

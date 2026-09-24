@@ -271,7 +271,7 @@ broken output is a log line, not a crash, and easy to miss.
 | `json` | `{ path }` | Writes `GraphOutput` as JSON, relative to `process.cwd()` |
 | `markdown` | `{ path }` | Writes a Mermaid diagram plus a per-module report, and an `information.json` beside it |
 | `http` | `{ origin?, host?, port?, path? }` | Registers the four graph routes; default path `/__nest-graph-inspector` |
-| `viewer` | `{ origin?, host?, port?, path?, directRun? }` | `http` + Direct Run + prints the viewer link; default path `/__graph-inspector` |
+| `viewer` | `{ origin?, host?, port?, path?, directRun? }` | `http` + Direct Run (unless `directRun.enabled: false`) + prints the viewer link; default path `/__graph-inspector` |
 
 Everything a `viewer` output installs, on one server:
 
@@ -365,19 +365,35 @@ along with the lockout behaviour, over real TCP.
 
 Direct Run turns the viewer into something that *does* things rather than only
 showing them: a `POST /direct-run` with `{ module, provider, method, args }`
-looks the provider instance up in the live container and calls the method.
+looks the provider instance up in the live container and calls only the exact
+public prototype method advertised for that module/provider in its `directRun`
+metadata. Constructors, Nest lifecycle hooks, inherited methods,
+instance-shadowed methods, and TypeScript-`private` methods are refused. Since
+`private` is erased at compile time and a "private" method is an ordinary
+callable prototype member at runtime, that last check is the one exclusion
+`SourceMetadataService` — not the runtime shape of the object — has to make,
+by reading the method's modifiers from the application's own sources; a method
+whose source cannot be found is not treated as private. `directRun.enabled`
+defaults to `true`; setting it to `false` omits all Direct Run and
+trace-history routes.
+
+Direct Run reads at most **1 MiB of encoded request bytes**. Oversized payloads
+receive a generic `413` response, and UTF-8 is decoded across chunk boundaries
+before JSON is parsed.
 
 Around that call `RuntimeTraceRecorder` builds a trace. `DiscoveryAdapter`
-instruments provider instances once (tracked in a `WeakSet`, so wrapping is
-never doubled), and each instrumented method opens a span. Two
+instruments provider prototypes once (tracked in a `WeakSet`, so wrapping is
+never doubled) while preserving each method's arity, and each instrumented
+method opens a span. Two
 `AsyncLocalStorage` stores — one for the active trace, one for the span stack —
 give the nesting, so a call graph several providers deep is reconstructed
 without explicit plumbing. A method returning a promise gets its span settled
 when the promise settles; a span whose promise nobody awaited is marked rather
 than lost, which is why `RuntimeTraceStatus` has a `partial` state alongside
-`success` and `error`. Traces are kept in memory, and written to disk too when
-a `json` output is configured — `viewer-output.adapter.ts` derives the history
-directory from that output's path.
+`success` and `error`. At most 100 completed traces are retained in memory;
+the oldest insertion is evicted first. Traces are written to disk too when a
+`json` output is configured — `viewer-output.adapter.ts` derives the history
+directory from that output's path and rewrites its index from current memory.
 
 ---
 
@@ -782,7 +798,7 @@ without knowing what it buys.
 | Default bind `0.0.0.0` | The viewer is hosted elsewhere and must reach the developer's machine | The endpoint is reachable from the local network; the token is what protects it |
 | Wildcard CORS on the viewer output | A hosted viewer on a fixed origin cannot be same-origin with an arbitrary developer machine | Any page can *attempt* a request; none succeeds without the token |
 | The token is printed in the startup log | It is the only handoff point, and copying it by hand would make the product unusable | Log shipping captures a live credential — `accessToken.logToken: false` is the escape hatch |
-| Direct Run invokes real methods | The trace is only honest if the call is real | An authenticated caller can run any provider method; it is a development tool, not a production one |
+| Direct Run invokes real methods | The trace is only honest if the call is real | An authenticated caller can run only public methods advertised in that provider's Direct Run metadata; it remains a development tool, not a production one |
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
 

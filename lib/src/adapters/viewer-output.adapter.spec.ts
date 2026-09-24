@@ -1,5 +1,8 @@
 import { Buffer } from 'node:buffer';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import http from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { HttpOutputAdapter } from './http-output.adapter';
@@ -7,6 +10,8 @@ import { HttpServeAdapter } from './http-serve.adapter';
 import { ViewerOutputAdapter } from './viewer-output.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
+import type { RuntimeTrace } from '../types/direct-run.type';
+import type { GraphOutput } from '../types/graph-output.type';
 import {
   ACCESS_TOKEN_QUERY_PARAM,
   AccessTokenService,
@@ -211,6 +216,153 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
+  it('does not register direct-run routes when disabled', async () => {
+    const port = await availablePort();
+    const registerSpy = jest.spyOn(httpServeAdapter, 'register');
+    const graphOutput: GraphOutput = {
+      version: '3',
+      root: 'AppModule',
+      modules: {
+        AppModule: {
+          imports: [],
+          exports: [],
+          providers: [],
+          controllers: [],
+        },
+      },
+      cycles: { modules: [], providers: [], controllers: [] },
+    };
+
+    await adapter.execute(graphOutput, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      directRun: {
+        enabled: false,
+        path: '/direct-run',
+        instanceLookup: () => ({ ping: () => 'pong' }),
+      },
+    } as never);
+
+    expect(registerSpy).not.toHaveBeenCalled();
+  });
+
+  it('hides direct-run metadata from a disabled viewer without resolving or mutating its graph source', async () => {
+    const graphOutput: GraphOutput = {
+      version: '3',
+      root: 'AppModule',
+      modules: {
+        AppModule: {
+          imports: [],
+          exports: [],
+          providers: [
+            {
+              name: 'AppService',
+              dependencies: [],
+              directRun: {
+                methods: [{ name: 'ping', parameterTypes: '()' }],
+              },
+            },
+          ],
+          controllers: [],
+        },
+      },
+      cycles: { modules: [], providers: [], controllers: [] },
+    };
+    const graphSource = jest.fn(async () => graphOutput);
+
+    await adapter.execute(graphSource, {
+      type: 'viewer',
+      path: 'graph',
+      directRun: { enabled: false },
+    });
+
+    const projectedSource = httpOutputAdapter.execute.mock.calls[0]?.[0] as
+      | (() => Promise<GraphOutput>)
+      | undefined;
+
+    expect(typeof projectedSource).toBe('function');
+    expect(graphSource).not.toHaveBeenCalled();
+
+    const projectedGraph = await projectedSource?.();
+
+    expect(projectedGraph?.modules.AppModule?.providers).toEqual([
+      { name: 'AppService', dependencies: [] },
+    ]);
+    expect(graphOutput.modules.AppModule?.providers[0]?.directRun).toEqual({
+      methods: [{ name: 'ping', parameterTypes: '()' }],
+    });
+    expect(graphSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps direct-run metadata in an enabled viewer graph', async () => {
+    const graphOutput: GraphOutput = {
+      version: '3',
+      root: 'AppModule',
+      modules: {
+        AppModule: {
+          imports: [],
+          exports: [],
+          providers: [
+            {
+              name: 'AppService',
+              dependencies: [],
+              directRun: {
+                methods: [{ name: 'ping', parameterTypes: '()' }],
+              },
+            },
+          ],
+          controllers: [],
+        },
+      },
+      cycles: { modules: [], providers: [], controllers: [] },
+    };
+
+    await adapter.execute(graphOutput, {
+      type: 'viewer',
+      path: 'graph',
+      directRun: { enabled: true },
+    });
+
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
+      graphOutput,
+      expect.any(Object),
+    );
+  });
+
+  it('writes a disk history index from the retained trace set', async () => {
+    const recorder = moduleRef.get(RuntimeTraceRecorder);
+    const traces: RuntimeTrace[] = [];
+    for (let index = 0; index < 101; index += 1) {
+      const handle = recorder.start({
+        moduleName: 'AppModule',
+        providerName: 'PingProvider',
+        methodName: `ping${index}`,
+        args: [],
+      });
+      traces.push(await recorder.finishSuccess(handle, index));
+    }
+
+    const historyDir = await mkdtemp(join(tmpdir(), 'ngi-history-'));
+    try {
+      await (
+        adapter as unknown as {
+          writeHistoryFiles: (dirPath: string, trace: (typeof traces)[number]) => Promise<void>;
+        }
+      ).writeHistoryFiles(historyDir, traces.at(-1)!);
+      const index = JSON.parse(
+        await readFile(join(historyDir, 'index.json'), 'utf8'),
+      ) as Array<{ traceId: string }>;
+
+      expect(index).toHaveLength(100);
+      expect(index.map((item) => item.traceId)).not.toContain(traces[0]!.traceId);
+      expect(index.at(-1)?.traceId).toBe(traces.at(-1)?.traceId);
+    } finally {
+      await rm(historyDir, { recursive: true, force: true });
+    }
+  });
+
   it('registers only the graph and direct-run routes on the viewer origin', async () => {
     const port = await availablePort();
     const registerSpy = jest.spyOn(httpServeAdapter, 'register');
@@ -250,6 +402,12 @@ describe(ViewerOutputAdapter.name, () => {
     const port = await availablePort();
     const ping = jest.fn().mockReturnValue('pong');
 
+    class PingProvider {
+      public ping(): string {
+        return ping();
+      }
+    }
+
     await adapter.execute({} as never, {
       type: 'viewer',
       host: '127.0.0.1',
@@ -257,7 +415,8 @@ describe(ViewerOutputAdapter.name, () => {
       path: 'graph',
       directRun: {
         path: '/direct-run',
-        instanceLookup: () => ({ ping }),
+        instanceLookup: () => new PingProvider(),
+        allowedMethodsLookup: () => new Set(['ping']),
       },
     } as never);
 

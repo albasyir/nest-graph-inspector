@@ -8,13 +8,19 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 import type { RuntimeTrace } from '../types/direct-run.type';
+import type { GraphOutput } from '../types/graph-output.type';
 import { AccessTokenService } from '../access-token.service';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 type ViewerOutputInternalConfig = ViewerOutputConfig & {
   directRun?: {
+    enabled?: boolean;
     path: string;
     instanceLookup: (moduleName: string, providerName: string) => unknown;
+    allowedMethodsLookup: (
+      moduleName: string,
+      providerName: string,
+    ) => ReadonlySet<string> | undefined;
     historyDirPath?: string;
   };
 };
@@ -41,8 +47,12 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     const path = this.httpOutputAdapter.normalizePath(
       config.path ?? '/__graph-inspector',
     );
+    const viewerGraphOutput =
+      internalConfig.directRun?.enabled === false
+        ? this.withoutDirectRunMetadata(graphOutput)
+        : graphOutput;
 
-    await this.httpOutputAdapter.execute(graphOutput, {
+    await this.httpOutputAdapter.execute(viewerGraphOutput, {
       type: 'http',
       origin: config.origin,
       host: config.host,
@@ -51,7 +61,10 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       httpAdapter: this.httpServeAdapter,
     });
 
-    if (internalConfig.directRun?.path) {
+    if (
+      internalConfig.directRun?.path &&
+      internalConfig.directRun.enabled !== false
+    ) {
       this.httpServeAdapter.register(
         {
           origin: this.httpOrigin(config),
@@ -64,6 +77,11 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
             internalConfig.directRun.path,
             (moduleName, providerName) =>
               internalConfig.directRun?.instanceLookup(
+                moduleName,
+                providerName,
+              ),
+            (moduleName, providerName) =>
+              internalConfig.directRun?.allowedMethodsLookup(
                 moduleName,
                 providerName,
               ),
@@ -134,6 +152,33 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
     return (
       config.origin ?? `http://${config.host ?? host}:${config.port ?? port}`
     );
+  }
+
+  private withoutDirectRunMetadata(
+    graphOutput: GraphOutputSource,
+  ): GraphOutputSource {
+    if (typeof graphOutput === 'function') {
+      return async () => this.removeDirectRunMetadata(await graphOutput());
+    }
+
+    return this.removeDirectRunMetadata(graphOutput);
+  }
+
+  private removeDirectRunMetadata(graphOutput: GraphOutput): GraphOutput {
+    return {
+      ...graphOutput,
+      modules: Object.fromEntries(
+        Object.entries(graphOutput.modules).map(([moduleName, module]) => [
+          moduleName,
+          {
+            ...module,
+            providers: module.providers.map(({ directRun: _, ...provider }) =>
+              provider,
+            ),
+          },
+        ]),
+      ),
+    };
   }
 
   private async writeHistoryFiles(

@@ -200,11 +200,14 @@ Discriminator: `type` field. Each member configures one output channel.
 
 ```ts
 type NestGraphInspectorViewerDirectRunOptions = {
-  path?: string;   // Path prefix for Direct Run endpoints
+  enabled?: boolean; // Defaults to true; false omits Direct Run routes
+  path?: string;      // Path prefix for Direct Run endpoints
 }
 ```
 
-Controls the Direct Run endpoint path within the `viewer` output.
+Controls Direct Run within the `viewer` output. With `enabled: false`, the
+viewer still serves graph routes but does not register Direct Run or runtime
+trace-history routes.
 
 ---
 

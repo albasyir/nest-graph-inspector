@@ -123,6 +123,14 @@ for the published history.
 
 ### Fixed
 
+- Direct Run now invokes only allowlisted public prototype methods and refuses
+  lifecycle or unsafe methods, rejects requests over 1 MiB with `413`, defaults
+  to enabled, retains the latest 100 trace records in FIFO order, and is covered
+  by CI security end-to-end checks. The allowlist also excludes TypeScript-
+  `private` methods, which compile down to ordinary callable prototype members
+  and previously slipped through as "public" — Direct Run now reads the
+  application's own sources to tell the two apart, the same way it already does
+  for JSDoc and parameter types.
 - The access token is built by encoding the HMAC digest buffer, rather than by
   asking `digest()` for `base64url`. A runtime that ignores that argument hands
   back raw bytes, and a token made of raw bytes does not survive the URL it

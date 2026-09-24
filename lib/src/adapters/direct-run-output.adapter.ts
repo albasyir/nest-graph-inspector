@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { StringDecoder } from 'node:string_decoder';
 import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { DirectRunResult } from '../types/direct-run.type';
@@ -8,6 +9,11 @@ import type { RuntimeTrace } from '../types/direct-run.type';
 type DirectRunArgsResult =
   | { ok: true; args: unknown[] }
   | { ok: false; response: HttpServeResponse };
+type DirectRunBodyResult =
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; response: HttpServeResponse };
+
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
 @Injectable()
 export class DirectRunOutputAdapter {
@@ -19,12 +25,21 @@ export class DirectRunOutputAdapter {
   createRoute(
     path: string,
     instanceLookup: (moduleName: string, providerName: string) => unknown,
+    allowedMethodsLookup: (
+      moduleName: string,
+      providerName: string,
+    ) => ReadonlySet<string> | undefined,
     onComplete?: (trace: RuntimeTrace) => void | Promise<void>,
   ) {
     return this.httpServeAdapter.post(
       path,
       async ({ request }) => {
-        const body = await this.readJsonBody(request);
+        const bodyResult = await this.readJsonBody(request);
+        if (!bodyResult.ok) {
+          return bodyResult.response;
+        }
+
+        const { body } = bodyResult;
         const moduleName = typeof body.module === 'string' ? body.module : '';
         const providerName =
           typeof body.provider === 'string' ? body.provider : '';
@@ -43,7 +58,25 @@ export class DirectRunOutputAdapter {
           );
         }
 
-        const method = instance[methodName];
+        const allowedMethods = allowedMethodsLookup(moduleName, providerName);
+        if (!allowedMethods?.has(methodName)) {
+          return this.badRequest(
+            `Method ${methodName} is unavailable for direct run.`,
+          );
+        }
+
+        if (Object.hasOwn(instance, methodName)) {
+          return this.badRequest(
+            `Method ${methodName} is unavailable for direct run.`,
+          );
+        }
+
+        const prototype = Object.getPrototypeOf(instance) as
+          | Record<string, unknown>
+          | null;
+        const method =
+          prototype &&
+          Object.getOwnPropertyDescriptor(prototype, methodName)?.value;
         if (typeof method !== 'function') {
           return this.badRequest(
             `Method ${methodName} is unavailable for direct run.`,
@@ -169,21 +202,35 @@ export class DirectRunOutputAdapter {
 
   private async readJsonBody(
     request: NodeJS.ReadableStream,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<DirectRunBodyResult> {
     let body = '';
+    let byteLength = 0;
+    const decoder = new StringDecoder('utf8');
 
     for await (const chunk of request) {
-      body += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += buffer.byteLength;
+      if (byteLength > MAX_JSON_BODY_BYTES) {
+        request.resume?.();
+        return {
+          ok: false,
+          response: this.payloadTooLarge(),
+        };
+      }
+
+      body += decoder.write(buffer);
     }
 
+    body += decoder.end();
+
     if (!body.trim()) {
-      return {};
+      return { ok: true, body: {} };
     }
 
     try {
-      return JSON.parse(body) as Record<string, unknown>;
+      return { ok: true, body: JSON.parse(body) as Record<string, unknown> };
     } catch {
-      return {};
+      return { ok: true, body: {} };
     }
   }
 
@@ -238,6 +285,16 @@ export class DirectRunOutputAdapter {
       body: {
         ok: false,
         error: message,
+      } satisfies DirectRunResult,
+    };
+  }
+
+  private payloadTooLarge(): HttpServeResponse {
+    return {
+      statusCode: 413,
+      body: {
+        ok: false,
+        error: 'Request body is too large.',
       } satisfies DirectRunResult,
     };
   }

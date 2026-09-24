@@ -346,9 +346,11 @@ describe(NestGraphInspectorSetup.name, () => {
         host: "127.0.0.1",
         port: 3998,
         directRun: {
+          enabled: true,
           path: "/direct-run",
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
+          allowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -373,9 +375,11 @@ describe(NestGraphInspectorSetup.name, () => {
         host: "127.0.0.1",
         port: 3998,
         directRun: {
+          enabled: true,
           path: "/run",
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
+          allowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -427,6 +431,8 @@ describe(NestGraphInspectorSetup.name, () => {
       withArgs(value: string) {
         return value;
       }
+
+      onModuleInit() {}
     }
 
     appModuleRef.providers.set(RunnableProvider.name, {
@@ -534,6 +540,25 @@ describe(NestGraphInspectorSetup.name, () => {
     expect(() => setup.getDirectRunMethods(provider)).not.toThrow();
     expect(setup.getDirectRunMethods(provider)).toEqual([
       { name: "normalMethod", parameterTypes: "[]" },
+    ]);
+  });
+
+  it("should exclude TypeScript-private methods from direct-run methods", () => {
+    class ProviderWithPrivateMethod {
+      private secretMethod() {
+        return "not for direct run";
+      }
+
+      publicMethod() {
+        return "public";
+      }
+    }
+
+    const provider = new ProviderWithPrivateMethod();
+    const setup = service as unknown as SetupWithPrivateMethods;
+
+    expect(setup.getDirectRunMethods(provider)).toEqual([
+      { name: "publicMethod", parameterTypes: "[]" },
     ]);
   });
 

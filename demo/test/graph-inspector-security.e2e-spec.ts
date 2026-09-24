@@ -26,6 +26,20 @@ class VaultService {
 
     return 'production-database-password';
   }
+
+  /**
+   * TypeScript-`private`, not runtime-private: an ordinary callable prototype
+   * member once compiled. Direct Run must refuse it by reading this modifier
+   * from source, since the runtime shape alone cannot tell it apart from
+   * `readSecret`.
+   */
+  private rotateMasterKey(): string {
+    this.invocations.push('rotateMasterKey');
+
+    return 'rotated-master-key-material';
+  }
+
+  onModuleInit(): void {}
 }
 
 @Module({ providers: [VaultService], exports: [VaultService] })
@@ -218,6 +232,36 @@ describe('Graph inspector network access', () => {
       expect(Object.keys(graph.modules)).toContain('VaultModule');
     });
 
+    it('omits a TypeScript-private method from the direct-run metadata', async () => {
+      const response = await probe(`${origin}/__graph-inspector/output.json`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      const graph = JSON.parse(response.body) as {
+        modules: Record<
+          string,
+          {
+            providers: Array<{
+              name: string;
+              directRun?: { methods: Array<{ name: string }> };
+            }>;
+          }
+        >;
+      };
+
+      const vaultService = graph.modules.VaultModule.providers.find(
+        (provider) => provider.name === 'VaultService',
+      );
+      const methodNames =
+        vaultService?.directRun?.methods.map((method) => method.name) ?? [];
+
+      // Read from the same live application whose sources back the Direct Run
+      // allowlist below, so a regression here shows up before the request-time
+      // check would have to catch it.
+      expect(methodNames).toContain('readSecret');
+      expect(methodNames).not.toContain('rotateMasterKey');
+    });
+
     it('runs the provider method once the token is presented', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
@@ -233,6 +277,63 @@ describe('Graph inspector network access', () => {
         ok: true,
         result: 'production-database-password',
       });
+      expect(vault.invocations).toEqual(['readSecret']);
+    });
+
+    it.each(['constructor', 'onModuleInit', 'toString'])(
+      'rejects the %s method even with a valid token',
+      async (method) => {
+        const response = await probe(`${origin}/direct-run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            module: 'VaultModule',
+            provider: 'VaultService',
+            method,
+          }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.body).not.toContain('production-database-password');
+        expect(vault.invocations).toEqual(['readSecret']);
+      },
+    );
+
+    it('rejects a TypeScript-private method even with a valid token, without invoking it', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          module: 'VaultModule',
+          provider: 'VaultService',
+          method: 'rotateMasterKey',
+        }),
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).not.toContain('rotated-master-key-material');
+      expect(vault.invocations).toEqual(['readSecret']);
+    });
+
+    it('rejects oversized direct-run input without leaking its contents', async () => {
+      const secret = 'oversized-direct-run-secret';
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ args: `${secret}${'x'.repeat(1024 * 1024)}` }),
+      });
+
+      expect(response.statusCode).toBe(413);
+      expect(response.body).not.toContain(secret);
       expect(vault.invocations).toEqual(['readSecret']);
     });
   });
