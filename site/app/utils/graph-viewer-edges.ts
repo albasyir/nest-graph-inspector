@@ -56,11 +56,46 @@ export function resolveEdgeRelationship({
     return 'module'
   }
 
-  if (target.startsWith('controller-') || source.startsWith('controller-')) {
+  if (isControllerEdge(source, target)) {
     return 'controller'
   }
 
   return 'provider'
+}
+
+/**
+ * Whether an edge has a controller at either end.
+ *
+ * Dependency edges point from what is injected to what receives it, so a
+ * controller is normally the target; the source counts too, because a
+ * dependency can resolve to a controller's node.
+ */
+export function isControllerEdge(source: string, target: string): boolean {
+  return source.startsWith('controller-') || target.startsWith('controller-')
+}
+
+/**
+ * Whether an edge is drawn while no bright line is lit.
+ *
+ * `isNormallyVisible` is what the toggle governing the edge says. An edge with
+ * a controller at either end must also pass "Show controller lines", whichever
+ * way it points; edges without one are untouched by that toggle.
+ */
+export function isEdgeNormallyVisible({
+  source,
+  target,
+  isNormallyVisible,
+  showControllerLines
+}: {
+  source: string
+  target: string
+  isNormallyVisible: boolean
+  showControllerLines: boolean
+}): boolean {
+  return (
+    isNormallyVisible
+    && (!isControllerEdge(source, target) || showControllerLines)
+  )
 }
 
 /** The colour an edge of this relationship is drawn in. */

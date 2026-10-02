@@ -15,7 +15,13 @@ import { MiniMap } from '@vue-flow/minimap'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
-import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
+import type {
+  Node,
+  Edge,
+  EdgeMarker,
+  EdgeProps,
+  NodeMouseEvent
+} from '@vue-flow/core'
 import type * as Monaco from 'monaco-editor'
 import type {
   GraphLayout,
@@ -56,7 +62,9 @@ import { resolveHoverCardPosition } from '~/utils/hover-card-position'
 import {
   getEdgeColor,
   getEdgeRelationClass,
-  resolveEdgeRelationship
+  isEdgeNormallyVisible,
+  resolveEdgeRelationship,
+  type EdgeRelationship
 } from '~/utils/graph-viewer-edges'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
@@ -151,6 +159,7 @@ type CircularEdgeInfo = CircularDependencyIssue
 
 type CircularEdgeData = {
   isNormallyVisible: boolean
+  relationship: EdgeRelationship
   circularIds: number[]
   circularReason: string
   circularDetails: CircularEdgeInfo[]
@@ -158,6 +167,7 @@ type CircularEdgeData = {
 
 type StandardEdgeData = {
   isNormallyVisible: boolean
+  relationship: EdgeRelationship
 }
 
 type FlowEdgeData = CircularEdgeData | StandardEdgeData
@@ -287,6 +297,12 @@ const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
 const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
+const BRIGHT_LINE_EDGE_COLOR = 'var(--ui-primary)'
+/**
+ * Vue Flow folds a marker's fields into the id of the `<marker>` it defines,
+ * so this ends up in that id — which is how `[id*="highlighted"]` finds it.
+ */
+const BRIGHT_LINE_MARKER_ID = 'highlighted'
 /** How long a pointer has to rest on a node before its JSDoc appears. */
 const JSDOC_HOVER_OPEN_DELAY_MS = 240
 /**
@@ -745,12 +761,13 @@ function getModuleItemHierarchy(
 
 function getEdgeDataProps(
   info: CircularEdgeInfo[] | undefined,
-  isNormallyVisible: boolean
+  isNormallyVisible: boolean,
+  relationship: EdgeRelationship
 ): {
   data: FlowEdgeData
 } {
   if (!info?.length) {
-    return { data: { isNormallyVisible } }
+    return { data: { isNormallyVisible, relationship } }
   }
 
   const normalizedInfo = Array.from(
@@ -765,6 +782,7 @@ function getEdgeDataProps(
   return {
     data: {
       isNormallyVisible,
+      relationship,
       circularIds: normalizedInfo.map(item => item.id),
       circularDetails: normalizedInfo.map(item => ({
         id: item.id,
@@ -779,6 +797,38 @@ function getEdgeDataProps(
         .join('\n')
     }
   }
+}
+
+/**
+ * The arrowhead an edge points with. Vue Flow defines one shared `<marker>`
+ * per configuration, outside every edge, so no rule scoped to an edge can
+ * reach its arrowhead; a bright-lined edge gets a marker of its own instead.
+ */
+function getEdgeMarkerEnd(
+  relationship: EdgeRelationship,
+  isHighlighted: boolean
+): EdgeMarker {
+  if (isHighlighted) {
+    return {
+      type: MarkerType.ArrowClosed,
+      color: BRIGHT_LINE_EDGE_COLOR,
+      id: BRIGHT_LINE_MARKER_ID
+    }
+  }
+
+  return { type: MarkerType.ArrowClosed, color: getEdgeColor(relationship) }
+}
+
+function isSameMarker(
+  current: FlowEdge['markerEnd'],
+  next: EdgeMarker
+): boolean {
+  return (
+    typeof current === 'object'
+    && current.type === next.type
+    && current.color === next.color
+    && current.id === next.id
+  )
 }
 
 function deduplicateCircularEdgeLabels(
@@ -1415,8 +1465,12 @@ function buildGraph(
               edge.data?.isNormallyVisible ?? true
             )
           ],
-          markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getEdgeDataProps(circularLabelInfo, showModuleToModuleLine)
+          markerEnd: getEdgeMarkerEnd(relationship, false),
+          ...getEdgeDataProps(
+            circularLabelInfo,
+            showModuleToModuleLine,
+            relationship
+          )
         })
       }
     }
@@ -1447,6 +1501,12 @@ function buildGraph(
     })
     const edgeColor = getEdgeColor(relationship)
     const edgeRelationClass = getEdgeRelationClass(relationship)
+    const effectiveNormallyVisible = isEdgeNormallyVisible({
+      source: sourceId,
+      target: targetId,
+      isNormallyVisible,
+      showControllerLines
+    })
 
     edges.push({
       id: `e-dep-${sourceId}->${targetId}`,
@@ -1467,8 +1527,12 @@ function buildGraph(
           edge.data?.isNormallyVisible ?? true
         )
       ],
-      markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-      ...getEdgeDataProps(circularLabelInfo, isNormallyVisible)
+      markerEnd: getEdgeMarkerEnd(relationship, false),
+      ...getEdgeDataProps(
+        circularLabelInfo,
+        effectiveNormallyVisible,
+        relationship
+      )
     })
   }
 
@@ -1492,11 +1556,9 @@ function buildGraph(
           const sourceId = resolveDepNodeId(dep, moduleName, moduleMap)
           const targetId = `controller-${moduleName}-${controller.name}`
           if (sourceId) {
-            const isNormallyVisible
-              = showControllerLines
-                && (isNodeInModule(sourceId, moduleName)
-                  ? showProviderToProviderInsideModule
-                  : showProviderToProviderAcrossModule)
+            const isNormallyVisible = isNodeInModule(sourceId, moduleName)
+              ? showProviderToProviderInsideModule
+              : showProviderToProviderAcrossModule
             addDependencyEdge(sourceId, targetId, isNormallyVisible)
           }
         }
@@ -3385,6 +3447,36 @@ watch(
   { immediate: true }
 )
 
+// The watched set reads `flowEdges` itself, so the ref is only triggered when
+// an arrowhead actually changed — an unconditional trigger re-fires this
+// watcher forever.
+watch(
+  activeBrightLineConnectedNodeIds,
+  () => {
+    let hasChangedMarker = false
+    for (const edge of flowEdges.value) {
+      const relationship = edge.data?.relationship
+      if (!relationship) {
+        continue
+      }
+
+      const markerEnd = getEdgeMarkerEnd(
+        relationship,
+        isBrightLineEdgeActive(edge.source, edge.target)
+      )
+      if (!isSameMarker(edge.markerEnd, markerEnd)) {
+        edge.markerEnd = markerEnd
+        hasChangedMarker = true
+      }
+    }
+
+    if (hasChangedMarker) {
+      triggerRef(flowEdges)
+    }
+  },
+  { immediate: true }
+)
+
 watch(showModuleToModuleLine, () => {
   refreshGraph()
 })
@@ -4719,13 +4811,20 @@ useResizeObserver(graphViewerRef, () => {
     filter 140ms ease;
 }
 
-/* Edges blend with one another, never with the nodes and background beneath. */
+/*
+ * Vue Flow draws each edge in an SVG of its own with a z-index, so a blend
+ * mode inside it has only that edge to blend with. Blending the SVG itself
+ * mixes edges with each other; the transform pane keeps it off the background.
+ */
 .graph-viewer .vue-flow__edges {
-  isolation: isolate;
+  mix-blend-mode: var(--mg-edge-blend-mode);
+}
+
+.graph-viewer .vue-flow__edges:has(> .bright-line-edge) {
+  mix-blend-mode: normal;
 }
 
 .graph-viewer .vue-flow__edge {
-  mix-blend-mode: var(--mg-edge-blend-mode);
   transition: opacity 140ms ease;
 }
 
@@ -4787,7 +4886,6 @@ useResizeObserver(graphViewerRef, () => {
 }
 
 .graph-viewer .bright-line-edge {
-  mix-blend-mode: normal !important;
   opacity: 1;
   z-index: 12;
 }
@@ -4801,7 +4899,7 @@ useResizeObserver(graphViewerRef, () => {
   );
 }
 
-.graph-viewer .bright-line-edge .vue-flow__arrowhead polyline {
+.graph-viewer .vue-flow__arrowhead[id*="highlighted"] polyline {
   opacity: 1 !important;
 }
 

@@ -7,6 +7,8 @@ import {
   PROVIDER_EDGE_COLOR,
   getEdgeColor,
   getEdgeRelationClass,
+  isControllerEdge,
+  isEdgeNormallyVisible,
   resolveEdgeRelationship,
   type EdgeRelationship
 } from './graph-viewer-edges.ts'
@@ -152,5 +154,105 @@ describe('getEdgeRelationClass', () => {
       'edge-relation--controller'
     )
     assert.equal(getEdgeRelationClass('circular'), 'edge-relation--circular')
+  })
+})
+
+describe('isControllerEdge', () => {
+  test('is true for a provider injected into a controller', () => {
+    assert.equal(
+      isControllerEdge(
+        'provider-UserModule-UserService',
+        'controller-UserModule-UserController'
+      ),
+      true
+    )
+  })
+
+  test('is true with the controller at the source end', () => {
+    assert.equal(
+      isControllerEdge(
+        'controller-UserModule-UserController',
+        'provider-UserModule-UserService'
+      ),
+      true
+    )
+  })
+
+  test('is false for a provider injected into a provider', () => {
+    assert.equal(
+      isControllerEdge(
+        'provider-UserModule-UserRepository',
+        'provider-UserModule-UserService'
+      ),
+      false
+    )
+  })
+
+  test('is false for a module import', () => {
+    assert.equal(
+      isControllerEdge('module-UserModule', 'module-AppModule'),
+      false
+    )
+  })
+})
+
+describe('isEdgeNormallyVisible', () => {
+  const controllerToProvider = {
+    source: 'controller-UserModule-UserController',
+    target: 'provider-UserModule-UserService'
+  }
+
+  test('hiding controller lines hides a controller-to-provider edge its own toggle shows', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        ...controllerToProvider,
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      false
+    )
+  })
+
+  test('hiding controller lines hides a provider-to-controller edge too', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'provider-UserModule-UserService',
+        target: 'controller-UserModule-UserController',
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      false
+    )
+  })
+
+  test('showing controller lines leaves the edge to its own toggle', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        ...controllerToProvider,
+        isNormallyVisible: true,
+        showControllerLines: true
+      }),
+      true
+    )
+    assert.equal(
+      isEdgeNormallyVisible({
+        ...controllerToProvider,
+        isNormallyVisible: false,
+        showControllerLines: true
+      }),
+      false
+    )
+  })
+
+  test('the controller toggle never hides an edge without a controller', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'provider-UserModule-UserRepository',
+        target: 'provider-UserModule-UserService',
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      true
+    )
   })
 })
