@@ -17,7 +17,13 @@ const {
   endpointRequiresAccessToken,
   hasLoadError,
   showCircularDependencies,
-  openModuleDetail
+  openModuleDetail,
+  layoutData,
+  layoutPersistence,
+  isLayoutDirty,
+  isLayoutSaving,
+  layoutSaveError,
+  layoutSavedAt
 } = storeToRefs(graphStore)
 const { endpointUrl, isGraphLoading, startupMessage, refresh }
   = useGraphViewerPage()
@@ -80,11 +86,21 @@ function handleExecutionSequenceOpen() {
       :direct-run-on="directRunOn"
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"
+      :layout-data="layoutData"
+      can-save-layout
+      :layout-dirty="isLayoutDirty"
+      :layout-saving="isLayoutSaving"
+      :layout-save-error="layoutSaveError"
+      :layout-saved-at="layoutSavedAt"
+      :layout-persistence="layoutPersistence"
       height="100%"
       flush
       @direct-run-drawer-open="handleDirectRunDrawerOpen"
       @direct-run-drawer-close="handleDirectRunDrawerClose"
       @execution-sequence-open="handleExecutionSequenceOpen"
+      @layout-change="graphStore.markLayoutDirty()"
+      @layout-save="graphStore.saveLayout"
+      @layout-download="graphStore.downloadLayout"
     />
   </ClientOnly>
 

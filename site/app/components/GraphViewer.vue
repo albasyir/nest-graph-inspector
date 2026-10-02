@@ -18,6 +18,8 @@ import type { CSSProperties } from 'vue'
 import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
 import type * as Monaco from 'monaco-editor'
 import type {
+  GraphLayout,
+  GraphLayoutModule,
   GraphOutput,
   GraphOutputModule,
   GraphOutputDependencyRef,
@@ -25,6 +27,10 @@ import type {
   GraphOutputProviderCycle,
   GraphOutputCycles
 } from 'nest-graph-inspector'
+import {
+  collapsedModulesFromLayout,
+  resolveIncrementalLayout
+} from '~/utils/graph-layout-placement'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
@@ -192,8 +198,30 @@ const props = withDefaults(
     directRunOn?: string
     showControls?: boolean
     showMiniMap?: boolean
+    /**
+     * The saved arrangement to draw. Saved modules and items keep their
+     * positions exactly; anything the layout has not seen is placed around
+     * them. `null` draws the automatic layout.
+     */
+    layoutData?: GraphLayout | null
+    /** Whether to offer the layout toolbar: save, download, reset. */
+    canSaveLayout?: boolean
+    /** Save state, as the page's store reports it. */
+    layoutDirty?: boolean
+    layoutSaving?: boolean
+    layoutSaveError?: string
+    layoutSavedAt?: string | null
+    /** Where a save lands: the application's own file, or this tab. */
+    layoutPersistence?: 'endpoint' | 'session'
   }>(),
   {
+    layoutData: null,
+    canSaveLayout: false,
+    layoutDirty: false,
+    layoutSaving: false,
+    layoutSaveError: '',
+    layoutSavedAt: null,
+    layoutPersistence: 'endpoint',
     height: '75vh',
     interactive: true,
     flush: false,
@@ -217,6 +245,10 @@ const emit = defineEmits<{
   directRunDrawerOpen: [nodeId: string]
   directRunDrawerClose: []
   executionSequenceOpen: []
+  /** The visitor rearranged the canvas; carries the whole arrangement. */
+  layoutChange: [layout: GraphLayout]
+  layoutSave: [layout: GraphLayout]
+  layoutDownload: [layout: GraphLayout]
 }>()
 
 const showCircularDependencies = defineModel<boolean>(
@@ -453,6 +485,37 @@ function getInitialCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
     const normalizedModuleName = moduleName.trim()
     if (normalizedModuleName && moduleMap.modules[normalizedModuleName]) {
       collapsedModules.add(normalizedModuleName)
+    }
+  }
+
+  return collapsedModules
+}
+
+/**
+ * The initial collapsed set, with every module a layout mentions collapsed or
+ * expanded as the layout says. Modules the layout has not seen keep the
+ * default, and a module with nothing inside stays collapsed regardless.
+ */
+function getLayoutCollapsedModuleNames(
+  moduleMap: GraphOutput,
+  layout: GraphLayout | null
+): Set<string> {
+  const collapsedModules = getInitialCollapsedModuleNames(moduleMap)
+  if (!layout) {
+    return collapsedModules
+  }
+
+  const savedCollapsed = collapsedModulesFromLayout(layout)
+  for (const moduleName of Object.keys(layout.modules)) {
+    const mod = moduleMap.modules[moduleName]
+    if (!mod || !hasModuleComponents(mod)) {
+      continue
+    }
+
+    if (savedCollapsed.has(moduleName)) {
+      collapsedModules.add(moduleName)
+    } else {
+      collapsedModules.delete(moduleName)
     }
   }
 
@@ -1145,6 +1208,8 @@ function buildGraph(
     showProviderToProviderInsideModule?: boolean
     showProviderToProviderAcrossModule?: boolean
     nodePositions?: Map<string, NodePosition>
+    /** Overrides the computed size of a module, e.g. to fit placed items. */
+    moduleSizes?: Map<string, { width: number, height: number }>
   } = {}
 ): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
@@ -1178,7 +1243,8 @@ function buildGraph(
       = collapsedModules.has(moduleName) || !hasModuleComponents(mod)
     moduleSizes.set(
       moduleName,
-      calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
+      options.moduleSizes?.get(moduleName)
+      ?? calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
     )
   }
 
@@ -1423,8 +1489,14 @@ function buildGraph(
   return { nodes, edges }
 }
 
+/**
+ * The arrangement the canvas is drawn from: the saved layout as loaded, then
+ * every change the visitor makes on top of it. `null` draws the automatic
+ * layout.
+ */
+const layoutDraft = shallowRef<GraphLayout | null>(props.layoutData ?? null)
 const collapsedModuleNames = ref<Set<string>>(
-  getInitialCollapsedModuleNames(graphData.value)
+  getLayoutCollapsedModuleNames(graphData.value, layoutDraft.value)
 )
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
@@ -1457,11 +1529,16 @@ const directRunArgsSchemaCache = new Map<
   string,
   DirectRunArgsSchemaCacheEntry
 >()
+const initialLayoutPositions = layoutDraft.value
+  ? resolveLayoutPositions(layoutDraft.value)
+  : undefined
 const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
   showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
-  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value
+  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value,
+  nodePositions: initialLayoutPositions?.nodePositions,
+  moduleSizes: initialLayoutPositions?.moduleSizes
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
@@ -3024,6 +3101,11 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   }
   showCircularDetailDialog.value = false
   circularDetailDialogData.value = null
+  // With a layout, positions come from it — the visitor's drags are already in
+  // the draft — and only what it has never seen is placed fresh.
+  const layoutPositions = layoutDraft.value
+    ? resolveLayoutPositions(layoutDraft.value)
+    : undefined
   const graph = buildGraph(graphData.value, collapsedModuleNames.value, {
     showCircularDependencies: showCircularDependencies.value,
     showModuleToModuleLine: showModuleToModuleLine.value,
@@ -3031,12 +3113,173 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
       showProviderToProviderInsideModule.value,
     showProviderToProviderAcrossModule:
       showProviderToProviderAcrossModule.value,
-    nodePositions: preservePositions ? nodePositionOverrides : undefined
+    nodePositions:
+      layoutPositions?.nodePositions
+      ?? (preservePositions ? nodePositionOverrides : undefined),
+    moduleSizes: layoutPositions?.moduleSizes
   })
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
   syncFixedBrightLineNode()
 }
+
+/**
+ * Node positions and module sizes for `buildGraph`, from a layout: saved
+ * positions as saved, everything else placed around them.
+ */
+function resolveLayoutPositions(layout: GraphLayout): {
+  nodePositions: Map<string, NodePosition>
+  moduleSizes: Map<string, { width: number, height: number }>
+} {
+  const moduleMap = graphData.value
+  const resolved = resolveIncrementalLayout({
+    moduleMap,
+    layout,
+    collapsedModules: collapsedModuleNames.value,
+    defaultItemRows: (moduleName, mod) =>
+      getHierarchyRows(getModuleItemHierarchy(moduleName, mod, moduleMap)).map(
+        row => row.map(item => item.id)
+      )
+  })
+  const nodePositions = new Map<string, NodePosition>()
+  const moduleSizes = new Map<string, { width: number, height: number }>()
+
+  for (const [moduleName, module] of resolved.modules) {
+    nodePositions.set(`module-${moduleName}`, { ...module.position })
+    moduleSizes.set(moduleName, module.size)
+    for (const [itemId, position] of module.items) {
+      nodePositions.set(itemId, { ...position })
+    }
+  }
+
+  return { nodePositions, moduleSizes }
+}
+
+/**
+ * The canvas as it stands, as a layout: where every module and visible item
+ * is, and which modules are collapsed. A collapsed module draws no items, so
+ * the positions they had are carried over from the draft.
+ */
+function snapshotCanvasLayout(): GraphLayout {
+  const previous = layoutDraft.value?.modules ?? {}
+  const modules: Record<string, GraphLayoutModule> = {}
+
+  for (const node of flowNodes.value) {
+    if (node.type !== 'module') {
+      continue
+    }
+
+    const moduleName = node.id.slice('module-'.length)
+    const mod = graphData.value.modules[moduleName]
+    const isCollapsed
+      = Boolean(mod && hasModuleComponents(mod))
+        && collapsedModuleNames.value.has(moduleName)
+    const carriedItems = isCollapsed ? previous[moduleName]?.items : undefined
+
+    modules[moduleName] = {
+      position: { x: node.position.x, y: node.position.y },
+      ...(isCollapsed ? { isCollapsed: true } : {}),
+      ...(carriedItems ? { items: { ...carriedItems } } : {})
+    }
+  }
+
+  for (const node of flowNodes.value) {
+    if (node.type !== 'item' || typeof node.parentNode !== 'string') {
+      continue
+    }
+
+    const module = modules[node.parentNode.slice('module-'.length)]
+    if (module) {
+      module.items = {
+        ...module.items,
+        [node.id]: { x: node.position.x, y: node.position.y }
+      }
+    }
+  }
+
+  return { version: '1', modules }
+}
+
+/** Takes the canvas as the new draft and tells the page it changed. */
+function captureLayoutFromCanvas(): void {
+  const layout = snapshotCanvasLayout()
+  layoutDraft.value = layout
+  emit('layoutChange', layout)
+}
+
+function handleNodeDragStop(): void {
+  if (props.interactive) {
+    captureLayoutFromCanvas()
+  }
+}
+
+function saveCurrentLayout(): void {
+  // The whole canvas, not just the draft: modules and items the saved layout
+  // had never seen were placed on this render, and saving pins them there.
+  const layout = snapshotCanvasLayout()
+  layoutDraft.value = layout
+  emit('layoutSave', layout)
+}
+
+function downloadCurrentLayout(): void {
+  emit('layoutDownload', snapshotCanvasLayout())
+}
+
+/**
+ * Drops the layout and draws the automatic arrangement. Nothing is saved
+ * until the visitor saves, so the saved file is untouched until then.
+ */
+function resetToAutoLayout(): void {
+  layoutDraft.value = null
+  nodePositionOverrides.clear()
+  collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
+  refreshGraph({ preservePositions: false })
+  void centerGraph()
+  emit('layoutChange', snapshotCanvasLayout())
+}
+
+const layoutStatus = computed<'saving' | 'error' | 'unsaved' | 'clean'>(() => {
+  if (props.layoutSaving) {
+    return 'saving'
+  }
+
+  if (props.layoutSaveError) {
+    return 'error'
+  }
+
+  return props.layoutDirty ? 'unsaved' : 'clean'
+})
+
+const layoutStatusBadge = computed(() => {
+  switch (layoutStatus.value) {
+    case 'saving':
+      return { label: 'Saving…', color: 'neutral' as const }
+    case 'error':
+      return { label: 'Save failed', color: 'error' as const }
+    case 'unsaved':
+      return { label: 'Unsaved', color: 'warning' as const }
+    default:
+      return { label: 'Clean', color: 'success' as const }
+  }
+})
+
+const layoutSaveButton = computed(() => {
+  if (props.layoutSaving) {
+    return { label: 'Saving…', icon: 'i-lucide-loader-circle' }
+  }
+
+  if (layoutStatus.value === 'clean' && props.layoutSavedAt) {
+    return { label: 'Saved', icon: 'i-lucide-check' }
+  }
+
+  return { label: 'Save layout', icon: 'i-lucide-save' }
+})
+
+const layoutSaveTitle = computed(() =>
+  props.layoutPersistence === 'session'
+    ? 'Kept in this tab only — download it to commit beside the application'
+    : 'Save to the application\'s layout file'
+)
 
 function toggleModule(moduleName: string) {
   const mod = graphData.value.modules[moduleName]
@@ -3052,6 +3295,14 @@ function toggleModule(moduleName: string) {
   }
 
   collapsedModuleNames.value = nextCollapsedModules
+  if (layoutDraft.value) {
+    // A laid-out canvas stays where the visitor put it; collapsing is part of
+    // the arrangement, so it is captured like a drag.
+    refreshGraph()
+    captureLayoutFromCanvas()
+    return
+  }
+
   refreshGraph({ preservePositions: !autoAdjustGraphView.value })
   if (autoAdjustGraphView.value) {
     void centerGraph()
@@ -3063,6 +3314,12 @@ function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
     = isOpen === true
       ? getPermanentCollapsedModuleNames(graphData.value)
       : getDefaultCollapsedModuleNames(graphData.value)
+  if (layoutDraft.value) {
+    refreshGraph()
+    captureLayoutFromCanvas()
+    return
+  }
+
   refreshGraph({ preservePositions: !autoAdjustGraphView.value })
   if (autoAdjustGraphView.value) {
     void centerGraph()
@@ -3121,8 +3378,11 @@ watch(
   graphData,
   () => {
     nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(
-      graphData.value
+    // The layout outlives a graph reload: what it saved stays put, and what
+    // the new graph adds is placed around it.
+    collapsedModuleNames.value = getLayoutCollapsedModuleNames(
+      graphData.value,
+      layoutDraft.value
     )
     refreshGraph({ preservePositions: false })
     syncDirectRunOn()
@@ -3137,8 +3397,28 @@ watch(
   [() => props.defaultOpenModuleDetail, () => props.collapsedModules],
   () => {
     nodePositionOverrides.clear()
-    collapsedModuleNames.value = getInitialCollapsedModuleNames(
-      graphData.value
+    collapsedModuleNames.value = getLayoutCollapsedModuleNames(
+      graphData.value,
+      layoutDraft.value
+    )
+    refreshGraph({ preservePositions: false })
+    void centerGraph()
+  }
+)
+
+watch(
+  () => props.layoutData,
+  (layout) => {
+    // The arrangement this viewer just handed to a save, coming back.
+    if (layout === layoutDraft.value) {
+      return
+    }
+
+    layoutDraft.value = layout ?? null
+    nodePositionOverrides.clear()
+    collapsedModuleNames.value = getLayoutCollapsedModuleNames(
+      graphData.value,
+      layoutDraft.value
     )
     refreshGraph({ preservePositions: false })
     void centerGraph()
@@ -3172,6 +3452,54 @@ useResizeObserver(graphViewerRef, () => {
     :class="{ 'graph-viewer--flush': props.flush }"
     :style="{ height: props.height }"
   >
+    <div
+      v-if="props.interactive && props.canSaveLayout"
+      class="graph-viewer-layout nodrag nopan"
+      role="toolbar"
+      aria-label="Layout"
+    >
+      <UBadge
+        :label="layoutStatusBadge.label"
+        :color="layoutStatusBadge.color"
+        variant="subtle"
+        :title="props.layoutSaveError || undefined"
+        class="graph-viewer-layout__status"
+      />
+      <UButton
+        type="button"
+        icon="i-lucide-rotate-ccw"
+        label="Auto layout"
+        color="neutral"
+        variant="soft"
+        size="sm"
+        title="Reset to the automatic layout"
+        @click="resetToAutoLayout"
+      />
+      <UButton
+        v-if="props.layoutPersistence === 'session'"
+        type="button"
+        icon="i-lucide-download"
+        color="neutral"
+        variant="soft"
+        size="sm"
+        square
+        aria-label="Download layout"
+        title="Download nest-graph-layout.json to commit beside the application"
+        @click="downloadCurrentLayout"
+      />
+      <UButton
+        type="button"
+        :icon="layoutSaveButton.icon"
+        :label="layoutSaveButton.label"
+        :title="layoutSaveTitle"
+        :disabled="props.layoutSaving"
+        color="primary"
+        variant="soft"
+        size="sm"
+        @click="saveCurrentLayout"
+      />
+    </div>
+
     <div
       v-if="props.interactive"
       class="graph-viewer-settings"
@@ -3353,6 +3681,7 @@ useResizeObserver(graphViewerRef, () => {
       @node-mouse-leave="clearActiveBrightLineNode"
       @node-click="handleNodeClick"
       @node-drag-start="closeJsDocHoverCard"
+      @node-drag-stop="handleNodeDragStop"
       @move-start="closeJsDocHoverCard"
       @pane-click="handlePaneClick"
     >
@@ -3949,6 +4278,17 @@ useResizeObserver(graphViewerRef, () => {
   top: 12px;
   right: 12px;
   z-index: 10;
+}
+
+/* Beside the settings trigger, which is a square soft button at the corner. */
+.graph-viewer-layout {
+  position: absolute;
+  top: 12px;
+  right: 56px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .graph-viewer .vue-flow__edge-labels {

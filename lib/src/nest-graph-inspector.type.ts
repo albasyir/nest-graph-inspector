@@ -142,6 +142,11 @@ export type NestGraphInspectorOutput =
       port?: number;
       path?: string;
       directRun?: NestGraphInspectorViewerDirectRunOptions;
+      /**
+       * Where this output reads and saves the graph layout. Overrides the
+       * module-wide `layoutFilePath`.
+       */
+      layoutFilePath?: string;
     }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
@@ -151,7 +156,17 @@ export type NestGraphInspectorOutput =
       host?: string;
       port?: number;
       path?: string;
+      /**
+       * Where this output reads and saves the graph layout. Overrides the
+       * module-wide `layoutFilePath`.
+       */
+      layoutFilePath?: string;
     };
+
+export type NestGraphInspectorViewerOptions = Extract<
+  NestGraphInspectorOutput,
+  { type: 'viewer' }
+>;
 
 export interface NestGraphInspectorModuleOptions {
   /**
@@ -225,4 +240,14 @@ export interface NestGraphInspectorModuleOptions {
    * wins where it sets a value.
    */
   directRun?: NestGraphInspectorViewerDirectRunOptions;
+
+  /**
+   * The file the viewer's graph layout is read from (`GET {path}/layout.json`)
+   * and saved to (`POST {path}/layout`), for every `viewer` and `http` output
+   * that does not set its own `layoutFilePath`.
+   *
+   * Defaults to `'./nest-graph-layout.json'`. A relative path resolves against
+   * `process.cwd()`; missing parent directories are created on save.
+   */
+  layoutFilePath?: string;
 }

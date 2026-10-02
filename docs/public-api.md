@@ -11,13 +11,16 @@
 The package's `exports` map points a single condition (`"."`) to `index.js`/`index.d.ts`.
 Everything re-exported from `index.ts` is the intended public API.
 
-`index.ts` re-exports from exactly five source files:
+`index.ts` re-exports these source files wholesale, alongside named exports of
+the access-token and rate-limiter surface:
 
 ```ts
 export * from './nest-graph-inspector.module';   // class + const
 export * from './nest-graph-inspector.type';     // config types
 export * from './types/graph-output.schema';     // schema constant + object
 export * from './types/graph-output.type';       // graph output types
+export * from './types/graph-layout.schema';     // layout schema, constants, validator
+export * from './types/graph-layout.type';       // graph layout types
 export * from './types/direct-run.type';         // trace / direct-run types
 ```
 
@@ -167,6 +170,7 @@ The options object passed to `forRoot()`.
 | `nestCoreModuleName` | `string` | No | `'NestJSCoreModule'` | Name for the virtual NestJS core module |
 | `nestCoreProviders` | `string[]` | No | `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']` | Providers grouped under the virtual core module |
 | `directRun` | `NestGraphInspectorViewerDirectRunOptions` | No | `{ allowUnsafeMethods: true, maxBodySizeBytes: 50 MiB }` | Module-wide Direct Run defaults, applied to every `viewer` output that does not set its own `directRun.allowUnsafeMethods` or `directRun.maxBodySizeBytes`; a `viewer` output's own `directRun` wins where it sets a value |
+| `layoutFilePath` | `string` | No | `'./nest-graph-layout.json'` | File the graph layout is read from and saved to, for every `viewer` and `http` output that does not set its own `layoutFilePath`. A relative path resolves against `process.cwd()`; missing parent directories are created on save. See [Graph layout](#graph-layout-types) |
 
 ---
 
@@ -181,13 +185,36 @@ The options object passed to `forRoot()`.
 ```ts
 type NestGraphInspectorOutput =
   | { type: 'viewer'; origin?: string; host?: string; port?: number;
-      path?: string; directRun?: NestGraphInspectorViewerDirectRunOptions; }
+      path?: string; directRun?: NestGraphInspectorViewerDirectRunOptions;
+      layoutFilePath?: string; }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
-  | { type: 'http'; origin?: string; host?: string; port?: number; path?: string; }
+  | { type: 'http'; origin?: string; host?: string; port?: number; path?: string;
+      layoutFilePath?: string; }
 ```
 
 Discriminator: `type` field. Each member configures one output channel.
+
+`layoutFilePath` on a `viewer` or `http` output overrides the module-wide
+`NestGraphInspectorModuleOptions.layoutFilePath`, which in turn overrides the
+`'./nest-graph-layout.json'` default.
+
+---
+
+### `NestGraphInspectorViewerOptions`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Stable — tracks the `viewer` member of `NestGraphInspectorOutput` |
+| **Documented** | This document |
+
+```ts
+type NestGraphInspectorViewerOptions = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
+```
+
+The `viewer` member of the output union, named so a consumer can type a
+viewer output on its own without repeating the `Extract`.
 
 ---
 
@@ -478,6 +505,136 @@ validate arbitrary JSON against the schema. The schema ID is:
 ```
 https://albasyir.github.io/nest-graph-inspector/schemas/graph-output-v3.schema.json
 ```
+
+---
+
+## Graph layout types
+
+All exported from `src/types/graph-layout.type.ts`. They describe the file the
+viewer's arrangement of a graph is saved to, and the body of the layout
+endpoints every `viewer` and `http` output installs:
+
+| Method | Path (relative to the output's `path`) | Behaviour |
+|---|---|---|
+| `GET` | `/layout.json`, `/layout` | `200` with the saved `GraphLayout`, or `{ version: '1', modules: {} }` when no file exists yet. `500` with `{ ok: false, message, errors? }` when the file exists but is not valid JSON or not a valid layout — it is reported, never served as empty |
+| `POST` | `/layout`, `/layout.json` | Replaces the saved layout with the body. `200` `{ ok: true, message: 'Layout saved successfully' }`; `400` `{ ok: false, message: 'Invalid layout payload', errors }` for a body that fails `validateGraphLayout`, or `{ ok: false, message }` for one that is not JSON; `413` over 10 MiB; `500` when the file cannot be written |
+
+Both are token-guarded like every other inspector route. Saves to one file are
+written one at a time in arrival order, so overlapping requests cannot
+interleave into an invalid file and the later request is the one that lands.
+The file is written as `JSON.stringify(layout, null, 2) + '\n'`.
+
+### `GraphLayout`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Stable (versioned; current layout schema version is `'1'`) |
+| **Documented** | This document |
+
+```ts
+type GraphLayout = {
+  $schema?: string;                           // optional pointer to the JSON Schema
+  version: '1';                               // layout schema version
+  modules: Record<string, GraphLayoutModule>; // keyed by module class name
+}
+```
+
+### `GraphLayoutModule`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Stable |
+| **Documented** | This document |
+
+```ts
+type GraphLayoutModule = {
+  position: GraphLayoutPosition;
+  isCollapsed?: boolean;                        // absent means expanded
+  items?: Record<string, GraphLayoutPosition>;  // keyed by the viewer's item id
+}
+```
+
+The library treats item keys as opaque; the viewer chooses them and draws
+items relative to their module.
+
+### `GraphLayoutPosition`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Stable |
+| **Documented** | This document |
+
+```ts
+type GraphLayoutPosition = {
+  x: number;  // finite
+  y: number;  // finite
+}
+```
+
+---
+
+## Graph layout schema
+
+All exported from `src/types/graph-layout.schema.ts`.
+
+### `GRAPH_LAYOUT_SCHEMA_VERSION`
+
+| | |
+|---|---|
+| **Kind** | Exported `const` (string) |
+| **Current value** | `'1'` |
+| **Stability** | Stable; bumped on breaking layout changes |
+
+### `GRAPH_LAYOUT_SCHEMA_ID`
+
+| | |
+|---|---|
+| **Kind** | Exported `const` (string) |
+| **Current value** | `'https://albasyir.github.io/nest-graph-inspector/schemas/graph-layout-v1.schema.json'` |
+| **Stability** | Stable; carries the version, so it changes with `GRAPH_LAYOUT_SCHEMA_VERSION` |
+
+The `$id` of `GRAPH_LAYOUT_JSON_SCHEMA`. Like the graph output schema's id, it
+names the schema; the site does not currently serve a file at that URL.
+
+### `GRAPH_LAYOUT_JSON_SCHEMA`
+
+| | |
+|---|---|
+| **Kind** | Exported `const` (JSON Schema object, `as const`) |
+| **Stability** | Stable; tied to `GRAPH_LAYOUT_SCHEMA_VERSION` |
+
+The JSON Schema (draft 2020-12) for `GraphLayout`. `additionalProperties` is
+`false` at every level, so a field this version does not define is invalid
+rather than ignored; and a `__proto__` key is refused among `modules` and
+`items`, because a layout file is committed and shared and a naive deep merge
+would follow that key into `Object.prototype`.
+
+### `validateGraphLayout`
+
+| | |
+|---|---|
+| **Kind** | Exported function |
+| **Stability** | Stable |
+
+```ts
+function validateGraphLayout(value: unknown): GraphLayoutValidationResult;
+
+type GraphLayoutValidationResult =
+  | { ok: true; layout: GraphLayout }   // `layout` is `value`, not a copy
+  | { ok: false; errors: string[] };
+```
+
+Checks a value against `GRAPH_LAYOUT_JSON_SCHEMA` without a schema engine — the
+package has no runtime dependency beyond ts-morph — reading required and
+allowed property names from the schema object itself. It also requires
+coordinates to be finite, since `JSON.parse('1e999')` is `Infinity` and would
+be written back as `null`. Each error is a JSON Pointer rooted at `layout`,
+for example `layout/modules/UserModule/position/x must be a finite number`;
+at most 20 are reported. The `POST` layout endpoint and the `GET` read-back
+both use it, and a CI script can use it to check a committed layout file.
 
 ---
 
@@ -839,6 +996,15 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `NestGraphInspectorModuleOptions` | Interface | Stable | ✅ | ✅ |
 | `NestGraphInspectorOutput` | Union type | Stable / partial | ✅ | ✅ |
 | `NestGraphInspectorViewerDirectRunOptions` | Type | Experimental | ✅ | ✅ |
+| `NestGraphInspectorViewerOptions` | Type | Stable | ✅ | ✅ |
+| `GraphLayout` | Type | Stable | ✅ | ✅ |
+| `GraphLayoutModule` | Type | Stable | ✅ | ✅ |
+| `GraphLayoutPosition` | Type | Stable | ✅ | ✅ |
+| `GRAPH_LAYOUT_SCHEMA_VERSION` | Const | Stable | ✅ | ✅ |
+| `GRAPH_LAYOUT_SCHEMA_ID` | Const | Stable | ✅ | ✅ |
+| `GRAPH_LAYOUT_JSON_SCHEMA` | Const | Stable | ✅ | ✅ |
+| `validateGraphLayout` | Function | Stable | ✅ | ✅ |
+| `GraphLayoutValidationResult` | Type | Stable | ✅ | ✅ |
 | `GRAPH_OUTPUT_SCHEMA_VERSION` | Const | Stable | ✅ | Partial |
 | `GRAPH_OUTPUT_JSON_SCHEMA` | Const | Stable | ✅ | ❌ |
 | `GraphOutput` | Type | Stable | ✅ | ✅ |

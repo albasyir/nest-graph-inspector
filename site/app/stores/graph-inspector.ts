@@ -1,5 +1,13 @@
-import type { GraphOutput } from 'nest-graph-inspector'
+import type { GraphLayout, GraphOutput } from 'nest-graph-inspector'
 import { defineStore } from 'pinia'
+import {
+  GRAPH_LAYOUT_FILE_NAME,
+  isGraphLayout,
+  readLayoutResponseError,
+  readStoredLayout,
+  serializeGraphLayout,
+  writeStoredLayout
+} from '~/utils/graph-layout-persistence'
 import { requiresVersionAcknowledgement } from '~/utils/graph-inspector-version-gate'
 import {
   INSPECTOR_ACCESS_TOKEN_HEADER,
@@ -80,6 +88,30 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const markdownUrl = computed(() =>
     appendOutputPath(endpoint.value, 'output.md')
   )
+  const layoutUrl = computed(() =>
+    appendOutputPath(endpoint.value, 'layout.json')
+  )
+  const layoutSaveUrl = computed(() =>
+    appendOutputPath(endpoint.value, 'layout')
+  )
+
+  /** The layout the viewer is drawing, as last loaded or saved. */
+  const layoutData = ref<GraphLayout | null>(null)
+  /** Whether the canvas holds an arrangement that has not been saved. */
+  const isLayoutDirty = ref(false)
+  const isLayoutSaving = ref(false)
+  const layoutSaveError = ref('')
+  /** Why the saved layout could not be loaded; the viewer lays out itself. */
+  const layoutLoadError = ref('')
+  /** ISO 8601 time of the last successful save. */
+  const layoutSavedAt = ref<string | null>(null)
+  /**
+   * Set when a live endpoint has no layout route — a library from before
+   * layouts existed. Its layout is kept by the tab instead.
+   */
+  const layoutEndpointMissing = ref(false)
+  let layoutSaveSequence = 0
+  let layoutSaveChain: Promise<unknown> = Promise.resolve()
 
   /** Headers every request to the inspected application has to carry. */
   const requestHeaders = computed(() => accessTokenHeaders(accessToken.value))
@@ -207,6 +239,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   )
 
   /**
+   * Where a layout is saved to. A live application writes it to its own file;
+   * a static graph has no server, the demo's file system dies with the tab,
+   * and an older library has no layout route — those keep it in the tab, from
+   * where the visitor can download it.
+   */
+  const layoutPersistence = computed<'endpoint' | 'session'>(() =>
+    graphIsStatic.value || isDemo.value || layoutEndpointMissing.value
+      ? 'session'
+      : 'endpoint'
+  )
+
+  /**
    * Whether the endpoint failed to answer at all.
    *
    * Distinct from an endpoint that answered with something unexpected: a graph
@@ -247,6 +291,20 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     endpointUnreachable.value = false
     resolveVersionAcknowledgement?.(false)
     resolveVersionAcknowledgement = undefined
+    clearLayout()
+  }
+
+  function clearLayout() {
+    // A save still in flight belongs to the previous graph; bumping the
+    // sequence makes it drop its result instead of reporting it here.
+    layoutSaveSequence += 1
+    layoutData.value = null
+    isLayoutDirty.value = false
+    isLayoutSaving.value = false
+    layoutSaveError.value = ''
+    layoutLoadError.value = ''
+    layoutSavedAt.value = null
+    layoutEndpointMissing.value = false
   }
 
   /**
@@ -458,6 +516,175 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     return Boolean(graphMarkdown.value)
   }
 
+  /**
+   * Loads the saved layout for the current endpoint.
+   *
+   * Never fails the graph load: without a layout the viewer lays the graph out
+   * itself, so every failure here leaves `layoutData` empty and, when it is
+   * worth telling the visitor, says why in `layoutLoadError`.
+   */
+  async function fetchLayout(): Promise<GraphLayout | null> {
+    const requestedEndpoint = endpoint.value
+    layoutLoadError.value = ''
+    isLayoutDirty.value = false
+
+    if (!requestedEndpoint) {
+      layoutData.value = null
+      return null
+    }
+
+    if (layoutPersistence.value === 'session') {
+      layoutData.value = readStoredLayout(requestedEndpoint)
+      return layoutData.value
+    }
+
+    try {
+      const layout = await inspectorFetch<unknown>(layoutUrl.value)
+      if (endpoint.value !== requestedEndpoint) {
+        return null
+      }
+
+      if (!isGraphLayout(layout)) {
+        layoutData.value = null
+        layoutLoadError.value
+          = 'The inspector answered with something that is not a graph layout.'
+        return null
+      }
+
+      layoutData.value = layout
+    } catch (error) {
+      if (endpoint.value !== requestedEndpoint) {
+        return null
+      }
+
+      const statusCode = readStatusCode(error)
+      if (statusCode === 404) {
+        // A library from before layouts existed. Not an error worth showing:
+        // the tab keeps the layout instead.
+        layoutEndpointMissing.value = true
+        layoutData.value = readStoredLayout(requestedEndpoint)
+        return layoutData.value
+      }
+
+      if (statusCode === 401) {
+        discardRejectedAccessToken()
+      }
+
+      layoutData.value = null
+      layoutLoadError.value
+        = readLayoutResponseError(error)
+          || (error instanceof Error ? error.message : 'The layout could not be loaded.')
+    }
+
+    return layoutData.value
+  }
+
+  /**
+   * Saves a layout where this endpoint keeps them, and makes it the one the
+   * viewer draws.
+   *
+   * Saves run one at a time, in order, and a save superseded by a newer one
+   * before it started is skipped — each carries the whole layout, so only the
+   * newest needs to land. Resolves to whether this call's layout, or the newer
+   * one that replaced it, was saved; a failure is also left in
+   * `layoutSaveError`.
+   */
+  async function saveLayout(layout: GraphLayout): Promise<boolean> {
+    layoutData.value = layout
+    isLayoutDirty.value = true
+    const sequence = ++layoutSaveSequence
+    const requestedEndpoint = endpoint.value
+
+    const saving = layoutSaveChain.then(async () => {
+      if (sequence !== layoutSaveSequence) {
+        return true
+      }
+
+      return await persistLayout(layout, sequence, requestedEndpoint)
+    })
+    layoutSaveChain = saving.catch(() => undefined)
+
+    return await saving
+  }
+
+  async function persistLayout(
+    layout: GraphLayout,
+    sequence: number,
+    requestedEndpoint: string
+  ): Promise<boolean> {
+    const isCurrent = () =>
+      sequence === layoutSaveSequence && endpoint.value === requestedEndpoint
+
+    if (!requestedEndpoint) {
+      return false
+    }
+
+    isLayoutSaving.value = true
+    layoutSaveError.value = ''
+
+    try {
+      if (layoutPersistence.value === 'session') {
+        writeStoredLayout(requestedEndpoint, layout)
+      } else {
+        await inspectorFetch(layoutSaveUrl.value, {
+          method: 'POST',
+          body: layout
+        })
+      }
+
+      if (isCurrent()) {
+        isLayoutDirty.value = false
+        layoutSavedAt.value = new Date().toISOString()
+      }
+
+      return true
+    } catch (error) {
+      if (readStatusCode(error) === 401) {
+        discardRejectedAccessToken()
+      }
+
+      if (isCurrent()) {
+        layoutSaveError.value
+          = readLayoutResponseError(error)
+            || (error instanceof Error ? error.message : 'The layout could not be saved.')
+      }
+
+      return false
+    } finally {
+      if (isCurrent()) {
+        isLayoutSaving.value = false
+      }
+    }
+  }
+
+  /**
+   * Downloads a layout as the file the library would have written, for a
+   * graph whose layout cannot be saved to the application — commit it beside
+   * the application and it is picked up from there.
+   */
+  function downloadLayout(layout: GraphLayout) {
+    if (!import.meta.client) {
+      return
+    }
+
+    const url = URL.createObjectURL(
+      new Blob([serializeGraphLayout(layout)], { type: 'application/json' })
+    )
+    const link = document.createElement('a')
+    link.href = url
+    link.download = GRAPH_LAYOUT_FILE_NAME
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /**
+   * Notes that the canvas has moved away from the saved layout, without
+   * saving it yet.
+   */
+  function markLayoutDirty() {
+    isLayoutDirty.value = true
+  }
+
   /** Points the store at a graph and loads it. */
   async function setEndpoint(nextEndpointUrl: string, token?: string) {
     applyEndpoint(nextEndpointUrl, token)
@@ -558,7 +785,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
       const jsonLoaded = await fetchJson()
       if (jsonLoaded) {
-        await fetchMarkdown()
+        await Promise.all([fetchMarkdown(), fetchLayout()])
       }
 
       return jsonLoaded
@@ -607,6 +834,19 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     probeEndpoint,
     fetchJson,
     fetchMarkdown,
-    fetchGraph
+    fetchGraph,
+    layoutUrl,
+    layoutSaveUrl,
+    layoutData,
+    layoutPersistence,
+    isLayoutDirty,
+    isLayoutSaving,
+    layoutSaveError,
+    layoutLoadError,
+    layoutSavedAt,
+    fetchLayout,
+    saveLayout,
+    downloadLayout,
+    markLayoutDirty
   }
 })

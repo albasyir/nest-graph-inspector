@@ -175,6 +175,21 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
+  it('passes its layout file path to the HTTP output adapter', async () => {
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port: 3998,
+      path: 'graph',
+      layoutFilePath: 'layouts/graph.json',
+    });
+
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ layoutFilePath: 'layouts/graph.json' }),
+    );
+  });
+
   it('registers the direct-run route when configured', async () => {
     const port = await availablePort();
     const registerSpy = jest.spyOn(httpServeAdapter, 'register');

@@ -345,6 +345,7 @@ describe(NestGraphInspectorSetup.name, () => {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
+        layoutFilePath: "./nest-graph-layout.json",
         directRun: {
           enabled: true,
           path: "/direct-run",
@@ -378,6 +379,7 @@ describe(NestGraphInspectorSetup.name, () => {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
+        layoutFilePath: "./nest-graph-layout.json",
         directRun: {
           enabled: true,
           path: "/run",
@@ -405,6 +407,7 @@ describe(NestGraphInspectorSetup.name, () => {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
+        layoutFilePath: "./nest-graph-layout.json",
         directRun: {
           enabled: true,
           path: "/direct-run",
@@ -439,6 +442,7 @@ describe(NestGraphInspectorSetup.name, () => {
         type: "viewer",
         host: "127.0.0.1",
         port: 3998,
+        layoutFilePath: "./nest-graph-layout.json",
         directRun: {
           enabled: true,
           path: "/direct-run",
@@ -452,6 +456,89 @@ describe(NestGraphInspectorSetup.name, () => {
         },
       },
     );
+  });
+
+  it("should give an http output the default layout file path", async () => {
+    options.outputs = [{ type: "http", host: "127.0.0.1", port: 3998 }];
+
+    await service.onModuleInit();
+
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ root: TestRootModule.name }),
+      {
+        type: "http",
+        host: "127.0.0.1",
+        port: 3998,
+        layoutFilePath: "./nest-graph-layout.json",
+      },
+    );
+  });
+
+  it("should let a module-level layoutFilePath apply to every viewer and http output", async () => {
+    options.layoutFilePath = "layouts/graph.json";
+    options.outputs = [
+      { type: "viewer", host: "127.0.0.1", port: 3998 },
+      { type: "http", host: "127.0.0.1", port: 3999 },
+    ];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ layoutFilePath: "layouts/graph.json" }),
+    );
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ layoutFilePath: "layouts/graph.json" }),
+    );
+  });
+
+  it("should let an output's own layoutFilePath override the module-level one", async () => {
+    options.layoutFilePath = "layouts/graph.json";
+    options.outputs = [
+      {
+        type: "viewer",
+        host: "127.0.0.1",
+        port: 3998,
+        layoutFilePath: "viewer-layout.json",
+      },
+      {
+        type: "http",
+        host: "127.0.0.1",
+        port: 3999,
+        layoutFilePath: "http-layout.json",
+      },
+    ];
+
+    await service.onModuleInit();
+
+    expect(viewerOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ layoutFilePath: "viewer-layout.json" }),
+    );
+    expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ layoutFilePath: "http-layout.json" }),
+    );
+  });
+
+  it("should not give file outputs a layout file path", async () => {
+    options.layoutFilePath = "layouts/graph.json";
+    options.outputs = [
+      { type: "json", path: "graph.json" },
+      { type: "markdown", path: "graph.md" },
+    ];
+
+    await service.onModuleInit();
+
+    expect(jsonOutputAdapter.execute.mock.calls[0]?.[1]).toStrictEqual({
+      type: "json",
+      path: "graph.json",
+    });
+    expect(fileOutputAdapter.execute.mock.calls[0]?.[1]).toStrictEqual({
+      type: "markdown",
+      path: "graph.md",
+    });
   });
 
   it("should use the default inspector filtering options when none are configured", () => {
