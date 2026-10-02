@@ -89,11 +89,17 @@ type GraphOutputController = {
   name: string;                         // required
   jsdoc?: string;                       // optional
   dependencies: GraphOutputDependencyRef[]; // required
+  directRun?: DirectRunControllerMeta;  // optional — present when ts-morph finds public methods
 }
 ```
 
-Controllers do not carry a `directRun` field.  The shape is otherwise
-identical to a provider (minus `directRun`).
+A controller's `directRun` field is the same shape and eligibility rule as a
+provider's (see [Direct Run metadata](#direct-run-metadata--directrun)
+below), plus an optional per-method `http: { method, path }` read from
+NestJS's own route metadata. This field was added after schema version `'3'`
+first shipped; it is additive and optional, so it does not change the schema
+version — a graph produced before this field existed simply omits it, and
+still validates.
 
 ---
 
@@ -205,7 +211,8 @@ and provider cycles (array of objects).
 
 ## Direct Run metadata — `directRun`
 
-Present on providers only; absent from controllers.
+Present on both providers and controllers, in the same shape except for one
+addition: a controller's methods may also carry `http`.
 
 ```ts
 type DirectRunProviderMeta = {
@@ -216,17 +223,48 @@ type DirectRunProviderMethod = {
   name: string;           // required — method name
   parameterTypes: string; // required — TypeScript parameter list as a string, e.g. "[id: number]"
 }
+
+type DirectRunControllerMeta = {
+  methods: DirectRunControllerMethod[];
+}
+
+type DirectRunControllerMethod = {
+  name: string;           // required — method name
+  parameterTypes: string; // required — TypeScript parameter list as a string
+  http?: DirectRunHttpRoute; // optional — present only when Nest recorded route metadata for this method
+}
+
+type DirectRunHttpRoute = {
+  method: string; // required — HTTP verb, e.g. "GET"
+  path: string;   // required — first controller prefix + first method path, e.g. "/users/:id"
+}
 ```
 
 Both fields on `DirectRunProviderMethod` are required. `methods` contains the
-provider's eligible public methods declared directly on its prototype; it
-excludes `constructor`, Nest lifecycle hooks, and TypeScript-`private` methods
-(detected from the application's own sources, since `private` does not survive
-compilation). `directRun` is omitted when a provider has no eligible methods.
+provider's or controller's eligible public methods declared directly on its
+prototype; it excludes `constructor`, Nest lifecycle hooks, and
+TypeScript-`private` methods (detected from the application's own sources,
+since `private` does not survive compilation). `directRun` is omitted when a
+provider or controller has no eligible methods.
 
 `parameterTypes` is a raw TypeScript signature string extracted by ts-morph.
 It is used by the viewer's Direct Run UI for documentation; it is not parsed
 programmatically.
+
+`http` is read from NestJS's own route-registration metadata
+(`Reflect.getMetadata` with the keys `@Get`/`@Post`/etc. decorators write),
+never guessed or parsed from source, and is present only when Nest recorded
+it for that method — a controller method with no route decorator simply has
+no `http` field. It is informational: Direct Run calls the method directly
+and never sends it an HTTP request, so `http` does not describe what a
+request will do, only what the method would normally answer. `path` is not
+the full URL either: it joins the first `@Controller()` prefix to the
+method's first path, and does not include a `RouterModule` mount path, the
+global prefix (`app.setGlobalPrefix`), URI versioning, or any prefix but the
+first. See
+[`controller-direct-run-design.md`](./controller-direct-run-design.md) for
+the full set of things Direct Run does not simulate (guards, interceptors,
+pipes, parameter decorators).
 
 This `methods` list only ever advertises methods `SourceMetadataService`
 confirms are public in the application's own sources — regardless of which
@@ -237,8 +275,20 @@ graph metadata lists. `directRun.allowUnsafeMethods` defaults to `true`
 provider's instance or prototype chain may be invoked, including ones
 TypeScript marks `private` or `protected`. Set it to `false` for strict mode,
 where only the exact methods advertised in this `methods` array may be
-invoked. `directRun.maxBodySizeBytes` bounds a request body, in encoded
-bytes, and defaults to 50 MiB; `0` or a negative number removes the limit.
+invoked. Controller permissive mode is narrower than provider permissive
+mode: only a direct controller method may be invoked — a function-valued own
+property of the instance, or a method declared on the controller's own class
+— and the constructor, Nest lifecycle hooks, getters, and inherited methods
+(from a base class or a built-in prototype) are refused, even with
+`allowUnsafeMethods: true`.
+`directRun.maxBodySizeBytes` bounds a request body, in encoded bytes, and
+defaults to 50 MiB; `0` or a negative number removes the limit.
+
+The request body itself now names a `target` (`"provider"` or
+`"controller"`, defaulting to `"provider"` when absent) alongside the
+`provider` or `controller` field matching it — see
+[`controller-direct-run-design.md`](./controller-direct-run-design.md) for
+the full request shape and why it is unambiguous by construction.
 
 > **Open question:** `directRun` is omitted entirely when ts-morph cannot
 > locate the source file, not set to `null` or `{ methods: [] }`.  The viewer
@@ -266,6 +316,9 @@ bytes, and defaults to 50 MiB; `0` or a negative number removes the limit.
 | `controller.name` | ✅ |
 | `controller.dependencies` | ✅ |
 | `controller.jsdoc` | ❌ optional |
+| `controller.directRun` | ❌ optional |
+| `controller.directRun.methods` | ✅ (when directRun present) |
+| `controller.directRun.methods[].http` | ❌ optional |
 | `dependency.providedBy` | ✅ |
 | `dependency.providedBy.type` | ✅ |
 | `dependency.providedBy.name` | ✅ |
@@ -306,6 +359,10 @@ From `graph-output.schema.ts`:
 From `direct-run.type.ts`:
 - `DirectRunProviderMethod`
 - `DirectRunProviderMeta`
+- `DirectRunControllerMethod`
+- `DirectRunControllerMeta`
+- `DirectRunHttpRoute`
+- `DirectRunTargetType`
 - `DirectRunResult`
 - `DirectRunTraceRecorder`
 - `RuntimeTrace`

@@ -21,6 +21,14 @@ type ViewerOutputInternalConfig = ViewerOutputConfig & {
       moduleName: string,
       providerName: string,
     ) => ReadonlySet<string> | undefined;
+    controllerInstanceLookup?: (
+      moduleName: string,
+      controllerName: string,
+    ) => unknown;
+    controllerAllowedMethodsLookup?: (
+      moduleName: string,
+      controllerName: string,
+    ) => ReadonlySet<string> | undefined;
     historyDirPath?: string;
     allowUnsafeMethods?: boolean;
     maxBodySizeBytes?: number;
@@ -77,16 +85,23 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
         [
           this.directRunOutputAdapter.createRoute(
             internalConfig.directRun.path,
-            (moduleName, providerName) =>
-              internalConfig.directRun?.instanceLookup(
-                moduleName,
-                providerName,
-              ),
-            (moduleName, providerName) =>
-              internalConfig.directRun?.allowedMethodsLookup(
-                moduleName,
-                providerName,
-              ),
+            (target, moduleName, name) =>
+              target === 'controller'
+                ? internalConfig.directRun?.controllerInstanceLookup?.(
+                    moduleName,
+                    name,
+                  )
+                : internalConfig.directRun?.instanceLookup(moduleName, name),
+            (target, moduleName, name) =>
+              target === 'controller'
+                ? internalConfig.directRun?.controllerAllowedMethodsLookup?.(
+                    moduleName,
+                    name,
+                  )
+                : internalConfig.directRun?.allowedMethodsLookup(
+                    moduleName,
+                    name,
+                  ),
             {
               allowUnsafeMethods: internalConfig.directRun.allowUnsafeMethods,
               maxBodySizeBytes: internalConfig.directRun.maxBodySizeBytes,
@@ -180,6 +195,9 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
             ...module,
             providers: module.providers.map(({ directRun: _, ...provider }) =>
               provider,
+            ),
+            controllers: module.controllers.map(
+              ({ directRun: _, ...controller }) => controller,
             ),
           },
         ]),

@@ -96,6 +96,48 @@ export const GRAPH_OUTPUT_JSON_SCHEMA = {
         },
       },
     },
+    directRunHttpRoute: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['method', 'path'],
+      properties: {
+        method: {
+          type: 'string',
+        },
+        path: {
+          type: 'string',
+        },
+      },
+    },
+    directRunControllerMethod: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'parameterTypes'],
+      properties: {
+        name: {
+          type: 'string',
+        },
+        parameterTypes: {
+          type: 'string',
+        },
+        http: {
+          $ref: '#/$defs/directRunHttpRoute',
+        },
+      },
+    },
+    directRunControllerMeta: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['methods'],
+      properties: {
+        methods: {
+          type: 'array',
+          items: {
+            $ref: '#/$defs/directRunControllerMethod',
+          },
+        },
+      },
+    },
     controller: {
       type: 'object',
       additionalProperties: false,
@@ -112,6 +154,9 @@ export const GRAPH_OUTPUT_JSON_SCHEMA = {
           items: {
             $ref: '#/$defs/dependencyRef',
           },
+        },
+        directRun: {
+          $ref: '#/$defs/directRunControllerMeta',
         },
       },
     },

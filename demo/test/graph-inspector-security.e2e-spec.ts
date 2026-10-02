@@ -1,6 +1,12 @@
 import http from 'node:http';
 import os from 'node:os';
-import { INestApplication, Injectable, Module } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  INestApplication,
+  Injectable,
+  Module,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   AccessTokenService,
@@ -43,7 +49,35 @@ class VaultService {
   onModuleInit(): void {}
 }
 
-@Module({ providers: [VaultService], exports: [VaultService] })
+/** Stands in for the kind of controller direct run can reach. */
+@Controller('vault')
+class VaultController {
+  readonly invocations: string[] = [];
+
+  constructor(private readonly vaultService: VaultService) {}
+
+  @Get('secret')
+  readSecret(): string {
+    this.invocations.push('readSecret');
+
+    return this.vaultService.readSecret();
+  }
+
+  /** TypeScript-`private`, same story as `VaultService.rotateMasterKey`. */
+  private rotateMasterKey(): string {
+    this.invocations.push('rotateMasterKey');
+
+    return 'rotated-controller-key-material';
+  }
+
+  onModuleInit(): void {}
+}
+
+@Module({
+  providers: [VaultService],
+  controllers: [VaultController],
+  exports: [VaultService],
+})
 class VaultModule {}
 
 type Probe = {
@@ -122,7 +156,12 @@ async function bootInspector(config: {
   port: number;
   accessToken?: NestGraphInspectorModuleOptions['accessToken'];
   directRun?: NestGraphInspectorModuleOptions['directRun'];
-}): Promise<{ app: INestApplication; vault: VaultService; token: string }> {
+}): Promise<{
+  app: INestApplication;
+  vault: VaultService;
+  vaultController: VaultController;
+  token: string;
+}> {
   const moduleRef = await Test.createTestingModule({
     imports: [
       VaultModule,
@@ -140,6 +179,7 @@ async function bootInspector(config: {
   return {
     app,
     vault: app.get(VaultService, { strict: false }),
+    vaultController: app.get(VaultController, { strict: false }),
     token: app.get(AccessTokenService, { strict: false }).current(),
   };
 }
@@ -158,17 +198,34 @@ function directRunBodyFor(method: string): string {
   });
 }
 
+const CONTROLLER_DIRECT_RUN_BODY = JSON.stringify({
+  module: 'VaultModule',
+  target: 'controller',
+  controller: 'VaultController',
+  method: 'readSecret',
+});
+
+function controllerDirectRunBodyFor(method: string): string {
+  return JSON.stringify({
+    module: 'VaultModule',
+    target: 'controller',
+    controller: 'VaultController',
+    method,
+  });
+}
+
 describe('Graph inspector network access', () => {
   describe('an anonymous caller', () => {
     let app: INestApplication;
     let vault: VaultService;
+    let vaultController: VaultController;
     let token: string;
     let origin: string;
 
     beforeAll(async () => {
       const port = await freePort();
       origin = `http://127.0.0.1:${port}`;
-      ({ app, vault, token } = await bootInspector({
+      ({ app, vault, vaultController, token } = await bootInspector({
         host: '127.0.0.1',
         port,
       }));
@@ -230,6 +287,18 @@ describe('Graph inspector network access', () => {
       expect(vault.invocations).toEqual([]);
     });
 
+    it('cannot invoke a controller method through direct run', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: CONTROLLER_DIRECT_RUN_BODY,
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.body).not.toContain('production-database-password');
+      expect(vaultController.invocations).toEqual([]);
+    });
+
     it('is served once it presents the token', async () => {
       const response = await probe(`${origin}/__graph-inspector/output.json`, {
         headers: { authorization: `Bearer ${token}` },
@@ -275,6 +344,45 @@ describe('Graph inspector network access', () => {
       expect(methodNames).not.toContain('rotateMasterKey');
     });
 
+    it('carries HTTP verb/path metadata for a routed controller method, and omits a TypeScript-private one', async () => {
+      const response = await probe(`${origin}/__graph-inspector/output.json`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      const graph = JSON.parse(response.body) as {
+        modules: Record<
+          string,
+          {
+            controllers: Array<{
+              name: string;
+              directRun?: {
+                methods: Array<{
+                  name: string;
+                  http?: { method: string; path: string };
+                }>;
+              };
+            }>;
+          }
+        >;
+      };
+
+      const vaultController = graph.modules.VaultModule.controllers.find(
+        (controller) => controller.name === 'VaultController',
+      );
+      const methods = vaultController?.directRun?.methods ?? [];
+      const methodNames = methods.map((method) => method.name);
+      const readSecretMethod = methods.find(
+        (method) => method.name === 'readSecret',
+      );
+
+      expect(methodNames).toContain('readSecret');
+      expect(methodNames).not.toContain('rotateMasterKey');
+      expect(readSecretMethod?.http).toEqual({
+        method: 'GET',
+        path: '/vault/secret',
+      });
+    });
+
     it('runs the provider method once the token is presented', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
@@ -291,6 +399,44 @@ describe('Graph inspector network access', () => {
         result: 'production-database-password',
       });
       expect(vault.invocations).toEqual(['readSecret']);
+    });
+
+    it('runs the controller method once the token is presented', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: CONTROLLER_DIRECT_RUN_BODY,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
+        ok: true,
+        result: 'production-database-password',
+      });
+      expect(vaultController.invocations).toEqual(['readSecret']);
+    });
+
+    it('never resolves a controller-targeted request against the provider instance map', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          module: 'VaultModule',
+          target: 'controller',
+          // VaultService is a real name in this module — just not a controller.
+          controller: 'VaultService',
+          method: 'readSecret',
+        }),
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.body).not.toContain('production-database-password');
     });
 
     it('invokes a TypeScript-private method in the default permissive mode', async () => {
@@ -314,6 +460,24 @@ describe('Graph inspector network access', () => {
       expect(vault.invocations).toContain('rotateMasterKey');
     });
 
+    it('invokes a TypeScript-private controller method in the default permissive mode', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: controllerDirectRunBodyFor('rotateMasterKey'),
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
+        ok: true,
+        result: 'rotated-controller-key-material',
+      });
+      expect(vaultController.invocations).toContain('rotateMasterKey');
+    });
+
     it('invokes a Nest lifecycle hook and an inherited prototype method in the default permissive mode', async () => {
       for (const method of ['onModuleInit', 'toString']) {
         const response = await probe(`${origin}/direct-run`, {
@@ -330,6 +494,25 @@ describe('Graph inspector network access', () => {
       }
     });
 
+    it('still refuses a Nest lifecycle hook and an inherited prototype method on a controller, even in the default permissive mode', async () => {
+      // Unlike provider permissive mode (asserted just above), controller
+      // permissive mode never allows these — see docs/architecture.md and
+      // docs/controller-direct-run-design.md for why the two modes diverge.
+      for (const method of ['onModuleInit', 'toString']) {
+        const response = await probe(`${origin}/direct-run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: controllerDirectRunBodyFor(method),
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(JSON.parse(response.body)).toMatchObject({ ok: false });
+      }
+    });
+
     it('still refuses to invoke the constructor even in the default permissive mode', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
@@ -342,18 +525,32 @@ describe('Graph inspector network access', () => {
 
       expect(response.statusCode).toBe(400);
     });
+
+    it('still refuses to invoke a controller constructor even in the default permissive mode', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: controllerDirectRunBodyFor('constructor'),
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
   });
 
   describe('a caller in strict mode (allowUnsafeMethods: false)', () => {
     let app: INestApplication;
     let vault: VaultService;
+    let vaultController: VaultController;
     let token: string;
     let origin: string;
 
     beforeAll(async () => {
       const port = await freePort();
       origin = `http://127.0.0.1:${port}`;
-      ({ app, vault, token } = await bootInspector({
+      ({ app, vault, vaultController, token } = await bootInspector({
         host: '127.0.0.1',
         port,
         directRun: {
@@ -383,6 +580,24 @@ describe('Graph inspector network access', () => {
       expect(vault.invocations).toEqual(['readSecret']);
     });
 
+    it('still runs an allowlisted controller method', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: CONTROLLER_DIRECT_RUN_BODY,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
+        ok: true,
+        result: 'production-database-password',
+      });
+      expect(vaultController.invocations).toEqual(['readSecret']);
+    });
+
     it('rejects a TypeScript-private method even with a valid token, without invoking it', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
@@ -398,6 +613,21 @@ describe('Graph inspector network access', () => {
       expect(vault.invocations).not.toContain('rotateMasterKey');
     });
 
+    it('rejects a TypeScript-private controller method even with a valid token, without invoking it', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: controllerDirectRunBodyFor('rotateMasterKey'),
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).not.toContain('rotated-controller-key-material');
+      expect(vaultController.invocations).not.toContain('rotateMasterKey');
+    });
+
     it.each(['constructor', 'onModuleInit', 'toString', 'unknownMethod'])(
       'rejects the non-allowlisted method %s even with a valid token',
       async (method) => {
@@ -408,6 +638,23 @@ describe('Graph inspector network access', () => {
             authorization: `Bearer ${token}`,
           },
           body: directRunBodyFor(method),
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.body).not.toContain('production-database-password');
+      },
+    );
+
+    it.each(['constructor', 'onModuleInit', 'toString', 'unknownMethod'])(
+      'rejects the non-allowlisted controller method %s even with a valid token',
+      async (method) => {
+        const response = await probe(`${origin}/direct-run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: controllerDirectRunBodyFor(method),
         });
 
         expect(response.statusCode).toBe(400);

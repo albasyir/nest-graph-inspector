@@ -216,6 +216,121 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
+  it('dispatches a controller-targeted request to controllerInstanceLookup, never instanceLookup', async () => {
+    const port = await availablePort();
+    const instanceLookup = jest.fn(() => ({ ping: () => 'from-provider' }));
+    const controllerInstanceLookup = jest.fn(() => ({
+      ping: () => 'from-controller',
+    }));
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      directRun: {
+        path: '/direct-run',
+        instanceLookup,
+        allowedMethodsLookup: () => undefined,
+        controllerInstanceLookup,
+        controllerAllowedMethodsLookup: () => undefined,
+      },
+    } as never);
+
+    const token = moduleRef.get(AccessTokenService).current();
+    const response = await fetch(`http://127.0.0.1:${port}/direct-run`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        module: 'AppModule',
+        target: 'controller',
+        controller: 'PingController',
+        method: 'ping',
+      }),
+    });
+    const payload = (await response.json()) as { result?: unknown };
+
+    expect(payload.result).toBe('from-controller');
+    expect(controllerInstanceLookup).toHaveBeenCalledWith(
+      'AppModule',
+      'PingController',
+    );
+    expect(instanceLookup).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a controller-targeted request to the controller allowlist in strict mode, never the provider one', async () => {
+    const port = await availablePort();
+
+    class PingController {
+      ping(): string {
+        return 'from-controller';
+      }
+
+      secret(): string {
+        return 'controller-secret';
+      }
+    }
+
+    const instanceLookup = jest.fn(() => ({ ping: () => 'from-provider' }));
+    const allowedMethodsLookup = jest.fn(() => new Set(['ping', 'secret']));
+    const controllerInstanceLookup = jest.fn(() => new PingController());
+    const controllerAllowedMethodsLookup = jest.fn(() => new Set(['ping']));
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      directRun: {
+        path: '/direct-run',
+        allowUnsafeMethods: false,
+        instanceLookup,
+        allowedMethodsLookup,
+        controllerInstanceLookup,
+        controllerAllowedMethodsLookup,
+      },
+    } as never);
+
+    const url = `http://127.0.0.1:${port}/direct-run`;
+    const headers = {
+      authorization: `Bearer ${moduleRef.get(AccessTokenService).current()}`,
+    };
+    const controllerRequest = (method: string) =>
+      JSON.stringify({
+        module: 'AppModule',
+        target: 'controller',
+        controller: 'PingController',
+        method,
+      });
+
+    const allowed = await post(url, controllerRequest('ping'), headers);
+    expect(allowed.statusCode).toBe(200);
+    expect(JSON.parse(allowed.body)).toMatchObject({
+      ok: true,
+      result: 'from-controller',
+    });
+
+    // `secret` is on the provider allowlist, not the controller's: strict
+    // mode must read the controller's, so it is refused.
+    const refused = await post(url, controllerRequest('secret'), headers);
+    expect(refused.statusCode).toBe(400);
+    expect(refused.body).not.toContain('controller-secret');
+
+    expect(controllerAllowedMethodsLookup.mock.calls).toEqual([
+      ['AppModule', 'PingController'],
+      ['AppModule', 'PingController'],
+    ]);
+    expect(controllerInstanceLookup).toHaveBeenCalledWith(
+      'AppModule',
+      'PingController',
+    );
+    expect(allowedMethodsLookup).not.toHaveBeenCalled();
+    expect(instanceLookup).not.toHaveBeenCalled();
+  });
+
   it('does not register direct-run routes when disabled', async () => {
     const port = await availablePort();
     const registerSpy = jest.spyOn(httpServeAdapter, 'register');
@@ -265,7 +380,21 @@ describe(ViewerOutputAdapter.name, () => {
               },
             },
           ],
-          controllers: [],
+          controllers: [
+            {
+              name: 'AppController',
+              dependencies: [],
+              directRun: {
+                methods: [
+                  {
+                    name: 'getPing',
+                    parameterTypes: '()',
+                    http: { method: 'GET', path: '/ping' },
+                  },
+                ],
+              },
+            },
+          ],
         },
       },
       cycles: { modules: [], providers: [], controllers: [] },
@@ -290,8 +419,20 @@ describe(ViewerOutputAdapter.name, () => {
     expect(projectedGraph?.modules.AppModule?.providers).toEqual([
       { name: 'AppService', dependencies: [] },
     ]);
+    expect(projectedGraph?.modules.AppModule?.controllers).toEqual([
+      { name: 'AppController', dependencies: [] },
+    ]);
     expect(graphOutput.modules.AppModule?.providers[0]?.directRun).toEqual({
       methods: [{ name: 'ping', parameterTypes: '()' }],
+    });
+    expect(graphOutput.modules.AppModule?.controllers[0]?.directRun).toEqual({
+      methods: [
+        {
+          name: 'getPing',
+          parameterTypes: '()',
+          http: { method: 'GET', path: '/ping' },
+        },
+      ],
     });
     expect(graphSource).toHaveBeenCalledTimes(1);
   });
@@ -441,6 +582,58 @@ describe(ViewerOutputAdapter.name, () => {
       result: 'pong',
     });
     expect(ping).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to invoke a controller method without a valid token', async () => {
+    const port = await availablePort();
+    const readSecret = jest.fn(() => 'controller-secret');
+
+    class VaultController {
+      public readSecret(): string {
+        return readSecret();
+      }
+    }
+
+    const controllerInstanceLookup = jest.fn(() => new VaultController());
+
+    await adapter.execute({} as never, {
+      type: 'viewer',
+      host: '127.0.0.1',
+      port,
+      path: 'graph',
+      directRun: {
+        path: '/direct-run',
+        instanceLookup: () => undefined,
+        allowedMethodsLookup: () => undefined,
+        controllerInstanceLookup,
+        controllerAllowedMethodsLookup: () => new Set(['readSecret']),
+      },
+    } as never);
+
+    const body = JSON.stringify({
+      module: 'AppModule',
+      target: 'controller',
+      controller: 'VaultController',
+      method: 'readSecret',
+    });
+    const url = `http://127.0.0.1:${port}/direct-run`;
+
+    const rejected = await post(url, body);
+    expect(rejected.statusCode).toBe(401);
+    expect(JSON.parse(rejected.body)).toMatchObject({ reason: 'missing' });
+    expect(rejected.body).not.toContain('controller-secret');
+    expect(controllerInstanceLookup).not.toHaveBeenCalled();
+    expect(readSecret).not.toHaveBeenCalled();
+
+    const accepted = await post(url, body, {
+      authorization: `Bearer ${moduleRef.get(AccessTokenService).current()}`,
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(JSON.parse(accepted.body)).toMatchObject({
+      ok: true,
+      result: 'controller-secret',
+    });
+    expect(readSecret).toHaveBeenCalledTimes(1);
   });
 });
 

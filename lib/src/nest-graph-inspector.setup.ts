@@ -1,9 +1,17 @@
 import { dirname, join } from "node:path";
-import { Inject, Injectable, Logger, OnModuleInit, Type } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  RequestMethod,
+  Type,
+} from "@nestjs/common";
+import { METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 
 import { ModulesContainer } from "@nestjs/core";
 import { DiscoveryAdapter } from "./adapters/discovery";
-import type { ModuleTree } from "./adapters/discovery";
+import type { AnyFunction, ModuleTree } from "./adapters/discovery";
 import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
 import type {
   NestGraphInspectorModuleOptions,
@@ -12,7 +20,11 @@ import type {
 import { defaultOptions } from "./nest-graph-inspector.module";
 import { Modules } from "./types/module.type";
 import { ModuleMap } from "./types/module-map.type";
+import { DIRECT_RUN_EXCLUDED_METHODS } from "./direct-run.constants";
 import type {
+  DirectRunControllerMeta,
+  DirectRunControllerMethod,
+  DirectRunHttpRoute,
   DirectRunProviderMeta,
   DirectRunProviderMethod,
 } from "./types/direct-run.type";
@@ -52,15 +64,13 @@ const MAX_TYPE_RENDER_MEMBERS = 50;
 const MAX_TYPE_RENDER_LENGTH = 8_000;
 const MAX_TYPE_PROPERTY_NAME_LENGTH = 160;
 const MIN_TYPE_RENDER_LENGTH = "unknown".length;
-const DIRECT_RUN_EXCLUDED_METHODS = new Set([
-  "constructor",
-  "onModuleInit",
-  "onApplicationBootstrap",
-  "onModuleDestroy",
-  "beforeApplicationShutdown",
-  "onApplicationShutdown",
-]);
 const DEFAULT_DIRECT_RUN_MAX_BODY_SIZE_BYTES = 50 * 1024 * 1024;
+/** Reverse lookup: Nest's numeric `RequestMethod` enum value to its HTTP verb name. */
+const HTTP_VERB_BY_REQUEST_METHOD: Record<number, string> = Object.fromEntries(
+  Object.entries(RequestMethod)
+    .filter(([, value]) => typeof value === "number")
+    .map(([name, value]) => [value as number, name]),
+);
 
 type TypeRenderState = {
   activeTypes: Set<TsMorphType>;
@@ -80,8 +90,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     (...args: unknown[]) => unknown,
     string
   >();
-  private directRunProviderInstances:
-    | { tree: ModuleTree; modules: Map<string, Map<string, unknown>> }
+  private directRunInstanceIndex:
+    | {
+        tree: ModuleTree;
+        providers: Map<string, Map<string, unknown>>;
+        controllers: Map<string, Map<string, unknown>>;
+      }
     | undefined;
 
   constructor(
@@ -263,6 +277,12 @@ export class NestGraphInspectorSetup implements OnModuleInit {
         this.findDirectRunProviderInstance(moduleName, providerName),
       allowedMethodsLookup: (moduleName: string, providerName: string) =>
         this.getDirectRunAllowedMethods(moduleName, providerName),
+      controllerInstanceLookup: (moduleName: string, controllerName: string) =>
+        this.findDirectRunControllerInstance(moduleName, controllerName),
+      controllerAllowedMethodsLookup: (
+        moduleName: string,
+        controllerName: string,
+      ) => this.getDirectRunControllerAllowedMethods(moduleName, controllerName),
     };
   }
 
@@ -362,6 +382,10 @@ export class NestGraphInspectorSetup implements OnModuleInit {
           dependencies: controller.dependencies.map((dep) =>
             this.enrichDependency(dep, moduleName),
           ),
+          directRun: this.resolveDirectRunControllerMeta(
+            controller.name,
+            moduleName,
+          ),
         })),
       };
     }
@@ -400,7 +424,7 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     providerName: string,
   ): unknown {
     const moduleInstances =
-      this.getDirectRunProviderInstances().get(moduleName);
+      this.getDirectRunInstanceIndex().providers.get(moduleName);
     return moduleInstances?.get(providerName);
   }
 
@@ -414,17 +438,68 @@ export class NestGraphInspectorSetup implements OnModuleInit {
       : undefined;
   }
 
-  private getDirectRunProviderInstances(): Map<string, Map<string, unknown>> {
-    const tree = this.discovery.scan();
-    if (this.directRunProviderInstances?.tree === tree) {
-      return this.directRunProviderInstances.modules;
+  private resolveDirectRunControllerMeta(
+    controllerName: string,
+    moduleName: string,
+  ): DirectRunControllerMeta | undefined {
+    const instance = this.findDirectRunControllerInstance(
+      moduleName,
+      controllerName,
+    );
+    if (!instance) {
+      return undefined;
     }
 
-    const modules = new Map<string, Map<string, unknown>>();
+    const methods = this.getDirectRunControllerMethods(instance);
+    if (!methods.length) {
+      return undefined;
+    }
+
+    return {
+      methods,
+    };
+  }
+
+  private findDirectRunControllerInstance(
+    moduleName: string,
+    controllerName: string,
+  ): unknown {
+    const moduleInstances =
+      this.getDirectRunInstanceIndex().controllers.get(moduleName);
+    return moduleInstances?.get(controllerName);
+  }
+
+  private getDirectRunControllerAllowedMethods(
+    moduleName: string,
+    controllerName: string,
+  ): ReadonlySet<string> | undefined {
+    const metadata = this.resolveDirectRunControllerMeta(
+      controllerName,
+      moduleName,
+    );
+    return metadata
+      ? new Set(metadata.methods.map((method) => method.name))
+      : undefined;
+  }
+
+  private getDirectRunInstanceIndex(): {
+    providers: Map<string, Map<string, unknown>>;
+    controllers: Map<string, Map<string, unknown>>;
+  } {
+    const tree = this.discovery.scan();
+    if (this.directRunInstanceIndex?.tree === tree) {
+      return this.directRunInstanceIndex;
+    }
+
+    const providers = new Map<string, Map<string, unknown>>();
+    const controllers = new Map<string, Map<string, unknown>>();
     const visit = (node: ModuleTree): void => {
       // The previous depth-first lookup returned the first module occurrence.
-      if (!modules.has(node.name)) {
-        modules.set(node.name, node.providerInstances);
+      if (!providers.has(node.name)) {
+        providers.set(node.name, node.providerInstances);
+      }
+      if (!controllers.has(node.name)) {
+        controllers.set(node.name, node.controllerInstances);
       }
 
       for (const child of node.children) {
@@ -433,8 +508,8 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     };
     visit(tree);
 
-    this.directRunProviderInstances = { tree, modules };
-    return modules;
+    this.directRunInstanceIndex = { tree, providers, controllers };
+    return this.directRunInstanceIndex;
   }
 
   private getDirectRunMethods(instance: unknown): DirectRunProviderMethod[] {
@@ -487,6 +562,121 @@ export class NestGraphInspectorSetup implements OnModuleInit {
     return [
       ...new Map(methods.map((method) => [method.name, method])).values(),
     ];
+  }
+
+  /**
+   * Same eligibility rules as `getDirectRunMethods` — public, own-prototype
+   * methods, excluding the constructor and Nest lifecycle hooks — plus the
+   * HTTP verb/path Nest recorded for the method, when it recorded any.
+   */
+  private getDirectRunControllerMethods(
+    instance: unknown,
+  ): DirectRunControllerMethod[] {
+    return this.getDirectRunMethods(instance).map((method) => {
+      const http = this.getControllerMethodHttpRoute(instance, method.name);
+      return http ? { ...method, http } : method;
+    });
+  }
+
+  /**
+   * Reads the HTTP verb/path NestJS's own `@Get`/`@Post`/etc. decorators
+   * recorded for this method via `reflect-metadata` — never guessed or
+   * parsed from source. Runtime-trace instrumentation replaces instrumented
+   * prototype methods with a wrapper function (see `discovery.ts`), and that
+   * metadata was attached to the *original* function, so the wrapper is
+   * unwrapped first via `getOriginalTracedMethod` — reading metadata off the
+   * wrapper itself silently returns nothing.
+   */
+  private getControllerMethodHttpRoute(
+    instance: unknown,
+    methodName: string,
+  ): DirectRunHttpRoute | undefined {
+    if (
+      !instance ||
+      (typeof instance !== "object" && typeof instance !== "function")
+    ) {
+      return undefined;
+    }
+
+    const controllerClass = instance.constructor;
+    if (typeof controllerClass !== "function") {
+      return undefined;
+    }
+
+    const prototype = Object.getPrototypeOf(instance) as Record<
+      string,
+      unknown
+    > | null;
+    const descriptor = prototype
+      ? Object.getOwnPropertyDescriptor(prototype, methodName)
+      : undefined;
+    if (typeof descriptor?.value !== "function") {
+      return undefined;
+    }
+
+    const targetMethod =
+      getOriginalTracedMethod(descriptor.value as AnyFunction) ??
+      descriptor.value;
+
+    const methodPath = this.getReflectMetadata(PATH_METADATA, targetMethod) as
+      | string
+      | string[]
+      | undefined;
+    const requestMethod = this.getReflectMetadata(
+      METHOD_METADATA,
+      targetMethod,
+    ) as RequestMethod | undefined;
+    if (methodPath === undefined || requestMethod === undefined) {
+      return undefined;
+    }
+
+    const verb = HTTP_VERB_BY_REQUEST_METHOD[requestMethod];
+    if (!verb) {
+      return undefined;
+    }
+
+    const controllerPath = this.getReflectMetadata(
+      PATH_METADATA,
+      controllerClass,
+    ) as string | string[] | undefined;
+
+    return {
+      method: verb,
+      path: this.joinControllerRoutePath(
+        this.firstRoutePathSegment(controllerPath),
+        this.firstRoutePathSegment(methodPath),
+      ),
+    };
+  }
+
+  /**
+   * `reflect-metadata` is not a declared dependency of this package — it
+   * only ever arrives transitively through `@nestjs/common`/`@nestjs/core`,
+   * which install its global `Reflect.getMetadata` polyfill as a side effect
+   * of their own bootstrap, long before this ever runs inside a booted Nest
+   * application. Reading it through a locally-typed accessor, rather than
+   * `Reflect.getMetadata` directly, avoids depending on that package's own
+   * ambient type augmentation being present in this package's compilation.
+   */
+  private getReflectMetadata(key: string, target: object): unknown {
+    const reflectWithMetadata = Reflect as unknown as {
+      getMetadata?: (metadataKey: string, targetObject: object) => unknown;
+    };
+
+    return reflectWithMetadata.getMetadata?.(key, target);
+  }
+
+  private firstRoutePathSegment(value: string | string[] | undefined): string {
+    const segment = Array.isArray(value) ? value[0] : value;
+    return typeof segment === "string" ? segment : "";
+  }
+
+  private joinControllerRoutePath(prefix: string, path: string): string {
+    const trimmedPrefix = prefix.replace(/^\/+|\/+$/g, "");
+    const trimmedPath = path.replace(/^\/+|\/+$/g, "");
+    const segments = [trimmedPrefix, trimmedPath].filter(Boolean);
+
+    return `/${segments.join("/")}`;
   }
 
   private getDirectRunMethodParameterTypes(param: {
