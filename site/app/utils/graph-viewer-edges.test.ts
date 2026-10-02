@@ -117,6 +117,55 @@ describe('resolveEdgeRelationship', () => {
       'module'
     )
   })
+
+  // A collapsed module hides its providers, so a dependency between two
+  // collapsed modules is drawn from one module node to the other. It is
+  // still a provider dependency, not an import, and names its relationship
+  // to say so.
+  test('a named relationship outranks the nodes the edge is drawn between', () => {
+    assert.equal(
+      resolveEdgeRelationship({
+        source: 'module-PaymentModule',
+        target: 'module-OrderModule',
+        relationship: 'provider'
+      }),
+      'provider'
+    )
+  })
+
+  test('a controller dependency drawn onto a collapsed module stays a controller edge', () => {
+    assert.equal(
+      resolveEdgeRelationship({
+        source: 'provider-PaymentModule-PaymentService',
+        target: 'module-OrderModule',
+        relationship: 'controller'
+      }),
+      'controller'
+    )
+  })
+
+  test('an edge closing a cycle is circular, whatever relationship it names', () => {
+    assert.equal(
+      resolveEdgeRelationship({
+        source: 'module-PaymentModule',
+        target: 'module-OrderModule',
+        relationship: 'provider',
+        isCircular: true
+      }),
+      'circular'
+    )
+  })
+
+  test('relationship: undefined resolves as if it were left out', () => {
+    assert.equal(
+      resolveEdgeRelationship({
+        source: 'module-UserModule',
+        target: 'module-AppModule',
+        relationship: undefined
+      }),
+      'module'
+    )
+  })
 })
 
 describe('getEdgeColor', () => {
@@ -249,6 +298,58 @@ describe('isEdgeNormallyVisible', () => {
       isEdgeNormallyVisible({
         source: 'provider-UserModule-UserRepository',
         target: 'provider-UserModule-UserService',
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      true
+    )
+  })
+
+  // A collapsed module hides its controllers, so a controller's dependency is
+  // drawn onto the module node instead; the relationship it names is all that
+  // still says a controller is involved.
+  test('the controller toggle governs an edge that names a controller relationship', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'provider-PaymentModule-PaymentService',
+        target: 'module-OrderModule',
+        relationship: 'controller',
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      false
+    )
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'provider-PaymentModule-PaymentService',
+        target: 'module-OrderModule',
+        relationship: 'controller',
+        isNormallyVisible: true,
+        showControllerLines: true
+      }),
+      true
+    )
+  })
+
+  test('naming another relationship never exempts an edge with a controller end', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'controller-PaymentModule-PaymentController',
+        target: 'module-OrderModule',
+        relationship: 'provider',
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      false
+    )
+  })
+
+  test('the controller toggle never hides a provider edge between two collapsed modules', () => {
+    assert.equal(
+      isEdgeNormallyVisible({
+        source: 'module-PaymentModule',
+        target: 'module-OrderModule',
+        relationship: 'provider',
         isNormallyVisible: true,
         showControllerLines: false
       }),

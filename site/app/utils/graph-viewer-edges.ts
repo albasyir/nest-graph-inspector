@@ -35,21 +35,31 @@ const EDGE_COLOR_BY_RELATIONSHIP: Readonly<Record<EdgeRelationship, string>> = {
  * Says what an edge between two graph nodes represents.
  *
  * Node ids carry their kind as a prefix — `module-`, `provider-`,
- * `controller-` — and that prefix is all this reads. A cycle outranks
- * everything else, because an edge closing one is a problem whatever it
- * connects; a controller at either end outranks a provider at the other.
+ * `controller-` — and that prefix is enough for most edges. One drawn between
+ * nodes that stand in for its real ends names its `relationship` instead: a
+ * provider dependency between two collapsed modules runs from one module node
+ * to the other, but it is a provider edge, not an import. A cycle outranks
+ * everything else, a named `relationship` included, because an edge closing
+ * one is a problem whatever it connects; a controller at either end outranks a
+ * provider at the other.
  */
 export function resolveEdgeRelationship({
   source,
   target,
-  isCircular
+  isCircular,
+  relationship
 }: {
   source: string
   target: string
   isCircular?: boolean
+  relationship?: EdgeRelationship
 }): EdgeRelationship {
   if (isCircular) {
     return 'circular'
+  }
+
+  if (relationship) {
+    return relationship
   }
 
   if (source.startsWith('module-') && target.startsWith('module-')) {
@@ -79,23 +89,28 @@ export function isControllerEdge(source: string, target: string): boolean {
  *
  * `isNormallyVisible` is what the toggle governing the edge says. An edge with
  * a controller at either end must also pass "Show controller lines", whichever
- * way it points; edges without one are untouched by that toggle.
+ * way it points. So must one that names `relationship: 'controller'`, such as
+ * a controller's dependency drawn onto the collapsed module hiding it; naming
+ * any other relationship never exempts an edge with a controller end. Edges
+ * with neither are untouched by that toggle.
  */
 export function isEdgeNormallyVisible({
   source,
   target,
   isNormallyVisible,
-  showControllerLines
+  showControllerLines,
+  relationship
 }: {
   source: string
   target: string
   isNormallyVisible: boolean
   showControllerLines: boolean
+  relationship?: EdgeRelationship
 }): boolean {
-  return (
-    isNormallyVisible
-    && (!isControllerEdge(source, target) || showControllerLines)
-  )
+  const isControllerLine
+    = relationship === 'controller' || isControllerEdge(source, target)
+
+  return isNormallyVisible && (!isControllerLine || showControllerLines)
 }
 
 /** The colour an edge of this relationship is drawn in. */
