@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { StringDecoder } from 'node:string_decoder';
 import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import type { DirectRunResult } from '../types/direct-run.type';
@@ -8,6 +9,27 @@ import type { RuntimeTrace } from '../types/direct-run.type';
 type DirectRunArgsResult =
   | { ok: true; args: unknown[] }
   | { ok: false; response: HttpServeResponse };
+type DirectRunBodyResult =
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; response: HttpServeResponse };
+type DirectRunMethodResult =
+  | { ok: true; method: (...args: unknown[]) => unknown }
+  | { ok: false; response: HttpServeResponse };
+
+export type DirectRunRouteOptions = {
+  /**
+   * Permissive (default, `true`): any callable method found on the
+   * provider's prototype or instance may be invoked. Strict (`false`): only
+   * methods `allowedMethodsLookup` advertises, and only when not shadowed on
+   * the instance.
+   */
+  allowUnsafeMethods?: boolean;
+
+  /** Defaults to 50 MiB. `0` or negative removes the limit. */
+  maxBodySizeBytes?: number;
+};
+
+const DEFAULT_MAX_JSON_BODY_BYTES = 50 * 1024 * 1024;
 
 @Injectable()
 export class DirectRunOutputAdapter {
@@ -19,12 +41,26 @@ export class DirectRunOutputAdapter {
   createRoute(
     path: string,
     instanceLookup: (moduleName: string, providerName: string) => unknown,
+    allowedMethodsLookup: (
+      moduleName: string,
+      providerName: string,
+    ) => ReadonlySet<string> | undefined,
+    options: DirectRunRouteOptions = {},
     onComplete?: (trace: RuntimeTrace) => void | Promise<void>,
   ) {
+    const allowUnsafeMethods = options.allowUnsafeMethods ?? true;
+    const maxBodySizeBytes =
+      options.maxBodySizeBytes ?? DEFAULT_MAX_JSON_BODY_BYTES;
+
     return this.httpServeAdapter.post(
       path,
       async ({ request }) => {
-        const body = await this.readJsonBody(request);
+        const bodyResult = await this.readJsonBody(request, maxBodySizeBytes);
+        if (!bodyResult.ok) {
+          return bodyResult.response;
+        }
+
+        const { body } = bodyResult;
         const moduleName = typeof body.module === 'string' ? body.module : '';
         const providerName =
           typeof body.provider === 'string' ? body.provider : '';
@@ -43,13 +79,18 @@ export class DirectRunOutputAdapter {
           );
         }
 
-        const method = instance[methodName];
-        if (typeof method !== 'function') {
-          return this.badRequest(
-            `Method ${methodName} is unavailable for direct run.`,
-          );
+        const methodResult = allowUnsafeMethods
+          ? this.resolvePermissiveMethod(instance, methodName)
+          : this.resolveStrictMethod(
+              instance,
+              methodName,
+              allowedMethodsLookup(moduleName, providerName),
+            );
+        if (!methodResult.ok) {
+          return methodResult.response;
         }
 
+        const { method } = methodResult;
         const argsResult = this.resolveArgs(body, methodName, method.length);
         if (!argsResult.ok) {
           return argsResult.response;
@@ -63,7 +104,7 @@ export class DirectRunOutputAdapter {
         });
 
         const invokeMethod = async (): Promise<unknown> =>
-          (await method.call(instance, ...argsResult.args)) as unknown;
+          await method.call(instance, ...argsResult.args);
 
         const payload: DirectRunResult = await (async () => {
           try {
@@ -169,22 +210,127 @@ export class DirectRunOutputAdapter {
 
   private async readJsonBody(
     request: NodeJS.ReadableStream,
-  ): Promise<Record<string, unknown>> {
+    maxBodySizeBytes: number,
+  ): Promise<DirectRunBodyResult> {
+    const limit =
+      maxBodySizeBytes > 0 ? maxBodySizeBytes : Number.POSITIVE_INFINITY;
     let body = '';
+    let byteLength = 0;
+    const decoder = new StringDecoder('utf8');
 
     for await (const chunk of request) {
-      body += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += buffer.byteLength;
+      if (byteLength > limit) {
+        request.resume?.();
+        return {
+          ok: false,
+          response: this.payloadTooLarge(),
+        };
+      }
+
+      body += decoder.write(buffer);
     }
 
+    body += decoder.end();
+
     if (!body.trim()) {
-      return {};
+      return { ok: true, body: {} };
     }
 
     try {
-      return JSON.parse(body) as Record<string, unknown>;
+      return { ok: true, body: JSON.parse(body) as Record<string, unknown> };
     } catch {
-      return {};
+      return { ok: true, body: {} };
     }
+  }
+
+  /**
+   * Strict mode: only a method `allowedMethodsLookup` advertises, resolved
+   * as an own property of the provider's immediate prototype and never
+   * shadowed on the instance itself.
+   */
+  private resolveStrictMethod(
+    instance: Record<string, unknown>,
+    methodName: string,
+    allowedMethods: ReadonlySet<string> | undefined,
+  ): DirectRunMethodResult {
+    if (!allowedMethods?.has(methodName)) {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    if (Object.hasOwn(instance, methodName)) {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    const prototype = Object.getPrototypeOf(instance) as
+      | Record<string, unknown>
+      | null;
+    const method =
+      prototype &&
+      Object.getOwnPropertyDescriptor(prototype, methodName)?.value;
+    if (typeof method !== 'function') {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    return { ok: true, method: method as (...args: unknown[]) => unknown };
+  }
+
+  /**
+   * Permissive mode (default): any callable method found on the instance or
+   * its prototype chain may be invoked, including ones TypeScript would have
+   * marked `private` or `protected` — that keyword does not survive
+   * compilation, so it was never a runtime boundary. `constructor` is the
+   * one name refused outright: it builds the instance rather than acting on
+   * it, so invoking it as a plain method call is not a provider "method" in
+   * any sense a caller intends.
+   */
+  private resolvePermissiveMethod(
+    instance: Record<string, unknown>,
+    methodName: string,
+  ): DirectRunMethodResult {
+    if (methodName === 'constructor') {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    const ownValue = Object.hasOwn(instance, methodName)
+      ? instance[methodName]
+      : undefined;
+    const prototype = Object.getPrototypeOf(instance) as
+      | Record<string, unknown>
+      | null;
+    const method =
+      typeof ownValue === 'function' ? ownValue : prototype?.[methodName];
+    if (typeof method !== 'function') {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    return { ok: true, method: method as (...args: unknown[]) => unknown };
   }
 
   private resolveArgs(
@@ -238,6 +384,16 @@ export class DirectRunOutputAdapter {
       body: {
         ok: false,
         error: message,
+      } satisfies DirectRunResult,
+    };
+  }
+
+  private payloadTooLarge(): HttpServeResponse {
+    return {
+      statusCode: 413,
+      body: {
+        ok: false,
+        error: 'Request body is too large.',
       } satisfies DirectRunResult,
     };
   }

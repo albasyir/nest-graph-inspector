@@ -26,6 +26,15 @@ function parseJson(body: string): DirectRunResponseBody {
   return JSON.parse(body) as DirectRunResponseBody;
 }
 
+function provider<Methods extends Record<string, (...args: never[]) => unknown>>(
+  methods: Methods,
+) {
+  class TestProvider {}
+
+  Object.assign(TestProvider.prototype, methods);
+  return new TestProvider();
+}
+
 describe(DirectRunOutputAdapter.name, () => {
   let moduleRef: TestingModule;
   let adapter: DirectRunOutputAdapter;
@@ -56,13 +65,13 @@ describe(DirectRunOutputAdapter.name, () => {
       [
         adapter.createRoute('/direct-run', (moduleName, providerName) => {
           if (moduleName === 'AppModule' && providerName === 'PingProvider') {
-            return {
+            return provider({
               ping: () => 'pong',
-            };
+            });
           }
 
           return undefined;
-        }),
+        }, () => new Set(['ping'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -99,9 +108,9 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           ping: () => 'pong',
-        })),
+        }), () => new Set(['ping'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -132,9 +141,9 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           ping: () => 'pong',
-        })),
+        }), () => new Set(['ping'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -177,9 +186,9 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           ping: (value: { message: string }) => `pong:${value.message}`,
-        })),
+        }), () => new Set(['ping'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -213,9 +222,9 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           add: (left: number, right: number) => left + right,
-        })),
+        }), () => new Set(['add'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -247,11 +256,11 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           fail: () => {
             throw new Error('boom');
           },
-        })),
+        }), () => new Set(['fail'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -299,12 +308,12 @@ describe(DirectRunOutputAdapter.name, () => {
         port,
       },
       [
-        adapter.createRoute('/direct-run', () => ({
+        adapter.createRoute('/direct-run', () => provider({
           ping: async () => {
             await Promise.resolve();
             return { ok: true };
           },
-        })),
+        }), () => new Set(['ping'])),
       ],
     );
     await httpServeAdapter.serve();
@@ -343,6 +352,110 @@ describe(DirectRunOutputAdapter.name, () => {
       result: { ok: true },
     });
     expect(payload.runtimeTrace.spans[0]?.metadata).toBeUndefined();
+  });
+
+  it('rejects non-allowlisted and instance-shadowed methods', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+    const instance = provider({ ping: () => 'pong' }) as unknown as {
+      ping: () => string;
+    };
+    instance.ping = () => 'secret';
+
+    httpServeAdapter.register(
+      { host: '127.0.0.1', port },
+      [
+        adapter.createRoute(
+          '/direct-run',
+          () => instance,
+          () => new Set(['ping']),
+          { allowUnsafeMethods: false },
+        ),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    for (const method of ['toString', 'ping']) {
+      const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+        module: 'AppModule',
+        provider: 'PingProvider',
+        method,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(parseJson(response.body)).toMatchObject({ ok: false });
+      expect(response.body).not.toContain('secret');
+    }
+  });
+
+  it('invokes methods not advertised by allowedMethodsLookup by default (permissive mode)', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      { host: '127.0.0.1', port },
+      [
+        adapter.createRoute(
+          '/direct-run',
+          () => provider({ secretMethod: () => 'internal' }),
+          () => new Set(['ping']),
+        ),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const response = await post(`http://127.0.0.1:${port}/direct-run`, {
+      module: 'AppModule',
+      provider: 'PingProvider',
+      method: 'secretMethod',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(parseJson(response.body)).toMatchObject({
+      ok: true,
+      method: 'secretMethod',
+      result: 'internal',
+    });
+  });
+
+  it('limits JSON bodies by encoded bytes and decodes split UTF-8 safely', async () => {
+    const port = await availablePort();
+    const httpServeAdapter = moduleRef.get(HttpServeAdapter);
+
+    httpServeAdapter.register(
+      { host: '127.0.0.1', port },
+      [
+        adapter.createRoute(
+          '/direct-run',
+          () => provider({ ping: (value: string) => value }),
+          () => new Set(['ping']),
+          { maxBodySizeBytes: 1024 * 1024 },
+        ),
+      ],
+    );
+    await httpServeAdapter.serve();
+
+    const splitResponse = await requestChunks(
+      `http://127.0.0.1:${port}/direct-run`,
+      [
+        Buffer.from('{"module":"AppModule","provider":"PingProvider","method":"ping","args":"caf'),
+        Buffer.from([0xc3]),
+        Buffer.from([0xa9]),
+        Buffer.from('"}'),
+      ],
+    );
+    expect(splitResponse.statusCode).toBe(200);
+    expect(parseJson(splitResponse.body)).toMatchObject({ result: 'café' });
+
+    const oversizedResponse = await requestChunks(
+      `http://127.0.0.1:${port}/direct-run`,
+      [Buffer.alloc(1024 * 1024 + 1, 0x61)],
+    );
+    expect(oversizedResponse.statusCode).toBe(413);
+    expect(parseJson(oversizedResponse.body)).toEqual({
+      ok: false,
+      error: 'Request body is too large.',
+    });
   });
 });
 
@@ -395,6 +508,39 @@ function request(
     req.on('error', reject);
     if (options.body) {
       req.write(options.body);
+    }
+    req.end();
+  });
+}
+
+function requestChunks(url: string, chunks: Buffer[]): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const req = http.request(
+      target,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      },
+      (res) => {
+        let responseBody = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () =>
+          resolve({
+            statusCode: res.statusCode,
+            headers: res.headers,
+            body: responseBody,
+          }),
+        );
+      },
+    );
+
+    req.on('error', reject);
+    for (const chunk of chunks) {
+      req.write(chunk);
     }
     req.end();
   });

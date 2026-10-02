@@ -23,6 +23,8 @@ type RuntimeTraceSpanInput = {
   metadata?: Record<string, string | number | boolean | null>;
 };
 
+const MAX_COMPLETED_TRACES = 100;
+
 @Injectable()
 export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
   private readonly activeContextStorage =
@@ -363,6 +365,13 @@ export class RuntimeTraceRecorder implements DirectRunTraceRecorder {
 
   private persistCompletedTrace(trace: RuntimeTrace): RuntimeTrace {
     this.completedTraces.set(trace.traceId, trace);
+    while (this.completedTraces.size > MAX_COMPLETED_TRACES) {
+      const oldestTraceId = this.completedTraces.keys().next().value;
+      if (!oldestTraceId) {
+        break;
+      }
+      this.completedTraces.delete(oldestTraceId);
+    }
     return trace;
   }
 

@@ -26,6 +26,21 @@ class VaultService {
 
     return 'production-database-password';
   }
+
+  /**
+   * TypeScript-`private`, not runtime-private: an ordinary callable prototype
+   * member once compiled. In the default permissive mode Direct Run invokes
+   * it like any other prototype method; strict mode (`allowUnsafeMethods:
+   * false`) is what refuses it, by reading this modifier from source, since
+   * the runtime shape alone cannot tell it apart from `readSecret`.
+   */
+  private rotateMasterKey(): string {
+    this.invocations.push('rotateMasterKey');
+
+    return 'rotated-master-key-material';
+  }
+
+  onModuleInit(): void {}
 }
 
 @Module({ providers: [VaultService], exports: [VaultService] })
@@ -106,6 +121,7 @@ async function bootInspector(config: {
   host: string;
   port: number;
   accessToken?: NestGraphInspectorModuleOptions['accessToken'];
+  directRun?: NestGraphInspectorModuleOptions['directRun'];
 }): Promise<{ app: INestApplication; vault: VaultService; token: string }> {
   const moduleRef = await Test.createTestingModule({
     imports: [
@@ -113,6 +129,7 @@ async function bootInspector(config: {
       NestGraphInspectorModule.forRoot({
         outputs: [{ type: 'viewer', host: config.host, port: config.port }],
         ...(config.accessToken ? { accessToken: config.accessToken } : {}),
+        ...(config.directRun ? { directRun: config.directRun } : {}),
       }),
     ],
   }).compile();
@@ -132,6 +149,14 @@ const DIRECT_RUN_BODY = JSON.stringify({
   provider: 'VaultService',
   method: 'readSecret',
 });
+
+function directRunBodyFor(method: string): string {
+  return JSON.stringify({
+    module: 'VaultModule',
+    provider: 'VaultService',
+    method,
+  });
+}
 
 describe('Graph inspector network access', () => {
   describe('an anonymous caller', () => {
@@ -218,6 +243,38 @@ describe('Graph inspector network access', () => {
       expect(Object.keys(graph.modules)).toContain('VaultModule');
     });
 
+    it('omits a TypeScript-private method from the direct-run metadata, even though the default mode can invoke it', async () => {
+      const response = await probe(`${origin}/__graph-inspector/output.json`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      const graph = JSON.parse(response.body) as {
+        modules: Record<
+          string,
+          {
+            providers: Array<{
+              name: string;
+              directRun?: { methods: Array<{ name: string }> };
+            }>;
+          }
+        >;
+      };
+
+      const vaultService = graph.modules.VaultModule.providers.find(
+        (provider) => provider.name === 'VaultService',
+      );
+      const methodNames =
+        vaultService?.directRun?.methods.map((method) => method.name) ?? [];
+
+      // Read from the same live application whose sources back the Direct Run
+      // allowlist the strict-mode suite below exercises, so a regression here
+      // shows up before the request-time check would have to catch it. The
+      // graph metadata only ever advertises confirmed public methods,
+      // regardless of `allowUnsafeMethods`.
+      expect(methodNames).toContain('readSecret');
+      expect(methodNames).not.toContain('rotateMasterKey');
+    });
+
     it('runs the provider method once the token is presented', async () => {
       const response = await probe(`${origin}/direct-run`, {
         method: 'POST',
@@ -234,6 +291,143 @@ describe('Graph inspector network access', () => {
         result: 'production-database-password',
       });
       expect(vault.invocations).toEqual(['readSecret']);
+    });
+
+    it('invokes a TypeScript-private method in the default permissive mode', async () => {
+      // `allowUnsafeMethods` defaults to `true`: the keyword is erased at
+      // compile time, so this is an ordinary callable prototype member at
+      // runtime, and the default favors local development ergonomics.
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: directRunBodyFor('rotateMasterKey'),
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
+        ok: true,
+        result: 'rotated-master-key-material',
+      });
+      expect(vault.invocations).toContain('rotateMasterKey');
+    });
+
+    it('invokes a Nest lifecycle hook and an inherited prototype method in the default permissive mode', async () => {
+      for (const method of ['onModuleInit', 'toString']) {
+        const response = await probe(`${origin}/direct-run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: directRunBodyFor(method),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body)).toMatchObject({ ok: true });
+      }
+    });
+
+    it('still refuses to invoke the constructor even in the default permissive mode', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: directRunBodyFor('constructor'),
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe('a caller in strict mode (allowUnsafeMethods: false)', () => {
+    let app: INestApplication;
+    let vault: VaultService;
+    let token: string;
+    let origin: string;
+
+    beforeAll(async () => {
+      const port = await freePort();
+      origin = `http://127.0.0.1:${port}`;
+      ({ app, vault, token } = await bootInspector({
+        host: '127.0.0.1',
+        port,
+        directRun: {
+          allowUnsafeMethods: false,
+          maxBodySizeBytes: 1024 * 1024,
+        },
+      }));
+    });
+
+    afterAll(() => app.close());
+
+    it('still runs an allowlisted public method', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: DIRECT_RUN_BODY,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
+        ok: true,
+        result: 'production-database-password',
+      });
+      expect(vault.invocations).toEqual(['readSecret']);
+    });
+
+    it('rejects a TypeScript-private method even with a valid token, without invoking it', async () => {
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: directRunBodyFor('rotateMasterKey'),
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).not.toContain('rotated-master-key-material');
+      expect(vault.invocations).not.toContain('rotateMasterKey');
+    });
+
+    it.each(['constructor', 'onModuleInit', 'toString', 'unknownMethod'])(
+      'rejects the non-allowlisted method %s even with a valid token',
+      async (method) => {
+        const response = await probe(`${origin}/direct-run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: directRunBodyFor(method),
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.body).not.toContain('production-database-password');
+      },
+    );
+
+    it('rejects a request body over the configured limit without leaking its contents', async () => {
+      const secret = 'oversized-direct-run-secret';
+      const response = await probe(`${origin}/direct-run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ args: `${secret}${'x'.repeat(1024 * 1024)}` }),
+      });
+
+      expect(response.statusCode).toBe(413);
+      expect(response.body).not.toContain(secret);
     });
   });
 

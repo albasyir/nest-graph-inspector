@@ -218,12 +218,27 @@ type DirectRunProviderMethod = {
 }
 ```
 
-Both fields on `DirectRunProviderMethod` are required.  `methods` may be an
-empty array if a provider has no public methods.
+Both fields on `DirectRunProviderMethod` are required. `methods` contains the
+provider's eligible public methods declared directly on its prototype; it
+excludes `constructor`, Nest lifecycle hooks, and TypeScript-`private` methods
+(detected from the application's own sources, since `private` does not survive
+compilation). `directRun` is omitted when a provider has no eligible methods.
 
 `parameterTypes` is a raw TypeScript signature string extracted by ts-morph.
 It is used by the viewer's Direct Run UI for documentation; it is not parsed
 programmatically.
+
+This `methods` list only ever advertises methods `SourceMetadataService`
+confirms are public in the application's own sources — regardless of which
+`directRun.allowUnsafeMethods` mode is active on the `viewer` output that
+serves it. That mode governs what `POST /direct-run` accepts, not what the
+graph metadata lists. `directRun.allowUnsafeMethods` defaults to `true`
+(permissive, for local developer exploration): any callable method found on a
+provider's instance or prototype chain may be invoked, including ones
+TypeScript marks `private` or `protected`. Set it to `false` for strict mode,
+where only the exact methods advertised in this `methods` array may be
+invoked. `directRun.maxBodySizeBytes` bounds a request body, in encoded
+bytes, and defaults to 50 MiB; `0` or a negative number removes the limit.
 
 > **Open question:** `directRun` is omitted entirely when ts-morph cannot
 > locate the source file, not set to `null` or `{ methods: [] }`.  The viewer

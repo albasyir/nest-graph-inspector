@@ -166,6 +166,7 @@ The options object passed to `forRoot()`.
 | `ignoreImport` | `string[]` | No | `['InternalCoreModule', 'NestGraphInspectorModule']` | Module names to omit from imports |
 | `nestCoreModuleName` | `string` | No | `'NestJSCoreModule'` | Name for the virtual NestJS core module |
 | `nestCoreProviders` | `string[]` | No | `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']` | Providers grouped under the virtual core module |
+| `directRun` | `NestGraphInspectorViewerDirectRunOptions` | No | `{ allowUnsafeMethods: true, maxBodySizeBytes: 50 MiB }` | Module-wide Direct Run defaults, applied to every `viewer` output that does not set its own `directRun.allowUnsafeMethods` or `directRun.maxBodySizeBytes`; a `viewer` output's own `directRun` wins where it sets a value |
 
 ---
 
@@ -195,16 +196,30 @@ Discriminator: `type` field. Each member configures one output channel.
 | | |
 |---|---|
 | **Kind** | Type alias |
-| **Stability** | Experimental (feature marked "coming soon" in README) |
-| **Documented** | No standalone documentation |
+| **Stability** | Experimental |
+| **Documented** | Yes — `docs/architecture.md` (Direct Run and runtime tracing), this document |
 
 ```ts
 type NestGraphInspectorViewerDirectRunOptions = {
-  path?: string;   // Path prefix for Direct Run endpoints
+  enabled?: boolean;            // Defaults to true; false omits Direct Run routes
+  path?: string;                 // Path prefix for Direct Run endpoints
+  allowUnsafeMethods?: boolean;  // Defaults to true — see below
+  maxBodySizeBytes?: number;     // Defaults to 50 MiB; 0 or negative removes the limit
 }
 ```
 
-Controls the Direct Run endpoint path within the `viewer` output.
+Controls Direct Run within the `viewer` output. With `enabled: false`, the
+viewer still serves graph routes but does not register Direct Run or runtime
+trace-history routes.
+
+| Field | Default | Purpose |
+|---|---|---|
+| `allowUnsafeMethods` | `true` | Permissive (`true`): any callable method found on the provider's prototype or instance may be invoked, including ones TypeScript marks `private` or `protected` — that keyword is erased at compile time and is not a runtime boundary. Only `constructor` is refused. Strict (`false`): only the method `SourceMetadataService` confirms is public on the application's own sources, advertised in that provider's `directRun` metadata, and not shadowed on the instance. |
+| `maxBodySizeBytes` | 50 MiB (`50 * 1024 * 1024`) | Upper bound on a Direct Run request body, in encoded bytes. A request over the limit receives `413` before it is parsed as JSON. `0` or a negative number removes the limit. |
+
+Both fields can also be set module-wide on `NestGraphInspectorModuleOptions.directRun`,
+applied to every `viewer` output that does not set its own value; a `viewer`
+output's own `directRun` wins where it sets a value.
 
 ---
 
@@ -744,7 +759,7 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `defaultOptions` | Const | Uncertain | ✅ via module re-export | ❌ |
 | `NestGraphInspectorModuleOptions` | Interface | Stable | ✅ | ✅ |
 | `NestGraphInspectorOutput` | Union type | Stable / partial | ✅ | ✅ |
-| `NestGraphInspectorViewerDirectRunOptions` | Type | Experimental | ✅ | ❌ |
+| `NestGraphInspectorViewerDirectRunOptions` | Type | Experimental | ✅ | ✅ |
 | `GRAPH_OUTPUT_SCHEMA_VERSION` | Const | Stable | ✅ | Partial |
 | `GRAPH_OUTPUT_JSON_SCHEMA` | Const | Stable | ✅ | ❌ |
 | `GraphOutput` | Type | Stable | ✅ | ✅ |
