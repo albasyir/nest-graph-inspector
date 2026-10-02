@@ -15,7 +15,13 @@ import { MiniMap } from '@vue-flow/minimap'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
-import type { Node, Edge, EdgeProps, NodeMouseEvent } from '@vue-flow/core'
+import type {
+  Node,
+  Edge,
+  EdgeMarker,
+  EdgeProps,
+  NodeMouseEvent
+} from '@vue-flow/core'
 import type * as Monaco from 'monaco-editor'
 import type {
   GraphOutput,
@@ -47,6 +53,13 @@ import {
   type JsDocPreviewBlock
 } from '~/utils/jsdoc-preview'
 import { resolveHoverCardPosition } from '~/utils/hover-card-position'
+import {
+  getEdgeColor,
+  getEdgeRelationClass,
+  isEdgeNormallyVisible,
+  resolveEdgeRelationship,
+  type EdgeRelationship
+} from '~/utils/graph-viewer-edges'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -140,6 +153,7 @@ type CircularEdgeInfo = CircularDependencyIssue
 
 type CircularEdgeData = {
   isNormallyVisible: boolean
+  relationship: EdgeRelationship
   circularIds: number[]
   circularReason: string
   circularDetails: CircularEdgeInfo[]
@@ -147,6 +161,7 @@ type CircularEdgeData = {
 
 type StandardEdgeData = {
   isNormallyVisible: boolean
+  relationship: EdgeRelationship
 }
 
 type FlowEdgeData = CircularEdgeData | StandardEdgeData
@@ -241,9 +256,6 @@ const MODULE_GAP_X = 320
 const MODULE_GAP_Y = 100
 const GRAPH_FIT_PADDING = 0.12
 const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
-const MODULE_EDGE_COLOR = '#888'
-const DEPENDENCY_EDGE_COLOR = '#555'
-const CIRCULAR_DEPENDENCY_EDGE_COLOR = '#facc15'
 const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'UserRepository'
 const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
 const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
@@ -253,6 +265,12 @@ const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
 const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
 const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
 const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
+const BRIGHT_LINE_EDGE_COLOR = 'var(--ui-primary)'
+/**
+ * Vue Flow folds a marker's fields into the id of the `<marker>` it defines,
+ * so this ends up in that id — which is how `[id*="highlighted"]` finds it.
+ */
+const BRIGHT_LINE_MARKER_ID = 'highlighted'
 /** How long a pointer has to rest on a node before its JSDoc appears. */
 const JSDOC_HOVER_OPEN_DELAY_MS = 240
 /**
@@ -680,12 +698,13 @@ function getModuleItemHierarchy(
 
 function getEdgeDataProps(
   info: CircularEdgeInfo[] | undefined,
-  isNormallyVisible: boolean
+  isNormallyVisible: boolean,
+  relationship: EdgeRelationship
 ): {
   data: FlowEdgeData
 } {
   if (!info?.length) {
-    return { data: { isNormallyVisible } }
+    return { data: { isNormallyVisible, relationship } }
   }
 
   const normalizedInfo = Array.from(
@@ -700,6 +719,7 @@ function getEdgeDataProps(
   return {
     data: {
       isNormallyVisible,
+      relationship,
       circularIds: normalizedInfo.map(item => item.id),
       circularDetails: normalizedInfo.map(item => ({
         id: item.id,
@@ -714,6 +734,38 @@ function getEdgeDataProps(
         .join('\n')
     }
   }
+}
+
+/**
+ * The arrowhead an edge points with. Vue Flow defines one shared `<marker>`
+ * per configuration, outside every edge, so no rule scoped to an edge can
+ * reach its arrowhead; a bright-lined edge gets a marker of its own instead.
+ */
+function getEdgeMarkerEnd(
+  relationship: EdgeRelationship,
+  isHighlighted: boolean
+): EdgeMarker {
+  if (isHighlighted) {
+    return {
+      type: MarkerType.ArrowClosed,
+      color: BRIGHT_LINE_EDGE_COLOR,
+      id: BRIGHT_LINE_MARKER_ID
+    }
+  }
+
+  return { type: MarkerType.ArrowClosed, color: getEdgeColor(relationship) }
+}
+
+function isSameMarker(
+  current: FlowEdge['markerEnd'],
+  next: EdgeMarker
+): boolean {
+  return (
+    typeof current === 'object'
+    && current.type === next.type
+    && current.color === next.color
+    && current.id === next.id
+  )
 }
 
 function deduplicateCircularEdgeLabels(
@@ -1144,6 +1196,7 @@ function buildGraph(
     showModuleToModuleLine?: boolean
     showProviderToProviderInsideModule?: boolean
     showProviderToProviderAcrossModule?: boolean
+    showControllerLines?: boolean
     nodePositions?: Map<string, NodePosition>
   } = {}
 ): { nodes: FlowNode[], edges: FlowEdge[] } {
@@ -1157,6 +1210,7 @@ function buildGraph(
     = options.showProviderToProviderInsideModule ?? true
   const showProviderToProviderAcrossModule
     = options.showProviderToProviderAcrossModule ?? false
+  const showControllerLines = options.showControllerLines ?? true
   const nodePositions
     = options.nodePositions ?? new Map<string, NodePosition>()
   const circularModuleEdges = showCircularDependencies
@@ -1319,26 +1373,38 @@ function buildGraph(
         const circularLabelInfo = circularModuleEdgeLabels.get(
           `${imp}->${moduleName}`
         )
-        const edgeColor = circularInfo
-          ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-          : MODULE_EDGE_COLOR
+        const source = `module-${imp}`
+        const target = `module-${moduleName}`
+        const relationship = resolveEdgeRelationship({
+          source,
+          target,
+          isCircular: Boolean(circularInfo)
+        })
+        const edgeColor = getEdgeColor(relationship)
+        const edgeRelationClass = getEdgeRelationClass(relationship)
 
         edges.push({
           id: `e-mod-${imp}->${moduleName}`,
-          source: `module-${imp}`,
-          target: `module-${moduleName}`,
+          source,
+          target,
           sourceHandle,
           targetHandle,
           type: circularLabelInfo ? 'warning' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-          class: edge =>
-            getBrightLineEdgeClass(
+          class: edge => [
+            edgeRelationClass,
+            ...getBrightLineEdgeClass(
               edge.source,
               edge.target,
               edge.data?.isNormallyVisible ?? true
-            ),
-          markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-          ...getEdgeDataProps(circularLabelInfo, showModuleToModuleLine)
+            )
+          ],
+          markerEnd: getEdgeMarkerEnd(relationship, false),
+          ...getEdgeDataProps(
+            circularLabelInfo,
+            showModuleToModuleLine,
+            relationship
+          )
         })
       }
     }
@@ -1362,9 +1428,19 @@ function buildGraph(
     const circularLabelInfo = circularDependencyEdgeLabels.get(
       `${sourceId}->${targetId}`
     )
-    const edgeColor = circularInfo
-      ? CIRCULAR_DEPENDENCY_EDGE_COLOR
-      : DEPENDENCY_EDGE_COLOR
+    const relationship = resolveEdgeRelationship({
+      source: sourceId,
+      target: targetId,
+      isCircular: Boolean(circularInfo)
+    })
+    const edgeColor = getEdgeColor(relationship)
+    const edgeRelationClass = getEdgeRelationClass(relationship)
+    const effectiveNormallyVisible = isEdgeNormallyVisible({
+      source: sourceId,
+      target: targetId,
+      isNormallyVisible,
+      showControllerLines
+    })
 
     edges.push({
       id: `e-dep-${sourceId}->${targetId}`,
@@ -1377,14 +1453,20 @@ function buildGraph(
         stroke: edgeColor,
         strokeWidth: circularInfo ? 2.2 : 1.5
       },
-      class: edge =>
-        getBrightLineEdgeClass(
+      class: edge => [
+        edgeRelationClass,
+        ...getBrightLineEdgeClass(
           edge.source,
           edge.target,
           edge.data?.isNormallyVisible ?? true
-        ),
-      markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-      ...getEdgeDataProps(circularLabelInfo, isNormallyVisible)
+        )
+      ],
+      markerEnd: getEdgeMarkerEnd(relationship, false),
+      ...getEdgeDataProps(
+        circularLabelInfo,
+        effectiveNormallyVisible,
+        relationship
+      )
     })
   }
 
@@ -1438,6 +1520,7 @@ const hasInitialFixedBrightLine
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
 const showProviderToProviderAcrossModule = ref(false)
+const showControllerLines = ref(!hasInitialFixedBrightLine)
 const showJsDocOnHover = ref(true)
 const jsDocHoverCard = ref<JsDocHoverCardState | null>(null)
 const jsDocHoverCardRef = ref<HTMLElement | null>(null)
@@ -1461,7 +1544,8 @@ const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
   showCircularDependencies: showCircularDependencies.value,
   showModuleToModuleLine: showModuleToModuleLine.value,
   showProviderToProviderInsideModule: showProviderToProviderInsideModule.value,
-  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value
+  showProviderToProviderAcrossModule: showProviderToProviderAcrossModule.value,
+  showControllerLines: showControllerLines.value
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
@@ -3031,6 +3115,7 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
       showProviderToProviderInsideModule.value,
     showProviderToProviderAcrossModule:
       showProviderToProviderAcrossModule.value,
+    showControllerLines: showControllerLines.value,
     nodePositions: preservePositions ? nodePositionOverrides : undefined
   })
   flowNodes.value = graph.nodes
@@ -3105,6 +3190,36 @@ watch(
   { immediate: true }
 )
 
+// The watched set reads `flowEdges` itself, so the ref is only triggered when
+// an arrowhead actually changed — an unconditional trigger re-fires this
+// watcher forever.
+watch(
+  activeBrightLineConnectedNodeIds,
+  () => {
+    let hasChangedMarker = false
+    for (const edge of flowEdges.value) {
+      const relationship = edge.data?.relationship
+      if (!relationship) {
+        continue
+      }
+
+      const markerEnd = getEdgeMarkerEnd(
+        relationship,
+        isBrightLineEdgeActive(edge.source, edge.target)
+      )
+      if (!isSameMarker(edge.markerEnd, markerEnd)) {
+        edge.markerEnd = markerEnd
+        hasChangedMarker = true
+      }
+    }
+
+    if (hasChangedMarker) {
+      triggerRef(flowEdges)
+    }
+  },
+  { immediate: true }
+)
+
 watch(showModuleToModuleLine, () => {
   refreshGraph()
 })
@@ -3114,6 +3229,10 @@ watch(showProviderToProviderInsideModule, () => {
 })
 
 watch(showProviderToProviderAcrossModule, () => {
+  refreshGraph()
+})
+
+watch(showControllerLines, () => {
   refreshGraph()
 })
 
@@ -3253,22 +3372,56 @@ useResizeObserver(graphViewerRef, () => {
                 />
               </UTooltip>
             </div>
-            <UCheckbox
-              v-model="showModuleToModuleLine"
-              label="Show module to module line"
-            />
-            <UCheckbox
-              v-model="showProviderToProviderInsideModule"
-              label="Show provider to provider inside module"
-            />
-            <UCheckbox
-              v-model="showProviderToProviderAcrossModule"
-              label="Show provider to provider across module"
-            />
-            <UCheckbox
-              v-model="showCircularDependencies"
-              label="Circular dependencies"
-            />
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showModuleToModuleLine"
+                label="Show module to module line"
+              />
+              <span
+                class="graph-viewer-settings__line-indicator graph-viewer-settings__line-indicator--module"
+                aria-hidden="true"
+              />
+            </div>
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showProviderToProviderInsideModule"
+                label="Show provider to provider inside module"
+              />
+              <span
+                class="graph-viewer-settings__line-indicator graph-viewer-settings__line-indicator--provider"
+                aria-hidden="true"
+              />
+            </div>
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showProviderToProviderAcrossModule"
+                label="Show provider to provider across module"
+              />
+              <span
+                class="graph-viewer-settings__line-indicator graph-viewer-settings__line-indicator--provider"
+                aria-hidden="true"
+              />
+            </div>
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showControllerLines"
+                label="Show controller lines"
+              />
+              <span
+                class="graph-viewer-settings__line-indicator graph-viewer-settings__line-indicator--controller"
+                aria-hidden="true"
+              />
+            </div>
+            <div class="graph-viewer-settings__row">
+              <UCheckbox
+                v-model="showCircularDependencies"
+                label="Circular dependencies"
+              />
+              <span
+                class="graph-viewer-settings__line-indicator graph-viewer-settings__line-indicator--circular"
+                aria-hidden="true"
+              />
+            </div>
           </div>
         </template>
       </UPopover>
@@ -3305,6 +3458,38 @@ useResizeObserver(graphViewerRef, () => {
           C
         </span>
         <span class="graph-viewer-legends__label">Controller</span>
+      </div>
+      <div
+        class="graph-viewer-legends__divider"
+        aria-hidden="true"
+      />
+      <div class="graph-viewer-legends__item">
+        <span
+          class="graph-viewer-legends__line graph-viewer-legends__line--module"
+          aria-hidden="true"
+        />
+        <span class="graph-viewer-legends__label">Module connection</span>
+      </div>
+      <div class="graph-viewer-legends__item">
+        <span
+          class="graph-viewer-legends__line graph-viewer-legends__line--provider"
+          aria-hidden="true"
+        />
+        <span class="graph-viewer-legends__label">Provider dependency</span>
+      </div>
+      <div class="graph-viewer-legends__item">
+        <span
+          class="graph-viewer-legends__line graph-viewer-legends__line--controller"
+          aria-hidden="true"
+        />
+        <span class="graph-viewer-legends__label">Controller dependency</span>
+      </div>
+      <div class="graph-viewer-legends__item">
+        <span
+          class="graph-viewer-legends__line graph-viewer-legends__line--circular"
+          aria-hidden="true"
+        />
+        <span class="graph-viewer-legends__label">Circular dependency</span>
       </div>
     </div>
 
@@ -3903,6 +4088,17 @@ useResizeObserver(graphViewerRef, () => {
   --mg-trace-card-bg: rgba(15, 23, 42, 0.03);
   --mg-trace-error-border: rgba(239, 68, 68, 0.45);
   --mg-trace-slow-border: rgba(245, 158, 11, 0.45);
+  /*
+   * Edges mix where they overlap instead of hiding one another: multiply
+   * darkens a crossing on a light background and screen lightens one on a
+   * dark background, so each theme picks shades that read under its own mode.
+   */
+  --mg-edge-module: #0284c7;
+  --mg-edge-provider: #059669;
+  --mg-edge-controller: #7c3aed;
+  --mg-edge-circular: #d97706;
+  --mg-edge-blend-mode: multiply;
+  --mg-edge-opacity: 0.72;
 }
 
 .dark {
@@ -3929,6 +4125,12 @@ useResizeObserver(graphViewerRef, () => {
   --mg-trace-card-bg: rgba(15, 23, 42, 0.48);
   --mg-trace-error-border: rgba(248, 113, 113, 0.55);
   --mg-trace-slow-border: rgba(251, 191, 36, 0.55);
+  --mg-edge-module: #38bdf8;
+  --mg-edge-provider: #34d399;
+  --mg-edge-controller: #c084fc;
+  --mg-edge-circular: #facc15;
+  --mg-edge-blend-mode: screen;
+  --mg-edge-opacity: 0.75;
 }
 
 .graph-viewer {
@@ -4229,10 +4431,57 @@ useResizeObserver(graphViewerRef, () => {
   line-height: 1.25;
 }
 
+.graph-viewer-legends__divider {
+  height: 1px;
+  background: var(--mg-subgraph-title-border);
+}
+
+/* A legend entry and a settings toggle show the same swatch for a line. */
+.graph-viewer-legends__line,
+.graph-viewer-settings__line-indicator {
+  width: 18px;
+  height: 3px;
+  flex: 0 0 18px;
+  border-radius: 2px;
+}
+
+.graph-viewer-legends__line--module,
+.graph-viewer-settings__line-indicator--module {
+  background: var(--mg-edge-module);
+}
+
+.graph-viewer-legends__line--provider,
+.graph-viewer-settings__line-indicator--provider {
+  background: var(--mg-edge-provider);
+}
+
+.graph-viewer-legends__line--controller,
+.graph-viewer-settings__line-indicator--controller {
+  background: var(--mg-edge-controller);
+}
+
+.graph-viewer-legends__line--circular,
+.graph-viewer-settings__line-indicator--circular {
+  background: var(--mg-edge-circular);
+}
+
 .graph-viewer .vue-flow__node {
   transition:
     opacity 140ms ease,
     filter 140ms ease;
+}
+
+/*
+ * Vue Flow draws each edge in an SVG of its own with a z-index, so a blend
+ * mode inside it has only that edge to blend with. Blending the SVG itself
+ * mixes edges with each other; the transform pane keeps it off the background.
+ */
+.graph-viewer .vue-flow__edges {
+  mix-blend-mode: var(--mg-edge-blend-mode);
+}
+
+.graph-viewer .vue-flow__edges:has(> .bright-line-edge) {
+  mix-blend-mode: normal;
 }
 
 .graph-viewer .vue-flow__edge {
@@ -4240,10 +4489,32 @@ useResizeObserver(graphViewerRef, () => {
 }
 
 .graph-viewer .vue-flow__edge-path {
+  stroke-opacity: var(--mg-edge-opacity);
   transition:
     stroke 140ms ease,
     stroke-width 140ms ease,
     filter 140ms ease;
+}
+
+.graph-viewer .vue-flow__arrowhead polyline {
+  opacity: var(--mg-edge-opacity);
+  transition: opacity 140ms ease;
+}
+
+.graph-viewer .edge-relation--module .vue-flow__edge-path {
+  stroke: var(--mg-edge-module);
+}
+
+.graph-viewer .edge-relation--provider .vue-flow__edge-path {
+  stroke: var(--mg-edge-provider);
+}
+
+.graph-viewer .edge-relation--controller .vue-flow__edge-path {
+  stroke: var(--mg-edge-controller);
+}
+
+.graph-viewer .edge-relation--circular .vue-flow__edge-path {
+  stroke: var(--mg-edge-circular);
 }
 
 .graph-viewer .bright-line-node--dimmed {
@@ -4282,9 +4553,14 @@ useResizeObserver(graphViewerRef, () => {
 .graph-viewer .bright-line-edge .vue-flow__edge-path {
   stroke: var(--ui-primary) !important;
   stroke-width: 3.2px !important;
+  stroke-opacity: 1 !important;
   filter: drop-shadow(
     0 0 5px color-mix(in srgb, var(--ui-primary) 52%, transparent)
   );
+}
+
+.graph-viewer .vue-flow__arrowhead[id*="highlighted"] polyline {
+  opacity: 1 !important;
 }
 
 .graph-viewer .bright-line-edge--dimmed {
