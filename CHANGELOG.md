@@ -12,6 +12,8 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-03
+
 ### Added
 
 - Direct Run now reaches controller methods, not just providers. A request
