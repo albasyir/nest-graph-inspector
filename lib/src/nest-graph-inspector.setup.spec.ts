@@ -1,5 +1,5 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { Logger } from "@nestjs/common";
+import { Body, Controller, Get, Logger, Param, Post } from "@nestjs/common";
 import { ModulesContainer } from "@nestjs/core";
 import { Node, Project, Type as TsMorphType } from "ts-morph";
 import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
@@ -353,6 +353,8 @@ describe(NestGraphInspectorSetup.name, () => {
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),
+          controllerInstanceLookup: expect.any(Function),
+          controllerAllowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -384,6 +386,8 @@ describe(NestGraphInspectorSetup.name, () => {
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),
+          controllerInstanceLookup: expect.any(Function),
+          controllerAllowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -409,6 +413,8 @@ describe(NestGraphInspectorSetup.name, () => {
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),
+          controllerInstanceLookup: expect.any(Function),
+          controllerAllowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -441,6 +447,8 @@ describe(NestGraphInspectorSetup.name, () => {
           historyDirPath: undefined,
           instanceLookup: expect.any(Function),
           allowedMethodsLookup: expect.any(Function),
+          controllerInstanceLookup: expect.any(Function),
+          controllerAllowedMethodsLookup: expect.any(Function),
         },
       },
     );
@@ -528,6 +536,105 @@ describe(NestGraphInspectorSetup.name, () => {
         },
       },
     ]);
+  });
+
+  it("should include direct-run metadata, with HTTP verb/path, for controller methods", () => {
+    @Controller("widgets")
+    class RunnableController {
+      @Get(":id")
+      getWidget(@Param("id") id: string) {
+        return id;
+      }
+
+      @Post()
+      createWidget(@Body() body: { name: string }) {
+        return body;
+      }
+
+      helperNotRouted() {
+        return "not a route";
+      }
+
+      onModuleInit() {}
+    }
+
+    appModuleRef.controllers.set(RunnableController.name, {
+      metatype: RunnableController,
+      instance: new RunnableController(),
+      token: RunnableController,
+    });
+
+    const moduleMap = service.buildModuleMap(TestRootModule);
+    const graphOutput = (
+      service as unknown as SetupWithPrivateMethods
+    ).enrichModuleMap(moduleMap);
+
+    expect(graphOutput.modules[TestRootModule.name].controllers).toEqual([
+      {
+        name: RunnableController.name,
+        dependencies: [],
+        directRun: {
+          methods: [
+            {
+              name: "createWidget",
+              parameterTypes: expect.any(String),
+              http: { method: "POST", path: "/widgets" },
+            },
+            {
+              name: "getWidget",
+              parameterTypes: expect.any(String),
+              http: { method: "GET", path: "/widgets/:id" },
+            },
+            {
+              name: "helperNotRouted",
+              parameterTypes: "[]",
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("should resolve a controller Direct Run lookup from the controller table, never a same-named provider", async () => {
+    class SharedNameProvider {}
+    class SharedNameController {}
+    // Two classes, one graph name — what two same-named classes registered
+    // in one module, one as a provider and one as a controller, produce.
+    for (const sharedNameClass of [SharedNameProvider, SharedNameController]) {
+      Object.defineProperty(sharedNameClass, "name", { value: "Shared" });
+    }
+    const providerInstance = new SharedNameProvider();
+    const controllerInstance = new SharedNameController();
+    appModuleRef.providers.set("Shared", {
+      metatype: SharedNameProvider,
+      instance: providerInstance,
+      token: SharedNameProvider,
+    });
+    appModuleRef.controllers.set("Shared", {
+      metatype: SharedNameController,
+      instance: controllerInstance,
+      token: SharedNameController,
+    });
+    options.outputs = [{ type: "viewer", host: "127.0.0.1", port: 3998 }];
+
+    await service.onModuleInit();
+
+    const [, { directRun }] = viewerOutputAdapter.execute.mock.calls[0] as [
+      unknown,
+      {
+        directRun: {
+          instanceLookup(moduleName: string, name: string): unknown;
+          controllerInstanceLookup(moduleName: string, name: string): unknown;
+        };
+      },
+    ];
+
+    expect(directRun.instanceLookup(TestRootModule.name, "Shared")).toBe(
+      providerInstance,
+    );
+    expect(
+      directRun.controllerInstanceLookup(TestRootModule.name, "Shared"),
+    ).toBe(controllerInstance);
   });
 
   it("should bound recursive, deep, and wide direct-run parameter types", () => {

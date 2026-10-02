@@ -39,6 +39,33 @@ export type DirectRunProviderMeta = {
   methods: DirectRunProviderMethod[];
 };
 
+/** Which instance table a Direct Run request or trace addresses. */
+export type DirectRunTargetType = 'provider' | 'controller';
+
+/**
+ * The HTTP verb/path Nest registered for a controller method, read from its
+ * own route metadata. Informational only — Direct Run calls the method
+ * directly and never sends an HTTP request to this route. `path` joins the
+ * first `@Controller()` prefix to the method's first path; it does not
+ * include a `RouterModule` mount path, the global prefix, URI versioning, or
+ * any prefix but the first.
+ */
+export type DirectRunHttpRoute = {
+  method: string;
+  path: string;
+};
+
+export type DirectRunControllerMethod = {
+  name: string;
+  parameterTypes: string;
+  /** Absent when Nest has no route metadata for this method. */
+  http?: DirectRunHttpRoute;
+};
+
+export type DirectRunControllerMeta = {
+  methods: DirectRunControllerMethod[];
+};
+
 export type RuntimeTraceEntrypoint = {
   module?: string;
   className?: string;

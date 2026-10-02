@@ -17,6 +17,7 @@ import { ModuleProvider } from "../types/module-provider.type";
 import { RuntimeTraceSpanType } from "../types/direct-run.type";
 import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
 import { SourceMetadataService } from "../source-metadata.service";
+import { BUILTIN_PROTOTYPES } from "../direct-run.constants";
 
 export type ModuleTree = {
   name: string;
@@ -27,6 +28,7 @@ export type ModuleTree = {
   providers: ModuleProvider[];
   providerInstances: Map<string, unknown>;
   controllers: ModuleController[];
+  controllerInstances: Map<string, unknown>;
   children: ModuleTree[];
 };
 
@@ -45,32 +47,6 @@ const runtimeTraceInstrumentationByInstance = new WeakMap<
   object,
   RuntimeTraceInstrumentation
 >();
-
-/**
- * Prototypes shared by every object of their kind. Wrapping a method found
- * here would patch it for the entire process — every array, every promise —
- * not just the provider being instrumented, so these are refused before any
- * `defineProperty` call reaches them.
- */
-const BUILTIN_PROTOTYPES = new Set<object>(
-  [
-    Object.prototype,
-    Array.prototype,
-    Function.prototype,
-    Map.prototype,
-    Set.prototype,
-    WeakMap.prototype,
-    WeakSet.prototype,
-    Promise.prototype,
-    Error.prototype,
-    RegExp.prototype,
-    Date.prototype,
-    String.prototype,
-    Number.prototype,
-    Boolean.prototype,
-    Symbol.prototype,
-  ].filter((prototype): prototype is object => !!prototype),
-);
 
 /**
  * The traced wrapper replaces the original method on the shared prototype,
@@ -210,6 +186,7 @@ export class DiscoveryAdapter {
       providers: [],
       providerInstances: new Map(),
       controllers: [],
+      controllerInstances: new Map(),
       children: [...moduleRef.imports.values()]
         .filter((childModule) => !this.shouldIgnoreModule(childModule))
         .map((childModule) => this.resolveModuleTree(childModule, visited)),
@@ -226,6 +203,7 @@ export class DiscoveryAdapter {
       providers: [],
       providerInstances: new Map(),
       controllers: [],
+      controllerInstances: new Map(),
       children: [],
     };
   }
@@ -244,6 +222,10 @@ export class DiscoveryAdapter {
         node.providers,
       );
       node.controllers = this.extractControllers(node.moduleRef);
+      node.controllerInstances = this.extractControllerInstances(
+        node.moduleRef,
+        node.controllers,
+      );
     });
   }
 
@@ -376,6 +358,7 @@ export class DiscoveryAdapter {
       })),
       providerInstances: new Map(),
       controllers: [],
+      controllerInstances: new Map(),
       children: [],
     });
   }
@@ -502,6 +485,26 @@ export class DiscoveryAdapter {
       moduleRef,
       extract: (wrapper) => this.extractModuleMember({ wrapper, moduleRef }),
     });
+  }
+
+  private extractControllerInstances(
+    moduleRef: Module,
+    controllers: ModuleController[],
+  ): Map<string, unknown> {
+    const controllerNames = new Set(
+      controllers.map((controller) => controller.name),
+    );
+    const controllerInstances = new Map<string, unknown>();
+
+    for (const wrapper of moduleRef.controllers.values()) {
+      const name =
+        this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+      if (name && controllerNames.has(name)) {
+        controllerInstances.set(name, wrapper.instance);
+      }
+    }
+
+    return controllerInstances;
   }
 
   private extractModuleMembers<T extends { name: string }>(param: {

@@ -28,19 +28,21 @@ useSeoMeta({
   description: 'Viewing NestJS dependency graph data.'
 })
 
+// A graph node id (`controller-UserModule-UserController`), never a bare class
+// name: only the id says whether it is a provider or a controller.
 const directRunOn = computed(() => {
   const value = route.query['direct-run-on']
-  const providerName = Array.isArray(value) ? value[0] : value
-  return providerName || undefined
+  const nodeId = Array.isArray(value) ? value[0] : value
+  return nodeId || undefined
 })
 
-function handleDirectRunDrawerOpen(providerName: string) {
-  if (route.query['direct-run-on'] === providerName) return
+function handleDirectRunDrawerOpen(nodeId: string) {
+  if (route.query['direct-run-on'] === nodeId) return
 
   router.push({
     query: {
       ...route.query,
-      'direct-run-on': providerName
+      'direct-run-on': nodeId
     }
   })
 }

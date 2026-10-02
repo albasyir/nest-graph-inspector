@@ -2,9 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { StringDecoder } from 'node:string_decoder';
 import type { HttpServeResponse } from './http-serve.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
-import type { DirectRunResult } from '../types/direct-run.type';
+import type { DirectRunResult, DirectRunTargetType } from '../types/direct-run.type';
 import { RuntimeTraceRecorder } from '../runtime-trace.recorder';
 import type { RuntimeTrace } from '../types/direct-run.type';
+import {
+  BUILTIN_PROTOTYPES,
+  DIRECT_RUN_EXCLUDED_METHODS,
+} from '../direct-run.constants';
 
 type DirectRunArgsResult =
   | { ok: true; args: unknown[] }
@@ -15,13 +19,22 @@ type DirectRunBodyResult =
 type DirectRunMethodResult =
   | { ok: true; method: (...args: unknown[]) => unknown }
   | { ok: false; response: HttpServeResponse };
+type DirectRunTargetResult =
+  | { ok: true; target: DirectRunTargetType; name: string }
+  | { ok: false; response: HttpServeResponse };
+
+const TARGET_LABEL: Record<DirectRunTargetType, string> = {
+  provider: 'Provider',
+  controller: 'Controller',
+};
 
 export type DirectRunRouteOptions = {
   /**
-   * Permissive (default, `true`): any callable method found on the
-   * provider's prototype or instance may be invoked. Strict (`false`): only
-   * methods `allowedMethodsLookup` advertises, and only when not shadowed on
-   * the instance.
+   * Permissive (default, `true`): any callable method found on a provider's
+   * prototype chain or instance may be invoked; a controller is narrower —
+   * only a direct method of its own, never a lifecycle hook, getter, or
+   * inherited method. Strict (`false`): only methods `allowedMethodsLookup`
+   * advertises, and only when not shadowed on the instance.
    */
   allowUnsafeMethods?: boolean;
 
@@ -40,10 +53,15 @@ export class DirectRunOutputAdapter {
 
   createRoute(
     path: string,
-    instanceLookup: (moduleName: string, providerName: string) => unknown,
-    allowedMethodsLookup: (
+    instanceLookup: (
+      target: DirectRunTargetType,
       moduleName: string,
-      providerName: string,
+      name: string,
+    ) => unknown,
+    allowedMethodsLookup: (
+      target: DirectRunTargetType,
+      moduleName: string,
+      name: string,
     ) => ReadonlySet<string> | undefined,
     options: DirectRunRouteOptions = {},
     onComplete?: (trace: RuntimeTrace) => void | Promise<void>,
@@ -61,30 +79,38 @@ export class DirectRunOutputAdapter {
         }
 
         const { body } = bodyResult;
-        const moduleName = typeof body.module === 'string' ? body.module : '';
-        const providerName =
-          typeof body.provider === 'string' ? body.provider : '';
-        const methodName = typeof body.method === 'string' ? body.method : '';
-
-        if (!moduleName || !providerName || !methodName) {
-          return this.badRequest('module, provider, and method are required.');
+        const targetResult = this.resolveTarget(body);
+        if (!targetResult.ok) {
+          return targetResult.response;
         }
 
-        const instance = instanceLookup(moduleName, providerName) as
+        const { target, name } = targetResult;
+        const moduleName = typeof body.module === 'string' ? body.module : '';
+        const methodName = typeof body.method === 'string' ? body.method : '';
+
+        if (!moduleName || !name || !methodName) {
+          return this.badRequest(
+            `module, ${target}, and method are required.`,
+          );
+        }
+
+        const instance = instanceLookup(target, moduleName, name) as
           | Record<string, unknown>
           | undefined;
         if (!instance) {
           return this.notFound(
-            `Provider ${moduleName}:${providerName} is unavailable.`,
+            `${TARGET_LABEL[target]} ${moduleName}:${name} is unavailable.`,
           );
         }
 
         const methodResult = allowUnsafeMethods
-          ? this.resolvePermissiveMethod(instance, methodName)
+          ? target === 'controller'
+            ? this.resolvePermissiveControllerMethod(instance, methodName)
+            : this.resolvePermissiveMethod(instance, methodName)
           : this.resolveStrictMethod(
               instance,
               methodName,
-              allowedMethodsLookup(moduleName, providerName),
+              allowedMethodsLookup(target, moduleName, name),
             );
         if (!methodResult.ok) {
           return methodResult.response;
@@ -98,7 +124,10 @@ export class DirectRunOutputAdapter {
 
         const traceIdentity = this.runtimeTraceRecorder.start({
           moduleName,
-          providerName,
+          // Holds the provider or controller class name regardless of
+          // `target` — a label for the trace, not a claim about which table
+          // it was resolved from.
+          providerName: name,
           methodName,
           args: argsResult.args,
         });
@@ -322,6 +351,82 @@ export class DirectRunOutputAdapter {
     const method =
       typeof ownValue === 'function' ? ownValue : prototype?.[methodName];
     if (typeof method !== 'function') {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Method ${methodName} is unavailable for direct run.`,
+        ),
+      };
+    }
+
+    return { ok: true, method: method as (...args: unknown[]) => unknown };
+  }
+
+  /**
+   * `target` is optional and defaults to `"provider"` so every request built
+   * before this field existed (`{ module, provider, method, args }`) keeps
+   * resolving exactly as it did. A present-but-unrecognised value is a
+   * deterministic rejection rather than a silent fallback to either target.
+   * The name is read only from the field matching the resolved target — a
+   * `controller` value is never read from `body.provider` or vice versa —
+   * so a request can never be ambiguous about which instance table it means.
+   */
+  private resolveTarget(body: Record<string, unknown>): DirectRunTargetResult {
+    const rawTarget = body.target;
+    const target = rawTarget === undefined ? 'provider' : rawTarget;
+
+    if (target !== 'provider' && target !== 'controller') {
+      return {
+        ok: false,
+        response: this.badRequest(
+          `Unknown direct run target ${JSON.stringify(rawTarget)}.`,
+        ),
+      };
+    }
+
+    const nameField = target === 'controller' ? body.controller : body.provider;
+
+    return {
+      ok: true,
+      target,
+      name: typeof nameField === 'string' ? nameField : '',
+    };
+  }
+
+  /**
+   * Controller permissive mode resolves only a direct controller method: a
+   * function-valued own property of the instance or, when the instance has
+   * no own property of that name, a method declared on the controller's own
+   * class — its immediate prototype, unless that is a shared built-in
+   * (`BUILTIN_PROTOTYPES`). The constructor and Nest lifecycle hooks are
+   * refused by name, and anything inherited — from a base class, or from
+   * `Object.prototype` (`toString`, `valueOf`, …) — never resolves at all.
+   * This is a deliberate divergence from provider permissive mode, which
+   * searches the whole prototype chain and refuses only `constructor` (see
+   * `docs/architecture.md`): controllers are a new invocation surface with
+   * no existing DX contract to preserve.
+   *
+   * Both lookups read a property descriptor, never the property itself: a
+   * read would run an accessor's getter — controller code — while deciding
+   * whether anything may run at all. An accessor has no `value`, so it is
+   * refused like any other non-function property, without being called.
+   */
+  private resolvePermissiveControllerMethod(
+    instance: Record<string, unknown>,
+    methodName: string,
+  ): DirectRunMethodResult {
+    const prototype = Object.getPrototypeOf(instance) as object | null;
+    const descriptor =
+      Object.getOwnPropertyDescriptor(instance, methodName) ??
+      (prototype && !BUILTIN_PROTOTYPES.has(prototype)
+        ? Object.getOwnPropertyDescriptor(prototype, methodName)
+        : undefined);
+    const method: unknown = descriptor?.value;
+
+    if (
+      DIRECT_RUN_EXCLUDED_METHODS.has(methodName) ||
+      typeof method !== 'function'
+    ) {
       return {
         ok: false,
         response: this.badRequest(

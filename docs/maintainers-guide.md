@@ -266,7 +266,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 | `viewer-output.adapter.ts` | Delegates to `http-output` and `direct-run` adapters; prints viewer URL |
 | `file-output.adapter.ts` | Writes Markdown dependency graph to disk; also builds Markdown text for HTTP |
 | `json-output.adapter.ts` | Writes raw `GraphOutput` JSON to disk |
-| `direct-run-output.adapter.ts` | Registers provider method execution, history, and trace routes |
+| `direct-run-output.adapter.ts` | Registers provider and controller method execution, history, and trace routes |
 
 **What belongs here:** Implementations of `OutputAdapter<Config>`. Each adapter file must have a co-located `*.spec.ts`.
 
@@ -660,7 +660,7 @@ that cannot reach into a Pinia setup store.
 | `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
-| `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building) |
+| `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building, resolving a provider or controller by its node id, and which trace spans may be re-run) |
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
 | `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, and resolves the mount base its sibling endpoints hang off |
 | `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |

@@ -173,7 +173,7 @@ than implementing the port.
 | `ViewerOutputAdapter` | `adapters/viewer-output.adapter.ts` | Composes HTTP + Direct Run; prints the viewer link |
 | `FileOutputAdapter` | `adapters/file-output.adapter.ts` | Writes the Markdown report (Mermaid + prose) |
 | `JsonOutputAdapter` | `adapters/json-output.adapter.ts` | Writes raw `GraphOutput` JSON |
-| `DirectRunOutputAdapter` | `adapters/direct-run-output.adapter.ts` | Builds the routes that invoke provider methods |
+| `DirectRunOutputAdapter` | `adapters/direct-run-output.adapter.ts` | Builds the routes that invoke provider and controller methods |
 | `createInspectorEndpointInfo` | `inspector-endpoint-info.ts` | Builds the `information.json` handshake payload |
 
 Intermediate types under `types/` — `ModuleMap`, `Modules`, `ModuleProvider`,
@@ -281,7 +281,7 @@ Everything a `viewer` output installs, on one server:
 | `GET` | `/output.json` | `GraphOutput` |
 | `GET` | `/output.schema.json` | `GRAPH_OUTPUT_JSON_SCHEMA` |
 | `GET` | `/output.md` | The Markdown report |
-| `POST` | `/direct-run` | Invokes `{ module, provider, method, args }` |
+| `POST` | `/direct-run` | Invokes `{ module, target?, provider?, controller?, method, args }` |
 | `GET` | `/direct-run/histories` | Every completed `RuntimeTrace` |
 | `GET` | `/direct-run/history/index.json` | Trace summaries |
 | `GET` | `/direct-run/history/*` | One trace by id |
@@ -307,7 +307,8 @@ origin; the server is created once and started once.
 ### Security architecture
 
 The inspector serves the shape of an application's internals from inside that
-application, and Direct Run invokes real provider methods on request. The
+application, and Direct Run invokes real provider and controller methods on
+request. The
 defaults below are deliberate: when you touch `http-serve.adapter.ts` or
 `direct-run-output.adapter.ts`, question them rather than treating them as
 inherited noise.
@@ -364,31 +365,67 @@ along with the lockout behaviour, over real TCP.
 ### Direct Run and runtime tracing
 
 Direct Run turns the viewer into something that *does* things rather than only
-showing them: a `POST /direct-run` with `{ module, provider, method, args }`
-looks the provider instance up in the live container and calls a method on it.
-Which methods are callable depends on `directRun.allowUnsafeMethods`:
+showing them: a `POST /direct-run` with `{ module, target, provider |
+controller, method, args }` looks the target instance — a provider or a
+controller — up in the live container and calls a method on it. `target` is
+`"provider"` or `"controller"` — it defaults to `"provider"` when absent, so a
+request built before this field existed still resolves exactly as it did — and
+the request names the target only through the field matching it (`provider`
+or `controller`), never both, so a request can never be ambiguous about which
+instance table it addresses. Which methods are callable depends on
+`directRun.allowUnsafeMethods`, which governs both target types:
 
-- **Permissive (default, `true`).** Any callable method found on the
-  provider's instance or prototype chain may be invoked, including ones
+- **Permissive (default, `true`).** On a provider, any callable method found
+  on the instance or its prototype chain may be invoked, including ones
   TypeScript marks `private` or `protected` — that keyword is erased at
   compile time and is not a runtime boundary. Only `constructor` is refused
   outright, because invoking it as a plain method call is not a provider
-  "method" in any sense a caller intends. This favors local development
-  ergonomics: the default assumes Direct Run is reached by a trusted
-  developer, not exposed to the open internet.
+  "method" in any sense a caller intends. A controller gets a narrower rule,
+  described below. This favors local development ergonomics: the default
+  assumes Direct Run is reached by a trusted developer, not exposed to the
+  open internet.
 - **Strict (`false`).** Only the exact public prototype method advertised for
-  that module/provider in its `directRun` metadata may be invoked, and only
-  when it is not shadowed on the instance. Constructors, Nest lifecycle hooks,
-  inherited methods, instance-shadowed methods, and TypeScript-`private` or
-  `-protected` methods are refused. Since `private`/`protected` are erased at
-  compile time and such a method is an ordinary callable prototype member at
-  runtime, that exclusion is the one check `SourceMetadataService` — not the
+  that module/provider or module/controller in its `directRun` metadata may be
+  invoked, and only when it is not shadowed on the instance. Constructors,
+  Nest lifecycle hooks, inherited methods, instance-shadowed methods, and
+  TypeScript-`private` or `-protected` methods are refused. Since
+  `private`/`protected` are erased at compile time and such a method is an
+  ordinary callable prototype member at runtime, that exclusion is the one
+  check `SourceMetadataService` — not the
   runtime shape of the object — has to make, by reading the method's
   modifiers from the application's own sources; a method whose source cannot
   be found, or whose class name resolves ambiguously across the application's
   sources, is not treated as public. The graph's `directRun` metadata only
   ever advertises methods confirmed public this way, regardless of which mode
   is active, so the metadata itself never grows to include unsafe methods.
+
+**Controllers are a Direct Run target too**, resolved from their own instance
+table — never the provider one, and never the reverse — so a same-named
+provider and controller in one module can't be confused for each other; a
+name that doesn't exist in the target's own table is a `404`, not a fallback
+lookup in the other. A controller's advertised methods follow the same
+eligibility rules as a provider's, plus an optional `http: { method, path }`
+read from NestJS's own route metadata when the method is a routed handler —
+informational only, since Direct Run never sends this method an HTTP request
+and never runs its guards, interceptors, pipes, or parameter decorators. The
+path is the first `@Controller()` prefix joined with the method's first path;
+it does not include a `RouterModule` mount path, the global prefix
+(`app.setGlobalPrefix`), URI versioning, or any prefix but the first, so it
+can differ from the URL the application actually serves.
+
+Controller permissive mode is stricter than provider permissive mode by
+design, since there is no existing DX contract to preserve for a brand-new
+invocation surface. Only a *direct* controller method resolves: a
+function-valued own property of the instance or — when the instance has no own
+property of that name — a method declared on the controller's own class, its
+immediate prototype. Both are read through property descriptors, so a getter
+is refused without ever running. The constructor, Nest lifecycle hooks,
+accessors, and every inherited method — whether from a base class or from a
+built-in prototype such as `Object.prototype` — are refused with `400`.
+TypeScript-`private` methods declared on the controller's own class stay
+callable, exactly as on a provider. See
+[`docs/controller-direct-run-design.md`](./controller-direct-run-design.md)
+for the full design.
 
 `directRun.enabled` defaults to `true`; setting it to `false` omits all
 Direct Run and trace-history routes. Both `allowUnsafeMethods` and
@@ -402,16 +439,19 @@ Oversized payloads receive a generic `413` response, and UTF-8 is decoded
 across chunk boundaries before JSON is parsed.
 
 Around that call `RuntimeTraceRecorder` builds a trace. `DiscoveryAdapter`
-instruments provider prototypes once (tracked in a `WeakSet`, so wrapping is
-never doubled) while preserving each method's arity, and each instrumented
-method opens a span. A `BUILTIN_PROTOTYPES` guard in `discovery.ts` refuses to
-instrument prototypes shared by every object of their kind — `Object.prototype`,
-`Array.prototype`, `Function.prototype`, `Map.prototype`, `Promise.prototype`,
-and the rest of the built-ins — before any `defineProperty` call reaches them,
-because wrapping a method found there would patch it for the entire process,
-not just the provider being instrumented; a provider whose prototype chain
-bottoms out at one of these (a plain object literal, an array, a bare
-function) is left uninstrumented rather than corrupting a shared prototype.
+instruments provider and controller prototypes once (tracked in a `WeakSet`,
+so wrapping is never doubled) while preserving each method's arity, and each
+instrumented method opens a span. `discovery.ts` refuses to instrument
+prototypes shared by every object of their kind — the `BUILTIN_PROTOTYPES` set
+in `direct-run.constants.ts`: `Object.prototype`, `Array.prototype`,
+`Function.prototype`, `Map.prototype`, `Promise.prototype`, and the rest of the
+built-ins — before any `defineProperty` call reaches them, because wrapping a
+method found there would patch it for the entire process, not just the
+instance being instrumented; an instance whose immediate prototype is one of
+these (a plain object literal, an array, a bare function) is left
+uninstrumented rather than corrupting a shared prototype. Controller Direct
+Run reads the same set, which is why it lives beside the Direct Run constants
+rather than in `discovery.ts`.
 Two `AsyncLocalStorage` stores — one for the active trace, one for the span
 stack — give the nesting, so a call graph several providers deep is
 reconstructed without explicit plumbing. A method returning a promise gets its
@@ -422,6 +462,14 @@ retained in memory; the oldest insertion is evicted first. Traces are written
 to disk too when a `json` output is configured — `viewer-output.adapter.ts`
 derives the history directory from that output's path and rewrites its index
 from current memory.
+
+A trace records each span's module, class, and method, but not whether that
+class is a provider or a controller. The viewer's execution-sequence page
+therefore re-runs a span only as a provider, and offers to only when the graph
+knows the span's class as a provider of that module and not also as a
+controller there. It never offers to re-run a controller span: re-sent as a
+provider, that would be refused with a `404` — or, when the module also has a
+provider of the same name, run that provider's method instead.
 
 ---
 
@@ -542,9 +590,9 @@ Everything the site shows as a demo — the previews in the documentation pages,
 and "Open Demo" on `/view` — is the `demo/` application actually running, on
 the [nodepod](https://www.npmjs.com/package/@scelar/nodepod) browser-native
 Node.js runtime, in the visitor's own tab. Nothing is captured ahead of time:
-Direct Run really invokes provider methods, runtime traces really accumulate,
-and the JSDoc and parameter types in the graph come from the sources of the
-application that is answering.
+Direct Run really invokes provider and controller methods, runtime traces
+really accumulate, and the JSDoc and parameter types in the graph come from
+the sources of the application that is answering.
 
 **The payload.** `demo/scripts/build-nodepod-payload.ts` writes three files
 into `site/public/nodepod-demo/`:
@@ -826,7 +874,7 @@ without knowing what it buys.
 | Default bind `0.0.0.0` | The viewer is hosted elsewhere and must reach the developer's machine | The endpoint is reachable from the local network; the token is what protects it |
 | Wildcard CORS on the viewer output | A hosted viewer on a fixed origin cannot be same-origin with an arbitrary developer machine | Any page can *attempt* a request; none succeeds without the token |
 | The token is printed in the startup log | It is the only handoff point, and copying it by hand would make the product unusable | Log shipping captures a live credential — `accessToken.logToken: false` is the escape hatch |
-| Direct Run invokes real methods | The trace is only honest if the call is real | In the default permissive mode, an authenticated caller can run any callable method on a provider, including ones TypeScript marks `private`; set `directRun.allowUnsafeMethods: false` to restrict calls to the public methods advertised in that provider's Direct Run metadata. It remains a development tool, not a production one |
+| Direct Run invokes real methods | The trace is only honest if the call is real | In the default permissive mode, an authenticated caller can run any callable method on a provider, and any direct method of a controller, including ones TypeScript marks `private`; set `directRun.allowUnsafeMethods: false` to restrict calls to the public methods advertised in that provider's or controller's Direct Run metadata. It remains a development tool, not a production one |
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
 
@@ -845,3 +893,5 @@ Facts a code change can invalidate, and the file to check:
 - Limiter defaults — `lib/src/access-attempt-limiter.ts`
 - Viewer page names — `site/app/utils/viewer-bootstrap-link.ts`
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
+- Which controller methods permissive Direct Run resolves —
+  `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`

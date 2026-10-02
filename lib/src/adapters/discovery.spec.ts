@@ -68,6 +68,43 @@ describe(DiscoveryAdapter.name, () => {
     expect(discovery.tree).toBe(firstTree);
   });
 
+  it("captures controller instances alongside provider instances", () => {
+    class TestController {}
+    const controllerInstance = new TestController();
+
+    const discovery = new DiscoveryAdapter(
+      { rootModule: TestRootModule, outputs: [] },
+      new Map([
+        [
+          TestRootModule.name,
+          {
+            metatype: TestRootModule,
+            imports: new Map(),
+            exports: new Map(),
+            providers: new Map(),
+            controllers: new Map([
+              [
+                TestController.name,
+                { metatype: TestController, instance: controllerInstance },
+              ],
+            ]),
+          },
+        ],
+      ]) as never,
+      new RuntimeTraceRecorder(),
+      new SourceMetadataService(),
+    );
+
+    const tree = discovery.scan();
+
+    expect(tree.controllers.map((controller) => controller.name)).toContain(
+      TestController.name,
+    );
+    expect(tree.controllerInstances.get(TestController.name)).toBe(
+      controllerInstance,
+    );
+  });
+
   it("preserves instrumented method arity without instance shadowing", () => {
     class ArityProvider {
       join(first: string, second: string): string {

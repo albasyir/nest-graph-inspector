@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import type { GraphOutput } from 'nest-graph-inspector'
 import type {
   DirectRunResultPayload,
   RuntimeTrace,
   RuntimeTraceSpan
 } from '~/utils/direct-run-provider'
-import { buildDirectRunRequest } from '~/utils/direct-run-provider'
+import {
+  buildDirectRunRequest,
+  canRerunSpanAsProvider
+} from '~/utils/direct-run-provider'
 import type { AccordionItem } from '@nuxt/ui'
 
 const props = defineProps<{
@@ -14,6 +18,8 @@ const props = defineProps<{
   directRunUrl?: string
   directRunHeaders?: Record<string, string>
   running?: boolean
+  // What tells a provider span from a controller span: the trace cannot.
+  graph?: GraphOutput | null
 }>()
 
 const emit = defineEmits<{
@@ -238,9 +244,7 @@ function isSpanRerunning(spanId: string): boolean {
 }
 
 function canRerunSpan(span: RuntimeTraceSpan): boolean {
-  return Boolean(
-    props.directRunUrl && span.moduleName && span.className && span.methodName
-  )
+  return Boolean(props.directRunUrl) && canRerunSpanAsProvider(props.graph, span)
 }
 
 function barColor(span: RuntimeTraceSpan): string {
@@ -348,7 +352,12 @@ async function rerunSpan(span: RuntimeTraceSpan): Promise<void> {
       headers: props.directRunHeaders,
       body: buildDirectRunRequest({
         moduleName: span.moduleName!,
-        providerName: span.className!,
+        // A trace span records no target type, so a re-run can only ever be
+        // a provider one. canRerunSpan() lets through only spans the graph
+        // knows solely as a provider of their module: re-sent as a provider,
+        // a controller span would 404 — or run a same-named provider instead.
+        targetType: 'provider',
+        targetName: span.className!,
         methodName: span.methodName!,
         args: Array.isArray(span.args) ? span.args : []
       })

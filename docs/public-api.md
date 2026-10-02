@@ -214,7 +214,7 @@ trace-history routes.
 
 | Field | Default | Purpose |
 |---|---|---|
-| `allowUnsafeMethods` | `true` | Permissive (`true`): any callable method found on the provider's prototype or instance may be invoked, including ones TypeScript marks `private` or `protected` — that keyword is erased at compile time and is not a runtime boundary. Only `constructor` is refused. Strict (`false`): only the method `SourceMetadataService` confirms is public on the application's own sources, advertised in that provider's `directRun` metadata, and not shadowed on the instance. |
+| `allowUnsafeMethods` | `true` | Permissive (`true`): any callable method found on a provider's prototype chain or instance may be invoked, including ones TypeScript marks `private` or `protected` — that keyword is erased at compile time and is not a runtime boundary. Only `constructor` is refused. On a controller, only a direct method may be invoked — a function-valued own property of the instance, or a method declared on the controller's own class — and the constructor, Nest lifecycle hooks, getters, and inherited methods (from a base class or a built-in prototype) are refused. Strict (`false`): only the method `SourceMetadataService` confirms is public on the application's own sources, advertised in that provider's or controller's `directRun` metadata, and not shadowed on the instance. |
 | `maxBodySizeBytes` | 50 MiB (`50 * 1024 * 1024`) | Upper bound on a Direct Run request body, in encoded bytes. A request over the limit receives `413` before it is parsed as JSON. `0` or a negative number removes the limit. |
 
 Both fields can also be set module-wide on `NestGraphInspectorModuleOptions.directRun`,
@@ -298,7 +298,7 @@ type GraphOutputProvider = {
 | | |
 |---|---|
 | **Kind** | Type alias |
-| **Stability** | Stable |
+| **Stability** | Stable; `directRun` field is experimental |
 | **Documented** | Yes — `docs/graph-contract.md` |
 
 ```ts
@@ -306,6 +306,7 @@ type GraphOutputController = {
   name: string;
   jsdoc?: string;
   dependencies: GraphOutputDependencyRef[];
+  directRun?: DirectRunControllerMeta;   // absent when ts-morph cannot resolve source
 }
 ```
 
@@ -519,6 +520,84 @@ type DirectRunProviderMethod = {
 ```
 
 `parameterTypes` is a human-readable string, not a parsed structure.
+
+---
+
+### `DirectRunTargetType`
+
+| | |
+|---|---|
+| **Kind** | Type alias (string literal union) |
+| **Stability** | Experimental |
+| **Documented** | Yes — `docs/graph-contract.md`, `docs/controller-direct-run-design.md` |
+
+```ts
+type DirectRunTargetType = 'provider' | 'controller';
+```
+
+Which instance table a Direct Run request or trace addresses.
+
+---
+
+### `DirectRunHttpRoute`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Experimental |
+| **Documented** | Yes — `docs/graph-contract.md` |
+
+```ts
+type DirectRunHttpRoute = {
+  method: string;
+  path: string;
+}
+```
+
+The HTTP verb/path NestJS recorded for a controller method, read from its own
+route metadata. Informational only — Direct Run calls the method directly and
+never sends it an HTTP request. `path` joins the first `@Controller()` prefix
+to the method's first path; it does not include a `RouterModule` mount path,
+the global prefix, URI versioning, or any prefix but the first.
+
+---
+
+### `DirectRunControllerMethod`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Experimental |
+| **Documented** | Yes — `docs/graph-contract.md` |
+
+```ts
+type DirectRunControllerMethod = {
+  name: string;
+  parameterTypes: string;
+  http?: DirectRunHttpRoute; // absent when Nest has no route metadata for this method
+}
+```
+
+Same eligibility rule as `DirectRunProviderMethod`, plus optional `http`.
+
+---
+
+### `DirectRunControllerMeta`
+
+| | |
+|---|---|
+| **Kind** | Type alias |
+| **Stability** | Experimental |
+| **Documented** | Yes — `docs/graph-contract.md` |
+
+```ts
+type DirectRunControllerMeta = {
+  methods: DirectRunControllerMethod[];
+}
+```
+
+Embedded in `GraphOutputController.directRun`. Absent when ts-morph cannot
+locate the controller source file.
 
 ---
 
@@ -765,7 +844,7 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `GraphOutput` | Type | Stable | ✅ | ✅ |
 | `GraphOutputModule` | Type | Stable | ✅ | ✅ |
 | `GraphOutputProvider` | Type | Stable | ✅ | ✅ |
-| `GraphOutputController` | Type | Stable | ✅ | ✅ |
+| `GraphOutputController` | Type | Stable / partial | ✅ | ✅ |
 | `GraphOutputDependencyRef` | Type | Stable | ✅ | ✅ |
 | `GraphOutputCycles` | Type | Stable | ✅ | ✅ |
 | `GraphOutputCycle` | Type | Stable | ✅ | ✅ |
@@ -775,6 +854,10 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `GraphOutputProviderCyclePathItem` | Type | Stable | ✅ | ✅ |
 | `DirectRunProviderMeta` | Type | Experimental | ✅ | Partial |
 | `DirectRunProviderMethod` | Type | Experimental | ✅ | Partial |
+| `DirectRunTargetType` | Type | Experimental | ✅ | ✅ |
+| `DirectRunHttpRoute` | Type | Experimental | ✅ | ✅ |
+| `DirectRunControllerMeta` | Type | Experimental | ✅ | ✅ |
+| `DirectRunControllerMethod` | Type | Experimental | ✅ | ✅ |
 | `DirectRunResult` | Type | Experimental | ✅ | ❌ |
 | `DirectRunTraceRecorder` | Type | Experimental | ✅ | ❌ |
 | `RuntimeTrace` | Type | Experimental | ✅ | Partial |

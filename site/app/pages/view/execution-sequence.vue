@@ -9,6 +9,7 @@ const graphStore = useGraphInspectorStore()
 const {
   directRunUrl,
   requestHeaders,
+  graphData,
   errorMessage,
   endpointRequiresAccessToken,
   hasLoadError
@@ -46,6 +47,7 @@ function openNavigator() {
       v-else
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"
+      :graph="graphData"
       @navigator-open="openNavigator"
     />
   </div>

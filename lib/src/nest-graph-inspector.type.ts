@@ -5,8 +5,9 @@ export type NestGraphInspectorViewerDirectRunOptions = {
    * Whether to register Direct Run routes for this viewer output.
    *
    * Defaults to `true`. Set to `false` to serve the graph without exposing
-   * provider invocation or runtime-trace history routes. The viewer graph
-   * also omits Direct Run metadata, so it cannot advertise those routes.
+   * provider or controller invocation, or runtime-trace history routes. The
+   * viewer graph also omits Direct Run metadata, so it cannot advertise those
+   * routes.
    */
   enabled?: boolean;
 
@@ -14,18 +15,21 @@ export type NestGraphInspectorViewerDirectRunOptions = {
 
   /**
    * Whether Direct Run may invoke any callable method it finds on a
-   * provider's prototype or instance, rather than only the public methods
-   * advertised in that provider's Direct Run metadata.
+   * provider's prototype chain or instance, rather than only the public
+   * methods advertised in that provider's Direct Run metadata.
    *
    * Defaults to `true` — permissive, for local development ergonomics: an
    * authenticated caller can run any method, including ones TypeScript marks
    * `private` or `protected`, since that keyword is erased at compile time
-   * and unenforceable at runtime anyway. Set to `false` to enforce the
-   * stricter allowlist instead: only methods `SourceMetadataService` can
-   * confirm are public on the application's own sources, excluding
-   * constructors, Nest lifecycle hooks, and instance-shadowed methods. Turn
-   * this off before exposing Direct Run outside a trusted development
-   * environment.
+   * and unenforceable at runtime anyway. A controller is narrower even here:
+   * only a method of its own — a function-valued property of the instance,
+   * or one declared on its own class — never its constructor, a Nest
+   * lifecycle hook, a getter, or an inherited method. Set to `false` to
+   * enforce the stricter allowlist instead: only methods
+   * `SourceMetadataService` can confirm are public on the application's own
+   * sources, excluding constructors, Nest lifecycle hooks, and
+   * instance-shadowed methods. Turn this off before exposing Direct Run
+   * outside a trusted development environment.
    */
   allowUnsafeMethods?: boolean;
 

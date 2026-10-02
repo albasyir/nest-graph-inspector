@@ -14,6 +14,28 @@ for the published history.
 
 ### Added
 
+- Direct Run now reaches controller methods, not just providers. A request
+  names an explicit `target` (`"provider"` or `"controller"`, defaulting to
+  `"provider"` so every existing client keeps working unmodified), and the
+  server resolves it only against that target's own instance table — a
+  provider and a controller sharing a name can never be confused for one
+  another, and an unrecognised or mismatched target is a deterministic
+  rejection. The graph now carries `directRun` metadata for controllers too,
+  including an optional `http: { method, path }` per method read from Nest's
+  own route metadata when available; the path does not include a
+  `RouterModule` mount path, the global prefix, URI versioning, or any
+  prefix but the first. Controller permissive mode is stricter than provider
+  permissive mode by design: only a direct controller method — a
+  function-valued own property of the instance, or a method declared on the
+  controller's own class — may be invoked, and the constructor, Nest
+  lifecycle hooks, getters (refused without running), and inherited methods
+  are refused, even with `allowUnsafeMethods: true`. As with providers, this
+  is direct JavaScript method invocation for debugging, not a Nest HTTP
+  request pipeline — it does not simulate guards, interceptors, pipes, or
+  parameter decorators. The viewer's execution sequence does not offer to
+  re-run a controller span, since a trace does not record whether a class
+  was a provider or a controller. See `docs/controller-direct-run-design.md`
+  for the full design.
 - Direct Run's `allowUnsafeMethods` and `maxBodySizeBytes` are now configurable
   per `viewer` output, or module-wide via `NestGraphInspectorModuleOptions.directRun`.
   `allowUnsafeMethods` defaults to `true`: any callable method on a provider's
