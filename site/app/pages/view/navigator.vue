@@ -62,7 +62,6 @@ function handleExecutionSequenceOpen() {
     :message="startupMessage"
   />
 
-  <!-- Error State -->
   <GraphViewerErrorState
     v-else-if="hasLoadError"
     :message="errorMessage"
@@ -70,7 +69,6 @@ function handleExecutionSequenceOpen() {
     @retry="refresh()"
   />
 
-  <!-- Graph -->
   <ClientOnly v-else-if="graphData">
     <GraphViewer
       v-model:show-circular-dependencies="showCircularDependencies"
@@ -88,7 +86,6 @@ function handleExecutionSequenceOpen() {
     />
   </ClientOnly>
 
-  <!-- Empty State -->
   <div
     v-else
     class="flex h-full min-h-0 flex-col items-center justify-center gap-4"
