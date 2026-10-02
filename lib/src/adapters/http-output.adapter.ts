@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Injectable } from '@nestjs/common';
@@ -324,8 +324,20 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
     const write = (this.pendingLayoutWrites.get(filePath) ?? Promise.resolve())
       .catch(() => undefined)
       .then(async () => {
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, text, 'utf8');
+        const dir = dirname(filePath);
+        await mkdir(dir, { recursive: true });
+        const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+        try {
+          await writeFile(tempPath, text, 'utf8');
+          await rename(tempPath, filePath);
+        } catch (error) {
+          try {
+            await unlink(tempPath);
+          } catch {
+            // Ignore cleanup failure of the temporary file.
+          }
+          throw error;
+        }
       });
     this.pendingLayoutWrites.set(filePath, write);
 
