@@ -63,6 +63,10 @@ import {
   type EdgeRelationship,
   type RedirectedDependencyEdge
 } from '~/utils/graph-viewer-edges'
+import {
+  buildModuleFocusFitViewOptions,
+  resolveModuleFocusTargetNodeIds
+} from '~/utils/graph-viewer-focus'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -245,6 +249,8 @@ const emit = defineEmits<{
   directRunDrawerOpen: [nodeId: string]
   directRunDrawerClose: []
   executionSequenceOpen: []
+  // As soon as a focus is asked for — not once the camera has arrived.
+  moduleFocus: [moduleName: string]
 }>()
 
 const showCircularDependencies = defineModel<boolean>(
@@ -3281,6 +3287,34 @@ function toggleModule(moduleName: string) {
   }
 }
 
+/**
+ * Moves the camera onto one module — its node, and the items inside it while
+ * it is open — without moving any node, so a layout the reader dragged into
+ * place survives it.
+ *
+ * A module that is not on the canvas leaves the viewport where it is. Like any
+ * Vue Flow transition, the returned promise does not settle if a pan or zoom
+ * interrupts the move.
+ */
+async function focusModule(moduleName: string, duration?: number) {
+  if (!import.meta.client) {
+    return
+  }
+
+  await nextTick()
+  const targetNodeIds = resolveModuleFocusTargetNodeIds(
+    moduleName,
+    flowNodes.value
+  )
+  const options = buildModuleFocusFitViewOptions(targetNodeIds, { duration })
+
+  // The card is anchored to where the module was on screen, and a camera move
+  // made from code does not fire Vue Flow's `move-start`, which closes it.
+  closeJsDocHoverCard()
+  emit('moduleFocus', moduleName)
+  await fitView(options)
+}
+
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
   collapsedModuleNames.value
     = isOpen === true
@@ -3420,6 +3454,8 @@ onBeforeUnmount(() => {
 useResizeObserver(graphViewerRef, () => {
   debouncedCenterGraph()
 })
+
+defineExpose({ centerGraph, focusModule })
 </script>
 
 <template>
@@ -3782,27 +3818,47 @@ useResizeObserver(graphViewerRef, () => {
             <span class="module-subgraph__label">
               {{ moduleProps.data.label }}
             </span>
-            <button
-              v-if="moduleProps.data.isExpandable"
-              type="button"
-              class="module-subgraph__toggle"
-              :aria-expanded="!moduleProps.data.isCollapsed"
-              :aria-label="
-                moduleProps.data.isCollapsed
-                  ? `Open ${moduleProps.data.label}`
-                  : `Close ${moduleProps.data.label}`
-              "
-              @click.stop="toggleModule(moduleProps.data.label)"
-            >
-              <UIcon
-                :name="
+            <div class="module-subgraph__actions">
+              <UTooltip
+                v-if="props.interactive"
+                text="Focus on this module"
+                :delay-duration="0"
+              >
+                <button
+                  type="button"
+                  class="module-subgraph__focus nodrag nopan"
+                  aria-label="Focus on this module"
+                  title="Focus on this module"
+                  @click.stop="focusModule(moduleProps.data.label)"
+                >
+                  <UIcon
+                    name="i-lucide-maximize-2"
+                    class="module-subgraph__focus-icon"
+                  />
+                </button>
+              </UTooltip>
+              <button
+                v-if="moduleProps.data.isExpandable"
+                type="button"
+                class="module-subgraph__toggle nodrag nopan"
+                :aria-expanded="!moduleProps.data.isCollapsed"
+                :aria-label="
                   moduleProps.data.isCollapsed
-                    ? 'i-lucide-plus'
-                    : 'i-lucide-minus'
+                    ? `Open ${moduleProps.data.label}`
+                    : `Close ${moduleProps.data.label}`
                 "
-                class="module-subgraph__toggle-icon"
-              />
-            </button>
+                @click.stop="toggleModule(moduleProps.data.label)"
+              >
+                <UIcon
+                  :name="
+                    moduleProps.data.isCollapsed
+                      ? 'i-lucide-plus'
+                      : 'i-lucide-minus'
+                  "
+                  class="module-subgraph__toggle-icon"
+                />
+              </button>
+            </div>
           </div>
           <div
             v-if="!moduleProps.data.isCollapsed"
@@ -4758,6 +4814,45 @@ useResizeObserver(graphViewerRef, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.module-subgraph__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.module-subgraph__focus {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--mg-toggle-bg);
+  border-radius: 4px;
+  background: var(--mg-toggle-bg);
+  color: var(--mg-toggle-text);
+  box-shadow: 0 2px 8px rgba(76, 29, 149, 0.28);
+  flex: 0 0 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.module-subgraph__focus:hover {
+  border-color: var(--mg-toggle-bg-hover);
+  background: var(--mg-toggle-bg-hover);
+}
+
+.module-subgraph__focus:focus-visible {
+  outline: 2px solid var(--mg-toggle-bg-hover);
+  outline-offset: 2px;
+}
+
+.module-subgraph__focus-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .module-subgraph__toggle {
