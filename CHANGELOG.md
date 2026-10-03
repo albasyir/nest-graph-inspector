@@ -12,6 +12,48 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-03
+
+### Added
+
+- **Persistent graph layout.** The interactive viewer now saves where you have
+  arranged a graph's modules, providers, and controllers to a layout file in
+  the host application's working tree — `./nest-graph-layout.json` by default —
+  so the arrangement survives a page reload and can be committed to source
+  control and shared with the rest of the team, instead of being recomputed
+  from scratch in every browser tab.
+- `layoutFilePath` is configurable on `NestGraphInspectorModuleOptions`,
+  module-wide, and per `http` or `viewer` output. The output's own value wins
+  over the module-wide one, which wins over the default, and a relative path
+  resolves against `process.cwd()`.
+- `GET /__graph-inspector/layout.json` and `GET /__graph-inspector/layout` read
+  the saved layout from disk, returning the default empty layout,
+  `{ version: '1', modules: {} }`, when no file exists yet.
+  `POST /__graph-inspector/layout` and `POST /__graph-inspector/layout.json`
+  are token-guarded: they validate the request body as a `GraphLayout` and
+  persist it as formatted JSON, with writes to one file serialized so two
+  overlapping saves cannot interleave into invalid JSON.
+- A standalone recursive validator checks every layout before it is accepted
+  or served — `additionalProperties` is rejected throughout, a `__proto__` key
+  is refused outright rather than merged, and every coordinate must be a
+  finite number. `GraphLayout`, `GraphLayoutModule`, `GraphLayoutPosition`,
+  `validateGraphLayout`, `GRAPH_LAYOUT_SCHEMA_VERSION`,
+  `GRAPH_LAYOUT_SCHEMA_ID`, and `GRAPH_LAYOUT_JSON_SCHEMA` are now exported
+  from `lib`.
+- **Incremental layout engine.** When a graph grows a module, provider, or
+  controller that a saved layout does not know about, every node the layout
+  does know about keeps its exact saved coordinates. A new module is placed in
+  open canvas space by a non-overlapping bounding-box search run adjacent to
+  the modules it imports or is imported by; a new provider or controller
+  inside an existing module takes the next available slot in that module.
+- The viewer gained a "Save layout" button with Saving / Saved / Error states,
+  an "Auto layout" button that discards the saved arrangement and recomputes
+  one, and a status badge showing whether the current arrangement is clean or
+  has unsaved changes. Where there is no writable inspector endpoint to save
+  to — the static demo viewer, or a library predating these routes — saving
+  falls back to a downloaded file, and reading falls back to an in-memory or
+  `sessionStorage` bridge, instead of the HTTP layout routes.
+
 ## [0.10.0] - 2026-10-03
 
 ### Added
