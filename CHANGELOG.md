@@ -12,6 +12,21 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-04
+
+### Added
+
+- **Architecture Health & Diagnostics dashboard.** The Graph Issues page (`/view/issues`) has been upgraded from a basic circular dependency reporter into a comprehensive Architecture Health & Diagnostics dashboard for NestJS applications, analyzing `GraphOutput` for critical architectural issues, dead code, and misconfigurations:
+  - **5 deterministic issue analyzers**:
+    - **Circular Dependencies** (`error`): Detects module and provider dependency cycles with complete cycle paths and visual indicators.
+    - **Duplicate Provider Registration** (`error`): Identifies provider tokens and classes registered across multiple modules without shared exports, preventing accidental duplicate singleton state divergence.
+    - **Unused Module Imports** (`warning`): Detects modules imported by another module where none of their exported providers or controllers are injected or re-exported.
+    - **Dead / Unconsumed Exports** (`info`): Flags providers exported by a module that are never injected or re-exported anywhere across the graph.
+    - **Disconnected / Orphan Modules** (`warning`): Highlights standalone modules unreachable from the root application module via the import graph.
+  - **Metric summary cards & category filter tabs**: Displays total issue count alongside error, warning, and cleanup metrics, with dedicated filter tabs showing per-category counts for targeted inspection.
+  - **Interactive cycle diagrams & remediation guidance**: Issue cards provide concrete remediation advice and expand interactive SVG cycle diagrams for circular dependencies.
+  - **Seamless Focus in Graph navigation**: Direct links from issue cards to `/view/navigator?focus-module=<ModuleName>` smoothly pan and frame the relevant module in the graph canvas.
+
 ## [0.12.0] - 2026-10-04
 
 ### Added
