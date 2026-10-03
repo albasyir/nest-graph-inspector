@@ -12,6 +12,21 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-04
+
+### Added
+
+- **Distinct edge coloring by dependency type with semi-transparent blending.** The interactive graph viewer now visually distinguishes dependency lines by relationship type across both dark and light themes:
+  - Module-to-module imports render in cyan (`#38bdf8`).
+  - Provider-to-provider injections render in emerald (`#34d399`).
+  - Controller-related dependencies render in purple (`#c084fc`).
+  - Circular dependencies closing a cycle render in warning amber (`#fbbf24`).
+  Edge paths and arrowheads use calibrated semi-transparent stroke opacities (0.4 base, 0.7 on hover, 0.95 when selected) and CSS `mix-blend-mode` (`screen` in dark mode, `multiply` in light mode) so intersecting and overlapping dependency paths blend cleanly rather than occluding one another.
+- Added a `showControllerLines` toggle in the Graph Settings popover to optionally show or hide all controller dependency lines across the canvas.
+- Updated the GraphViewer Legends card with visual swatches and indicators for each dependency line type and color.
+- **Aggregated provider dependency lines for collapsed modules.** When a module is minimized or collapsed, internal providers and controllers are hidden from the canvas, and external dependencies entering or leaving them are dynamically aggregated and redrawn to or from the collapsed module container node. Dependencies connecting two collapsed modules are routed module-to-module, while internal dependencies between items within the same collapsed module are cleanly omitted. Aggregated lines preserve circular dependency detection and controller visibility gating.
+- **Module zoom-to-focus action button beside minimize toggle.** Added a dedicated zoom-to-focus button in module headers next to the minimize/expand toggle. Triggering focus performs a smooth, animated camera transition (`fitView`, 650ms duration, 0.2 padding) that smoothly frames the module. When expanded, the camera automatically bounds the module container and all its internal providers and controllers; when collapsed, it neatly frames the collapsed module container.
+
 ## [0.11.0] - 2026-10-03
 
 ### Added
