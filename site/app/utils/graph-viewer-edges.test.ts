@@ -5,10 +5,12 @@ import {
   CONTROLLER_EDGE_COLOR,
   MODULE_EDGE_COLOR,
   PROVIDER_EDGE_COLOR,
+  collectCircularEdgeInfo,
   getEdgeColor,
   getEdgeRelationClass,
   isControllerEdge,
   isEdgeNormallyVisible,
+  placeDependencyEdge,
   resolveEdgeRelationship,
   type EdgeRelationship
 } from './graph-viewer-edges.ts'
@@ -354,6 +356,227 @@ describe('isEdgeNormallyVisible', () => {
         showControllerLines: false
       }),
       true
+    )
+  })
+})
+
+describe('placeDependencyEdge', () => {
+  const paymentServiceIntoOrderService = {
+    source: 'provider-PaymentModule-PaymentService',
+    target: 'provider-OrderModule-OrderService',
+    sourceModule: 'PaymentModule',
+    targetModule: 'OrderModule'
+  }
+
+  const orderRepositoryIntoOrderService = {
+    source: 'provider-OrderModule-OrderRepository',
+    target: 'provider-OrderModule-OrderService',
+    sourceModule: 'OrderModule',
+    targetModule: 'OrderModule'
+  }
+
+  test('a dependency inside a collapsed module is not drawn', () => {
+    assert.deepEqual(
+      placeDependencyEdge({
+        ...orderRepositoryIntoOrderService,
+        isSourceModuleCollapsed: true,
+        isTargetModuleCollapsed: true
+      }),
+      { type: 'hidden' }
+    )
+  })
+
+  test('a dependency between items on show is drawn between them', () => {
+    assert.deepEqual(
+      placeDependencyEdge({
+        ...orderRepositoryIntoOrderService,
+        isSourceModuleCollapsed: false,
+        isTargetModuleCollapsed: false
+      }),
+      { type: 'direct', isInsideModule: true }
+    )
+    assert.deepEqual(
+      placeDependencyEdge({
+        ...paymentServiceIntoOrderService,
+        isSourceModuleCollapsed: false,
+        isTargetModuleCollapsed: false
+      }),
+      { type: 'direct', isInsideModule: false }
+    )
+  })
+
+  test('a dependency out of a collapsed module is redrawn from the module node', () => {
+    assert.deepEqual(
+      placeDependencyEdge({
+        ...paymentServiceIntoOrderService,
+        isSourceModuleCollapsed: true,
+        isTargetModuleCollapsed: false
+      }),
+      {
+        type: 'redirected',
+        source: 'module-PaymentModule',
+        target: 'provider-OrderModule-OrderService',
+        relationship: 'provider',
+        key: 'module-PaymentModule->provider-OrderModule-OrderService:provider',
+        id: 'e-dep-module-PaymentModule->provider-OrderModule-OrderService-provider',
+        isBetweenModules: false,
+        itemEdgeKey:
+          'provider-PaymentModule-PaymentService->provider-OrderModule-OrderService'
+      }
+    )
+  })
+
+  // Regression: a controller hidden in a collapsed module leaves no
+  // `controller-` id at either end of the edge redrawn for its dependency, so
+  // only the relationship the placement keeps says what the edge still is.
+  test('a controller dependency redrawn onto its collapsed module stays a controller edge, hidden with controller lines', () => {
+    const placement = placeDependencyEdge({
+      source: 'provider-PaymentModule-PaymentService',
+      target: 'controller-OrderModule-OrderController',
+      sourceModule: 'PaymentModule',
+      targetModule: 'OrderModule',
+      isSourceModuleCollapsed: false,
+      isTargetModuleCollapsed: true
+    })
+    assert.ok(placement.type === 'redirected')
+    assert.equal(placement.target, 'module-OrderModule')
+    assert.equal(isControllerEdge(placement.source, placement.target), false)
+
+    const edge = {
+      source: placement.source,
+      target: placement.target,
+      relationship: placement.relationship
+    }
+    assert.equal(resolveEdgeRelationship(edge), 'controller')
+    assert.equal(
+      isEdgeNormallyVisible({
+        ...edge,
+        isNormallyVisible: true,
+        showControllerLines: false
+      }),
+      false
+    )
+    assert.equal(
+      isEdgeNormallyVisible({
+        ...edge,
+        isNormallyVisible: true,
+        showControllerLines: true
+      }),
+      true
+    )
+  })
+
+  test('a dependency between two collapsed modules runs module to module', () => {
+    const placement = placeDependencyEdge({
+      ...paymentServiceIntoOrderService,
+      isSourceModuleCollapsed: true,
+      isTargetModuleCollapsed: true
+    })
+    assert.ok(placement.type === 'redirected')
+    assert.equal(placement.source, 'module-PaymentModule')
+    assert.equal(placement.target, 'module-OrderModule')
+    assert.equal(placement.isBetweenModules, true)
+    assert.equal(
+      placement.id,
+      'e-agg-dep-module-PaymentModule->module-OrderModule-provider'
+    )
+  })
+
+  test('dependencies redrawn onto the same ends share an edge only when the same kind of item depends', () => {
+    const placeIntoCollapsedOrderModule = (target: string) =>
+      placeDependencyEdge({
+        source: 'provider-PaymentModule-PaymentService',
+        target,
+        sourceModule: 'PaymentModule',
+        targetModule: 'OrderModule',
+        isSourceModuleCollapsed: false,
+        isTargetModuleCollapsed: true
+      })
+    const service = placeIntoCollapsedOrderModule(
+      'provider-OrderModule-OrderService'
+    )
+    const repository = placeIntoCollapsedOrderModule(
+      'provider-OrderModule-OrderRepository'
+    )
+    const controller = placeIntoCollapsedOrderModule(
+      'controller-OrderModule-OrderController'
+    )
+    assert.ok(
+      service.type === 'redirected'
+      && repository.type === 'redirected'
+      && controller.type === 'redirected'
+    )
+    assert.equal(service.key, repository.key)
+    assert.notEqual(service.key, controller.key)
+    assert.notEqual(service.id, controller.id)
+  })
+})
+
+describe('collectCircularEdgeInfo', () => {
+  const paymentIntoOrder
+    = 'provider-PaymentModule-PaymentService->provider-OrderModule-OrderService'
+  const refundIntoOrder
+    = 'provider-PaymentModule-RefundService->provider-OrderModule-OrderService'
+  const ledgerIntoOrder
+    = 'provider-PaymentModule-LedgerService->provider-OrderModule-OrderService'
+  const circularEdges = new Map([
+    [paymentIntoOrder, [{ id: 1 }]],
+    [refundIntoOrder, [{ id: 1 }, { id: 2 }]]
+  ])
+
+  test('an edge carries every cycle its item edges close, each once', () => {
+    assert.deepEqual(
+      collectCircularEdgeInfo(
+        [paymentIntoOrder, refundIntoOrder, ledgerIntoOrder],
+        circularEdges
+      ).map(info => info.id),
+      [1, 2]
+    )
+  })
+
+  test('an edge whose item edges close no cycle carries none', () => {
+    assert.deepEqual(
+      collectCircularEdgeInfo([ledgerIntoOrder], circularEdges),
+      []
+    )
+  })
+
+  // Regression: a cycle is recorded under the item edge that closes it, so an
+  // edge redrawn between collapsed modules finds nothing under its own ends.
+  test('a cycle through collapsed modules stays on the edge redrawn for it', () => {
+    const placement = placeDependencyEdge({
+      source: 'provider-PaymentModule-PaymentService',
+      target: 'provider-OrderModule-OrderService',
+      sourceModule: 'PaymentModule',
+      targetModule: 'OrderModule',
+      isSourceModuleCollapsed: true,
+      isTargetModuleCollapsed: true
+    })
+    assert.ok(placement.type === 'redirected')
+    assert.deepEqual(
+      collectCircularEdgeInfo(
+        [`${placement.source}->${placement.target}`],
+        circularEdges
+      ),
+      []
+    )
+
+    const circularInfo = collectCircularEdgeInfo(
+      [placement.itemEdgeKey],
+      circularEdges
+    )
+    assert.deepEqual(
+      circularInfo.map(info => info.id),
+      [1]
+    )
+    assert.equal(
+      resolveEdgeRelationship({
+        source: placement.source,
+        target: placement.target,
+        relationship: placement.relationship,
+        isCircular: circularInfo.length > 0
+      }),
+      'circular'
     )
   })
 })
