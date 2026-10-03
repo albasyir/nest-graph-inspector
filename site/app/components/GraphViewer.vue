@@ -54,11 +54,14 @@ import {
 } from '~/utils/jsdoc-preview'
 import { resolveHoverCardPosition } from '~/utils/hover-card-position'
 import {
+  collectCircularEdgeInfo,
   getEdgeColor,
   getEdgeRelationClass,
   isEdgeNormallyVisible,
+  placeDependencyEdge,
   resolveEdgeRelationship,
-  type EdgeRelationship
+  type EdgeRelationship,
+  type RedirectedDependencyEdge
 } from '~/utils/graph-viewer-edges'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
@@ -175,6 +178,16 @@ type CircularEdgePairAggregate = {
   edgeKeys: string[]
   infoById: Map<number, CircularEdgeInfo>
   sizeByEdgeKey: Map<string, number>
+}
+
+type EdgeHandles = { sourceHandle: string, targetHandle: string }
+
+/** A dependency edge redrawn onto a collapsed module, and what it stands for. */
+type RedirectedDependencyEdgeGroup = {
+  edge: RedirectedDependencyEdge
+  handles?: EdgeHandles
+  /** Every item edge drawn as this one, whose cycles it carries. */
+  itemEdgeKeys: string[]
 }
 
 type FlowNode
@@ -1434,13 +1447,21 @@ function buildGraph(
     }
   }
 
+  /**
+   * Draws a dependency edge. `overrides` serve one redrawn onto a collapsed
+   * module: the relationship, id and handles its ends cannot give it, and the
+   * item edges it stands for, whose cycles it closes in place of its own.
+   */
   function addDependencyEdge(
     sourceId: string,
     targetId: string,
     isNormallyVisible: boolean,
-    relationshipOverride?: EdgeRelationship,
-    edgeIdOverride?: string,
-    handlesOverride?: { sourceHandle: string, targetHandle: string }
+    overrides: {
+      relationship?: EdgeRelationship
+      id?: string
+      handles?: EdgeHandles
+      circularEdgeKeys?: string[]
+    } = {}
   ): void {
     const sPos = nodeAbsPositions.get(sourceId)
     const tPos = nodeAbsPositions.get(targetId)
@@ -1449,18 +1470,23 @@ function buildGraph(
     }
 
     const { sourceHandle, targetHandle }
-      = handlesOverride ?? pickDependencyHandles(sPos, tPos)
-    const circularInfo = circularDependencyEdges.get(
-      `${sourceId}->${targetId}`
+      = overrides.handles ?? pickDependencyHandles(sPos, tPos)
+    const circularEdgeKeys
+      = overrides.circularEdgeKeys ?? [`${sourceId}->${targetId}`]
+    const circularInfo = collectCircularEdgeInfo(
+      circularEdgeKeys,
+      circularDependencyEdges
     )
-    const circularLabelInfo = circularDependencyEdgeLabels.get(
-      `${sourceId}->${targetId}`
+    const circularLabelInfo = collectCircularEdgeInfo(
+      circularEdgeKeys,
+      circularDependencyEdgeLabels
     )
+    const isCircular = circularInfo.length > 0
     const relationship = resolveEdgeRelationship({
       source: sourceId,
       target: targetId,
-      isCircular: Boolean(circularInfo),
-      relationship: relationshipOverride
+      isCircular,
+      relationship: overrides.relationship
     })
     const edgeColor = getEdgeColor(relationship)
     const edgeRelationClass = getEdgeRelationClass(relationship)
@@ -1469,19 +1495,19 @@ function buildGraph(
       target: targetId,
       isNormallyVisible,
       showControllerLines,
-      relationship: relationshipOverride
+      relationship: overrides.relationship
     })
 
     edges.push({
-      id: edgeIdOverride ?? `e-dep-${sourceId}->${targetId}`,
+      id: overrides.id ?? `e-dep-${sourceId}->${targetId}`,
       source: sourceId,
       target: targetId,
       sourceHandle,
       targetHandle,
-      type: circularLabelInfo ? 'warning' : 'smoothstep',
+      type: circularLabelInfo.length > 0 ? 'warning' : 'smoothstep',
       style: {
         stroke: edgeColor,
-        strokeWidth: circularInfo ? 2.2 : 1.5
+        strokeWidth: isCircular ? 2.2 : 1.5
       },
       class: edge => [
         edgeRelationClass,
@@ -1508,20 +1534,18 @@ function buildGraph(
   /**
    * The edges for what each provider and controller depends on.
    *
-   * A collapsed module hides its items, so a dependency crossing into or out
-   * of one is drawn to or from the module node instead — once per pair of
-   * ends and kind of dependent, however many dependencies it stands for, and
-   * named for what depends so it keeps that colour and answers to the same
-   * toggles.
+   * A dependency `placeDependencyEdge` redraws onto a collapsed module shares
+   * its edge with every other one redrawn onto the same ends, so those are
+   * gathered first and each edge is drawn once, closing every cycle any of
+   * them closes.
    */
   function addModuleItemDependencyEdges(): void {
-    const seenDependencyEdges = new Set<string>()
+    const redirectedEdgeGroups = new Map<string, RedirectedDependencyEdgeGroup>()
 
     function addItemDependencyEdge(
       dep: GraphOutputDependencyRef,
       targetModuleName: string,
-      targetId: string,
-      targetKind: ItemNodeData['kind']
+      targetId: string
     ): void {
       const sourceId = resolveDepNodeId(dep, targetModuleName, moduleMap)
       if (!sourceId) {
@@ -1533,69 +1557,48 @@ function buildGraph(
         return
       }
 
-      const isSourceCollapsed = isModuleCollapsed(sourceModuleName)
-      const isTargetCollapsed = isModuleCollapsed(targetModuleName)
+      const placement = placeDependencyEdge({
+        source: sourceId,
+        target: targetId,
+        sourceModule: sourceModuleName,
+        targetModule: targetModuleName,
+        isSourceModuleCollapsed: isModuleCollapsed(sourceModuleName),
+        isTargetModuleCollapsed: isModuleCollapsed(targetModuleName)
+      })
 
-      if (sourceModuleName === targetModuleName) {
-        if (!isTargetCollapsed) {
-          addDependencyEdge(
-            sourceId,
-            targetId,
-            showProviderToProviderInsideModule
-          )
-        }
+      if (placement.type === 'hidden') {
         return
       }
 
-      if (!isSourceCollapsed && !isTargetCollapsed) {
+      if (placement.type === 'direct') {
         addDependencyEdge(
           sourceId,
           targetId,
-          showProviderToProviderAcrossModule
+          placement.isInsideModule
+            ? showProviderToProviderInsideModule
+            : showProviderToProviderAcrossModule
         )
         return
       }
 
-      const effectiveSourceId = isSourceCollapsed
-        ? `module-${sourceModuleName}`
-        : sourceId
-      const effectiveTargetId = isTargetCollapsed
-        ? `module-${targetModuleName}`
-        : targetId
-      const edgeKey = `${effectiveSourceId}->${effectiveTargetId}:${targetKind}`
-      if (seenDependencyEdges.has(edgeKey)) {
-        return
-      }
-      seenDependencyEdges.add(edgeKey)
-
-      const isNormallyVisible = showProviderToProviderAcrossModule
-      if (isSourceCollapsed && isTargetCollapsed) {
-        // The import between the two modules is drawn from the same handles,
-        // so where it exists both lines run along one path and blend.
-        const sourcePos = modulePositions.get(sourceModuleName)
-        const targetPos = modulePositions.get(targetModuleName)
-        if (sourcePos && targetPos) {
-          addDependencyEdge(
-            effectiveSourceId,
-            effectiveTargetId,
-            isNormallyVisible,
-            targetKind,
-            `e-agg-dep-module-${sourceModuleName}->module-${targetModuleName}-${targetKind}`,
-            pickHandles(sourcePos, targetPos)
-          )
-        }
+      const group = redirectedEdgeGroups.get(placement.key)
+      if (group) {
+        group.itemEdgeKeys.push(placement.itemEdgeKey)
         return
       }
 
-      // Redrawn onto a collapsed target module, a provider's and a
-      // controller's dependency share both ends, so the id names the kind.
-      addDependencyEdge(
-        effectiveSourceId,
-        effectiveTargetId,
-        isNormallyVisible,
-        targetKind,
-        `e-dep-${effectiveSourceId}->${effectiveTargetId}-${targetKind}`
-      )
+      // The import between two collapsed modules is drawn from the same
+      // handles, so where it exists both lines run along one path and blend.
+      const sourcePos = modulePositions.get(sourceModuleName)
+      const targetPos = modulePositions.get(targetModuleName)
+      const handles = placement.isBetweenModules && sourcePos && targetPos
+        ? pickHandles(sourcePos, targetPos)
+        : undefined
+      redirectedEdgeGroups.set(placement.key, {
+        edge: placement,
+        handles,
+        itemEdgeKeys: [placement.itemEdgeKey]
+      })
     }
 
     for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
@@ -1604,8 +1607,7 @@ function buildGraph(
           addItemDependencyEdge(
             dep,
             moduleName,
-            `provider-${moduleName}-${provider.name}`,
-            'provider'
+            `provider-${moduleName}-${provider.name}`
           )
         }
       }
@@ -1615,11 +1617,24 @@ function buildGraph(
           addItemDependencyEdge(
             dep,
             moduleName,
-            `controller-${moduleName}-${controller.name}`,
-            'controller'
+            `controller-${moduleName}-${controller.name}`
           )
         }
       }
+    }
+
+    for (const { edge, handles, itemEdgeKeys } of redirectedEdgeGroups.values()) {
+      addDependencyEdge(
+        edge.source,
+        edge.target,
+        showProviderToProviderAcrossModule,
+        {
+          relationship: edge.relationship,
+          id: edge.id,
+          handles,
+          circularEdgeKeys: itemEdgeKeys
+        }
+      )
     }
   }
 
