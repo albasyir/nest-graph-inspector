@@ -1,5 +1,7 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
+import { join } from 'node:path';
 import {
   Controller,
   Get,
@@ -156,6 +158,7 @@ async function bootInspector(config: {
   port: number;
   accessToken?: NestGraphInspectorModuleOptions['accessToken'];
   directRun?: NestGraphInspectorModuleOptions['directRun'];
+  layoutFilePath?: string;
 }): Promise<{
   app: INestApplication;
   vault: VaultService;
@@ -166,7 +169,16 @@ async function bootInspector(config: {
     imports: [
       VaultModule,
       NestGraphInspectorModule.forRoot({
-        outputs: [{ type: 'viewer', host: config.host, port: config.port }],
+        outputs: [
+          {
+            type: 'viewer',
+            host: config.host,
+            port: config.port,
+            ...(config.layoutFilePath
+              ? { layoutFilePath: config.layoutFilePath }
+              : {}),
+          },
+        ],
         ...(config.accessToken ? { accessToken: config.accessToken } : {}),
         ...(config.directRun ? { directRun: config.directRun } : {}),
       }),
@@ -205,6 +217,16 @@ const CONTROLLER_DIRECT_RUN_BODY = JSON.stringify({
   method: 'readSecret',
 });
 
+const GRAPH_LAYOUT = {
+  version: '1',
+  modules: {
+    VaultModule: {
+      position: { x: 120, y: 40 },
+      items: { VaultService: { x: 16, y: 64 } },
+    },
+  },
+};
+
 function controllerDirectRunBodyFor(method: string): string {
   return JSON.stringify({
     module: 'VaultModule',
@@ -221,23 +243,40 @@ describe('Graph inspector network access', () => {
     let vaultController: VaultController;
     let token: string;
     let origin: string;
+    let layoutDir: string;
+    let layoutFilePath: string;
 
     beforeAll(async () => {
       const port = await freePort();
       origin = `http://127.0.0.1:${port}`;
+      // Kept out of the working tree: the layout routes write a real file.
+      layoutDir = await mkdtemp(join(os.tmpdir(), 'graph-inspector-layout-'));
+      layoutFilePath = join(layoutDir, 'nest-graph-layout.json');
       ({ app, vault, vaultController, token } = await bootInspector({
         host: '127.0.0.1',
         port,
+        layoutFilePath,
       }));
     });
 
-    afterAll(() => app.close());
+    afterAll(async () => {
+      await app.close();
+      await rm(layoutDir, { recursive: true, force: true });
+    });
 
     it.each([
       ['the endpoint metadata', 'GET', '/__graph-inspector/information.json'],
       ['the dependency graph', 'GET', '/__graph-inspector/output.json'],
       ['the graph schema', 'GET', '/__graph-inspector/output.schema.json'],
       ['the markdown graph', 'GET', '/__graph-inspector/output.md'],
+      ['the graph layout', 'GET', '/__graph-inspector/layout.json'],
+      ['the graph layout alias', 'GET', '/__graph-inspector/layout'],
+      ['saving the graph layout', 'POST', '/__graph-inspector/layout'],
+      [
+        'saving the graph layout alias',
+        'POST',
+        '/__graph-inspector/layout.json',
+      ],
       ['direct run', 'POST', '/direct-run'],
       ['the direct run history', 'GET', '/direct-run/histories'],
       ['the direct run history index', 'GET', '/direct-run/history/index.json'],
@@ -297,6 +336,61 @@ describe('Graph inspector network access', () => {
       expect(response.statusCode).toBe(401);
       expect(response.body).not.toContain('production-database-password');
       expect(vaultController.invocations).toEqual([]);
+    });
+
+    it('cannot write the graph layout file without the token', async () => {
+      const response = await probe(`${origin}/__graph-inspector/layout`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(GRAPH_LAYOUT),
+      });
+
+      expect(response.statusCode).toBe(401);
+      await expect(readFile(layoutFilePath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+
+    it('can still complete a CORS preflight for saving the layout without a token', async () => {
+      const response = await probe(`${origin}/__graph-inspector/layout`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://albasyir.github.io',
+          'access-control-request-method': 'POST',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      await expect(readFile(layoutFilePath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+
+    it('saves and reads back the graph layout once it presents the token', async () => {
+      const saved = await probe(`${origin}/__graph-inspector/layout`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(GRAPH_LAYOUT),
+      });
+
+      expect(saved.statusCode).toBe(200);
+      expect(JSON.parse(saved.body)).toEqual({
+        ok: true,
+        message: 'Layout saved successfully',
+      });
+      await expect(readFile(layoutFilePath, 'utf8')).resolves.toBe(
+        `${JSON.stringify(GRAPH_LAYOUT, null, 2)}\n`,
+      );
+
+      const read = await probe(`${origin}/__graph-inspector/layout.json`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(read.statusCode).toBe(200);
+      expect(JSON.parse(read.body)).toEqual(GRAPH_LAYOUT);
     });
 
     it('is served once it presents the token', async () => {

@@ -68,6 +68,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       host: config.host,
       port: config.port,
       path,
+      layoutFilePath: config.layoutFilePath,
       httpAdapter: this.httpServeAdapter,
     });
 

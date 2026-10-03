@@ -73,8 +73,8 @@ delegation targets and do the work directly.
 
 ## Contracts that span packages
 
-Two shared surfaces; changing one side alone breaks the other.
-[`docs/architecture.md`](./docs/architecture.md) explains both in full.
+Three shared surfaces; changing one side alone breaks the other.
+[`docs/architecture.md`](./docs/architecture.md) explains all three in full.
 
 - **Public API** — everything exported from `lib/src/index.ts`. Adding is a
   feature; changing or removing is breaking. Keep
@@ -82,6 +82,14 @@ Two shared surfaces; changing one side alone breaks the other.
 - **Graph output JSON** — produced by `lib/`, consumed by the viewer in `site/`.
   Keep [`docs/graph-contract.md`](./docs/graph-contract.md) and the viewer in
   step with the emitting code.
+- **Graph layout JSON** — read and written in both directions: the viewer
+  saves it through `POST {path}/layout`, and the library validates it and
+  serves it back from `GET {path}/layout.json`. The library rejects fields its
+  layout version does not define, and the hosted viewer is always newer than
+  the installed library, so a new field is a `GRAPH_LAYOUT_SCHEMA_VERSION` bump.
+  Keep the layout section of [`docs/public-api.md`](./docs/public-api.md), the
+  schema in `lib/src/types/graph-layout.schema.ts`, and the viewer's
+  `site/app/utils/graph-layout-*.ts` in step.
 
 ## Library structure
 

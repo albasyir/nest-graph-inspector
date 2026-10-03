@@ -625,6 +625,11 @@ that cannot reach into a Pinia setup store.
   host is being probed.
 - Fetches `output.json` (`GraphOutput`) and validates schema version ≥ 3.
 - Fetches `output.md` for the Markdown view.
+- Fetches `layout.json` once the graph has loaded, and saves layouts to
+  `POST layout` one at a time — or, where the endpoint cannot keep one, to the
+  tab (`layoutPersistence: 'session'`), from where it can be downloaded. A
+  layout that fails to load never fails the graph: the viewer lays it out
+  itself.
 - Detects "legacy" graph outputs and shows an upgrade modal.
 - Turns a `401` into `endpointRequiresAccessToken` and drops the rejected token,
   so a stale tab says "reopen the printed link" instead of replaying a dead
@@ -656,6 +661,10 @@ that cannot reach into a Pinia setup store.
 | `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
 | `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
+| `graph-layout-placement.ts` | Incremental layout: `resolveIncrementalLayout` keeps every saved module and item exactly where the layout says, places items the layout has not seen in the first free slot of their module (growing it to fit), and places new modules beside a module they import or are imported by, else in the nearest free slot — never displacing anything saved. `LAYOUT_GEOMETRY` mirrors the sizes `GraphViewer.vue` draws with; item keys are the viewer's node ids (`provider-<Module>-<Name>`) |
+| `graph-layout-placement.test.ts` | Assert-based test for `graph-layout-placement.ts` |
+| `graph-layout-persistence.ts` | Where a layout lives when the inspector cannot keep it — static graphs, the in-browser demo, and libraries without a layout route keep it per endpoint in memory and `sessionStorage`. Also the shape check for a layout the viewer receives, the file serialization a download uses (byte-for-byte the library's), and reading a failed layout request's `message` and `errors` |
+| `graph-layout-persistence.test.ts` | Assert-based test for `graph-layout-persistence.ts`, with an injected fake `Storage` |
 | `http-error.ts` | Reads the reason and status out of a failed request, so the inspector's own message wins over the transport's |
 | `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |

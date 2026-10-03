@@ -38,7 +38,10 @@ import type {
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
 } from "./types/graph-output.type";
-import { HttpOutputAdapter } from "./adapters/http-output.adapter";
+import {
+  DEFAULT_LAYOUT_FILE_PATH,
+  HttpOutputAdapter,
+} from "./adapters/http-output.adapter";
 import { FileOutputAdapter } from "./adapters/file-output.adapter";
 import { JsonOutputAdapter } from "./adapters/json-output.adapter";
 import { ViewerOutputAdapter } from "./adapters/viewer-output.adapter";
@@ -216,19 +219,30 @@ export class NestGraphInspectorSetup implements OnModuleInit {
   private withDefaultOutputOptions(
     output: NestGraphInspectorOutput,
   ): NestGraphInspectorOutput {
-    if (output.type !== "viewer") {
+    if (output.type !== "viewer" && output.type !== "http") {
       return output;
+    }
+
+    // Precedence, most specific first: the output's own `layoutFilePath`,
+    // then the module-wide one, then the built-in default.
+    const layoutFilePath =
+      output.layoutFilePath ??
+      this.options.layoutFilePath ??
+      DEFAULT_LAYOUT_FILE_PATH;
+    if (output.type === "http") {
+      return { ...output, layoutFilePath };
     }
 
     const defaultViewerOutput = defaultOptions.outputs?.find(
       (defaultOutput) => defaultOutput.type === "viewer",
     );
     if (!defaultViewerOutput || defaultViewerOutput.type !== "viewer") {
-      return output;
+      return { ...output, layoutFilePath };
     }
 
     return {
       ...output,
+      layoutFilePath,
       directRun: this.mergeViewerDirectRunOptions(
         defaultViewerOutput.directRun,
         output.directRun,

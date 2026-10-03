@@ -105,15 +105,16 @@ the library before anything type-aware runs against them (see
 
 ---
 
-## The two contracts that span packages
+## The contracts that span packages
 
-Changing one side of either of these alone breaks the other.
+Changing one side of any of these alone breaks the other.
 
 ### 1. The public API — `lib/src/index.ts`
 
 Everything re-exported there is public: adding is a feature, changing or
 removing is breaking. It currently exports the module and its options types,
-the graph output types and JSON Schema, the Direct Run and runtime-trace types,
+the graph output types and JSON Schema, the graph layout types, JSON Schema
+and `validateGraphLayout`, the Direct Run and runtime-trace types,
 and the access-token/rate-limiter surface (`AccessTokenService`,
 `AccessAttemptLimiter`, and their constants) so an application can mint its own
 tokens. Keep [`public-api.md`](./public-api.md) in step.
@@ -137,6 +138,26 @@ raise the viewer's minimum, and update
 [`graph-contract.md`](./graph-contract.md) — in one pull request. Rather than
 render a graph whose version it does not support, the viewer shows an "update
 your package" modal, so a half-done bump is visible to users immediately.
+
+### 3. The graph layout JSON — `GraphLayout`
+
+Where the viewer has placed a graph's modules and items, saved to a file in
+the host application's working tree so an arrangement survives restarts and
+can be committed. Unlike `GraphOutput` it flows both ways: the viewer reads it
+from `GET {path}/layout.json` and writes it back with `POST {path}/layout`.
+
+| Constant | Location | Value |
+|---|---|---|
+| `GRAPH_LAYOUT_SCHEMA_VERSION` | `lib/src/types/graph-layout.schema.ts` | `'1'` |
+| `GRAPH_LAYOUT_SCHEMA_ID` | `lib/src/types/graph-layout.schema.ts` | `…/schemas/graph-layout-v1.schema.json` |
+
+The library validates every layout it accepts or serves with
+`validateGraphLayout`, and `additionalProperties` is `false` throughout. The
+direction matters here: the hosted viewer is always the latest release while
+the library is whatever version the application installed, so a viewer must
+send an older library only the fields its layout version defines — a new
+field is a version bump, not something an older library quietly drops. Field
+by field, the shape is in [`public-api.md`](./public-api.md#graph-layout-types).
 
 ---
 
@@ -169,7 +190,7 @@ than implementing the port.
 | `AccessTokenService` | `access-token.service.ts` | Mints, verifies, and guards with HMAC-signed tokens |
 | `AccessAttemptLimiter` | `access-attempt-limiter.ts` | Per-client lockout for repeated invalid tokens |
 | `HttpServeAdapter` | `adapters/http-serve.adapter.ts` | Standalone `node:http` server and router; no Express/Fastify |
-| `HttpOutputAdapter` | `adapters/http-output.adapter.ts` | Registers the four graph routes; owns the host/port defaults |
+| `HttpOutputAdapter` | `adapters/http-output.adapter.ts` | Registers the graph and layout routes; owns the host/port and layout-file defaults; reads and writes the layout file |
 | `ViewerOutputAdapter` | `adapters/viewer-output.adapter.ts` | Composes HTTP + Direct Run; prints the viewer link |
 | `FileOutputAdapter` | `adapters/file-output.adapter.ts` | Writes the Markdown report (Mermaid + prose) |
 | `JsonOutputAdapter` | `adapters/json-output.adapter.ts` | Writes raw `GraphOutput` JSON |
@@ -270,8 +291,14 @@ broken output is a log line, not a crash, and easy to miss.
 |---|---|---|
 | `json` | `{ path }` | Writes `GraphOutput` as JSON, relative to `process.cwd()` |
 | `markdown` | `{ path }` | Writes a Mermaid diagram plus a per-module report, and an `information.json` beside it |
-| `http` | `{ origin?, host?, port?, path? }` | Registers the four graph routes; default path `/__nest-graph-inspector` |
-| `viewer` | `{ origin?, host?, port?, path?, directRun? }` | `http` + Direct Run (unless `directRun.enabled: false`) + prints the viewer link; default path `/__graph-inspector` |
+| `http` | `{ origin?, host?, port?, path?, layoutFilePath? }` | Registers the graph and layout routes; default path `/__nest-graph-inspector` |
+| `viewer` | `{ origin?, host?, port?, path?, directRun?, layoutFilePath? }` | `http` + Direct Run (unless `directRun.enabled: false`) + prints the viewer link; default path `/__graph-inspector` |
+
+`layoutFilePath` is resolved most specific first — the output's own, then
+`NestGraphInspectorModuleOptions.layoutFilePath`, then
+`'./nest-graph-layout.json'` — by `NestGraphInspectorSetup`, and a relative
+path resolves against `process.cwd()`. Two outputs left on the default share
+one file.
 
 Everything a `viewer` output installs, on one server:
 
@@ -281,6 +308,8 @@ Everything a `viewer` output installs, on one server:
 | `GET` | `/output.json` | `GraphOutput` |
 | `GET` | `/output.schema.json` | `GRAPH_OUTPUT_JSON_SCHEMA` |
 | `GET` | `/output.md` | The Markdown report |
+| `GET` | `/layout.json`, `/layout` | The saved `GraphLayout`, or `{ version: '1', modules: {} }` when no file exists yet |
+| `POST` | `/layout`, `/layout.json` | Validates the body as a `GraphLayout` and replaces the layout file with it |
 | `POST` | `/direct-run` | Invokes `{ module, target?, provider?, controller?, method, args }` |
 | `GET` | `/direct-run/histories` | Every completed `RuntimeTrace` |
 | `GET` | `/direct-run/history/index.json` | Trace summaries |
@@ -299,6 +328,18 @@ do.
 hold up the host application's own startup on a network that blackholes rather
 than refuses — and that awaited `fetch` is also what keeps the in-browser
 demo's event loop alive long enough to boot.
+
+**The layout routes are the only ones that write to disk on request.** The
+file they write is fixed by configuration, never named by the request, and the
+body is bounded (10 MiB, `MAX_LAYOUT_BODY_BYTES`, `413` beyond it) and must pass
+`validateGraphLayout` before anything is written, so a caller holding the
+token can change what the file says but not where it goes or what kind of
+document it is. Saves to one file run one at a time in arrival order — two
+overlapping `writeFile` calls on one path can interleave into invalid JSON — and
+a read waits for a save in progress. A file that exists but cannot be read back
+as a layout answers `500` with the reason rather than an empty layout, so a
+broken file (a merge conflict in a committed layout, say) is surfaced instead of
+silently replaced by the next save.
 
 `HttpServeAdapter` keys routes by `"METHOD path"` and supports `*` for either
 half plus trailing-`/*` prefixes. Several outputs may register against the same
@@ -889,6 +930,10 @@ Facts a code change can invalidate, and the file to check:
 - Default host/port `0.0.0.0:53371` — `lib/src/adapters/http-output.adapter.ts`
 - Default paths `/__graph-inspector` (viewer) and `/__nest-graph-inspector`
   (http) — the respective adapters
+- Layout schema version `'1'` — `lib/src/types/graph-layout.schema.ts`
+- Default layout file `./nest-graph-layout.json` and the 10 MiB layout body
+  limit — `DEFAULT_LAYOUT_FILE_PATH` and `MAX_LAYOUT_BODY_BYTES` in
+  `lib/src/adapters/http-output.adapter.ts`
 - Token TTL, header, and query parameter — `lib/src/access-token.service.ts`
 - Limiter defaults — `lib/src/access-attempt-limiter.ts`
 - Viewer page names — `site/app/utils/viewer-bootstrap-link.ts`

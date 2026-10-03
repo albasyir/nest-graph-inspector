@@ -25,4 +25,6 @@ export type {
 export type { HttpServeAuthorize } from './adapters/http-serve.adapter';
 export * from './types/graph-output.schema';
 export * from './types/graph-output.type';
+export * from './types/graph-layout.schema';
+export * from './types/graph-layout.type';
 export * from './types/direct-run.type';
