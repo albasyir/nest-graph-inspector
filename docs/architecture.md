@@ -603,9 +603,13 @@ reads it per request. `probeEndpoint` — used by the `/view` entry page to gues
 at a local inspector — pointedly does *not* use that authenticated fetch, so
 probing a host never hands it a live credential for another one.
 
-The viewer pages are `navigator` (the Vue Flow graph), `issues` (circular
-dependencies), and `execution-sequence` (Direct Run traces as a Mermaid
-sequence diagram). `nuxt.config.ts` renders `/view/**` client-side only —
+The viewer pages are `navigator` (the Vue Flow graph), `issues` (architecture
+health: cycles, duplicate providers, unused imports, dead exports, and
+disconnected modules), and `execution-sequence` (Direct Run traces as a Mermaid
+sequence diagram). Everything on `issues` except the cycles is derived in the
+viewer by `app/utils/architecture-issues.ts` from fields the graph already
+carries, so it needs no change to `GraphOutput` and works against any library
+version the viewer supports. `nuxt.config.ts` renders `/view/**` client-side only —
 neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 

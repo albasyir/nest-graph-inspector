@@ -61,6 +61,43 @@ function handleDirectRunDrawerClose() {
 function handleExecutionSequenceOpen() {
   router.push('/view/execution-sequence')
 }
+
+// A module name, as the issues page links to it.
+const focusModuleName = computed(() => {
+  const value = route.query['focus-module']
+  const moduleName = Array.isArray(value) ? value[0] : value
+  return moduleName || undefined
+})
+
+type GraphViewerInstance = {
+  focusModule: (moduleName: string, duration?: number) => Promise<void>
+}
+const graphViewerRef = ref<GraphViewerInstance | null>(null)
+
+// GraphViewer centres the whole graph once after mounting (200 ms) and again
+// on its first resize (debounced 250 ms, animated 200 ms); focusing before
+// both have run would be undone by them.
+const FOCUS_MODULE_SETTLE_MS = 600
+let focusModuleTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(
+  [graphViewerRef, focusModuleName],
+  ([viewer, moduleName]) => {
+    clearTimeout(focusModuleTimer)
+    if (!viewer || !moduleName) {
+      return
+    }
+
+    focusModuleTimer = setTimeout(() => {
+      void viewer.focusModule(moduleName)
+    }, FOCUS_MODULE_SETTLE_MS)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  clearTimeout(focusModuleTimer)
+})
 </script>
 
 <template>
@@ -79,6 +116,7 @@ function handleExecutionSequenceOpen() {
 
   <ClientOnly v-else-if="graphData">
     <GraphViewer
+      ref="graphViewerRef"
       v-model:show-circular-dependencies="showCircularDependencies"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
