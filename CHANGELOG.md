@@ -12,6 +12,16 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-04
+
+### Changed
+
+- **Centralized layout persistence under `ui.layout.saveAs: 'file' | 'runtime'`.** Layout persistence configuration is now configured centrally under `ui.layout.saveAs` (default `'file'`):
+  - **File persistence target standardized to `./.muse`**: Target standardized to `./.muse` in the host project root, formatted with 2 spaces and serialized with atomic sequential writes.
+  - **In-memory runtime persistence mode (`saveAs: 'runtime'`)**: Purely in RAM without modifying or creating files on disk.
+  - **Removed legacy layout configuration**: Removed legacy output-level and module-level `layoutFilePath` configuration options.
+  - **Exported updated public API types**: Exported updated public API types (`NestGraphInspectorUiOptions`, `NestGraphInspectorLayoutOptions`) and comprehensive documentation.
+
 ## [0.13.0] - 2026-10-04
 
 ### Added
