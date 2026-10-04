@@ -3821,6 +3821,7 @@ defineExpose({ centerGraph, focusModule })
           icon="i-lucide-settings"
           color="neutral"
           variant="soft"
+          size="sm"
           square
           class="graph-viewer-settings__trigger nodrag nopan"
           aria-label="Graph settings"
@@ -4712,7 +4713,7 @@ defineExpose({ centerGraph, focusModule })
 .graph-viewer-layout {
   position: absolute;
   top: 12px;
-  right: 56px;
+  right: 46px;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -4725,8 +4726,6 @@ defineExpose({ centerGraph, focusModule })
 }
 
 .graph-viewer-settings__trigger {
-  width: 34px;
-  height: 34px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
 }
 
