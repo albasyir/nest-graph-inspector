@@ -60,11 +60,11 @@ async function openDemo() {
   // to add here.
   graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
   graphStore.trustEndpointVersion(demoStore.endpointUrl)
-  await navigateTo(
-    route.query['execution-sequence'] === 'true'
-      ? '/view/execution-sequence'
-      : '/view/navigator'
-  )
+  // `execution-sequence` is what the trace page was called before it was
+  // renamed, and what older docs previews still ask for.
+  const wantsTrace = route.query.trace === 'true'
+    || route.query['execution-sequence'] === 'true'
+  await navigateTo(wantsTrace ? '/view/trace' : '/view/navigator')
 }
 
 /**

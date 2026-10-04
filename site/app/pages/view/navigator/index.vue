@@ -58,8 +58,8 @@ function handleDirectRunDrawerClose() {
   router.push({ query })
 }
 
-function handleExecutionSequenceOpen() {
-  router.push('/view/execution-sequence')
+function handleTraceOpen() {
+  router.push('/view/trace')
 }
 
 // A module name, as the issues page links to it.
@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
       flush
       @direct-run-drawer-open="handleDirectRunDrawerOpen"
       @direct-run-drawer-close="handleDirectRunDrawerClose"
-      @execution-sequence-open="handleExecutionSequenceOpen"
+      @trace-open="handleTraceOpen"
       @layout-change="graphStore.markLayoutDirty()"
       @layout-save="graphStore.saveLayout"
       @layout-download="graphStore.downloadLayout"

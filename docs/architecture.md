@@ -507,7 +507,7 @@ derives the history directory from that output's path and rewrites its index
 from current memory.
 
 A trace records each span's module, class, and method, but not whether that
-class is a provider or a controller. The viewer's execution-sequence page
+class is a provider or a controller. The viewer's trace page
 therefore re-runs a span only as a provider, and offers to only when the graph
 knows the span's class as a provider of that module and not also as a
 controller there. It never offers to re-run a controller span: re-sent as a
@@ -607,11 +607,16 @@ probing a host never hands it a live credential for another one.
 
 The viewer pages are `navigator` (the Vue Flow graph), `issues` (architecture
 health: cycles, duplicate providers, unused imports, dead exports, and
-disconnected modules), and `execution-sequence` (Direct Run traces as a Mermaid
-sequence diagram). Everything on `issues` except the cycles is derived in the
-viewer by `app/utils/architecture-issues.ts` from fields the graph already
-carries, so it needs no change to `GraphOutput` and works against any library
-version the viewer supports. A module's deep dive lives under the navigator at
+disconnected modules), and `trace` (Direct Run traces as a waterfall of timed,
+nested spans, drawn by `TraceWaterfall.vue`). `trace` was called
+`execution-sequence` until it was renamed; `RENAMED_VIEWER_PAGES` in
+`viewer-bootstrap-link.ts` keeps the old name working, so the bootstrap
+middleware redirects `/view/execution-sequence` to `/view/trace` and an old
+printed link ending in `/execution-sequence` lands there too. Everything on
+`issues` except the cycles is derived in the viewer by
+`app/utils/architecture-issues.ts` from fields the graph already carries, so
+it needs no change to `GraphOutput` and works against any library version the
+viewer supports. A module's deep dive lives under the navigator at
 `/view/navigator/modules/<id>`, where `<id>` is the module name through
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
 than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it

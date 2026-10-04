@@ -201,9 +201,9 @@ any other module.
 
 ## Explicitly out of scope for v1
 
-- Re-running a controller span from `ExecutionSequence.vue`. A re-run can
-  only be sent as a provider: `RuntimeTraceSpan` carries no target-type field
-  to say otherwise (`RuntimeTraceSpanInput.type` is accepted by
+- Re-running a controller span from the trace page (`TraceWaterfall.vue`). A
+  re-run can only be sent as a provider: `RuntimeTraceSpan` carries no
+  target-type field to say otherwise (`RuntimeTraceSpanInput.type` is accepted by
   `RuntimeTraceRecorder.recordSpan` today but never stored, a pre-existing
   gap this feature does not touch). Sent as a provider, a controller span
   does not reliably fail safely: it 404s only when the module has no provider

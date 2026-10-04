@@ -5,7 +5,8 @@ import {
   VIEWER_PAGES,
   decodeEndpointUrl,
   isViewerPage,
-  resolveViewerBootstrap
+  resolveViewerBootstrap,
+  resolveViewerPage
 } from './viewer-bootstrap-link.ts'
 
 const TOKEN = 'ngi1.eyJpYXQiOjEsImV4cCI6Mn0.s1gn-atur_e'
@@ -25,9 +26,17 @@ assert.equal(
   BOOTSTRAP_ENDPOINT
 )
 
-assert.deepEqual([...VIEWER_PAGES], ['navigator', 'issues', 'execution-sequence'])
+assert.deepEqual([...VIEWER_PAGES], ['navigator', 'issues', 'trace'])
 assert.ok(isViewerPage('navigator'))
+assert.ok(isViewerPage('trace'))
 assert.ok(!isViewerPage('nope'))
+
+// A renamed page still answers to its old name, as the page it became: the
+// trace page was `execution-sequence`, and links made before still say so.
+assert.equal(resolveViewerPage('trace'), 'trace')
+assert.equal(resolveViewerPage('execution-sequence'), 'trace')
+assert.ok(!isViewerPage('execution-sequence'), 'a former name is not a page')
+assert.equal(resolveViewerPage('nope'), undefined)
 
 // The printed link is spent on arrival: the endpoint and token come out, and
 // the visitor lands on a page whose URL says nothing about either.
@@ -60,8 +69,13 @@ assert.equal(
   '/view/issues'
 )
 assert.equal(
+  resolveViewerBootstrap(`/view/${encoded}/trace`)?.path,
+  '/view/trace'
+)
+// A link naming a page by its name before a rename lands on the page it became.
+assert.equal(
   resolveViewerBootstrap(`/view/${encoded}/execution-sequence`)?.path,
-  '/view/execution-sequence'
+  '/view/trace'
 )
 // …and an unrecognised second segment falls back rather than 404s.
 assert.equal(
@@ -78,8 +92,9 @@ assert.equal(
 )
 
 // The viewer's own pages are not links to spend. Treating one as a link would
-// decode "navigator" as an endpoint and redirect in a loop.
-for (const page of VIEWER_PAGES) {
+// decode "navigator" as an endpoint and redirect in a loop. A page's former name
+// is no more a link than its current one.
+for (const page of [...VIEWER_PAGES, 'execution-sequence']) {
   assert.equal(
     resolveViewerBootstrap(`/view/${page}`),
     undefined,
@@ -111,6 +126,7 @@ for (const path of [
 for (const path of [
   '/view/navigator/anything',
   '/view/issues/1/2',
+  '/view/trace/x',
   '/view/execution-sequence/x'
 ]) {
   assert.equal(

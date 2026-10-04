@@ -473,7 +473,8 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `AiChatDrawer.vue` / `AiChatPanel.vue` | AI assistant UI. Runs either mode — plain streaming from a graph excerpt, or the ReAct agent through `useGraphAgent` — and renders the agent's tool calls in the transcript so the loop is legible rather than a long silence |
 | `CircularDependencyIssueCard.vue` | Card displaying a single circular dependency issue |
 | `DirectRunSequenceDiagram.vue` | Mermaid sequence diagram for Direct Run traces |
-| `ExecutionSequence.vue` | Full execution sequence view |
+| `TraceWaterfall.vue` | The trace page: Direct Run trace history, each trace a waterfall of timed, nested spans, with re-run for provider spans |
+| `ExecutionSequence.vue` | Deprecated alias for `TraceWaterfall`, kept from before the rename; renders it with every prop and event passed through |
 | `GraphInspectorUpdateModal.vue` | Modal shown when the graph version is unsupported |
 | `NodepodDemoErrorDialog.vue` | Mounted once for the whole app; reports a demo that would not start, with what the application printed before it stopped |
 | `JsonMonacoEditor.client.vue` | Monaco editor (client-only) for JSON viewing |
@@ -541,7 +542,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
 | `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
-| `view/execution-sequence.vue` | `/view/execution-sequence` | Execution sequence diagram for Direct Run traces |
+| `view/trace.vue` | `/view/trace` | Direct Run traces (`TraceWaterfall`). `/view/execution-sequence`, its address before the rename, redirects here — from the middleware in the browser, and from a `routeRules` redirect on a server |
 | `view/[...bootstrap].vue` | `/view/<base64url endpoint>` | Stands in for a printed link while it is spent; the middleware redirects away before it renders |
 
 **No viewer URL identifies a graph.** `/view/navigator` names a *view*; which
@@ -563,7 +564,8 @@ link carrying no token and therefore cannot be opened in the hosted viewer.
 hands the viewer an endpoint and, with it, an access token. It is spent on
 arrival: endpoint and token go to the store, and the address bar is replaced with
 a plain `/view/<page>`. Old links carrying a second segment
-(`/view/<blob>/issues`) still land on the view they named.
+(`/view/<blob>/issues`) still land on the view they named — under its current
+name, so `/view/<blob>/execution-sequence` lands on `/view/trace`.
 
 Two pieces spend it, because one cannot cover both consumers:
 
