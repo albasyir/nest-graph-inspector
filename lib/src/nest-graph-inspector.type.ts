@@ -246,7 +246,8 @@ export interface NestGraphInspectorModuleOptions {
 
   /**
    * UI-facing settings for the viewer, applied to every `viewer` and `http`
-   * output that does not set its own value.
+   * output. Layout persistence is a module-wide setting with no per-output
+   * override.
    */
   ui?: NestGraphInspectorUiOptions;
 }
