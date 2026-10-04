@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import {
   Controller,
   Get,
@@ -158,7 +158,7 @@ async function bootInspector(config: {
   port: number;
   accessToken?: NestGraphInspectorModuleOptions['accessToken'];
   directRun?: NestGraphInspectorModuleOptions['directRun'];
-  layoutFilePath?: string;
+  ui?: NestGraphInspectorModuleOptions['ui'];
 }): Promise<{
   app: INestApplication;
   vault: VaultService;
@@ -174,13 +174,11 @@ async function bootInspector(config: {
             type: 'viewer',
             host: config.host,
             port: config.port,
-            ...(config.layoutFilePath
-              ? { layoutFilePath: config.layoutFilePath }
-              : {}),
           },
         ],
         ...(config.accessToken ? { accessToken: config.accessToken } : {}),
         ...(config.directRun ? { directRun: config.directRun } : {}),
+        ...(config.ui ? { ui: config.ui } : {}),
       }),
     ],
   }).compile();
@@ -243,25 +241,27 @@ describe('Graph inspector network access', () => {
     let vaultController: VaultController;
     let token: string;
     let origin: string;
-    let layoutDir: string;
     let layoutFilePath: string;
 
     beforeAll(async () => {
       const port = await freePort();
       origin = `http://127.0.0.1:${port}`;
-      // Kept out of the working tree: the layout routes write a real file.
-      layoutDir = await mkdtemp(join(os.tmpdir(), 'graph-inspector-layout-'));
-      layoutFilePath = join(layoutDir, 'nest-graph-layout.json');
+      // process.cwd() is left alone: SourceMetadataService reads the
+      // application's own tsconfig.json from it during bootstrap to discover
+      // Direct Run method visibility (e.g. readSecret), so the layout file
+      // lands at the real, fixed ./.muse path relative to the working
+      // directory this suite actually runs from.
+      layoutFilePath = resolve(process.cwd(), '.muse');
+      await rm(layoutFilePath, { force: true });
       ({ app, vault, vaultController, token } = await bootInspector({
         host: '127.0.0.1',
         port,
-        layoutFilePath,
       }));
     });
 
     afterAll(async () => {
       await app.close();
-      await rm(layoutDir, { recursive: true, force: true });
+      await rm(layoutFilePath, { force: true });
     });
 
     it.each([
@@ -631,6 +631,62 @@ describe('Graph inspector network access', () => {
       });
 
       expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe("an anonymous caller with ui.layout.saveAs: 'runtime'", () => {
+    let app: INestApplication;
+    let token: string;
+    let origin: string;
+    let musePath: string;
+
+    beforeAll(async () => {
+      const port = await freePort();
+      origin = `http://127.0.0.1:${port}`;
+      // Same reasoning as the suite above: process.cwd() stays real so
+      // SourceMetadataService can still find the application's tsconfig.json.
+      musePath = resolve(process.cwd(), '.muse');
+      await rm(musePath, { force: true });
+      ({ app, token } = await bootInspector({
+        host: '127.0.0.1',
+        port,
+        ui: { layout: { saveAs: 'runtime' } },
+      }));
+    });
+
+    afterAll(async () => {
+      await app.close();
+      await rm(musePath, { force: true });
+    });
+
+    it('saves and reads back the graph layout in memory, never touching ./.muse', async () => {
+      const saved = await probe(`${origin}/__graph-inspector/layout`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(GRAPH_LAYOUT),
+      });
+
+      expect(saved.statusCode).toBe(200);
+      expect(JSON.parse(saved.body)).toEqual({
+        ok: true,
+        message: 'Layout saved successfully',
+      });
+      await expect(readFile(musePath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+
+      const read = await probe(`${origin}/__graph-inspector/layout.json`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(read.statusCode).toBe(200);
+      expect(JSON.parse(read.body)).toEqual(GRAPH_LAYOUT);
+      await expect(readFile(musePath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
     });
   });
 

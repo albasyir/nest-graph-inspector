@@ -170,7 +170,7 @@ The options object passed to `forRoot()`.
 | `nestCoreModuleName` | `string` | No | `'NestJSCoreModule'` | Name for the virtual NestJS core module |
 | `nestCoreProviders` | `string[]` | No | `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']` | Providers grouped under the virtual core module |
 | `directRun` | `NestGraphInspectorViewerDirectRunOptions` | No | `{ allowUnsafeMethods: true, maxBodySizeBytes: 50 MiB }` | Module-wide Direct Run defaults, applied to every `viewer` output that does not set its own `directRun.allowUnsafeMethods` or `directRun.maxBodySizeBytes`; a `viewer` output's own `directRun` wins where it sets a value |
-| `layoutFilePath` | `string` | No | `'./nest-graph-layout.json'` | File the graph layout is read from and saved to, for every `viewer` and `http` output that does not set its own `layoutFilePath`. A relative path resolves against `process.cwd()`; missing parent directories are created on save. See [Graph layout](#graph-layout-types) |
+| `ui` | `NestGraphInspectorUiOptions` | No | `{ layout: { saveAs: 'file' } }` | UI-facing settings, applied to every `viewer` and `http` output. Currently holds only `layout.saveAs`; see [Graph layout](#graph-layout-types) |
 
 ---
 
@@ -185,19 +185,18 @@ The options object passed to `forRoot()`.
 ```ts
 type NestGraphInspectorOutput =
   | { type: 'viewer'; origin?: string; host?: string; port?: number;
-      path?: string; directRun?: NestGraphInspectorViewerDirectRunOptions;
-      layoutFilePath?: string; }
+      path?: string; directRun?: NestGraphInspectorViewerDirectRunOptions; }
   | { type: 'markdown'; path: string }
   | { type: 'json'; path: string }
-  | { type: 'http'; origin?: string; host?: string; port?: number; path?: string;
-      layoutFilePath?: string; }
+  | { type: 'http'; origin?: string; host?: string; port?: number; path?: string; }
 ```
 
 Discriminator: `type` field. Each member configures one output channel.
 
-`layoutFilePath` on a `viewer` or `http` output overrides the module-wide
-`NestGraphInspectorModuleOptions.layoutFilePath`, which in turn overrides the
-`'./nest-graph-layout.json'` default.
+Layout persistence is not configurable per output. Every `viewer` and `http`
+output shares the one module-wide setting,
+`NestGraphInspectorModuleOptions.ui.layout.saveAs`; see
+[Graph layout](#graph-layout-types).
 
 ---
 
@@ -215,6 +214,50 @@ type NestGraphInspectorViewerOptions = Extract<NestGraphInspectorOutput, { type:
 
 The `viewer` member of the output union, named so a consumer can type a
 viewer output on its own without repeating the `Extract`.
+
+---
+
+### `NestGraphInspectorUiOptions`
+
+| | |
+|---|---|
+| **Kind** | Interface |
+| **Stability** | Stable |
+| **Documented** | Yes — configuration docs, this document |
+
+```ts
+interface NestGraphInspectorUiOptions {
+  layout?: NestGraphInspectorLayoutOptions;
+}
+```
+
+Set on `NestGraphInspectorModuleOptions.ui`. Currently a single field; grouped
+under `ui` so viewer-facing settings have one place to grow into, separate
+from graph-extraction options like `ignoreProvider`.
+
+---
+
+### `NestGraphInspectorLayoutOptions`
+
+| | |
+|---|---|
+| **Kind** | Interface |
+| **Stability** | Stable |
+| **Documented** | Yes — configuration docs, this document |
+
+```ts
+interface NestGraphInspectorLayoutOptions {
+  saveAs?: 'file' | 'runtime';
+}
+```
+
+How graph layout is persisted, for every `viewer` and `http` output — this is
+a module-wide setting, not configurable per output.
+
+| Value | Behavior |
+|---|---|
+| `'file'` (default) | Saved to a fixed path, `./.muse` relative to `process.cwd()`. Not configurable. |
+| `'runtime'` | Kept purely in memory on `HttpOutputAdapter`; no file is ever read or written. Resets to an empty layout (`{ version: '1', modules: {} }`) on every process restart. |
 
 ---
 
@@ -510,19 +553,29 @@ https://albasyir.github.io/nest-graph-inspector/schemas/graph-output-v3.schema.j
 
 ## Graph layout types
 
-All exported from `src/types/graph-layout.type.ts`. They describe the file the
-viewer's arrangement of a graph is saved to, and the body of the layout
-endpoints every `viewer` and `http` output installs:
+All exported from `src/types/graph-layout.type.ts`. They describe the
+viewer's arrangement of a graph, persisted according to
+`NestGraphInspectorModuleOptions.ui.layout.saveAs` (see
+[`NestGraphInspectorLayoutOptions`](#nestgraphinspectorlayoutoptions)), and the
+body of the layout endpoints every `viewer` and `http` output installs:
 
 | Method | Path (relative to the output's `path`) | Behaviour |
 |---|---|---|
-| `GET` | `/layout.json`, `/layout` | `200` with the saved `GraphLayout`, or `{ version: '1', modules: {} }` when no file exists yet. `500` with `{ ok: false, message, errors? }` when the file exists but is not valid JSON or not a valid layout — it is reported, never served as empty |
-| `POST` | `/layout`, `/layout.json` | Replaces the saved layout with the body. `200` `{ ok: true, message: 'Layout saved successfully' }`; `400` `{ ok: false, message: 'Invalid layout payload', errors }` for a body that fails `validateGraphLayout`, or `{ ok: false, message }` for one that is not JSON; `413` over 10 MiB; `500` when the file cannot be written |
+| `GET` | `/layout.json`, `/layout` | `200` with the saved `GraphLayout`, or `{ version: '1', modules: {} }` when nothing has been saved yet. In `'file'` mode, `500` with `{ ok: false, message, errors? }` when `./.muse` exists but is not valid JSON or not a valid layout — it is reported, never served as empty |
+| `POST` | `/layout`, `/layout.json` | Replaces the saved layout with the body. `200` `{ ok: true, message: 'Layout saved successfully' }`; `400` `{ ok: false, message: 'Invalid layout payload', errors }` for a body that fails `validateGraphLayout`, or `{ ok: false, message }` for one that is not JSON; `413` over 10 MiB; in `'file'` mode, `500` when the file cannot be written |
 
-Both are token-guarded like every other inspector route. Saves to one file are
-written one at a time in arrival order, so overlapping requests cannot
+Both are token-guarded like every other inspector route.
+
+**`saveAs: 'file'` (default).** Saved to `./.muse`, relative to
+`process.cwd()` — fixed, not configurable per output. Saves to that one file
+are written one at a time in arrival order, so overlapping requests cannot
 interleave into an invalid file and the later request is the one that lands.
 The file is written as `JSON.stringify(layout, null, 2) + '\n'`.
+
+**`saveAs: 'runtime'`.** Kept purely in memory on `HttpOutputAdapter` — no file
+is ever read or written, and every `viewer`/`http` output on the process
+shares that one in-memory layout. It resets to `{ version: '1', modules: {} }`
+on every restart.
 
 ### `GraphLayout`
 
@@ -997,6 +1050,8 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `NestGraphInspectorOutput` | Union type | Stable / partial | ✅ | ✅ |
 | `NestGraphInspectorViewerDirectRunOptions` | Type | Experimental | ✅ | ✅ |
 | `NestGraphInspectorViewerOptions` | Type | Stable | ✅ | ✅ |
+| `NestGraphInspectorUiOptions` | Interface | Stable | ✅ | ✅ |
+| `NestGraphInspectorLayoutOptions` | Interface | Stable | ✅ | ✅ |
 | `GraphLayout` | Type | Stable | ✅ | ✅ |
 | `GraphLayoutModule` | Type | Stable | ✅ | ✅ |
 | `GraphLayoutPosition` | Type | Stable | ✅ | ✅ |

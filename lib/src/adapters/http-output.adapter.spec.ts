@@ -285,15 +285,18 @@ describe(HttpOutputAdapter.name, () => {
         },
         body,
       });
-    const install = async (layoutFilePath?: string) => {
+    const install = async (saveAs?: 'file' | 'runtime') => {
       const port = await availablePort();
-      await adapter.execute({} as never, {
-        type: 'http',
-        host: '127.0.0.1',
-        port,
-        path: '/graph',
-        ...(layoutFilePath ? { layoutFilePath } : {}),
-      });
+      await adapter.execute(
+        {} as never,
+        {
+          type: 'http',
+          host: '127.0.0.1',
+          port,
+          path: '/graph',
+          ...(saveAs ? { layout: { saveAs } } : {}),
+        } as never,
+      );
       origin = `http://127.0.0.1:${port}`;
     };
     const expectNoFile = (filePath: string) =>
@@ -301,6 +304,7 @@ describe(HttpOutputAdapter.name, () => {
 
     beforeEach(async () => {
       layoutDir = await mkdtemp(join(tmpdir(), 'graph-layout-'));
+      jest.spyOn(process, 'cwd').mockReturnValue(layoutDir);
     });
 
     afterEach(async () => {
@@ -308,247 +312,315 @@ describe(HttpOutputAdapter.name, () => {
       await rm(layoutDir, { recursive: true, force: true });
     });
 
-    it('serves an empty layout from both GET paths until one is saved', async () => {
-      await install(join(layoutDir, 'layout.json'));
+    describe("saveAs: 'file' (default)", () => {
+      const muse = () => join(layoutDir, '.muse');
 
-      for (const path of ['/graph/layout.json', '/graph/layout']) {
-        const response = await get(`${origin}${path}`);
+      it('serves an empty layout from both GET paths until one is saved', async () => {
+        await install();
+
+        for (const path of ['/graph/layout.json', '/graph/layout']) {
+          const response = await get(`${origin}${path}`);
+
+          expect(response.statusCode).toBe(200);
+          expect(response.headers['content-type']).toBe(
+            'application/json; charset=utf-8',
+          );
+          expect(JSON.parse(response.body)).toEqual({
+            version: '1',
+            modules: {},
+          });
+        }
+      });
+
+      it('saves a layout from both POST paths to ./.muse, formatted for committing, and serves it back', async () => {
+        await install();
+
+        for (const [path, x] of [
+          ['/graph/layout', 1],
+          ['/graph/layout.json', 2],
+        ] as const) {
+          const saved: GraphLayout = {
+            ...layout,
+            modules: { ...layout.modules, AppModule: { position: { x, y: 0 } } },
+          };
+
+          const response = await post(`${origin}${path}`, JSON.stringify(saved));
+
+          expect(response.statusCode).toBe(200);
+          expect(JSON.parse(response.body)).toEqual({
+            ok: true,
+            message: 'Layout saved successfully',
+          });
+          await expect(readFile(muse(), 'utf8')).resolves.toBe(
+            `${JSON.stringify(saved, null, 2)}\n`,
+          );
+          expect(
+            JSON.parse((await get(`${origin}/graph/layout.json`)).body),
+          ).toEqual(saved);
+        }
+      });
+
+      it('saves explicitly configured saveAs: "file" to ./.muse too', async () => {
+        await install('file');
+
+        const response = await post(
+          `${origin}/graph/layout`,
+          JSON.stringify(layout),
+        );
 
         expect(response.statusCode).toBe(200);
-        expect(response.headers['content-type']).toBe(
-          'application/json; charset=utf-8',
+        await expect(readFile(muse(), 'utf8')).resolves.toBe(
+          serializeGraphLayout(layout),
         );
+      });
+
+      it('rejects an invalid layout with the reasons, and leaves the saved one alone', async () => {
+        await writeFile(muse(), serializeGraphLayout(layout));
+        await install();
+
+        const response = await post(
+          `${origin}/graph/layout`,
+          JSON.stringify({
+            version: '2',
+            modules: { UserModule: { position: { x: 'left', y: 0 } } },
+          }),
+        );
+
+        expect(response.statusCode).toBe(400);
         expect(JSON.parse(response.body)).toEqual({
-          version: '1',
-          modules: {},
+          ok: false,
+          message: 'Invalid layout payload',
+          errors: [
+            'layout/version must be "1"',
+            'layout/modules/UserModule/position/x must be a finite number',
+          ],
         });
-      }
-    });
+        await expect(readFile(muse(), 'utf8')).resolves.toBe(
+          serializeGraphLayout(layout),
+        );
+      });
 
-    it('saves a layout from both POST paths, formatted for committing, and serves it back', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
+      it.each([
+        ['an empty body', ''],
+        ['malformed JSON', '{"version":'],
+      ])('rejects %s', async (_label, body) => {
+        await install();
 
-      for (const [path, x] of [
-        ['/graph/layout', 1],
-        ['/graph/layout.json', 2],
-      ] as const) {
-        const saved: GraphLayout = {
-          ...layout,
-          modules: { ...layout.modules, AppModule: { position: { x, y: 0 } } },
+        const response = await post(`${origin}/graph/layout`, body);
+
+        expect(response.statusCode).toBe(400);
+        expect(JSON.parse(response.body)).toEqual({
+          ok: false,
+          message: 'Request body is not valid JSON.',
+        });
+        await expectNoFile(muse());
+      });
+
+      it('refuses a body over the size limit before parsing it', async () => {
+        await install();
+
+        const response = await post(
+          `${origin}/graph/layout`,
+          'x'.repeat(MAX_LAYOUT_BODY_BYTES + 1),
+        );
+
+        expect(response.statusCode).toBe(413);
+        expect(JSON.parse(response.body)).toEqual({
+          ok: false,
+          message: 'Request body is too large.',
+        });
+        await expectNoFile(muse());
+      });
+
+      it('refuses to read or save the layout without a token', async () => {
+        await install();
+
+        const read = await httpGet(`${origin}/graph/layout.json`);
+        const save = await httpRequest(`${origin}/graph/layout`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(layout),
+        });
+
+        expect(read.statusCode).toBe(401);
+        expect(save.statusCode).toBe(401);
+        await expectNoFile(muse());
+      });
+
+      it('reports a layout file it cannot read back instead of serving it as empty', async () => {
+        await install();
+
+        // What a merge conflict leaves behind in a committed layout file.
+        await writeFile(muse(), '<<<<<<< HEAD\n{}\n');
+        const unparsable = await get(`${origin}/graph/layout.json`);
+
+        expect(unparsable.statusCode).toBe(500);
+        expect(JSON.parse(unparsable.body)).toMatchObject({ ok: false });
+        expect(JSON.parse(unparsable.body).message).toContain(
+          `Graph layout file ${muse()} is not valid JSON`,
+        );
+
+        await writeFile(muse(), JSON.stringify({ version: '1' }));
+        const invalid = await get(`${origin}/graph/layout.json`);
+
+        expect(invalid.statusCode).toBe(500);
+        expect(JSON.parse(invalid.body)).toEqual({
+          ok: false,
+          message: `Graph layout file ${muse()} is not a valid graph layout`,
+          errors: ['layout is missing required property "modules"'],
+        });
+      });
+
+      it('lands overlapping saves one at a time, so the file always holds one whole layout', async () => {
+        await install();
+        // Different sizes on purpose: two interleaved writes of unequal length
+        // would leave the longer one's tail behind the shorter one.
+        const large: GraphLayout = {
+          version: '1',
+          modules: Object.fromEntries(
+            Array.from({ length: 500 }, (_, index) => [
+              `Module${index}`,
+              { position: { x: index, y: index } },
+            ]),
+          ),
         };
 
-        const response = await post(`${origin}${path}`, JSON.stringify(saved));
+        const responses = await Promise.all([
+          post(`${origin}/graph/layout`, JSON.stringify(large)),
+          post(`${origin}/graph/layout`, JSON.stringify(layout)),
+          post(`${origin}/graph/layout`, JSON.stringify(large)),
+        ]);
 
-        expect(response.statusCode).toBe(200);
-        expect(JSON.parse(response.body)).toEqual({
-          ok: true,
-          message: 'Layout saved successfully',
-        });
-        await expect(readFile(filePath, 'utf8')).resolves.toBe(
-          `${JSON.stringify(saved, null, 2)}\n`,
+        expect(responses.map((response) => response.statusCode)).toEqual([
+          200, 200, 200,
+        ]);
+        expect([
+          serializeGraphLayout(large),
+          serializeGraphLayout(layout),
+        ]).toContain(await readFile(muse(), 'utf8'));
+      });
+    });
+
+    describe("saveAs: 'runtime'", () => {
+      it('serves an empty layout from both GET paths until one is saved, entirely from RAM', async () => {
+        await install('runtime');
+
+        for (const path of ['/graph/layout.json', '/graph/layout']) {
+          const response = await get(`${origin}${path}`);
+
+          expect(response.statusCode).toBe(200);
+          expect(response.headers['content-type']).toBe(
+            'application/json; charset=utf-8',
+          );
+          expect(JSON.parse(response.body)).toEqual({
+            version: '1',
+            modules: {},
+          });
+        }
+
+        await expectNoFile(join(layoutDir, '.muse'));
+      });
+
+      it('saves and reads back a layout from memory, writing nothing to disk', async () => {
+        await install('runtime');
+
+        for (const [path, x] of [
+          ['/graph/layout', 1],
+          ['/graph/layout.json', 2],
+        ] as const) {
+          const saved: GraphLayout = {
+            ...layout,
+            modules: { ...layout.modules, AppModule: { position: { x, y: 0 } } },
+          };
+
+          const response = await post(`${origin}${path}`, JSON.stringify(saved));
+
+          expect(response.statusCode).toBe(200);
+          expect(JSON.parse(response.body)).toEqual({
+            ok: true,
+            message: 'Layout saved successfully',
+          });
+          expect(
+            JSON.parse((await get(`${origin}/graph/layout.json`)).body),
+          ).toEqual(saved);
+        }
+
+        await expectNoFile(join(layoutDir, '.muse'));
+      });
+
+      it('rejects an invalid layout without touching the in-memory layout or disk', async () => {
+        await install('runtime');
+        await post(`${origin}/graph/layout`, JSON.stringify(layout));
+
+        const response = await post(
+          `${origin}/graph/layout`,
+          JSON.stringify({
+            version: '2',
+            modules: { UserModule: { position: { x: 'left', y: 0 } } },
+          }),
         );
+
+        expect(response.statusCode).toBe(400);
+        expect(JSON.parse(response.body)).toEqual({
+          ok: false,
+          message: 'Invalid layout payload',
+          errors: [
+            'layout/version must be "1"',
+            'layout/modules/UserModule/position/x must be a finite number',
+          ],
+        });
         expect(
           JSON.parse((await get(`${origin}/graph/layout.json`)).body),
-        ).toEqual(saved);
-      }
-    });
-
-    it('resolves a relative layoutFilePath against the working directory and creates its parent directories', async () => {
-      jest.spyOn(process, 'cwd').mockReturnValue(layoutDir);
-      await install('nested/dir/layout.json');
-
-      const response = await post(
-        `${origin}/graph/layout`,
-        JSON.stringify(layout),
-      );
-
-      expect(response.statusCode).toBe(200);
-      await expect(
-        readFile(join(layoutDir, 'nested', 'dir', 'layout.json'), 'utf8'),
-      ).resolves.toBe(serializeGraphLayout(layout));
-    });
-
-    it('saves to nest-graph-layout.json in the working directory when no path is configured', async () => {
-      jest.spyOn(process, 'cwd').mockReturnValue(layoutDir);
-      await install();
-
-      const response = await post(
-        `${origin}/graph/layout`,
-        JSON.stringify(layout),
-      );
-
-      expect(response.statusCode).toBe(200);
-      await expect(
-        readFile(join(layoutDir, 'nest-graph-layout.json'), 'utf8'),
-      ).resolves.toBe(serializeGraphLayout(layout));
-    });
-
-    it('rejects an invalid layout with the reasons, and leaves the saved one alone', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await writeFile(filePath, serializeGraphLayout(layout));
-      await install(filePath);
-
-      const response = await post(
-        `${origin}/graph/layout`,
-        JSON.stringify({
-          version: '2',
-          modules: { UserModule: { position: { x: 'left', y: 0 } } },
-        }),
-      );
-
-      expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body)).toEqual({
-        ok: false,
-        message: 'Invalid layout payload',
-        errors: [
-          'layout/version must be "1"',
-          'layout/modules/UserModule/position/x must be a finite number',
-        ],
-      });
-      await expect(readFile(filePath, 'utf8')).resolves.toBe(
-        serializeGraphLayout(layout),
-      );
-    });
-
-    it.each([
-      ['an empty body', ''],
-      ['malformed JSON', '{"version":'],
-    ])('rejects %s', async (_label, body) => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
-
-      const response = await post(`${origin}/graph/layout`, body);
-
-      expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body)).toEqual({
-        ok: false,
-        message: 'Request body is not valid JSON.',
-      });
-      await expectNoFile(filePath);
-    });
-
-    it('refuses a body over the size limit before parsing it', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
-
-      const response = await post(
-        `${origin}/graph/layout`,
-        'x'.repeat(MAX_LAYOUT_BODY_BYTES + 1),
-      );
-
-      expect(response.statusCode).toBe(413);
-      expect(JSON.parse(response.body)).toEqual({
-        ok: false,
-        message: 'Request body is too large.',
-      });
-      await expectNoFile(filePath);
-    });
-
-    it('refuses to read or save the layout without a token', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
-
-      const read = await httpGet(`${origin}/graph/layout.json`);
-      const save = await httpRequest(`${origin}/graph/layout`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(layout),
+        ).toEqual(layout);
+        await expectNoFile(join(layoutDir, '.muse'));
       });
 
-      expect(read.statusCode).toBe(401);
-      expect(save.statusCode).toBe(401);
-      await expectNoFile(filePath);
-    });
+      it.each([
+        ['an empty body', ''],
+        ['malformed JSON', '{"version":'],
+      ])('rejects %s', async (_label, body) => {
+        await install('runtime');
 
-    it('reports a layout file it cannot read back instead of serving it as empty', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
+        const response = await post(`${origin}/graph/layout`, body);
 
-      // What a merge conflict leaves behind in a committed layout file.
-      await writeFile(filePath, '<<<<<<< HEAD\n{}\n');
-      const unparsable = await get(`${origin}/graph/layout.json`);
-
-      expect(unparsable.statusCode).toBe(500);
-      expect(JSON.parse(unparsable.body)).toMatchObject({ ok: false });
-      expect(JSON.parse(unparsable.body).message).toContain(
-        `Graph layout file ${filePath} is not valid JSON`,
-      );
-
-      await writeFile(filePath, JSON.stringify({ version: '1' }));
-      const invalid = await get(`${origin}/graph/layout.json`);
-
-      expect(invalid.statusCode).toBe(500);
-      expect(JSON.parse(invalid.body)).toEqual({
-        ok: false,
-        message: `Graph layout file ${filePath} is not a valid graph layout`,
-        errors: ['layout is missing required property "modules"'],
-      });
-    });
-
-    it('reports a layout path it cannot write to', async () => {
-      const blocker = join(layoutDir, 'not-a-directory');
-      await writeFile(blocker, '');
-      const filePath = join(blocker, 'layout.json');
-      await install(filePath);
-
-      const response = await post(
-        `${origin}/graph/layout`,
-        JSON.stringify(layout),
-      );
-
-      expect(response.statusCode).toBe(500);
-      expect(JSON.parse(response.body).message).toContain(
-        `Graph layout could not be saved to ${filePath}`,
-      );
-    });
-
-    it('lands overlapping saves one at a time, so the file always holds one whole layout', async () => {
-      const filePath = join(layoutDir, 'layout.json');
-      await install(filePath);
-      // Different sizes on purpose: two interleaved writes of unequal length
-      // would leave the longer one's tail behind the shorter one.
-      const large: GraphLayout = {
-        version: '1',
-        modules: Object.fromEntries(
-          Array.from({ length: 500 }, (_, index) => [
-            `Module${index}`,
-            { position: { x: index, y: index } },
-          ]),
-        ),
-      };
-
-      const responses = await Promise.all([
-        post(`${origin}/graph/layout`, JSON.stringify(large)),
-        post(`${origin}/graph/layout`, JSON.stringify(layout)),
-        post(`${origin}/graph/layout`, JSON.stringify(large)),
-      ]);
-
-      expect(responses.map((response) => response.statusCode)).toEqual([
-        200, 200, 200,
-      ]);
-      expect([
-        serializeGraphLayout(large),
-        serializeGraphLayout(layout),
-      ]).toContain(await readFile(filePath, 'utf8'));
-    });
-
-    it('creates a missing parent directory only when a layout is saved', async () => {
-      const filePath = join(layoutDir, 'later', 'layout.json');
-      await install(filePath);
-
-      await get(`${origin}/graph/layout.json`);
-      await expect(readFile(join(layoutDir, 'later'))).rejects.toMatchObject({
-        code: 'ENOENT',
+        expect(response.statusCode).toBe(400);
+        expect(JSON.parse(response.body)).toEqual({
+          ok: false,
+          message: 'Request body is not valid JSON.',
+        });
+        await expectNoFile(join(layoutDir, '.muse'));
       });
 
-      expect(
-        (await post(`${origin}/graph/layout`, JSON.stringify(layout)))
-          .statusCode,
-      ).toBe(200);
-      await expect(readFile(filePath, 'utf8')).resolves.toBe(
-        serializeGraphLayout(layout),
-      );
+      it('refuses a body over the size limit before parsing it', async () => {
+        await install('runtime');
+
+        const response = await post(
+          `${origin}/graph/layout`,
+          'x'.repeat(MAX_LAYOUT_BODY_BYTES + 1),
+        );
+
+        expect(response.statusCode).toBe(413);
+        expect(JSON.parse(response.body)).toEqual({
+          ok: false,
+          message: 'Request body is too large.',
+        });
+        await expectNoFile(join(layoutDir, '.muse'));
+      });
+
+      it('refuses to read or save the layout without a token', async () => {
+        await install('runtime');
+
+        const read = await httpGet(`${origin}/graph/layout.json`);
+        const save = await httpRequest(`${origin}/graph/layout`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(layout),
+        });
+
+        expect(read.statusCode).toBe(401);
+        expect(save.statusCode).toBe(401);
+        await expectNoFile(join(layoutDir, '.muse'));
+      });
     });
   });
 

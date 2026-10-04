@@ -23,8 +23,10 @@ export type GraphLayoutModule = {
 };
 
 /**
- * The arrangement of a graph in the viewer, persisted to `layoutFilePath` and
- * served at `{path}/layout.json`.
+ * The arrangement of a graph in the viewer, served at `{path}/layout.json`.
+ * Persisted according to `ui.layout.saveAs`: `'file'` (default) saves to
+ * `./.muse` relative to `process.cwd()`; `'runtime'` keeps it in memory only,
+ * resetting on restart.
  */
 export type GraphLayout = {
   $schema?: string;

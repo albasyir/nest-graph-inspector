@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { OutputAdapter } from '../ports/output.adapter';
-import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
+import {
+  NestGraphInspectorLayoutOptions,
+  NestGraphInspectorOutput,
+} from '../nest-graph-inspector.type';
 import { GraphOutputSource, HttpOutputAdapter } from './http-output.adapter';
 import { HttpServeAdapter } from './http-serve.adapter';
 import { DirectRunOutputAdapter } from './direct-run-output.adapter';
@@ -13,6 +16,7 @@ import { AccessTokenService } from '../access-token.service';
 
 type ViewerOutputConfig = Extract<NestGraphInspectorOutput, { type: 'viewer' }>;
 type ViewerOutputInternalConfig = ViewerOutputConfig & {
+  layout?: NestGraphInspectorLayoutOptions;
   directRun?: {
     enabled?: boolean;
     path: string;
@@ -68,7 +72,7 @@ export class ViewerOutputAdapter implements OutputAdapter<ViewerOutputConfig> {
       host: config.host,
       port: config.port,
       path,
-      layoutFilePath: config.layoutFilePath,
+      layout: internalConfig.layout,
       httpAdapter: this.httpServeAdapter,
     });
 
