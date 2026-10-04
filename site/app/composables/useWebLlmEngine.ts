@@ -3,6 +3,7 @@ import type {
   InitProgressReport,
   MLCEngineInterface
 } from '@mlc-ai/web-llm'
+import { MOBILE_DISCLAIMER_MESSAGE, isMobileDevice } from '~/utils/device-detection'
 import { toWebLlmTemplateMessages } from '~/utils/web-llm-boundary'
 import type {
   WebLlmChatMessage,
@@ -117,7 +118,18 @@ function toRequestMessages(messages: readonly WebLlmChatMessage[]): ChatCompleti
   })
 }
 
-export function useWebLlmEngine() {
+export type WebLlmEngineOptions = {
+  /**
+   * Whether this is a mobile device, asked before anything touches WebGPU or
+   * web-llm. Defaults to {@link isMobileDevice}; the panel passes its own
+   * reactive answer so the engine and the UI never disagree.
+   */
+  isMobile?: () => boolean
+}
+
+export function useWebLlmEngine(options: WebLlmEngineOptions = {}) {
+  const isMobile = options.isMobile ?? (() => isMobileDevice())
+
   const isSupported = ref(false)
   const supportReason = ref('')
   const isCheckingSupport = ref(false)
@@ -149,6 +161,16 @@ export function useWebLlmEngine() {
    * mounted rather than deriving it.
    */
   async function checkSupport(): Promise<boolean> {
+    // Asked first, and answered without probing: a mobile browser can grant a
+    // GPU adapter and still kill the tab once the weights start arriving, so a
+    // "yes" from WebGPU would be the wrong answer here.
+    if (isMobile()) {
+      isSupported.value = false
+      supportReason.value = MOBILE_DISCLAIMER_MESSAGE
+
+      return false
+    }
+
     if (!import.meta.client) {
       return false
     }
@@ -218,6 +240,17 @@ export function useWebLlmEngine() {
    * failure instead of an empty menu.
    */
   async function refreshCatalog(): Promise<void> {
+    // Reading the catalog means loading web-llm's 6 MB runtime, which is
+    // wasted on a device that will never be allowed to run a model.
+    if (isMobile()) {
+      catalog.value = []
+      cachedModelIds.value = []
+      hasLoadedCatalog.value = false
+      error.value = MOBILE_DISCLAIMER_MESSAGE
+
+      return
+    }
+
     if (!import.meta.client) {
       return
     }
@@ -273,6 +306,12 @@ export function useWebLlmEngine() {
    * message.
    */
   async function prepareModel(modelId: string): Promise<void> {
+    if (isMobile()) {
+      error.value = MOBILE_DISCLAIMER_MESSAGE
+
+      throw new WebLlmError('unsupported', MOBILE_DISCLAIMER_MESSAGE)
+    }
+
     if (!import.meta.client || !modelId) {
       return
     }
@@ -376,6 +415,10 @@ export function useWebLlmEngine() {
     options: WebLlmStreamOptions,
     onDelta: (delta: WebLlmStreamDelta) => void
   ): Promise<void> {
+    if (isMobile()) {
+      throw new WebLlmError('unsupported', MOBILE_DISCLAIMER_MESSAGE)
+    }
+
     if (!import.meta.client) {
       return
     }
