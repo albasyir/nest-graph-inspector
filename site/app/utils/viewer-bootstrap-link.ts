@@ -6,9 +6,19 @@ import { readAccessToken, redactAccessToken } from './inspector-access-token.ts'
  * The graph being viewed lives in the store for the tab, not in the path — so
  * these paths mean "show me this view of whatever graph this tab is on".
  */
-export const VIEWER_PAGES = ['navigator', 'issues', 'execution-sequence'] as const
+export const VIEWER_PAGES = ['navigator', 'issues', 'trace'] as const
 
 export type ViewerPage = (typeof VIEWER_PAGES)[number]
+
+/**
+ * Names the viewer's pages used to have, and the page each one became.
+ *
+ * Links and bookmarks made before a rename still carry the old name: `trace`
+ * was `execution-sequence` until it was renamed.
+ */
+const RENAMED_VIEWER_PAGES = new Map<string, ViewerPage>([
+  ['execution-sequence', 'trace']
+])
 
 /** Where a graph, and the credential for it, came from. */
 export type ViewerBootstrap = {
@@ -40,6 +50,16 @@ export function isViewerPage(segment: string): segment is ViewerPage {
 }
 
 /**
+ * The viewer page a path segment names, by its current name or a former one.
+ *
+ * A former name resolves to the page it became, so a caller can tell the two
+ * apart by comparing the result with the segment.
+ */
+export function resolveViewerPage(segment: string): ViewerPage | undefined {
+  return isViewerPage(segment) ? segment : RENAMED_VIEWER_PAGES.get(segment)
+}
+
+/**
  * Reads a printed viewer link and says where it should land.
  *
  * `/view/<base64url(endpoint)>` is the one thing the library hands a developer,
@@ -48,7 +68,8 @@ export function isViewerPage(segment: string): segment is ViewerPage {
  * and the address bar is replaced with a plain `/view/<page>`.
  *
  * Returns nothing when the path is not a link to spend — one of the viewer's
- * own pages, or a segment that is not a graph endpoint at all.
+ * own pages, under its current name or a former one, or a segment that is not
+ * a graph endpoint at all.
  */
 export function resolveViewerBootstrap(
   path: string
@@ -56,7 +77,7 @@ export function resolveViewerBootstrap(
   const match = /^\/view\/([^/]+)(?:\/([^/]+))?\/?$/.exec(path)
   const segment = match?.[1]
 
-  if (!segment || isViewerPage(segment)) {
+  if (!segment || resolveViewerPage(segment)) {
     return undefined
   }
 
@@ -75,11 +96,10 @@ export function resolveViewerBootstrap(
 
   const token = readAccessToken(endpointUrl)
   // Links this site used to build carried the view in a second segment; honour
-  // it so an old bookmark still lands where it used to.
+  // it so an old bookmark still lands where it used to — on the page it became,
+  // if that page has been renamed since.
   const requestedPage = match?.[2]
-  const page = requestedPage && isViewerPage(requestedPage)
-    ? requestedPage
-    : 'navigator'
+  const page = (requestedPage && resolveViewerPage(requestedPage)) || 'navigator'
 
   return {
     path: `/view/${page}`,

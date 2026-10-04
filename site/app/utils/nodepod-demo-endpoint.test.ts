@@ -46,7 +46,7 @@ assert.equal(
 // A viewer link that already points at a deeper route still yields the endpoint.
 assert.equal(
   readViewerLinkEndpoint(
-    `${viewerLink(DEMO_ENDPOINT)}/execution-sequence`
+    `${viewerLink(DEMO_ENDPOINT)}/trace`
   ),
   DEMO_ENDPOINT
 )

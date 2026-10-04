@@ -739,12 +739,12 @@ function handlePaneClick(): void {
               <pre class="module-graph__result">{{ snapshotByKey[getMethodKey(method.name)]?.summary }}</pre>
               <UButton
                 v-if="snapshotByKey[getMethodKey(method.name)]?.traceId"
-                icon="i-lucide-history"
-                label="Open execution sequence"
+                icon="i-lucide-activity"
+                label="Open Trace"
                 color="neutral"
                 variant="link"
                 size="sm"
-                to="/view/execution-sequence"
+                to="/view/trace"
               />
             </div>
           </section>

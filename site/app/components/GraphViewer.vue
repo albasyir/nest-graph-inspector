@@ -284,7 +284,7 @@ const emit = defineEmits<{
   // The node id, not the class name: only the id says provider or controller.
   directRunDrawerOpen: [nodeId: string]
   directRunDrawerClose: []
-  executionSequenceOpen: []
+  traceOpen: []
   /** The visitor rearranged the canvas; carries the whole arrangement. */
   layoutChange: [layout: GraphLayout]
   layoutSave: [layout: GraphLayout]
@@ -2844,9 +2844,9 @@ function openStaticDirectRunDialog(): void {
   showStaticDirectRunDialog.value = true
 }
 
-function openExecutionSequenceHistory(): void {
+function openTraceHistory(): void {
   showStaticDirectRunDialog.value = false
-  emit('executionSequenceOpen')
+  emit('traceOpen')
 }
 
 function handleDirectRunAction(
@@ -3182,7 +3182,7 @@ async function executeDirectRun(
       snapshot
     })
     if (mode === 'inspect' && snapshot.runtimeTrace) {
-      emit('executionSequenceOpen')
+      emit('traceOpen')
     }
     clearDirectRunPending(nodeId)
   } catch (err) {
@@ -3209,7 +3209,7 @@ async function executeDirectRun(
         snapshot
       })
       if (mode === 'inspect' && snapshot.runtimeTrace) {
-        emit('executionSequenceOpen')
+        emit('traceOpen')
       }
     }
   }
@@ -4546,10 +4546,10 @@ defineExpose({ centerGraph, focusModule })
             @click="showStaticDirectRunDialog = false"
           />
           <UButton
-            label="Open Execution Sequence"
-            icon="i-lucide-history"
+            label="Open Trace"
+            icon="i-lucide-activity"
             color="primary"
-            @click="openExecutionSequenceHistory"
+            @click="openTraceHistory"
           />
         </div>
       </template>

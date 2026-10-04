@@ -18,9 +18,9 @@ const { endpointUrl, isGraphLoading, startupMessage, refresh }
   = useGraphViewerPage()
 
 useSeoMeta({
-  title: 'Execution Sequence',
-  ogTitle: 'Execution Sequence - Nest Graph Inspector',
-  description: 'Runtime direct-run execution history for the current NestJS graph.'
+  title: 'Trace',
+  ogTitle: 'Trace - Nest Graph Inspector',
+  description: 'Runtime direct-run execution trace for the current NestJS graph.'
 })
 
 function openNavigator() {
@@ -43,7 +43,7 @@ function openNavigator() {
       @retry="refresh()"
     />
 
-    <ExecutionSequence
+    <TraceWaterfall
       v-else
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"

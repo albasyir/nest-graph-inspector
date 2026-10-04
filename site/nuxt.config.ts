@@ -91,7 +91,11 @@ export default defineNuxtConfig({
     // linked from the homepage, so it keeps its prerendered HTML, title and OG
     // tags for crawlers and link unfurlers.
     '/view': { ssr: true },
-    '/view/**': { ssr: false }
+    '/view/**': { ssr: false },
+    // The trace page's address before it was renamed. This answers a server
+    // (`nuxt dev`); the static deployment has none, so in the browser the
+    // viewer's bootstrap middleware does the redirect, query and hash intact.
+    '/view/execution-sequence': { redirect: { to: '/view/trace', statusCode: 301 } }
   },
 
   experimental: {

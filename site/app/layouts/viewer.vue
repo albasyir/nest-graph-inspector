@@ -16,7 +16,9 @@ const aiChatOpen = ref(false)
 // the endpoint shown in the header comes from the store.
 const NAVIGATOR_PATH = '/view/navigator'
 const ISSUES_PATH = '/view/issues'
-const EXECUTION_SEQUENCE_PATH = '/view/execution-sequence'
+const TRACE_PATH = '/view/trace'
+// The trace page's address before it was renamed; the middleware redirects it.
+const LEGACY_TRACE_PATH = '/view/execution-sequence'
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -61,10 +63,10 @@ const viewerMenuItems = computed(() => [
     disabled: !endpointUrl.value
   },
   {
-    label: 'Execution Sequence',
-    icon: 'i-lucide-history',
-    to: EXECUTION_SEQUENCE_PATH,
-    active: route.path === EXECUTION_SEQUENCE_PATH,
+    label: 'Trace',
+    icon: 'i-lucide-activity',
+    to: TRACE_PATH,
+    active: route.path === TRACE_PATH || route.path === LEGACY_TRACE_PATH,
     disabled: !endpointUrl.value
   }
 ] satisfies NavigationMenuItem[])

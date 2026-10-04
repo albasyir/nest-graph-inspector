@@ -125,7 +125,7 @@ assert.equal(
 // happened on is the whole point of the property, and a redaction that collapsed
 // them would leave every event in one bucket while still passing the leak check
 // above.
-for (const page of ['/view/navigator', '/view/issues', '/view/execution-sequence']) {
+for (const page of ['/view/navigator', '/view/issues', '/view/trace']) {
   assert.equal(
     createGraphViewerEventProperties({
       graphUrl: ENDPOINT,

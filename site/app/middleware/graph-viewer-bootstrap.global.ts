@@ -1,7 +1,7 @@
 import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
 import {
-  isViewerPage,
-  resolveViewerBootstrap
+  resolveViewerBootstrap,
+  resolveViewerPage
 } from '~/utils/viewer-bootstrap-link'
 
 /**
@@ -42,7 +42,21 @@ export default defineNuxtRouteMiddleware((to) => {
   // page would leave it stranded on the bootstrap placeholder's spinner; it
   // belongs in the redirect branch below.
   const segments = to.path.replace(/\/+$/, '').split('/')
-  const isViewerRoute = segments.length === 3 && isViewerPage(segments[2] ?? '')
+  const viewerPage = segments.length === 3
+    ? resolveViewerPage(segments[2] ?? '')
+    : undefined
+
+  // A page under the name it had before it was renamed —
+  // `/view/execution-sequence` is `/view/trace` now. Old links still carry it,
+  // so it goes to the page it became, query and hash intact.
+  if (viewerPage && viewerPage !== segments[2]) {
+    return navigateTo(
+      { path: `/view/${viewerPage}`, query: to.query, hash: to.hash },
+      { replace: true }
+    )
+  }
+
+  const isViewerRoute = Boolean(viewerPage)
   const isModuleDeepDive = segments.length === 5
     && segments[2] === 'navigator'
     && segments[3] === 'modules'

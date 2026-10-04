@@ -43,8 +43,8 @@ const previewData = computed<GraphOutput | null>(() => {
   }
 })
 
-function openExecutionSequence() {
-  navigateTo('/view?preview=true&execution-sequence=true')
+function openTrace() {
+  navigateTo('/view?preview=true&trace=true')
 }
 </script>
 
@@ -64,7 +64,7 @@ function openExecutionSequence() {
           :show-circular-dependencies="false"
           :enable-bright-line="false"
           default-open-module-detail
-          @execution-sequence-open="openExecutionSequence"
+          @trace-open="openTrace"
         />
         <div
           v-else
