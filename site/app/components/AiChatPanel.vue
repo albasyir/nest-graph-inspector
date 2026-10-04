@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
+import {
+  MOBILE_DISCLAIMER_MESSAGE,
+  MOBILE_DRAWER_BANNER_MESSAGE,
+  MOBILE_DRAWER_BANNER_TITLE
+} from '~/utils/device-detection'
 import { estimateGraphAgentPromptChars } from '~/utils/graph-agent-run'
 import type { GraphAgentEvent, GraphAgentTurn } from '~/utils/graph-agent-run'
 import type { WebLlmCatalogModel } from '~/utils/web-llm-catalog'
@@ -132,8 +137,19 @@ const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const toast = useToast()
 
+const { isMobile } = useMobileDevice()
+
+/**
+ * Whether the live chat stays off because this is a mobile device.
+ *
+ * Never in preview: the marketing-page mock replies with canned text and never
+ * touches WebLLM, so there is nothing on a phone for it to exhaust.
+ */
+const isMobileRestricted = computed(() => !props.preview && isMobile.value)
+
 // Inference happens in this tab, so the composable owns the whole backend: the
-// WebGPU probe, the model cache, the worker, and the stream.
+// WebGPU probe, the model cache, the worker, and the stream. It asks the same
+// mobile question the panel renders from, so the two cannot disagree.
 const {
   isSupported,
   supportReason,
@@ -157,7 +173,7 @@ const {
   interrupt,
   deleteModel,
   dispose
-} = useWebLlmEngine()
+} = useWebLlmEngine({ isMobile: () => isMobileRestricted.value })
 
 const { isRunning: isAgentRunning, runAgent } = useGraphAgent()
 
@@ -342,6 +358,10 @@ const promptPlaceholder = computed(() => {
     return 'Ask about your NestJS graph...'
   }
 
+  if (isMobileRestricted.value) {
+    return 'DISABLED: AI chat needs a desktop browser'
+  }
+
   return isChatUnavailable.value ? 'DISABLED: Upgrade the library to answer on this graph' : 'Ask about this graph...'
 })
 
@@ -350,10 +370,10 @@ const isChatSubmitDisabled = computed(() => {
     return isLoading.value
   }
 
-  return isChatUnavailable.value || isStreaming.value || isPreparingModel.value || isCheckingSupport.value
+  return isMobileRestricted.value || isChatUnavailable.value || isStreaming.value || isPreparingModel.value || isCheckingSupport.value
 })
-const isPromptDisabled = computed(() => isStreaming.value || isPreparingModel.value)
-const isChatControlDisabled = computed(() => !props.preview && isChatUnavailable.value)
+const isPromptDisabled = computed(() => isMobileRestricted.value || isStreaming.value || isPreparingModel.value)
+const isChatControlDisabled = computed(() => !props.preview && (isMobileRestricted.value || isChatUnavailable.value))
 
 /**
  * The graph text the model will actually see.
@@ -441,6 +461,12 @@ const footerHint = computed(() => {
     return ''
   }
 
+  // Outranks the GPU note too: on a phone the probe never runs, so there is no
+  // WebGPU verdict to report, only the reason nothing will be asked of it.
+  if (isMobileRestricted.value) {
+    return MOBILE_DISCLAIMER_MESSAGE
+  }
+
   if (isWebGpuUnavailable.value) {
     const reason = modelError.value || supportReason.value
 
@@ -466,10 +492,18 @@ const footerHint = computed(() => {
 })
 
 const footerHintIcon = computed(() => {
+  if (isMobileRestricted.value) {
+    return 'i-lucide-monitor-smartphone'
+  }
+
   return isWebGpuUnavailable.value ? 'i-lucide-triangle-alert' : 'i-lucide-info'
 })
 
 const footerHintClass = computed(() => {
+  if (isMobileRestricted.value) {
+    return 'text-warning'
+  }
+
   return isWebGpuUnavailable.value ? 'text-error' : 'text-muted'
 })
 
@@ -625,6 +659,13 @@ function showRecommendedModelToast() {
 }
 
 async function ensureWebGpuSupport() {
+  // No probe and no toast: the banner already says why, and `hasCheckedSupport`
+  // stays false so a window widened past the breakpoint probes for real.
+  if (isMobileRestricted.value) {
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
+    return false
+  }
+
   const supported = await checkSupport()
   hasCheckedSupport.value = true
 
@@ -638,6 +679,12 @@ async function ensureWebGpuSupport() {
 
 async function loadModelCatalog() {
   if (props.preview || !import.meta.client || isLoadingCatalog.value) {
+    return
+  }
+
+  if (isMobileRestricted.value) {
+    selectedModel.value = ''
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
     return
   }
 
@@ -686,7 +733,7 @@ async function loadModelCatalog() {
 
 /** Fetches the weights, compiles the shaders, and leaves the model on the GPU. */
 async function ensureModelReady(modelId: string) {
-  if (props.preview || !import.meta.client || isPreparingModel.value) {
+  if (props.preview || !import.meta.client || isPreparingModel.value || isMobileRestricted.value) {
     return false
   }
 
@@ -716,6 +763,10 @@ async function ensureModelReady(modelId: string) {
 }
 
 function handleModelDownloadClick() {
+  if (isMobileRestricted.value) {
+    return
+  }
+
   isModelDownloadPopoverOpen.value = true
 
   if (isPreparingModel.value) {
@@ -829,6 +880,20 @@ watch(isChatUnavailable, (unavailable) => {
   void loadModelCatalog()
 }, { immediate: true })
 
+/**
+ * Leaving mobile — a tablet rotated, or a desktop window widened past the
+ * breakpoint — owes the visitor the probe and the model list that were skipped.
+ * Entering it stops nothing already running: an answer in progress was started
+ * on a device that could take it, and the engine refuses whatever comes next.
+ */
+watch(isMobileRestricted, (restricted) => {
+  if (restricted || isChatUnavailable.value || hasCheckedSupport.value || !selectedProvider.value) {
+    return
+  }
+
+  void loadModelCatalog()
+})
+
 watch(selectedModel, (modelId) => {
   if (!modelId) {
     return
@@ -918,6 +983,12 @@ async function handleSubmit(event: Event) {
       role: 'assistant',
       content: props.previewReply
     })
+    return
+  }
+
+  // The prompt is disabled on mobile, but a submit can still arrive — a
+  // keyboard shortcut, or a window narrowed while the text was being typed.
+  if (isMobileRestricted.value) {
     return
   }
 
@@ -1249,6 +1320,17 @@ async function handleSubmit(event: Event) {
       </div>
     </div>
 
+    <UAlert
+      v-if="isMobileRestricted"
+      :title="MOBILE_DRAWER_BANNER_TITLE"
+      :description="MOBILE_DRAWER_BANNER_MESSAGE"
+      icon="i-lucide-monitor"
+      color="warning"
+      variant="subtle"
+      class="shrink-0 rounded-none border-b border-default"
+      role="status"
+    />
+
     <UChatPalette
       class="min-h-0 flex-1 overflow-hidden"
       :ui="{
@@ -1256,7 +1338,27 @@ async function handleSubmit(event: Event) {
         prompt: props.promptClass
       }"
     >
+      <!-- Only the greeting so far: on a phone it would offer to trace a
+           dependency it will never be allowed to answer, so this says plainly
+           what the chat needs instead. -->
+      <div
+        v-if="isMobileRestricted && messages.length <= 1"
+        class="flex h-full min-h-48 flex-col items-center justify-center gap-3 px-6 text-center"
+      >
+        <UIcon
+          name="i-lucide-monitor-smartphone"
+          class="size-10 text-muted"
+        />
+        <p class="text-sm font-medium text-highlighted">
+          WebLLM is disabled on mobile devices
+        </p>
+        <p class="max-w-sm text-sm text-muted">
+          The model runs on this device's GPU and needs gigabytes of memory a mobile browser will not give a page. Open this graph in a desktop browser to ask about it.
+        </p>
+      </div>
+
       <UChatMessages
+        v-else
         :messages="chatMessages"
         :status="isStreaming ? 'streaming' : 'ready'"
         :assistant="{ side: 'left', variant: 'naked' }"

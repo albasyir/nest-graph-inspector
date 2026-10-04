@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
+import { MOBILE_DISCLAIMER_MESSAGE } from '~/utils/device-detection'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +12,7 @@ const {
   isLoading
 } = storeToRefs(graphStore)
 const aiChatOpen = ref(false)
+const { isMobile } = useMobileDevice()
 
 // The graph being viewed is no longer in the URL, so these paths are fixed and
 // the endpoint shown in the header comes from the store.
@@ -27,6 +29,11 @@ function handleRefresh(event?: Event) {
 
 function handleAskAi(event?: Event) {
   event?.preventDefault()
+
+  if (isMobile.value) {
+    return
+  }
+
   aiChatOpen.value = true
 }
 
@@ -160,14 +167,25 @@ const viewerMenuItems = computed(() => [
                 />
               </UTooltip>
 
-              <UButton
-                icon="i-lucide-bot"
-                label="Ask AI"
-                color="neutral"
-                variant="ghost"
-                :disabled="!endpointUrl"
-                @click="handleAskAi"
-              />
+              <!-- The chat runs its model on this device's GPU, which a phone
+                   cannot spare, so on mobile the button stays visible from
+                   `sm` up — saying why — and is gone below it, where the
+                   header has no room for a control that does nothing. -->
+              <UTooltip
+                :text="MOBILE_DISCLAIMER_MESSAGE"
+                :disabled="!isMobile"
+              >
+                <UButton
+                  icon="i-lucide-bot"
+                  label="Ask AI"
+                  color="neutral"
+                  variant="ghost"
+                  class="hidden sm:inline-flex"
+                  :aria-label="isMobile ? `Ask AI — ${MOBILE_DISCLAIMER_MESSAGE}` : 'Ask AI'"
+                  :disabled="!endpointUrl || isMobile"
+                  @click="handleAskAi"
+                />
+              </UTooltip>
             </div>
           </UContainer>
         </header>
