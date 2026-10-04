@@ -36,12 +36,19 @@ export default defineNuxtRouteMiddleware((to) => {
 
   const graphStore = useGraphInspectorStore()
 
-  // Exactly `/view/<page>`. A deeper path (`/view/navigator/anything`) matches no
-  // page, so treating it as a viewer page would leave it stranded on the
-  // bootstrap placeholder's spinner; it belongs in the redirect branch below.
+  // Exactly `/view/<page>`, or a module deep dive at
+  // `/view/navigator/modules/<moduleId>`. Any other deeper path
+  // (`/view/navigator/anything`) matches no page, so treating it as a viewer
+  // page would leave it stranded on the bootstrap placeholder's spinner; it
+  // belongs in the redirect branch below.
   const segments = to.path.replace(/\/+$/, '').split('/')
+  const isViewerRoute = segments.length === 3 && isViewerPage(segments[2] ?? '')
+  const isModuleDeepDive = segments.length === 5
+    && segments[2] === 'navigator'
+    && segments[3] === 'modules'
+    && Boolean(segments[4])
 
-  if (segments.length === 3 && isViewerPage(segments[2] ?? '')) {
+  if (isViewerRoute || isModuleDeepDive) {
     const endpointUrl = graphStore.restoreSession()
 
     if (!endpointUrl) {

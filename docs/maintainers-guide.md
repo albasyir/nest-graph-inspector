@@ -538,7 +538,8 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
 | `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input, and starts the in-browser demo behind "Open Demo" |
-| `view/navigator.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module |
+| `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
+| `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
 | `view/execution-sequence.vue` | `/view/execution-sequence` | Execution sequence diagram for Direct Run traces |
 | `view/[...bootstrap].vue` | `/view/<base64url endpoint>` | Stands in for a printed link while it is spent; the middleware redirects away before it renders |

@@ -23,6 +23,7 @@ coverage
 
 # Demo scratch output
 demo/tmp
+artifacts/
 
 # Editors / OS
 .DS_Store

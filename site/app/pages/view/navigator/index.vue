@@ -131,6 +131,7 @@ onBeforeUnmount(() => {
       :layout-save-error="layoutSaveError"
       :layout-saved-at="layoutSavedAt"
       :layout-persistence="layoutPersistence"
+      can-open-module-deep-dive
       height="100%"
       flush
       @direct-run-drawer-open="handleDirectRunDrawerOpen"

@@ -73,6 +73,7 @@ import {
   buildModuleFocusFitViewOptions,
   resolveModuleFocusTargetNodeIds
 } from '~/utils/graph-viewer-focus'
+import { encodeModuleId } from '~/utils/module-id'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -245,8 +246,15 @@ const props = withDefaults(
     layoutSavedAt?: string | null
     /** Where a save lands: the application's own file, or this tab. */
     layoutPersistence?: 'endpoint' | 'session'
+    /**
+     * Whether a module's header action opens its deep-dive page rather than
+     * moving the camera onto it. Only a viewer page has the session that page
+     * needs; a documentation preview would be sent back to `/view`.
+     */
+    canOpenModuleDeepDive?: boolean
   }>(),
   {
+    canOpenModuleDeepDive: false,
     layoutData: null,
     canSaveLayout: false,
     layoutDirty: false,
@@ -3566,6 +3574,12 @@ async function focusModule(moduleName: string, duration?: number) {
   await fitView(options)
 }
 
+/** Leaves the whole graph for one module's own page. */
+function openModuleDeepDive(moduleName: string) {
+  closeJsDocHoverCard()
+  void navigateTo(`/view/navigator/modules/${encodeModuleId(moduleName)}`)
+}
+
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
   collapsedModuleNames.value
     = isOpen === true
@@ -4149,7 +4163,25 @@ defineExpose({ centerGraph, focusModule })
             </span>
             <div class="module-subgraph__actions">
               <UTooltip
-                v-if="props.interactive"
+                v-if="props.interactive && props.canOpenModuleDeepDive"
+                text="Open module deep dive"
+                :delay-duration="0"
+              >
+                <button
+                  type="button"
+                  class="module-subgraph__focus nodrag nopan"
+                  aria-label="Open module deep dive"
+                  title="Open module deep dive"
+                  @click.stop="openModuleDeepDive(moduleProps.data.label)"
+                >
+                  <UIcon
+                    name="i-lucide-maximize-2"
+                    class="module-subgraph__focus-icon"
+                  />
+                </button>
+              </UTooltip>
+              <UTooltip
+                v-else-if="props.interactive"
                 text="Focus on this module"
                 :delay-duration="0"
               >

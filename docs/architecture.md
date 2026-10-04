@@ -611,7 +611,12 @@ disconnected modules), and `execution-sequence` (Direct Run traces as a Mermaid
 sequence diagram). Everything on `issues` except the cycles is derived in the
 viewer by `app/utils/architecture-issues.ts` from fields the graph already
 carries, so it needs no change to `GraphOutput` and works against any library
-version the viewer supports. `nuxt.config.ts` renders `/view/**` client-side only —
+version the viewer supports. A module's deep dive lives under the navigator at
+`/view/navigator/modules/<id>`, where `<id>` is the module name through
+`encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
+than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it
+draws the module alone, laid out by `app/utils/module-deep-dive.ts` from fields
+the graph already carries. `nuxt.config.ts` renders `/view/**` client-side only —
 neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 

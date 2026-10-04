@@ -49,7 +49,8 @@ const viewerMenuItems = computed(() => [
     label: 'Navigator',
     icon: 'i-lucide-map',
     to: NAVIGATOR_PATH,
-    active: route.path === NAVIGATOR_PATH,
+    // A module deep dive (`/view/navigator/modules/<id>`) is still the navigator.
+    active: route.path === NAVIGATOR_PATH || route.path.startsWith(`${NAVIGATOR_PATH}/`),
     disabled: !endpointUrl.value
   },
   {
