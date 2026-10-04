@@ -4,7 +4,10 @@ import { StringDecoder } from 'node:string_decoder';
 import { Injectable } from '@nestjs/common';
 import { createInspectorEndpointInfo } from '../inspector-endpoint-info';
 import { OutputAdapter } from '../ports/output.adapter';
-import { NestGraphInspectorOutput } from '../nest-graph-inspector.type';
+import {
+  NestGraphInspectorLayoutOptions,
+  NestGraphInspectorOutput,
+} from '../nest-graph-inspector.type';
 import type { GraphOutput } from '../types/graph-output.type';
 import type { GraphLayout } from '../types/graph-layout.type';
 import { GRAPH_OUTPUT_JSON_SCHEMA } from '../types/graph-output.schema';
@@ -19,8 +22,8 @@ import { AccessTokenService } from '../access-token.service';
 
 type HttpOutputConfig = Extract<NestGraphInspectorOutput, { type: 'http' }>;
 
-/** Used when neither the output nor the module sets `layoutFilePath`. */
-export const DEFAULT_LAYOUT_FILE_PATH = './nest-graph-layout.json';
+/** Where the graph layout is saved when `ui.layout.saveAs` is `'file'`. */
+export const DEFAULT_LAYOUT_FILE_PATH = './.muse';
 
 /**
  * Upper bound on a layout request body, in encoded bytes. A large
@@ -61,6 +64,9 @@ interface HttpOutputInternalOptions {
    * When provided, the adapter will reuse the given HttpServeAdapter instance instead of creating a new one. This is useful for scenarios where multiple outputs need to be served on the same HTTP server instance.
    */
   httpAdapter?: HttpServeAdapter;
+
+  /** How this output persists the graph layout. */
+  layout?: NestGraphInspectorLayoutOptions;
 }
 
 @Injectable()
@@ -74,6 +80,12 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
 
   /** The layout write still running, or last queued, for each file. */
   private readonly pendingLayoutWrites = new Map<string, Promise<void>>();
+
+  /** The layout for every output whose `ui.layout.saveAs` is `'runtime'`. */
+  private inMemoryLayout: GraphLayout = {
+    version: GRAPH_LAYOUT_SCHEMA_VERSION,
+    modules: {},
+  };
 
   constructor(
     private readonly fileOutputAdapter: FileOutputAdapter,
@@ -95,10 +107,8 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
       this.joinPath(path, 'layout.json'),
       this.joinPath(path, 'layout'),
     ];
-    const layoutFilePath = resolve(
-      process.cwd(),
-      config.layoutFilePath ?? DEFAULT_LAYOUT_FILE_PATH,
-    );
+    const saveAs = config.layout?.saveAs ?? 'file';
+    const layoutFilePath = resolve(process.cwd(), DEFAULT_LAYOUT_FILE_PATH);
     const inspectorEndpointInfo = await createInspectorEndpointInfo(false);
 
     const isReuseHttpAdapter = !!config.httpAdapter;
@@ -146,7 +156,10 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
         ...layoutOutputPaths.flatMap((layoutOutputPath) => [
           httpAdapter.get(
             layoutOutputPath,
-            () => this.readLayout(layoutFilePath),
+            () =>
+              saveAs === 'runtime'
+                ? this.readLayoutFromMemory()
+                : this.readLayout(layoutFilePath),
             {
               responseHeaders: {
                 'content-type': 'application/json; charset=utf-8',
@@ -155,7 +168,10 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
           ),
           httpAdapter.post(
             layoutOutputPath,
-            ({ request }) => this.saveLayout(request, layoutFilePath),
+            ({ request }) =>
+              saveAs === 'runtime'
+                ? this.saveLayoutToMemory(request)
+                : this.saveLayout(request, layoutFilePath),
             {
               responseHeaders: {
                 'content-type': 'application/json; charset=utf-8',
@@ -272,32 +288,13 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
     request: NodeJS.ReadableStream,
     filePath: string,
   ): Promise<HttpServeResponse> {
-    const bodyResult = await this.readLayoutBody(request);
-    if (!bodyResult.ok) {
-      return bodyResult.response;
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(bodyResult.text);
-    } catch {
-      return this.layoutFailure(400, 'Request body is not valid JSON.');
-    }
-
-    const validation = validateGraphLayout(payload);
-    if (!validation.ok) {
-      return {
-        statusCode: 400,
-        body: {
-          ok: false,
-          message: 'Invalid layout payload',
-          errors: validation.errors,
-        },
-      };
+    const parsed = await this.parseLayoutRequestBody(request);
+    if (!parsed.ok) {
+      return parsed.response;
     }
 
     try {
-      await this.writeLayout(filePath, validation.layout);
+      await this.writeLayout(filePath, parsed.layout);
     } catch (err) {
       return this.layoutFailure(
         500,
@@ -309,6 +306,65 @@ export class HttpOutputAdapter implements OutputAdapter<HttpOutputConfig> {
       statusCode: 200,
       body: { ok: true, message: 'Layout saved successfully' },
     };
+  }
+
+  /** The in-memory layout for a `saveAs: 'runtime'` output. */
+  private readLayoutFromMemory(): HttpServeResponse {
+    return { statusCode: 200, body: this.inMemoryLayout };
+  }
+
+  private async saveLayoutToMemory(
+    request: NodeJS.ReadableStream,
+  ): Promise<HttpServeResponse> {
+    const parsed = await this.parseLayoutRequestBody(request);
+    if (!parsed.ok) {
+      return parsed.response;
+    }
+
+    this.inMemoryLayout = parsed.layout;
+
+    return {
+      statusCode: 200,
+      body: { ok: true, message: 'Layout saved successfully' },
+    };
+  }
+
+  private async parseLayoutRequestBody(
+    request: NodeJS.ReadableStream,
+  ): Promise<
+    { ok: true; layout: GraphLayout } | { ok: false; response: HttpServeResponse }
+  > {
+    const bodyResult = await this.readLayoutBody(request);
+    if (!bodyResult.ok) {
+      return bodyResult;
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(bodyResult.text);
+    } catch {
+      return {
+        ok: false,
+        response: this.layoutFailure(400, 'Request body is not valid JSON.'),
+      };
+    }
+
+    const validation = validateGraphLayout(payload);
+    if (!validation.ok) {
+      return {
+        ok: false,
+        response: {
+          statusCode: 400,
+          body: {
+            ok: false,
+            message: 'Invalid layout payload',
+            errors: validation.errors,
+          },
+        },
+      };
+    }
+
+    return { ok: true, layout: validation.layout };
   }
 
   /**

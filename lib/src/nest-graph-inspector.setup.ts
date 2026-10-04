@@ -14,6 +14,7 @@ import { DiscoveryAdapter } from "./adapters/discovery";
 import type { AnyFunction, ModuleTree } from "./adapters/discovery";
 import { MODULE_OPTIONS_TOKEN } from "./nest-graph-inspector.config";
 import type {
+  NestGraphInspectorLayoutOptions,
   NestGraphInspectorModuleOptions,
   NestGraphInspectorOutput,
 } from "./nest-graph-inspector.type";
@@ -38,10 +39,7 @@ import type {
   GraphOutputProviderCycle,
   GraphOutputProviderCyclePathItem,
 } from "./types/graph-output.type";
-import {
-  DEFAULT_LAYOUT_FILE_PATH,
-  HttpOutputAdapter,
-} from "./adapters/http-output.adapter";
+import { HttpOutputAdapter } from "./adapters/http-output.adapter";
 import { FileOutputAdapter } from "./adapters/file-output.adapter";
 import { JsonOutputAdapter } from "./adapters/json-output.adapter";
 import { ViewerOutputAdapter } from "./adapters/viewer-output.adapter";
@@ -218,31 +216,26 @@ export class NestGraphInspectorSetup implements OnModuleInit {
 
   private withDefaultOutputOptions(
     output: NestGraphInspectorOutput,
-  ): NestGraphInspectorOutput {
+  ): NestGraphInspectorOutput & { layout?: NestGraphInspectorLayoutOptions } {
     if (output.type !== "viewer" && output.type !== "http") {
       return output;
     }
 
-    // Precedence, most specific first: the output's own `layoutFilePath`,
-    // then the module-wide one, then the built-in default.
-    const layoutFilePath =
-      output.layoutFilePath ??
-      this.options.layoutFilePath ??
-      DEFAULT_LAYOUT_FILE_PATH;
+    const layout = this.options.ui?.layout;
     if (output.type === "http") {
-      return { ...output, layoutFilePath };
+      return { ...output, layout };
     }
 
     const defaultViewerOutput = defaultOptions.outputs?.find(
       (defaultOutput) => defaultOutput.type === "viewer",
     );
     if (!defaultViewerOutput || defaultViewerOutput.type !== "viewer") {
-      return { ...output, layoutFilePath };
+      return { ...output, layout };
     }
 
     return {
       ...output,
-      layoutFilePath,
+      layout,
       directRun: this.mergeViewerDirectRunOptions(
         defaultViewerOutput.directRun,
         output.directRun,

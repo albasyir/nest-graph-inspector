@@ -175,18 +175,18 @@ describe(ViewerOutputAdapter.name, () => {
     );
   });
 
-  it('passes its layout file path to the HTTP output adapter', async () => {
+  it('passes its layout options to the HTTP output adapter', async () => {
     await adapter.execute({} as never, {
       type: 'viewer',
       host: '127.0.0.1',
       port: 3998,
       path: 'graph',
-      layoutFilePath: 'layouts/graph.json',
-    });
+      layout: { saveAs: 'runtime' },
+    } as never);
 
     expect(httpOutputAdapter.execute).toHaveBeenCalledWith(
       {},
-      expect.objectContaining({ layoutFilePath: 'layouts/graph.json' }),
+      expect.objectContaining({ layout: { saveAs: 'runtime' } }),
     );
   });
 

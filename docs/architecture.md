@@ -291,14 +291,16 @@ broken output is a log line, not a crash, and easy to miss.
 |---|---|---|
 | `json` | `{ path }` | Writes `GraphOutput` as JSON, relative to `process.cwd()` |
 | `markdown` | `{ path }` | Writes a Mermaid diagram plus a per-module report, and an `information.json` beside it |
-| `http` | `{ origin?, host?, port?, path?, layoutFilePath? }` | Registers the graph and layout routes; default path `/__nest-graph-inspector` |
-| `viewer` | `{ origin?, host?, port?, path?, directRun?, layoutFilePath? }` | `http` + Direct Run (unless `directRun.enabled: false`) + prints the viewer link; default path `/__graph-inspector` |
+| `http` | `{ origin?, host?, port?, path? }` | Registers the graph and layout routes; default path `/__nest-graph-inspector` |
+| `viewer` | `{ origin?, host?, port?, path?, directRun? }` | `http` + Direct Run (unless `directRun.enabled: false`) + prints the viewer link; default path `/__graph-inspector` |
 
-`layoutFilePath` is resolved most specific first — the output's own, then
-`NestGraphInspectorModuleOptions.layoutFilePath`, then
-`'./nest-graph-layout.json'` — by `NestGraphInspectorSetup`, and a relative
-path resolves against `process.cwd()`. Two outputs left on the default share
-one file.
+Layout persistence is a module-wide setting, `NestGraphInspectorModuleOptions.ui.layout.saveAs`
+(`'file' | 'runtime'`, default `'file'`), attached by `NestGraphInspectorSetup`
+to every `viewer` and `http` output. `'file'` saves to a fixed path, `./.muse`
+relative to `process.cwd()` — not configurable, and not per-output, so every
+`viewer` and `http` output on the default shares one file. `'runtime'` keeps
+the layout purely in memory on `HttpOutputAdapter`, never touching disk; it
+resets to an empty layout on every restart.
 
 Everything a `viewer` output installs, on one server:
 
@@ -935,8 +937,8 @@ Facts a code change can invalidate, and the file to check:
 - Default paths `/__graph-inspector` (viewer) and `/__nest-graph-inspector`
   (http) — the respective adapters
 - Layout schema version `'1'` — `lib/src/types/graph-layout.schema.ts`
-- Default layout file `./nest-graph-layout.json` and the 10 MiB layout body
-  limit — `DEFAULT_LAYOUT_FILE_PATH` and `MAX_LAYOUT_BODY_BYTES` in
+- Default layout file `./.muse` and the 10 MiB layout body limit —
+  `DEFAULT_LAYOUT_FILE_PATH` and `MAX_LAYOUT_BODY_BYTES` in
   `lib/src/adapters/http-output.adapter.ts`
 - Token TTL, header, and query parameter — `lib/src/access-token.service.ts`
 - Limiter defaults — `lib/src/access-attempt-limiter.ts`
