@@ -415,7 +415,15 @@ export function useWebLlmEngine(options: WebLlmEngineOptions = {}) {
     options: WebLlmStreamOptions,
     onDelta: (delta: WebLlmStreamDelta) => void
   ): Promise<void> {
+    // Recorded as well as thrown, like `prepareModel`: the panel words an
+    // `unsupported` failure from `error`, then `supportReason`, then a WebGPU
+    // hint, so leaving them as they were names WebGPU or an older failure
+    // instead. Not `isSupported`: the panel does not probe again when the
+    // window widens, so a `false` here would outlast the restriction.
     if (isMobile()) {
+      supportReason.value = MOBILE_DISCLAIMER_MESSAGE
+      error.value = MOBILE_DISCLAIMER_MESSAGE
+
       throw new WebLlmError('unsupported', MOBILE_DISCLAIMER_MESSAGE)
     }
 

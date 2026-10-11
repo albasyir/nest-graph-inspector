@@ -735,7 +735,15 @@ async function loadModelCatalog() {
 
 /** Fetches the weights, compiles the shaders, and leaves the model on the GPU. */
 async function ensureModelReady(modelId: string) {
-  if (props.preview || !import.meta.client || isPreparingModel.value || isMobileRestricted.value) {
+  if (props.preview || !import.meta.client || isPreparingModel.value) {
+    return false
+  }
+
+  // A submit checked the restriction before awaiting the graph, so the window
+  // may have narrowed since. It answers with `modelError`, which has to say so
+  // rather than fall back to the failed-download message.
+  if (isMobileRestricted.value) {
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
     return false
   }
 
@@ -890,7 +898,12 @@ watch(isChatUnavailable, (unavailable) => {
  * next.
  */
 watch(isMobileRestricted, (restricted) => {
-  if (restricted || isChatUnavailable.value || hasCheckedSupport.value || !selectedProvider.value) {
+  // Owed even after a probe that passed, when the window narrowed while the
+  // probe or a model removal was in flight: `refreshCatalog` then emptied the
+  // catalog instead of reading it.
+  const isCatalogOwed = !hasCheckedSupport.value || (isSupported.value && !hasLoadedCatalog.value)
+
+  if (restricted || isChatUnavailable.value || !isCatalogOwed || !selectedProvider.value) {
     return
   }
 
@@ -1261,9 +1274,15 @@ async function handleSubmit(event: Event) {
       : readWebLlmDiagnostic(kind)
 
     if (kind === 'unsupported') {
-      hasCheckedSupport.value = true
-      modelError.value = diagnostic
-      showWebGpuUnavailableToast(supportReason.value)
+      // The engine's mobile guard refuses an answer when the window narrows
+      // mid-run. The banner already says why and WebGPU was never the problem,
+      // so no toast, no `modelError` for the widened window to inherit, and no
+      // `hasCheckedSupport`: a refusal is not a probe, and widening may owe one.
+      if (!isMobileRestricted.value) {
+        hasCheckedSupport.value = true
+        modelError.value = diagnostic
+        showWebGpuUnavailableToast(supportReason.value)
+      }
     } else if (kind === 'load') {
       modelError.value = diagnostic
       showModelDownloadErrorToast(diagnostic)

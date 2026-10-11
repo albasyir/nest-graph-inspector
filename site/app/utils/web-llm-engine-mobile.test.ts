@@ -99,6 +99,10 @@ describe('useWebLlmEngine on a mobile device', () => {
     const engine = useWebLlmEngine({ isMobile: () => true })
     const deltas: unknown[] = []
 
+    // What an earlier failure left behind. The panel words this refusal from
+    // `error`, then `supportReason`, so both have to name it, not what was there.
+    engine.error.value = 'Qwen3-1.7B-q4f16_1-MLC could not be removed from this browser. The browser gave no reason.'
+
     await assert.rejects(
       engine.streamChat('Qwen3-1.7B-q4f16_1-MLC', [{ role: 'user', content: 'Hi' }], { enableThinking: false }, (delta) => {
         deltas.push(delta)
@@ -112,6 +116,8 @@ describe('useWebLlmEngine on a mobile device', () => {
     )
     assert.deepEqual(deltas, [])
     assert.equal(engine.isGenerating.value, false)
+    assert.equal(engine.error.value, MOBILE_DISCLAIMER_MESSAGE, 'not the stale failure, which the panel would repeat')
+    assert.equal(engine.supportReason.value, MOBILE_DISCLAIMER_MESSAGE, 'not empty, which the panel would replace with a WebGPU hint')
   })
 
   test('asks the device on every call, so a window that changes is followed', async () => {
