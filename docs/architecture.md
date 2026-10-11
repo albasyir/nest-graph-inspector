@@ -766,7 +766,9 @@ Markdown the viewer already fetches from `/output.md`, which the site budgets
 down to fit the model's context window before using it as the system prompt. The
 graph, the question, and the answer never leave the machine, and nothing has to
 be installed for the feature to work — at the cost of requiring a WebGPU-capable
-browser, which the panel checks for before offering the chat.
+browser on a desktop, in a window at least `MOBILE_BREAKPOINT_PX` wide
+(`app/utils/device-detection.ts`), which the viewer checks for before offering
+the chat.
 
 **The chat talks to a LangChain model, not to web-llm.** The panel never calls
 `@mlc-ai/web-llm`. It builds a `ChatWebLlm` — a LangChain `BaseChatModel`

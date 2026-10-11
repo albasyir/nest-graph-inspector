@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
+import {
+  MOBILE_BREAKPOINT_PX,
+  MOBILE_DISCLAIMER_MESSAGE,
+  MOBILE_DRAWER_BANNER_MESSAGE,
+  MOBILE_DRAWER_BANNER_TITLE
+} from '~/utils/device-detection'
 import { estimateGraphAgentPromptChars } from '~/utils/graph-agent-run'
 import type { GraphAgentEvent, GraphAgentTurn } from '~/utils/graph-agent-run'
 import type { WebLlmCatalogModel } from '~/utils/web-llm-catalog'
@@ -20,7 +26,7 @@ type ChatMessage = {
   reasoningStreaming?: boolean
   /** Only in agent mode: the lookups behind the answer, in the order they happened. */
   toolSteps?: ChatToolStep[]
-  /** Said the loop gave up rather than the model finishing. */
+  /** Why the run ended without the model finishing: the loop gave up, or the window narrowed under it. */
   notice?: string
 }
 
@@ -132,8 +138,20 @@ const posthog = usePostHog()
 const graphStore = useGraphInspectorStore()
 const toast = useToast()
 
+const { isMobile } = useMobileDevice()
+
+/**
+ * Whether the live chat stays off because this is a mobile device or a window
+ * narrower than the breakpoint.
+ *
+ * Never in preview: the marketing-page mock replies with canned text and never
+ * touches WebLLM, so there is nothing on a phone for it to exhaust.
+ */
+const isMobileRestricted = computed(() => !props.preview && isMobile.value)
+
 // Inference happens in this tab, so the composable owns the whole backend: the
-// WebGPU probe, the model cache, the worker, and the stream.
+// WebGPU probe, the model cache, the worker, and the stream. It asks the same
+// mobile question the panel renders from, so the two cannot disagree.
 const {
   isSupported,
   supportReason,
@@ -157,7 +175,7 @@ const {
   interrupt,
   deleteModel,
   dispose
-} = useWebLlmEngine()
+} = useWebLlmEngine({ isMobile: () => isMobileRestricted.value })
 
 const { isRunning: isAgentRunning, runAgent } = useGraphAgent()
 
@@ -342,6 +360,10 @@ const promptPlaceholder = computed(() => {
     return 'Ask about your NestJS graph...'
   }
 
+  if (isMobileRestricted.value) {
+    return `DISABLED: AI chat needs a desktop browser at least ${MOBILE_BREAKPOINT_PX}px wide`
+  }
+
   return isChatUnavailable.value ? 'DISABLED: Upgrade the library to answer on this graph' : 'Ask about this graph...'
 })
 
@@ -350,10 +372,10 @@ const isChatSubmitDisabled = computed(() => {
     return isLoading.value
   }
 
-  return isChatUnavailable.value || isStreaming.value || isPreparingModel.value || isCheckingSupport.value
+  return isMobileRestricted.value || isChatUnavailable.value || isStreaming.value || isPreparingModel.value || isCheckingSupport.value
 })
-const isPromptDisabled = computed(() => isStreaming.value || isPreparingModel.value)
-const isChatControlDisabled = computed(() => !props.preview && isChatUnavailable.value)
+const isPromptDisabled = computed(() => isMobileRestricted.value || isStreaming.value || isPreparingModel.value)
+const isChatControlDisabled = computed(() => !props.preview && (isMobileRestricted.value || isChatUnavailable.value))
 
 /**
  * The graph text the model will actually see.
@@ -441,6 +463,12 @@ const footerHint = computed(() => {
     return ''
   }
 
+  // Outranks the GPU note too: on a phone the probe never runs, so there is no
+  // WebGPU verdict to report, only the reason nothing will be asked of it.
+  if (isMobileRestricted.value) {
+    return MOBILE_DISCLAIMER_MESSAGE
+  }
+
   if (isWebGpuUnavailable.value) {
     const reason = modelError.value || supportReason.value
 
@@ -466,10 +494,18 @@ const footerHint = computed(() => {
 })
 
 const footerHintIcon = computed(() => {
+  if (isMobileRestricted.value) {
+    return 'i-lucide-monitor-smartphone'
+  }
+
   return isWebGpuUnavailable.value ? 'i-lucide-triangle-alert' : 'i-lucide-info'
 })
 
 const footerHintClass = computed(() => {
+  if (isMobileRestricted.value) {
+    return 'text-warning'
+  }
+
   return isWebGpuUnavailable.value ? 'text-error' : 'text-muted'
 })
 
@@ -625,6 +661,13 @@ function showRecommendedModelToast() {
 }
 
 async function ensureWebGpuSupport() {
+  // No probe and no toast: the banner already says why, and `hasCheckedSupport`
+  // stays false so a window widened past the breakpoint probes for real.
+  if (isMobileRestricted.value) {
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
+    return false
+  }
+
   const supported = await checkSupport()
   hasCheckedSupport.value = true
 
@@ -638,6 +681,12 @@ async function ensureWebGpuSupport() {
 
 async function loadModelCatalog() {
   if (props.preview || !import.meta.client || isLoadingCatalog.value) {
+    return
+  }
+
+  if (isMobileRestricted.value) {
+    selectedModel.value = ''
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
     return
   }
 
@@ -690,6 +739,14 @@ async function ensureModelReady(modelId: string) {
     return false
   }
 
+  // A submit checked the restriction before awaiting the graph, so the window
+  // may have narrowed since. It answers with `modelError`, which has to say so
+  // rather than fall back to the failed-download message.
+  if (isMobileRestricted.value) {
+    modelError.value = MOBILE_DISCLAIMER_MESSAGE
+    return false
+  }
+
   if (loadedModelId.value === modelId) {
     return true
   }
@@ -716,6 +773,10 @@ async function ensureModelReady(modelId: string) {
 }
 
 function handleModelDownloadClick() {
+  if (isMobileRestricted.value) {
+    return
+  }
+
   isModelDownloadPopoverOpen.value = true
 
   if (isPreparingModel.value) {
@@ -789,10 +850,20 @@ function abandonAgentRun() {
   agentRun = undefined
 }
 
+/**
+ * The answer being written, and whether the restriction cut it short.
+ *
+ * Each submit makes its own. A run still unwinding when the next one starts
+ * holds the record of its own cancellation, not the newer turn's, and a restart
+ * drops it, which is how that run learns its transcript is gone.
+ */
+let activeRun: { interrupted: boolean } | undefined
+
 function restartChat() {
   if (!props.preview) {
     abandonAgentRun()
     interrupt()
+    activeRun = undefined
   }
 
   prompt.value = ''
@@ -828,6 +899,46 @@ watch(isChatUnavailable, (unavailable) => {
 
   void loadModelCatalog()
 }, { immediate: true })
+
+/**
+ * Entering the restriction — a desktop window dragged narrower than the
+ * breakpoint — stops an answer that is still running. The engine's guard only
+ * refuses a request at the door, so without this a stream already decoding
+ * would run to the end on a device the chat has just been ruled out for, and an
+ * agent loop would go on to its next turn. It takes both calls: interrupting
+ * the engine ends the generation that is decoding but not the loop around it,
+ * and the signal is what stops the loop.
+ *
+ * Leaving it — the window widened past the breakpoint — owes the visitor the
+ * probe and the model list that were skipped.
+ */
+watch(isMobileRestricted, (restricted) => {
+  if (restricted) {
+    // Only a run with something to cut is told so — a decode, or an agent loop.
+    // One still fetching the graph or downloading a model is left to finish: the
+    // calls below cannot stop it, and marking it would call a complete answer
+    // interrupted if the window is widened again before it starts. Read before
+    // `abandonAgentRun` clears the loop's controller.
+    if (activeRun && (isGenerating.value || agentRun)) {
+      activeRun.interrupted = true
+    }
+
+    abandonAgentRun()
+    interrupt()
+    return
+  }
+
+  // Owed even after a probe that passed, when the window narrowed while the
+  // probe or a model removal was in flight: `refreshCatalog` then emptied the
+  // catalog instead of reading it.
+  const isCatalogOwed = !hasCheckedSupport.value || (isSupported.value && !hasLoadedCatalog.value)
+
+  if (isChatUnavailable.value || !isCatalogOwed || !selectedProvider.value) {
+    return
+  }
+
+  void loadModelCatalog()
+})
 
 watch(selectedModel, (modelId) => {
   if (!modelId) {
@@ -921,6 +1032,12 @@ async function handleSubmit(event: Event) {
     return
   }
 
+  // The prompt is disabled while restricted, but a submit can still arrive — a
+  // keyboard shortcut, or a window narrowed while the text was being typed.
+  if (isMobileRestricted.value) {
+    return
+  }
+
   if (!selectedProvider.value) {
     isProviderSelectOpen.value = true
     showProviderSelectionToast()
@@ -952,6 +1069,11 @@ async function handleSubmit(event: Event) {
     return
   }
 
+  // One record per answer, replaced by the next submit, so that a run still
+  // unwinding keeps its own cancellation and never reads a later turn's.
+  const run = { interrupted: false }
+
+  activeRun = run
   isLoading.value = true
   const assistantMessageIndex = messages.value.length
 
@@ -974,6 +1096,31 @@ async function handleSubmit(event: Event) {
       ...currentMessage,
       ...patch
     }
+  }
+
+  // Ends a run that was cancelled rather than finished, and says whether it was.
+  // A restart outlived it, so its transcript is gone: nothing to write and
+  // nothing to report. The restriction cut it short with the transcript still on
+  // screen, so its message is ended in place — what was written stays, and a
+  // notice says why it stops there. Both matter for a plain run, whose stream
+  // ends normally when the engine is interrupted and would otherwise pass for an
+  // answer that finished. The cut is read from the run's own record, not from the
+  // window's width now, which may already have changed back.
+  const endCancelledRun = (): boolean => {
+    if (activeRun !== run) {
+      return true
+    }
+
+    if (!run.interrupted) {
+      return false
+    }
+
+    updateAssistantMessage({
+      reasoningStreaming: false,
+      notice: `Stopped: ${MOBILE_DISCLAIMER_MESSAGE}`
+    })
+
+    return true
   }
 
   try {
@@ -1143,6 +1290,12 @@ async function handleSubmit(event: Event) {
       await runTurn(false)
     }
 
+    // A plain stream ends normally when it is interrupted, so a cancelled run
+    // arrives here looking like a finished one.
+    if (endCancelledRun()) {
+      return
+    }
+
     const parsedReply = parseAssistantReply(streamedContent)
 
     const finalMessage = getAssistantMessage()
@@ -1172,8 +1325,12 @@ async function handleSubmit(event: Event) {
   } catch (error) {
     // A restart or a closed drawer aborted the run. The transcript it was
     // writing into is already gone, so there is nothing to report and nobody to
-    // report it to.
+    // report it to. The restriction aborts a run whose transcript stays on
+    // screen, with this message still marked as streaming; `endCancelledRun`
+    // settles that one from the run's own record.
     if (error instanceof Error && error.name === 'AbortError') {
+      endCancelledRun()
+
       return
     }
 
@@ -1187,9 +1344,15 @@ async function handleSubmit(event: Event) {
       : readWebLlmDiagnostic(kind)
 
     if (kind === 'unsupported') {
-      hasCheckedSupport.value = true
-      modelError.value = diagnostic
-      showWebGpuUnavailableToast(supportReason.value)
+      // The engine's mobile guard refuses an answer when the window narrows
+      // mid-run. The banner already says why and WebGPU was never the problem,
+      // so no toast, no `modelError` for the widened window to inherit, and no
+      // `hasCheckedSupport`: a refusal is not a probe, and widening may owe one.
+      if (!isMobileRestricted.value) {
+        hasCheckedSupport.value = true
+        modelError.value = diagnostic
+        showWebGpuUnavailableToast(supportReason.value)
+      }
     } else if (kind === 'load') {
       modelError.value = diagnostic
       showModelDownloadErrorToast(diagnostic)
@@ -1203,8 +1366,13 @@ async function handleSubmit(event: Event) {
       content: diagnostic
     })
   } finally {
-    agentRun = undefined
-    isLoading.value = false
+    // Only the run still in charge gives the shared state back. One that a
+    // restart has outlived must not clear what a newer turn is using.
+    if (activeRun === run) {
+      activeRun = undefined
+      agentRun = undefined
+      isLoading.value = false
+    }
   }
 }
 </script>
@@ -1249,6 +1417,17 @@ async function handleSubmit(event: Event) {
       </div>
     </div>
 
+    <UAlert
+      v-if="isMobileRestricted"
+      :title="MOBILE_DRAWER_BANNER_TITLE"
+      :description="MOBILE_DRAWER_BANNER_MESSAGE"
+      icon="i-lucide-monitor"
+      color="warning"
+      variant="subtle"
+      class="shrink-0 rounded-none border-b border-default"
+      role="status"
+    />
+
     <UChatPalette
       class="min-h-0 flex-1 overflow-hidden"
       :ui="{
@@ -1256,7 +1435,27 @@ async function handleSubmit(event: Event) {
         prompt: props.promptClass
       }"
     >
+      <!-- Only the greeting so far: while restricted it would offer to trace a
+           dependency it cannot answer, so this says plainly what the chat
+           needs instead. -->
+      <div
+        v-if="isMobileRestricted && messages.length <= 1"
+        class="flex h-full min-h-48 flex-col items-center justify-center gap-3 px-6 text-center"
+      >
+        <UIcon
+          name="i-lucide-monitor-smartphone"
+          class="size-10 text-muted"
+        />
+        <p class="text-sm font-medium text-highlighted">
+          WebLLM is disabled on mobile devices and in narrow browser windows
+        </p>
+        <p class="max-w-sm text-sm text-muted">
+          On a phone or tablet the model needs gigabytes of GPU memory a mobile browser will not give a page, so open this graph in a desktop browser. On a desktop, widen this window to at least {{ MOBILE_BREAKPOINT_PX }}px to ask about it.
+        </p>
+      </div>
+
       <UChatMessages
+        v-else
         :messages="chatMessages"
         :status="isStreaming ? 'streaming' : 'ready'"
         :assistant="{ side: 'left', variant: 'naked' }"
