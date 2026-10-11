@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
 import {
+  MOBILE_BREAKPOINT_PX,
   MOBILE_DISCLAIMER_MESSAGE,
   MOBILE_DRAWER_BANNER_MESSAGE,
   MOBILE_DRAWER_BANNER_TITLE
@@ -140,7 +141,8 @@ const toast = useToast()
 const { isMobile } = useMobileDevice()
 
 /**
- * Whether the live chat stays off because this is a mobile device.
+ * Whether the live chat stays off because this is a mobile device or a window
+ * narrower than the breakpoint.
  *
  * Never in preview: the marketing-page mock replies with canned text and never
  * touches WebLLM, so there is nothing on a phone for it to exhaust.
@@ -359,7 +361,7 @@ const promptPlaceholder = computed(() => {
   }
 
   if (isMobileRestricted.value) {
-    return 'DISABLED: AI chat needs a desktop browser'
+    return `DISABLED: AI chat needs a desktop browser at least ${MOBILE_BREAKPOINT_PX}px wide`
   }
 
   return isChatUnavailable.value ? 'DISABLED: Upgrade the library to answer on this graph' : 'Ask about this graph...'
@@ -881,10 +883,11 @@ watch(isChatUnavailable, (unavailable) => {
 }, { immediate: true })
 
 /**
- * Leaving mobile — a tablet rotated, or a desktop window widened past the
- * breakpoint — owes the visitor the probe and the model list that were skipped.
- * Entering it stops nothing already running: an answer in progress was started
- * on a device that could take it, and the engine refuses whatever comes next.
+ * Leaving the restriction — a tablet rotated, or a desktop window widened past
+ * the breakpoint — owes the visitor the probe and the model list that were
+ * skipped. Entering it stops nothing already running: an answer in progress was
+ * started on a device that could take it, and the engine refuses whatever comes
+ * next.
  */
 watch(isMobileRestricted, (restricted) => {
   if (restricted || isChatUnavailable.value || hasCheckedSupport.value || !selectedProvider.value) {
@@ -986,7 +989,7 @@ async function handleSubmit(event: Event) {
     return
   }
 
-  // The prompt is disabled on mobile, but a submit can still arrive — a
+  // The prompt is disabled while restricted, but a submit can still arrive — a
   // keyboard shortcut, or a window narrowed while the text was being typed.
   if (isMobileRestricted.value) {
     return
@@ -1338,9 +1341,9 @@ async function handleSubmit(event: Event) {
         prompt: props.promptClass
       }"
     >
-      <!-- Only the greeting so far: on a phone it would offer to trace a
-           dependency it will never be allowed to answer, so this says plainly
-           what the chat needs instead. -->
+      <!-- Only the greeting so far: while restricted it would offer to trace a
+           dependency it cannot answer, so this says plainly what the chat
+           needs instead. -->
       <div
         v-if="isMobileRestricted && messages.length <= 1"
         class="flex h-full min-h-48 flex-col items-center justify-center gap-3 px-6 text-center"
@@ -1350,10 +1353,10 @@ async function handleSubmit(event: Event) {
           class="size-10 text-muted"
         />
         <p class="text-sm font-medium text-highlighted">
-          WebLLM is disabled on mobile devices
+          WebLLM is disabled on mobile devices and in narrow browser windows
         </p>
         <p class="max-w-sm text-sm text-muted">
-          The model runs on this device's GPU and needs gigabytes of memory a mobile browser will not give a page. Open this graph in a desktop browser to ask about it.
+          On a phone or tablet the model needs gigabytes of GPU memory a mobile browser will not give a page, so open this graph in a desktop browser. On a desktop, widen this window to at least {{ MOBILE_BREAKPOINT_PX }}px to ask about it.
         </p>
       </div>
 

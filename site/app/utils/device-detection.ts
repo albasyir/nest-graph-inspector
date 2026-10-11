@@ -1,5 +1,6 @@
 /**
- * Whether this tab is on a phone or tablet, where the in-browser AI chat stays off.
+ * Whether the in-browser AI chat stays off in this tab: on a phone or tablet, and
+ * in any window narrower than {@link MOBILE_BREAKPOINT_PX}, desktop included.
  *
  * WebLLM decodes on the GPU through WebGPU, and even the recommended model needs
  * about 2 GB of it. A mobile browser that exposes WebGPU at all hands a page far
@@ -12,17 +13,17 @@
  * than throwing.
  */
 
-/** The viewport width, in CSS pixels, below which a tab counts as mobile. Tailwind's `md`. */
+/** The viewport width, in CSS pixels, below which the chat stays off on any device. Tailwind's `md`. */
 export const MOBILE_BREAKPOINT_PX = 768
 
 /** The same breakpoint as a media query, for `matchMedia` and its `change` events. */
 export const MOBILE_VIEWPORT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px)`
 
-export const MOBILE_DISCLAIMER_MESSAGE = 'WebLLM requires desktop WebGPU resources and is disabled on mobile devices.'
+export const MOBILE_DISCLAIMER_MESSAGE = `WebLLM is disabled on mobile devices and in browser windows narrower than ${MOBILE_BREAKPOINT_PX}px.`
 
-export const MOBILE_DRAWER_BANNER_TITLE = 'Desktop Browser Required'
+export const MOBILE_DRAWER_BANNER_TITLE = 'Unavailable on Mobile or in Narrow Browser Windows'
 
-export const MOBILE_DRAWER_BANNER_MESSAGE = 'In-browser AI inference is only supported on desktop browsers. WebLLM requires desktop WebGPU resources and is disabled on mobile devices to prevent memory exhaustion and browser tab crashes.'
+export const MOBILE_DRAWER_BANNER_MESSAGE = `In-browser AI inference is only supported in desktop browser windows at least ${MOBILE_BREAKPOINT_PX}px wide. WebLLM is disabled on mobile devices to prevent memory exhaustion and browser tab crashes; on a desktop, widen this window to use it.`
 
 /**
  * Phone and tablet browsers name themselves in the user agent. `Mobile` covers

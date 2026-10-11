@@ -61,12 +61,22 @@ describe('the copy the panel and the header show', () => {
   })
 
   test('the messages say what the chat needs, and why', () => {
-    assert.equal(MOBILE_DISCLAIMER_MESSAGE, 'WebLLM requires desktop WebGPU resources and is disabled on mobile devices.')
-    assert.equal(MOBILE_DRAWER_BANNER_TITLE, 'Desktop Browser Required')
+    assert.equal(MOBILE_DISCLAIMER_MESSAGE, 'WebLLM is disabled on mobile devices and in browser windows narrower than 768px.')
+    assert.equal(MOBILE_DRAWER_BANNER_TITLE, 'Unavailable on Mobile or in Narrow Browser Windows')
     assert.equal(
       MOBILE_DRAWER_BANNER_MESSAGE,
-      'In-browser AI inference is only supported on desktop browsers. WebLLM requires desktop WebGPU resources and is disabled on mobile devices to prevent memory exhaustion and browser tab crashes.'
+      'In-browser AI inference is only supported in desktop browser windows at least 768px wide. WebLLM is disabled on mobile devices to prevent memory exhaustion and browser tab crashes; on a desktop, widen this window to use it.'
     )
+  })
+
+  test('a narrow desktop window is restricted without being a mobile device, so the copy names both', () => {
+    const desktop = DESKTOP_USER_AGENTS['Chrome on Windows']
+
+    assert.equal(isMobileUserAgent(desktop), false)
+    assert.equal(isMobileDevice({ userAgent: desktop, viewportWidth: MOBILE_BREAKPOINT_PX - 1 }), true)
+    assert.match(MOBILE_DISCLAIMER_MESSAGE, new RegExp(`mobile devices and in browser windows narrower than ${MOBILE_BREAKPOINT_PX}px`))
+    assert.match(MOBILE_DRAWER_BANNER_TITLE, /Mobile or in Narrow Browser Windows/)
+    assert.match(MOBILE_DRAWER_BANNER_MESSAGE, new RegExp(`desktop browser windows at least ${MOBILE_BREAKPOINT_PX}px wide`))
   })
 })
 
@@ -209,7 +219,7 @@ describe('isMobileDevice', () => {
     }), false)
   })
 
-  test('a desktop window narrower than the breakpoint is a mobile viewport', () => {
+  test('a desktop window narrower than the breakpoint is restricted too', () => {
     assert.equal(isMobileDevice({
       navigator: { userAgent: DESKTOP_USER_AGENTS['Firefox on Linux'], maxTouchPoints: 0 },
       window: fakeWindow({ width: 600 })
@@ -277,7 +287,7 @@ describe('isMobileDevice', () => {
     'Small laptop': { width: 1280, mobile: false },
     '4K monitor': { width: 3840, mobile: false }
   })) {
-    test(`a desktop user agent at ${label} width (${dimensions.width}px) is ${dimensions.mobile ? 'mobile' : 'a desktop'}`, () => {
+    test(`a desktop user agent at ${label} width (${dimensions.width}px) is ${dimensions.mobile ? 'restricted' : 'not restricted'}`, () => {
       assert.equal(isMobileDevice({
         navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 },
         window: fakeWindow({ width: dimensions.width })
