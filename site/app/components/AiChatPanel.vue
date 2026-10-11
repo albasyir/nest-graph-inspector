@@ -26,7 +26,7 @@ type ChatMessage = {
   reasoningStreaming?: boolean
   /** Only in agent mode: the lookups behind the answer, in the order they happened. */
   toolSteps?: ChatToolStep[]
-  /** Said the loop gave up rather than the model finishing. */
+  /** Why the run ended without the model finishing: the loop gave up, or the window narrowed under it. */
   notice?: string
 }
 
@@ -891,19 +891,30 @@ watch(isChatUnavailable, (unavailable) => {
 }, { immediate: true })
 
 /**
- * Leaving the restriction — a tablet rotated, or a desktop window widened past
- * the breakpoint — owes the visitor the probe and the model list that were
- * skipped. Entering it stops nothing already running: an answer in progress was
- * started on a device that could take it, and the engine refuses whatever comes
- * next.
+ * Entering the restriction — a desktop window dragged narrower than the
+ * breakpoint — stops an answer that is still running. The engine's guard only
+ * refuses a request at the door, so without this a stream already decoding
+ * would run to the end on a device the chat has just been ruled out for, and an
+ * agent loop would go on to its next turn. It takes both calls: interrupting
+ * the engine ends the generation that is decoding but not the loop around it,
+ * and the signal is what stops the loop.
+ *
+ * Leaving it — the window widened past the breakpoint — owes the visitor the
+ * probe and the model list that were skipped.
  */
 watch(isMobileRestricted, (restricted) => {
+  if (restricted) {
+    abandonAgentRun()
+    interrupt()
+    return
+  }
+
   // Owed even after a probe that passed, when the window narrowed while the
   // probe or a model removal was in flight: `refreshCatalog` then emptied the
   // catalog instead of reading it.
   const isCatalogOwed = !hasCheckedSupport.value || (isSupported.value && !hasLoadedCatalog.value)
 
-  if (restricted || isChatUnavailable.value || !isCatalogOwed || !selectedProvider.value) {
+  if (isChatUnavailable.value || !isCatalogOwed || !selectedProvider.value) {
     return
   }
 
@@ -1259,8 +1270,18 @@ async function handleSubmit(event: Event) {
   } catch (error) {
     // A restart or a closed drawer aborted the run. The transcript it was
     // writing into is already gone, so there is nothing to report and nobody to
-    // report it to.
+    // report it to. The restriction aborts a run whose transcript stays on
+    // screen, with this message still marked as streaming, so that one is
+    // settled in place: what was already written stays, and a notice says why it
+    // stops there. After a restart the message is gone and the update is a no-op.
     if (error instanceof Error && error.name === 'AbortError') {
+      if (isMobileRestricted.value) {
+        updateAssistantMessage({
+          reasoningStreaming: false,
+          notice: `Stopped: ${MOBILE_DISCLAIMER_MESSAGE}`
+        })
+      }
+
       return
     }
 
