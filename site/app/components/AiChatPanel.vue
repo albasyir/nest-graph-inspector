@@ -850,10 +850,20 @@ function abandonAgentRun() {
   agentRun = undefined
 }
 
+/**
+ * The answer being written, and whether the restriction cut it short.
+ *
+ * Each submit makes its own. A run still unwinding when the next one starts
+ * holds the record of its own cancellation, not the newer turn's, and a restart
+ * drops it, which is how that run learns its transcript is gone.
+ */
+let activeRun: { interrupted: boolean } | undefined
+
 function restartChat() {
   if (!props.preview) {
     abandonAgentRun()
     interrupt()
+    activeRun = undefined
   }
 
   prompt.value = ''
@@ -904,6 +914,15 @@ watch(isChatUnavailable, (unavailable) => {
  */
 watch(isMobileRestricted, (restricted) => {
   if (restricted) {
+    // Only a run with something to cut is told so — a decode, or an agent loop.
+    // One still fetching the graph or downloading a model is left to finish: the
+    // calls below cannot stop it, and marking it would call a complete answer
+    // interrupted if the window is widened again before it starts. Read before
+    // `abandonAgentRun` clears the loop's controller.
+    if (activeRun && (isGenerating.value || agentRun)) {
+      activeRun.interrupted = true
+    }
+
     abandonAgentRun()
     interrupt()
     return
@@ -1050,6 +1069,11 @@ async function handleSubmit(event: Event) {
     return
   }
 
+  // One record per answer, replaced by the next submit, so that a run still
+  // unwinding keeps its own cancellation and never reads a later turn's.
+  const run = { interrupted: false }
+
+  activeRun = run
   isLoading.value = true
   const assistantMessageIndex = messages.value.length
 
@@ -1072,6 +1096,31 @@ async function handleSubmit(event: Event) {
       ...currentMessage,
       ...patch
     }
+  }
+
+  // Ends a run that was cancelled rather than finished, and says whether it was.
+  // A restart outlived it, so its transcript is gone: nothing to write and
+  // nothing to report. The restriction cut it short with the transcript still on
+  // screen, so its message is ended in place — what was written stays, and a
+  // notice says why it stops there. Both matter for a plain run, whose stream
+  // ends normally when the engine is interrupted and would otherwise pass for an
+  // answer that finished. The cut is read from the run's own record, not from the
+  // window's width now, which may already have changed back.
+  const endCancelledRun = (): boolean => {
+    if (activeRun !== run) {
+      return true
+    }
+
+    if (!run.interrupted) {
+      return false
+    }
+
+    updateAssistantMessage({
+      reasoningStreaming: false,
+      notice: `Stopped: ${MOBILE_DISCLAIMER_MESSAGE}`
+    })
+
+    return true
   }
 
   try {
@@ -1241,6 +1290,12 @@ async function handleSubmit(event: Event) {
       await runTurn(false)
     }
 
+    // A plain stream ends normally when it is interrupted, so a cancelled run
+    // arrives here looking like a finished one.
+    if (endCancelledRun()) {
+      return
+    }
+
     const parsedReply = parseAssistantReply(streamedContent)
 
     const finalMessage = getAssistantMessage()
@@ -1271,16 +1326,10 @@ async function handleSubmit(event: Event) {
     // A restart or a closed drawer aborted the run. The transcript it was
     // writing into is already gone, so there is nothing to report and nobody to
     // report it to. The restriction aborts a run whose transcript stays on
-    // screen, with this message still marked as streaming, so that one is
-    // settled in place: what was already written stays, and a notice says why it
-    // stops there. After a restart the message is gone and the update is a no-op.
+    // screen, with this message still marked as streaming; `endCancelledRun`
+    // settles that one from the run's own record.
     if (error instanceof Error && error.name === 'AbortError') {
-      if (isMobileRestricted.value) {
-        updateAssistantMessage({
-          reasoningStreaming: false,
-          notice: `Stopped: ${MOBILE_DISCLAIMER_MESSAGE}`
-        })
-      }
+      endCancelledRun()
 
       return
     }
@@ -1317,8 +1366,13 @@ async function handleSubmit(event: Event) {
       content: diagnostic
     })
   } finally {
-    agentRun = undefined
-    isLoading.value = false
+    // Only the run still in charge gives the shared state back. One that a
+    // restart has outlived must not clear what a newer turn is using.
+    if (activeRun === run) {
+      activeRun = undefined
+      agentRun = undefined
+      isLoading.value = false
+    }
   }
 }
 </script>
