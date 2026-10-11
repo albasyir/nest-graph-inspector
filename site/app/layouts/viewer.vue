@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
-import { MOBILE_DISCLAIMER_MESSAGE } from '~/utils/device-detection'
+import { MOBILE_BREAKPOINT_PX, MOBILE_DISCLAIMER_MESSAGE } from '~/utils/device-detection'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +21,11 @@ const ISSUES_PATH = '/view/issues'
 const TRACE_PATH = '/view/trace'
 // The trace page's address before it was renamed; the middleware redirects it.
 const LEGACY_TRACE_PATH = '/view/execution-sequence'
+
+// What a phone's header prints in place of "Ask AI": short enough for the row,
+// and naming the width as well as the device, because a desktop window narrower
+// than the breakpoint is turned away too.
+const COMPACT_ASK_AI_LABEL = `AI: desktop, ${MOBILE_BREAKPOINT_PX}px+`
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -169,8 +174,8 @@ const viewerMenuItems = computed(() => [
 
               <!-- The chat runs its model on this device's GPU, which a phone
                    cannot spare, so on mobile the button stays visible from
-                   `sm` up — saying why — and is gone below it, where the
-                   header has no room for a control that does nothing. -->
+                   `sm` up, disabled, with the reason in its tooltip and its
+                   accessible name. -->
               <UTooltip
                 :text="MOBILE_DISCLAIMER_MESSAGE"
                 :disabled="!isMobile"
@@ -186,6 +191,23 @@ const viewerMenuItems = computed(() => [
                   @click="handleAskAi"
                 />
               </UTooltip>
+
+              <!-- Below `sm` the window is under the breakpoint, so the chat is
+                   always off there; the requirement is printed rather than left
+                   to a tooltip, which a tap on a disabled button never opens.
+                   Below `lg` this row has the header's full width to itself, so
+                   the label fits a 320px phone with room to spare. -->
+              <UButton
+                v-if="isMobile"
+                icon="i-lucide-bot"
+                :label="COMPACT_ASK_AI_LABEL"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                class="min-w-0 sm:hidden"
+                :aria-label="`${COMPACT_ASK_AI_LABEL} — ${MOBILE_DISCLAIMER_MESSAGE}`"
+                disabled
+              />
             </div>
           </UContainer>
         </header>
