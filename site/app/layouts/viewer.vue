@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { storeToRefs } from 'pinia'
-import { MOBILE_BREAKPOINT_PX, MOBILE_DISCLAIMER_MESSAGE } from '~/utils/device-detection'
+import { MOBILE_DISCLAIMER_MESSAGE } from '~/utils/device-detection'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,12 +21,6 @@ const ISSUES_PATH = '/view/issues'
 const TRACE_PATH = '/view/trace'
 // The trace page's address before it was renamed; the middleware redirects it.
 const LEGACY_TRACE_PATH = '/view/execution-sequence'
-
-// What the header prints in place of "Ask AI" on a phone, a tablet, or a window
-// under the breakpoint: short enough for a 320px row, and naming the width as
-// well as the device, because a desktop window narrower than the breakpoint is
-// turned away too.
-const COMPACT_ASK_AI_LABEL = `AI: desktop ${MOBILE_BREAKPOINT_PX}px+`
 
 function handleRefresh(event?: Event) {
   event?.preventDefault()
@@ -177,14 +171,11 @@ const viewerMenuItems = computed(() => [
                    cannot spare, so what shows follows the device state rather
                    than a breakpoint: `sm` is in rem and moves with the browser's
                    font size while the restriction's 768px does not, and a tablet
-                   is wider than `sm` and still cannot run the chat. The disabled
-                   control prints what the chat needs, because a tap on a
-                   disabled button never opens a tooltip; `min-w-0` on it and on
-                   its row lets the label truncate rather than widen the header. -->
+                   is wider than `sm` and still cannot run the chat. -->
               <UButton
                 v-if="!isMobile"
                 icon="i-lucide-bot"
-                label="Ask AI"
+                label="AI Chat"
                 color="neutral"
                 variant="ghost"
                 :disabled="!endpointUrl"
@@ -193,12 +184,10 @@ const viewerMenuItems = computed(() => [
               <UButton
                 v-else
                 icon="i-lucide-bot"
-                :label="COMPACT_ASK_AI_LABEL"
+                label="AI Chat"
                 color="neutral"
                 variant="ghost"
-                size="sm"
-                class="min-w-0"
-                :aria-label="`${COMPACT_ASK_AI_LABEL} — ${MOBILE_DISCLAIMER_MESSAGE}`"
+                :aria-label="`AI Chat — ${MOBILE_DISCLAIMER_MESSAGE}`"
                 disabled
               />
             </div>

@@ -4,7 +4,7 @@
       <ClientOnly>
         <AiChatPanel
           preview
-          title="Ask AI"
+          title="AI Chat"
           :show-close="false"
           initial-message="Hi, ask me about a NestJS module, provider, controller, or dependency path. In the real viewer I run on your own GPU, in this tab."
           preview-reply="Hai!, load real project to chat with me!"
