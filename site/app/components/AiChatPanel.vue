@@ -85,7 +85,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   active: true,
   preview: false,
-  title: 'Ask AI',
+  title: 'AI Chat',
   showHeader: true,
   showClose: true,
   contentClass: 'min-h-0 px-4 sm:px-5 py-4',
