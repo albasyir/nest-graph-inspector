@@ -12,9 +12,18 @@
  */
 import type {
   GraphOutput,
+  GraphOutputCycles,
   GraphOutputDependencyRef,
   GraphOutputModule
 } from 'nest-graph-inspector'
+import {
+  formatCircularEdgeLabel,
+  getCircularEdgeBounds,
+  getCircularEdgeGeometry,
+  getCircularLabelScale,
+  unionRects,
+  type CircularEdgeRect
+} from './circular-dependency-edge.ts'
 import { getDirectRunNodeId } from './direct-run-provider.ts'
 
 export type ModuleDeepDiveItemKind = 'provider' | 'controller'
@@ -60,6 +69,25 @@ export type ModuleDeepDiveEdge = {
   source: string
   target: string
   kind: ModuleDeepDiveEdgeKind
+  /**
+   * The ids of the graph's reported cycles this injection is a step of,
+   * ascending; empty for an edge on no cycle. An item injecting itself is the
+   * one step of its own cycle, drawn with the same node at both ends.
+   */
+  cycleIds: number[]
+}
+
+/** A class a cycle passes through, by the module that declares it. */
+export type DependencyCycleNode = {
+  moduleName: string
+  name: string
+}
+
+/** One injection a reported cycle runs through: `dependent` injects `dependency`. */
+export type DependencyCycleStep = {
+  cycleId: number
+  dependent: DependencyCycleNode
+  dependency: DependencyCycleNode
 }
 
 export type ModuleDeepDiveStats = {
@@ -92,9 +120,14 @@ const ROW_GAP = 20
  * declares. Anything else — another module's export, a NestJS core token, or a
  * token the library attributed to this module but that no item here declares —
  * is drawn as an external node, so nothing the module injects goes missing.
+ *
+ * Each edge carries the reported cycles it is a step of, read from the graph's
+ * own `cycles` rather than guessed from the layout. Cycles only mark edges the
+ * module's own injections already draw — one passing through another module
+ * marks the injection that reaches this one — and never add an edge.
  */
 export function buildModuleDeepDive(
-  graph: Pick<GraphOutput, 'modules'>,
+  graph: Pick<GraphOutput, 'modules'> & Partial<Pick<GraphOutput, 'cycles'>>,
   moduleName: string
 ): ModuleDeepDive | null {
   if (!Object.hasOwn(graph.modules, moduleName)) {
@@ -125,6 +158,8 @@ export function buildModuleDeepDive(
 
   const externals = new Map<string, ModuleDeepDiveExternalNode>()
   const edges = new Map<string, ModuleDeepDiveEdge>()
+  // Each injection, keyed as a cycle step names it → the edge drawing it.
+  const edgeIdByInjection = new Map<string, string>()
   // Provider id → the internal providers it injects, for its column.
   const providerDependencies = new Map<string, string[]>()
 
@@ -146,24 +181,32 @@ export function buildModuleDeepDive(
 
     for (const dep of entry.dependencies) {
       const internalId = resolveInternalId(dep)
+      let edgeId: string
 
       if (internalId) {
         internalDependencies.push(internalId)
-        addEdge(edges, internalId, id, kind === 'controller' ? 'controller' : 'provider')
-        continue
+        edgeId = addEdge(edges, internalId, id, kind === 'controller' ? 'controller' : 'provider')
+      } else {
+        const externalId = getExternalNodeId(dep.providedBy.name, dep.token)
+        if (!externals.has(externalId)) {
+          externals.set(externalId, {
+            id: externalId,
+            type: 'external',
+            label: dep.token,
+            moduleName: dep.providedBy.name,
+            position: { x: 0, y: 0 }
+          })
+        }
+        edgeId = addEdge(edges, externalId, id, 'external')
       }
 
-      const externalId = getExternalNodeId(dep.providedBy.name, dep.token)
-      if (!externals.has(externalId)) {
-        externals.set(externalId, {
-          id: externalId,
-          type: 'external',
-          label: dep.token,
-          moduleName: dep.providedBy.name,
-          position: { x: 0, y: 0 }
-        })
-      }
-      addEdge(edges, externalId, id, 'external')
+      edgeIdByInjection.set(
+        getInjectionKey(
+          { moduleName, name: entry.name },
+          { moduleName: dep.providedBy.name, name: dep.token }
+        ),
+        edgeId
+      )
     }
 
     if (kind === 'provider') {
@@ -229,7 +272,19 @@ export function buildModuleDeepDive(
     }
   }
 
+  for (const step of getDependencyCycleSteps(graph.cycles)) {
+    const edge = edges.get(
+      edgeIdByInjection.get(getInjectionKey(step.dependent, step.dependency)) ?? ''
+    )
+    if (edge && !edge.cycleIds.includes(step.cycleId)) {
+      edge.cycleIds.push(step.cycleId)
+    }
+  }
+
   const edgeList = [...edges.values()]
+  for (const edge of edgeList) {
+    edge.cycleIds.sort((left, right) => left - right)
+  }
 
   return {
     nodes,
@@ -245,6 +300,156 @@ export function buildModuleDeepDive(
   }
 }
 
+/**
+ * The box the canvas has to show for everything in a deep dive to be seen, in
+ * flow coordinates, or `null` for a module with nothing to draw.
+ *
+ * Fitting the view to the nodes alone cuts off what a cycle draws outside
+ * them — the curve that doubles back below the columns, the gentle bow above
+ * them, a self-loop beside its node — and the cycle labels on those curves,
+ * leaving them under the page header or past the canvas edge. So the box
+ * holds every node and, for every cycle edge and self-loop, its curve and its
+ * label at `labelScale`, the size labels are enlarged to at the fitted zoom.
+ * Edges run from a node's right side into another's left, as the deep dive's
+ * handles do.
+ */
+export function getModuleDeepDiveBounds(
+  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  labelScale = 1
+): CircularEdgeRect | null {
+  const nodeById = new Map(deepDive.nodes.map(node => [node.id, node]))
+  const rects: CircularEdgeRect[] = deepDive.nodes.map(node => ({
+    x: node.position.x,
+    y: node.position.y,
+    width: DEEP_DIVE_ITEM_WIDTH,
+    height: getNodeHeight(node)
+  }))
+
+  for (const edge of deepDive.edges) {
+    const source = nodeById.get(edge.source)
+    const target = nodeById.get(edge.target)
+    const isSelfLoop = edge.source === edge.target
+    if (!source || !target || (edge.cycleIds.length === 0 && !isSelfLoop)) {
+      continue
+    }
+
+    const geometry = getCircularEdgeGeometry({
+      sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH,
+      sourceY: source.position.y + getNodeHeight(source) / 2,
+      sourcePosition: 'right',
+      targetX: target.position.x,
+      targetY: target.position.y + getNodeHeight(target) / 2,
+      targetPosition: 'left',
+      isSelfLoop
+    })
+    rects.push(getCircularEdgeBounds(
+      geometry,
+      formatCircularEdgeLabel(edge.cycleIds),
+      labelScale
+    ))
+  }
+
+  return unionRects(rects)
+}
+
+/** The canvas a deep dive is fitted to: Vue Flow's `fitBounds`, and its zoom. */
+export type ModuleDeepDiveViewport = {
+  /** Resolves `false` when nothing moved — Vue Flow's answer before it is ready. */
+  fitBounds: (bounds: CircularEdgeRect) => Promise<boolean>
+  getZoom: () => number
+  /**
+   * Whether this fit is still the latest one asked for. A fit superseded by a
+   * newer one stops, so two never take turns moving the canvas.
+   */
+  isCurrent?: () => boolean
+}
+
+/**
+ * When the deep dive may be reframed, and which fit is the latest.
+ *
+ * A first frame — a module's nodes measured, its viewport ready — is always
+ * made. A resize afterwards reframes only while the reader has left the
+ * canvas where the fit put it: once they pan or zoom, opening the JSDoc or
+ * turning a phone must not throw their view away. Opening another module, or
+ * asking for a fit, starts over.
+ */
+export type DeepDiveFitTracker = {
+  /** A fit is starting; the returned check says whether it is still the latest. */
+  begin: () => () => boolean
+  /** The reader moved the canvas themselves. */
+  noteReaderMove: () => void
+  /** A new module, or a fit the reader asked for: resizes reframe again. */
+  reset: () => void
+  /** Whether a resize should reframe the deep dive. */
+  shouldFitOnResize: () => boolean
+}
+
+export function createDeepDiveFitTracker(): DeepDiveFitTracker {
+  let latestFit = 0
+  let hasReaderMoved = false
+
+  return {
+    begin: () => {
+      latestFit += 1
+      const fit = latestFit
+      return () => fit === latestFit
+    },
+    noteReaderMove: () => {
+      hasReaderMoved = true
+    },
+    reset: () => {
+      hasReaderMoved = false
+    },
+    shouldFitOnResize: () => !hasReaderMoved
+  }
+}
+
+/** Fits a label scale settles in: each fit can zoom out and enlarge labels. */
+const DEEP_DIVE_FIT_MAX_PASSES = 3
+
+/**
+ * Frames a deep dive with its cycle curves and labels, and says whether the
+ * canvas took the fit.
+ *
+ * Labels are enlarged as the canvas zooms out, so the box is refitted with the
+ * scale the last fit left, until the scale holds. `false` means the viewport
+ * refused — Vue Flow's `fitBounds` is a no-op answering `false` until its
+ * zoom handler and pane size exist — and the caller should fit again once it
+ * is ready, rather than leave the canvas at its default viewport with the top
+ * of the graph above it. A deep dive with nothing to draw needs no fit, and a
+ * fit superseded by a newer one stops without moving the canvas again — the
+ * newer fit owes whatever is left.
+ */
+export async function fitModuleDeepDive(
+  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  viewport: ModuleDeepDiveViewport
+): Promise<boolean> {
+  const isCurrent = viewport.isCurrent ?? (() => true)
+  let labelScale = 1
+
+  for (let pass = 0; pass < DEEP_DIVE_FIT_MAX_PASSES; pass += 1) {
+    const bounds = getModuleDeepDiveBounds(deepDive, labelScale)
+    if (!bounds || !isCurrent()) {
+      return true
+    }
+
+    if (!await viewport.fitBounds(bounds)) {
+      return false
+    }
+    if (!isCurrent()) {
+      return true
+    }
+
+    const nextScale = getCircularLabelScale(viewport.getZoom())
+    if (nextScale <= labelScale) {
+      return true
+    }
+    labelScale = nextScale
+  }
+
+  return true
+}
+
 /** The node height a layout column is spaced by. */
 export function getNodeHeight(node: Pick<ModuleDeepDiveNode, 'type'>): number {
   return node.type === 'external' ? DEEP_DIVE_EXTERNAL_HEIGHT : DEEP_DIVE_ITEM_HEIGHT
@@ -258,16 +463,93 @@ function getExternalNodeId(moduleName: string, token: string): string {
   return `external:${JSON.stringify([moduleName, token])}`
 }
 
+/** Adds the edge once, however many injections it draws, and returns its id. */
 function addEdge(
   edges: Map<string, ModuleDeepDiveEdge>,
   source: string,
   target: string,
   kind: ModuleDeepDiveEdgeKind
-): void {
+): string {
   const id = JSON.stringify([source, target])
   if (!edges.has(id)) {
-    edges.set(id, { id, source, target, kind })
+    edges.set(id, { id, source, target, kind, cycleIds: [] })
   }
+
+  return id
+}
+
+/**
+ * Every injection the graph's provider and controller cycles run through, in
+ * path order.
+ *
+ * A cycle's path names each class with its module — as `{ module, provider }`
+ * items in a provider cycle, as `Module:Class` strings in a controller one —
+ * and each class injects the next, the last repeating the first: a path of
+ * n + 1 names is n injections, and a class injecting itself is a path of two
+ * and a single step. A string that names no module is skipped. Module cycles
+ * are imports between modules, not injections, so they have no steps.
+ */
+export function getDependencyCycleSteps(
+  cycles: Partial<Pick<GraphOutputCycles, 'providers' | 'controllers'>> | undefined
+): DependencyCycleStep[] {
+  const paths = [
+    ...(cycles?.providers ?? []).map(cycle => ({
+      id: cycle.id,
+      nodes: cycle.path.map((item): DependencyCycleNode | null => ({
+        moduleName: item.module.name,
+        name: item.provider.name
+      }))
+    })),
+    ...(cycles?.controllers ?? []).map(cycle => ({
+      id: cycle.id,
+      nodes: cycle.path.map(splitCycleKey)
+    }))
+  ]
+  const steps: DependencyCycleStep[] = []
+
+  for (const { id, nodes } of paths) {
+    for (let index = 0; index < nodes.length - 1; index += 1) {
+      const dependent = nodes[index]
+      const dependency = nodes[index + 1]
+      if (dependent && dependency) {
+        steps.push({ cycleId: id, dependent, dependency })
+      }
+    }
+  }
+
+  return steps
+}
+
+/**
+ * The class a `Module:Class` cycle key names, split at the first colon as the
+ * library joins it, or `null` for a key with no module.
+ */
+function splitCycleKey(key: string): DependencyCycleNode | null {
+  const separatorIndex = key.indexOf(':')
+  if (separatorIndex === -1) {
+    return null
+  }
+
+  return {
+    moduleName: key.slice(0, separatorIndex),
+    name: key.slice(separatorIndex + 1)
+  }
+}
+
+/**
+ * One injection as a key: who injects, then what. JSON, like the node ids,
+ * so names containing `:` or `-` cannot run into each other.
+ */
+function getInjectionKey(
+  dependent: DependencyCycleNode,
+  dependency: DependencyCycleNode
+): string {
+  return JSON.stringify([
+    dependent.moduleName,
+    dependent.name,
+    dependency.moduleName,
+    dependency.name
+  ])
 }
 
 /**

@@ -6,8 +6,7 @@ import {
   Handle,
   MarkerType,
   BaseEdge,
-  EdgeLabelRenderer,
-  getSmoothStepPath
+  EdgeLabelRenderer
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -39,6 +38,13 @@ import {
 } from '~/utils/graph-layout-placement'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
+import {
+  formatCircularEdgeLabel,
+  getCircularEdgeGeometry,
+  getCircularLabelPlacement,
+  getCircularLabelScale,
+  type CircularEdgeGeometry
+} from '~/utils/circular-dependency-edge'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
 import {
   findDirectRunTarget,
@@ -71,7 +77,8 @@ import {
 } from '~/utils/graph-viewer-edges'
 import {
   buildModuleFocusFitViewOptions,
-  resolveModuleFocusTargetNodeIds
+  resolveModuleFocusTargetNodeIds,
+  resolveModuleHeaderAction
 } from '~/utils/graph-viewer-focus'
 import { encodeModuleId } from '~/utils/module-id'
 
@@ -209,7 +216,8 @@ type FlowEdge = Edge<
   Record<string, never>,
   'smoothstep' | 'warning'
 >
-type WarningEdgeProps = EdgeProps<CircularEdgeData>
+/** Every edge closing a cycle; only one per pair of nodes carries the label. */
+type WarningEdgeProps = EdgeProps<FlowEdgeData>
 type NodePosition = { x: number, y: number }
 
 const props = withDefaults(
@@ -252,9 +260,15 @@ const props = withDefaults(
      * needs; a documentation preview would be sent back to `/view`.
      */
     canOpenModuleDeepDive?: boolean
+    /**
+     * Whether a module's header offers to move the camera onto it when it
+     * cannot open the deep dive. Off for a preview with nothing to focus on.
+     */
+    canFocusModule?: boolean
   }>(),
   {
     canOpenModuleDeepDive: false,
+    canFocusModule: true,
     layoutData: null,
     canSaveLayout: false,
     layoutDirty: false,
@@ -300,7 +314,7 @@ const showCircularDependencies = defineModel<boolean>(
 
 const generatedFlowId = useId()
 const flowId = props.flowId || generatedFlowId
-const { fitView } = useVueFlow(flowId)
+const { fitView, viewport } = useVueFlow(flowId)
 const graphViewerRef = ref<HTMLElement | null>(null)
 
 const NODE_WIDTH = 200
@@ -945,34 +959,46 @@ function deduplicateCircularEdgeLabels(
   return dedupedEdgeLabels
 }
 
-function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
-  const [path] = getSmoothStepPath({
+/**
+ * A cycle edge's curve: bowed to the left of travel, so the two edges of a
+ * pair that inject or import each other no longer draw over one another, and
+ * a node depending on itself gets a loop on the side its handles face.
+ */
+function getWarningEdgeGeometry(edgeProps: WarningEdgeProps): CircularEdgeGeometry {
+  return getCircularEdgeGeometry({
     sourceX: edgeProps.sourceX,
     sourceY: edgeProps.sourceY,
     sourcePosition: edgeProps.sourcePosition,
     targetX: edgeProps.targetX,
     targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
+    targetPosition: edgeProps.targetPosition,
+    isSelfLoop: edgeProps.source === edgeProps.target
   })
-
-  return path
 }
 
-function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
-  const [, labelX, labelY] = getSmoothStepPath({
-    sourceX: edgeProps.sourceX,
-    sourceY: edgeProps.sourceY,
-    sourcePosition: edgeProps.sourcePosition,
-    targetX: edgeProps.targetX,
-    targetY: edgeProps.targetY,
-    targetPosition: edgeProps.targetPosition
-  })
+function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
+  return getWarningEdgeGeometry(edgeProps).path
+}
 
+/** Labels keep their own size on a zoomed-out canvas, so a phone can read them. */
+const circularLabelScale = computed(() => getCircularLabelScale(viewport.value.zoom))
+
+function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
   return {
     position: 'absolute',
-    transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+    ...getCircularLabelPlacement(
+      getWarningEdgeGeometry(edgeProps),
+      circularLabelScale.value
+    ),
     pointerEvents: 'all'
   }
+}
+
+/** Whether an edge carries the label for the cycles between its two nodes. */
+function hasCircularEdgeLabel(
+  data: FlowEdgeData | undefined
+): data is CircularEdgeData {
+  return Boolean(data && 'circularIds' in data)
 }
 
 function splitDependencyCycleKey(
@@ -1252,6 +1278,20 @@ function calcModuleSize(
   return { width, height }
 }
 
+/**
+ * Where a node depending on itself draws its loop: a module's on its right,
+ * where the next module is a wide gap away, and an item's below it, where the
+ * next row is — beside it sits another item a narrow gap away.
+ */
+const MODULE_SELF_LOOP_HANDLES: EdgeHandles = {
+  sourceHandle: 'source-right',
+  targetHandle: 'target-right'
+}
+const ITEM_SELF_LOOP_HANDLES: EdgeHandles = {
+  sourceHandle: 'source-bottom',
+  targetHandle: 'target-bottom'
+}
+
 function pickHandles(
   sourcePos: { x: number, y: number },
   targetPos: { x: number, y: number }
@@ -1482,10 +1522,9 @@ function buildGraph(
           continue
         }
 
-        const { sourceHandle, targetHandle } = pickHandles(
-          sourcePos,
-          targetPos
-        )
+        const { sourceHandle, targetHandle } = imp === moduleName
+          ? MODULE_SELF_LOOP_HANDLES
+          : pickHandles(sourcePos, targetPos)
         const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
         const circularLabelInfo = circularModuleEdgeLabels.get(
           `${imp}->${moduleName}`
@@ -1506,7 +1545,9 @@ function buildGraph(
           target,
           sourceHandle,
           targetHandle,
-          type: circularLabelInfo ? 'warning' : 'smoothstep',
+          // Every edge closing a cycle is curved, labelled or not, so the
+          // two directions of a mutual import stay apart.
+          type: circularInfo ? 'warning' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
           class: edge => [
             edgeRelationClass,
@@ -1549,8 +1590,12 @@ function buildGraph(
       return
     }
 
+    const selfLoopHandles
+      = sourceId === targetId ? ITEM_SELF_LOOP_HANDLES : undefined
     const { sourceHandle, targetHandle }
-      = overrides.handles ?? pickDependencyHandles(sPos, tPos)
+      = overrides.handles
+        ?? selfLoopHandles
+        ?? pickDependencyHandles(sPos, tPos)
     const circularEdgeKeys
       = overrides.circularEdgeKeys ?? [`${sourceId}->${targetId}`]
     const circularInfo = collectCircularEdgeInfo(
@@ -1584,7 +1629,7 @@ function buildGraph(
       target: targetId,
       sourceHandle,
       targetHandle,
-      type: circularLabelInfo.length > 0 ? 'warning' : 'smoothstep',
+      type: isCircular ? 'warning' : 'smoothstep',
       style: {
         stroke: edgeColor,
         strokeWidth: isCircular ? 2.2 : 1.5
@@ -3574,6 +3619,14 @@ async function focusModule(moduleName: string, duration?: number) {
   await fitView(options)
 }
 
+const moduleHeaderAction = computed(() =>
+  resolveModuleHeaderAction({
+    interactive: props.interactive,
+    canOpenModuleDeepDive: props.canOpenModuleDeepDive,
+    canFocusModule: props.canFocusModule
+  })
+)
+
 /** Leaves the whole graph for one module's own page. */
 function openModuleDeepDive(moduleName: string) {
   closeJsDocHoverCard()
@@ -4070,11 +4123,12 @@ defineExpose({ centerGraph, focusModule })
 
         <EdgeLabelRenderer
           v-if="
-            shouldShowCircularEdgeWarning(
-              edgeProps.source,
-              edgeProps.target,
-              edgeProps.data
-            )
+            hasCircularEdgeLabel(edgeProps.data)
+              && shouldShowCircularEdgeWarning(
+                edgeProps.source,
+                edgeProps.target,
+                edgeProps.data
+              )
           "
         >
           <UTooltip
@@ -4105,7 +4159,7 @@ defineExpose({ centerGraph, focusModule })
                 class="circular-edge-warning__icon"
               />
               <span class="circular-edge-warning__id">
-                {{ edgeProps.data.circularIds.length }}
+                {{ formatCircularEdgeLabel(edgeProps.data.circularIds) }}
               </span>
             </div>
           </UTooltip>
@@ -4164,7 +4218,7 @@ defineExpose({ centerGraph, focusModule })
             </span>
             <div class="module-subgraph__actions">
               <UTooltip
-                v-if="props.interactive && props.canOpenModuleDeepDive"
+                v-if="moduleHeaderAction === 'deep-dive'"
                 text="Open module deep dive"
                 :delay-duration="0"
               >
@@ -4182,7 +4236,7 @@ defineExpose({ centerGraph, focusModule })
                 </button>
               </UTooltip>
               <UTooltip
-                v-else-if="props.interactive"
+                v-else-if="moduleHeaderAction === 'focus'"
                 text="Focus on this module"
                 :delay-duration="0"
               >
@@ -5078,8 +5132,11 @@ defineExpose({ centerGraph, focusModule })
   stroke: var(--mg-edge-controller);
 }
 
+/* A cycle reads above the blend of ordinary edges it crosses. */
 .graph-viewer .edge-relation--circular .vue-flow__edge-path {
   stroke: var(--mg-edge-circular);
+  stroke-opacity: 0.95;
+  stroke-linecap: round;
 }
 
 .graph-viewer .bright-line-node--dimmed {
@@ -5364,6 +5421,7 @@ defineExpose({ centerGraph, focusModule })
 
 .circular-edge-warning__id {
   display: inline-block;
+  font-variant-numeric: tabular-nums;
 }
 
 .circular-detail-dialog {
