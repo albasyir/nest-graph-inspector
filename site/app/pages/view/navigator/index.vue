@@ -17,6 +17,7 @@ const {
   endpointRequiresAccessToken,
   hasLoadError,
   showCircularDependencies,
+  showBrightLine,
   openModuleDetail,
   layoutData,
   layoutPersistence,
@@ -118,6 +119,7 @@ onBeforeUnmount(() => {
     <GraphViewer
       ref="graphViewerRef"
       v-model:show-circular-dependencies="showCircularDependencies"
+      v-model:show-bright-line="showBrightLine"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
       :direct-run-disabled="graphIsStatic"
