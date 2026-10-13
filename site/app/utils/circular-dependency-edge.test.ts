@@ -14,6 +14,10 @@ import {
 
 const NODE_HALF_HEIGHT = 18
 
+/**
+ * The geometry of an edge between two different nodes, each end given as its
+ * handle's point and the side that handle sits on.
+ */
 function between(
   source: { x: number, y: number, side: string },
   target: { x: number, y: number, side: string }

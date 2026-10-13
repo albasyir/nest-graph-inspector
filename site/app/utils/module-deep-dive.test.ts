@@ -24,10 +24,12 @@ import {
   type ModuleDeepDiveNode
 } from './module-deep-dive.ts'
 
+/** A module that declares and imports nothing, apart from what the test overrides. */
 function module(overrides: Partial<GraphOutputModule> = {}): GraphOutputModule {
   return { imports: [], exports: [], providers: [], controllers: [], ...overrides }
 }
 
+/** A dependency on `token`, as the library reports one: provided by the module named. */
 function dep(moduleName: string, token: string) {
   return { providedBy: { type: 'module', name: moduleName }, token }
 }
@@ -73,18 +75,24 @@ const GRAPH: Pick<GraphOutput, 'modules'> = {
 
 type DeepDiveGraph = Pick<GraphOutput, 'modules'> & Partial<Pick<GraphOutput, 'cycles'>>
 
+/** The deep dive of `moduleName`, failing the test outright when the graph has no such module. */
 function build(graph: DeepDiveGraph, moduleName: string): ModuleDeepDive {
   const deepDive = buildModuleDeepDive(graph, moduleName)
   assert.ok(deepDive, `${moduleName} should exist`)
   return deepDive
 }
 
+/** The node drawn with `label`, failing the test when there is none. */
 function nodeByLabel(deepDive: ModuleDeepDive, label: string): ModuleDeepDiveNode {
   const node = deepDive.nodes.find(candidate => candidate.label === label)
   assert.ok(node, `no node labelled ${label}`)
   return node
 }
 
+/**
+ * Which layout column a node sits in, read back from its x position: columns
+ * are an item's width plus the layout's 120px column gap apart.
+ */
 function columnOf(node: ModuleDeepDiveNode): number {
   return node.position.x / (DEEP_DIVE_ITEM_WIDTH + 120)
 }
@@ -243,6 +251,7 @@ describe('buildModuleDeepDive', () => {
   })
 })
 
+/** A cycle report with no cycles, apart from the ones the test supplies. */
 function cycles(overrides: Partial<GraphOutputCycles> = {}): GraphOutputCycles {
   return { modules: [], providers: [], controllers: [], ...overrides }
 }
@@ -535,6 +544,7 @@ describe('getModuleDeepDiveBounds', () => {
 
   type Box = { x: number, y: number, width: number, height: number }
 
+  /** Whether `inner` lies wholly inside `outer`, touching edges included. */
   function contains(outer: Box, inner: Box): boolean {
     return inner.x >= outer.x
       && inner.y >= outer.y

@@ -247,6 +247,12 @@ export function unionRects(rects: readonly CircularEdgeRect[]): CircularEdgeRect
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
+/**
+ * The box around a curve's start, end and control points. A cubic Bézier
+ * never leaves the hull of its four points, so this box holds the whole
+ * curve — a little more where a control point overshoots the drawn line, which
+ * only errs towards showing too much when the canvas is fitted around it.
+ */
 function getPointsBounds(points: readonly CircularEdgePoint[]): CircularEdgeRect {
   const left = Math.min(...points.map(point => point.x))
   const top = Math.min(...points.map(point => point.y))
@@ -271,6 +277,14 @@ export function formatCircularEdgeLabel(cycleIds: readonly number[]): string {
   return unlisted > 0 ? [...listed, `+${unlisted}`].join(' ') : listed.join(' ')
 }
 
+/**
+ * A loop out of a node and back in on the side its handle faces. It leaves
+ * `SELF_LOOP_SPREAD` to one side of the handle and returns as far to the
+ * other, its control points `SELF_LOOP_REACH` out and wider apart, so the loop
+ * swells as it goes and the arrowhead points back into the node. The label
+ * sits `SELF_LOOP_LABEL_GAP` past the loop's farthest point, anchored by its
+ * nearest side, so it reads beside the loop rather than over it.
+ */
 function getSelfLoopGeometry(
   anchor: CircularEdgePoint,
   side: CircularEdgeSide
@@ -298,6 +312,11 @@ function getSelfLoopGeometry(
   }
 }
 
+/**
+ * The side a Vue Flow `Position` names. Vue Flow only passes one of the four;
+ * anything else falls back to `right` rather than leaving the curve with no
+ * direction to leave its handle in.
+ */
 function toSide(position: string): CircularEdgeSide {
   return Object.hasOwn(OUTWARD, position) ? position as CircularEdgeSide : 'right'
 }
@@ -310,22 +329,42 @@ function getMidpoint([start, first, second, end]: CircularEdgeGeometry['points']
   }
 }
 
+/**
+ * SVG path data for one cubic Bézier: from the start, through both control
+ * points, to the end.
+ */
 function toPath([start, first, second, end]: CircularEdgeGeometry['points']): string {
   return `M ${start.x},${start.y} C ${first.x},${first.y} ${second.x},${second.y} ${end.x},${end.y}`
 }
 
+/**
+ * `left` moved by the offset `right` — how a control point is pushed out from
+ * its handle and sideways into a bow.
+ */
 function add(left: CircularEdgePoint, right: CircularEdgePoint): CircularEdgePoint {
   return { x: left.x + right.x, y: left.y + right.y }
 }
 
+/**
+ * The offset from `right` to `left` — between two handles, the way an edge
+ * travels: `subtract(target, source)`.
+ */
 function subtract(left: CircularEdgePoint, right: CircularEdgePoint): CircularEdgePoint {
   return { x: left.x - right.x, y: left.y - right.y }
 }
 
+/**
+ * A direction stretched to a distance — an outward or sideways unit vector
+ * times a reach, bow or spread.
+ */
 function scale(vector: CircularEdgePoint, factor: number): CircularEdgePoint {
   return { x: vector.x * factor, y: vector.y * factor }
 }
 
+/**
+ * Positive where two directions agree, negative where they oppose — how an
+ * edge tells whether it leaves its handle towards its target or doubles back.
+ */
 function dot(left: CircularEdgePoint, right: CircularEdgePoint): number {
   return left.x * right.x + left.y * right.y
 }
@@ -335,6 +374,10 @@ function across(vector: CircularEdgePoint): CircularEdgePoint {
   return { x: -vector.y, y: vector.x }
 }
 
+/**
+ * `value` held within `min`..`max` — the limits every bow, reach and label
+ * scale here is kept to.
+ */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }

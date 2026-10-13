@@ -148,6 +148,11 @@ export function buildModuleDeepDive(
     ])
   )
 
+  /**
+   * The item a dependency resolves to inside this module — providers before
+   * controllers — or `null` for one reaching outside it: another module's
+   * export, a NestJS core token, or a token no item here declares.
+   */
   function resolveInternalId(dep: GraphOutputDependencyRef): string | null {
     if (dep.providedBy.name !== moduleName) {
       return null
@@ -384,6 +389,11 @@ export type DeepDiveFitTracker = {
   shouldFitOnResize: () => boolean
 }
 
+/**
+ * A tracker for one deep dive: no fit begun yet, and the reader yet to move
+ * the canvas. Each `begin` numbers its fit, so the check it hands back stays
+ * true only until a later fit begins.
+ */
 export function createDeepDiveFitTracker(): DeepDiveFitTracker {
   let latestFit = 0
   let hasReaderMoved = false
@@ -564,6 +574,11 @@ function resolveDependencyLevels(
   const levels = new Map<string, number>()
   const visiting = new Set<string>()
 
+  /**
+   * The level of `id`, worked out from its siblings' and remembered. A sibling
+   * still being visited lies on the path that led here — a cycle — so it is
+   * skipped, as is the provider itself; that is where the cycle gets cut.
+   */
   function visit(id: string): number {
     const known = levels.get(id)
     if (known !== undefined) {
