@@ -20,6 +20,7 @@ import {
   getDependencyCycleSteps,
   getModuleDeepDiveBounds,
   getNodeHeight,
+  withLiveNodePositions,
   type ModuleDeepDive,
   type ModuleDeepDiveNode
 } from './module-deep-dive.ts'
@@ -646,6 +647,52 @@ describe('getModuleDeepDiveBounds', () => {
   })
 })
 
+describe('withLiveNodePositions', () => {
+  test('moves the nodes the canvas has a position for, and leaves the rest and the input alone', () => {
+    const deepDive = build(GRAPH, 'OrderModule')
+    const dragged = nodeByLabel(deepDive, 'OrderService')
+    const layoutPosition = { ...dragged.position }
+    const live = withLiveNodePositions(deepDive, new Map([[dragged.id, { x: 2000, y: 900 }]]))
+
+    for (const node of live.nodes) {
+      const original = deepDive.nodes.find(candidate => candidate.id === node.id)
+      assert.deepEqual(
+        node.position,
+        node.id === dragged.id ? { x: 2000, y: 900 } : original?.position
+      )
+    }
+    assert.deepEqual(dragged.position, layoutPosition)
+    assert.equal(live.edges, deepDive.edges)
+  })
+
+  test('the box follows a dragged node, and the cycle label beside it', () => {
+    const deepDive = build(
+      {
+        modules: {
+          SelfModule: module({
+            providers: [{ name: 'Self', dependencies: [dep('SelfModule', 'Self')] }]
+          })
+        },
+        cycles: cycles({
+          providers: [providerCycle(7, [['SelfModule', 'Self'], ['SelfModule', 'Self']])]
+        })
+      },
+      'SelfModule'
+    )
+    const [node] = deepDive.nodes
+    assert.ok(node)
+    const bounds = getModuleDeepDiveBounds(
+      withLiveNodePositions(deepDive, new Map([[node.id, { x: 1500, y: 600 }]]))
+    )
+    assert.ok(bounds)
+
+    assert.equal(bounds.x, 1500)
+    // The self-loop and its label sit past the node's right side, where it was dragged.
+    assert.ok(bounds.x + bounds.width > 1500 + DEEP_DIVE_ITEM_WIDTH + 40)
+    assert.ok(bounds.y <= 600 && bounds.y + bounds.height >= 600 + getNodeHeight(node))
+  })
+})
+
 describe('fitModuleDeepDive', () => {
   type Box = { x: number, y: number, width: number, height: number }
 
@@ -720,6 +767,22 @@ describe('fitModuleDeepDive', () => {
     assert.equal(fitted, true)
     assert.equal(fits.length, 1)
     assert.equal(isCurrent(), false)
+  })
+
+  test('a node the reader dragged is framed where they left it', async () => {
+    const deepDive = build(GRAPH, 'OrderModule')
+    const dragged = nodeByLabel(deepDive, 'OrderController')
+    const { fits, viewport } = fakeViewport(1)
+
+    await fitModuleDeepDive(
+      withLiveNodePositions(deepDive, new Map([[dragged.id, { x: 3000, y: -800 }]])),
+      viewport
+    )
+
+    const [fit] = fits
+    assert.ok(fit)
+    assert.ok(fit.x + fit.width >= 3000 + DEEP_DIVE_ITEM_WIDTH)
+    assert.ok(fit.y <= -800)
   })
 
   test('a module with nothing to draw needs no fit', async () => {

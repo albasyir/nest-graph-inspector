@@ -50,6 +50,7 @@ import {
   createDeepDiveFitTracker,
   fitModuleDeepDive,
   getNodeHeight,
+  withLiveNodePositions,
   type ModuleDeepDiveEdgeKind,
   type ModuleDeepDiveExternalNode,
   type ModuleDeepDiveItemNode
@@ -199,7 +200,7 @@ function getCircularGeometry(edgeProps: CircularEdgeProps): CircularEdgeGeometry
   })
 }
 
-const { fitBounds, viewport, viewportHelper } = useVueFlow(flowId)
+const { fitBounds, getNodes, viewport, viewportHelper } = useVueFlow(flowId)
 
 /** Labels keep their own size on a zoomed-out canvas, so a phone can read them. */
 const circularLabelScale = computed(() => getCircularLabelScale(viewport.value.zoom))
@@ -225,10 +226,23 @@ let isDeepDiveFitPending = true
 const deepDiveFitTracker = createDeepDiveFitTracker()
 
 /**
+ * Where the canvas has each node now — the reader may have dragged some. The
+ * deep dive has no parent nodes, so a node's computed position is its place
+ * on the canvas.
+ */
+function getLiveNodePositions(): Map<string, { x: number, y: number }> {
+  return new Map(getNodes.value.map(node => [
+    node.id,
+    { x: node.computedPosition.x, y: node.computedPosition.y }
+  ]))
+}
+
+/**
  * Frames the deep dive with its cycle curves and labels, not only its nodes:
  * a label on a curve that bows past the nodes would otherwise sit outside the
- * canvas. Until the viewport is ready the fit stays pending, and is made the
- * moment it is. A newer fit supersedes one still running.
+ * canvas. Nodes are framed where the canvas has them, so a node the reader
+ * dragged stays in view. Until the viewport is ready the fit stays pending,
+ * and is made the moment it is. A newer fit supersedes one still running.
  */
 async function fitDeepDive(): Promise<void> {
   const current = deepDive.value
@@ -238,7 +252,8 @@ async function fitDeepDive(): Promise<void> {
     return
   }
 
-  const isFitted = await fitModuleDeepDive(current, {
+  const liveDeepDive = withLiveNodePositions(current, getLiveNodePositions())
+  const isFitted = await fitModuleDeepDive(liveDeepDive, {
     fitBounds: bounds => fitBounds(bounds, { padding: DEEP_DIVE_FIT_PADDING }),
     getZoom: () => viewport.value.zoom,
     isCurrent
@@ -291,18 +306,14 @@ const openCycleIds = ref<number[]>([])
 const openCycleIssues = computed(() =>
   cycleIssues.value.filter(issue => openCycleIds.value.includes(issue.id))
 )
-const showCycleDetails = computed({
-  get: () => openCycleIssues.value.length > 0,
-  set: (open) => {
-    if (!open) {
-      openCycleIds.value = []
-    }
-  }
-})
+// Open or shut on its own, so closing keeps the story in the drawer while it
+// slides away, as the navigator's does; the next label opened replaces it.
+const showCycleDetails = ref(false)
 
 function openCycleDetails(cycleIds: readonly number[]): void {
   closeJsDocHoverCard()
   openCycleIds.value = [...cycleIds]
+  showCycleDetails.value = openCycleIssues.value.length > 0
 }
 
 /** A cycle label as a screen reader hears it: each cycle's whole path. */

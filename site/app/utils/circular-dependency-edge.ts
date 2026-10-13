@@ -80,7 +80,10 @@ const OUTWARD: Readonly<Record<CircularEdgeSide, CircularEdgePoint>> = {
   left: { x: -1, y: 0 }
 }
 
-/** How far a self-loop reaches out of its node. */
+/**
+ * How far out of its node a self-loop's control points sit; the loop itself
+ * reaches three-quarters of that.
+ */
 const SELF_LOOP_REACH = 44
 /** Half the gap between where a self-loop leaves its node and comes back. */
 const SELF_LOOP_SPREAD = 8
@@ -330,8 +333,9 @@ function getMidpoint([start, first, second, end]: CircularEdgeGeometry['points']
 }
 
 /**
- * SVG path data for one cubic Bézier: from the start, through both control
- * points, to the end.
+ * SVG path data for one cubic Bézier from the start to the end. The two
+ * control points shape it: the curve bends towards them without passing
+ * through them.
  */
 function toPath([start, first, second, end]: CircularEdgeGeometry['points']): string {
   return `M ${start.x},${start.y} C ${first.x},${first.y} ${second.x},${second.y} ${end.x},${end.y}`

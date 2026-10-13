@@ -357,6 +357,28 @@ export function getModuleDeepDiveBounds(
   return unionRects(rects)
 }
 
+/**
+ * The deep dive with each node where the canvas has it now.
+ *
+ * The reader can drag the deep dive's nodes, and the layout never hears of it:
+ * a fit framed from the layout would leave a dragged node — and the cycle
+ * curves and labels that follow it — outside the view it settles on. A node
+ * the canvas has no position for, such as one not drawn yet, keeps its layout
+ * position. The deep dive passed in is left as it was.
+ */
+export function withLiveNodePositions(
+  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  livePositions: ReadonlyMap<string, { x: number, y: number }>
+): Pick<ModuleDeepDive, 'nodes' | 'edges'> {
+  return {
+    nodes: deepDive.nodes.map((node) => {
+      const position = livePositions.get(node.id)
+      return position ? { ...node, position: { x: position.x, y: position.y } } : node
+    }),
+    edges: deepDive.edges
+  }
+}
+
 /** The canvas a deep dive is fitted to: Vue Flow's `fitBounds`, and its zoom. */
 export type ModuleDeepDiveViewport = {
   /** Resolves `false` when nothing moved — Vue Flow's answer before it is ready. */
