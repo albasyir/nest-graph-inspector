@@ -35,6 +35,37 @@ export const MODULE_FOCUS_MAX_ZOOM = 1.2
  */
 export const MODULE_FOCUS_MIN_ZOOM = 0.05
 
+/** What the button in a module's header does, or `null` for no button. */
+export type ModuleHeaderAction = 'deep-dive' | 'focus' | null
+
+/**
+ * The action a module's header offers.
+ *
+ * A page that can open the deep dive offers that. Otherwise the header falls
+ * back to a focus, unless the embedding page turns focus off — a preview that
+ * shows a single module has nowhere else to move the camera to. A viewer that
+ * is not interactive offers nothing.
+ */
+export function resolveModuleHeaderAction({
+  interactive,
+  canOpenModuleDeepDive,
+  canFocusModule
+}: {
+  interactive: boolean
+  canOpenModuleDeepDive: boolean
+  canFocusModule: boolean
+}): ModuleHeaderAction {
+  if (!interactive) {
+    return null
+  }
+
+  if (canOpenModuleDeepDive) {
+    return 'deep-dive'
+  }
+
+  return canFocusModule ? 'focus' : null
+}
+
 /** The `fitView` options a module focus is made with. */
 export type ModuleFocusFitViewOptions = {
   /** Ids of the nodes to frame. */

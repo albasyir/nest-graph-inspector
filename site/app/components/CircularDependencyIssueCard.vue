@@ -10,6 +10,7 @@ import { useDebounceFn, useElementVisibility, useResizeObserver } from '@vueuse/
 import type { EdgeProps } from '@vue-flow/core'
 import type { CircularDependencyIssue } from '~/utils/circular-dependency-issues'
 import type { CircularIssueFlow } from '~/utils/circular-dependency-flow'
+import { getCircularEdgeGeometry } from '~/utils/circular-dependency-edge'
 import { circularDependencyCategoryLabel } from '~/utils/circular-dependency-issues'
 
 const props = withDefaults(
@@ -39,6 +40,19 @@ type IssuePathEdgeData = { isBackwardEdge: boolean }
 type IssuePathEdgeProps = EdgeProps<IssuePathEdgeData>
 
 function getIssuePathEdgePath(edgeProps: IssuePathEdgeProps): string {
+  // A class injecting itself: one node, and a loop out of its handle's side.
+  if (edgeProps.source === edgeProps.target) {
+    return getCircularEdgeGeometry({
+      sourceX: edgeProps.sourceX,
+      sourceY: edgeProps.sourceY,
+      sourcePosition: edgeProps.sourcePosition,
+      targetX: edgeProps.targetX,
+      targetY: edgeProps.targetY,
+      targetPosition: edgeProps.targetPosition,
+      isSelfLoop: true
+    }).path
+  }
+
   const backwardCenterY
     = Math.max(edgeProps.sourceY, edgeProps.targetY) + 88
   const [path] = getSmoothStepPath({

@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { VueFlow, Handle, MarkerType, Position } from '@vue-flow/core'
+import {
+  VueFlow,
+  BaseEdge,
+  EdgeLabelRenderer,
+  Handle,
+  MarkerType,
+  Position,
+  useVueFlow
+} from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import type { Edge, Node, NodeMouseEvent } from '@vue-flow/core'
+import { useDebounceFn, useResizeObserver } from '@vueuse/core'
+import type { CSSProperties } from 'vue'
+import type { Edge, EdgeProps, Node, NodeMouseEvent } from '@vue-flow/core'
 import type { BreadcrumbItem } from '@nuxt/ui'
 import type { GraphOutput } from 'nest-graph-inspector'
 import {
@@ -13,7 +23,17 @@ import {
   type DirectRunExecutionSnapshot,
   type DirectRunResultPayload
 } from '~/utils/direct-run-provider'
+import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import {
+  formatCircularEdgeLabel,
+  getCircularEdgeGeometry,
+  getCircularLabelPlacement,
+  getCircularLabelScale,
+  type CircularEdgeGeometry
+} from '~/utils/circular-dependency-edge'
+import { collectCircularDependencyIssues } from '~/utils/circular-dependency-issues'
+import {
+  CIRCULAR_DEPENDENCY_EDGE_COLOR,
   CONTROLLER_EDGE_COLOR,
   MODULE_EDGE_COLOR,
   PROVIDER_EDGE_COLOR
@@ -27,7 +47,10 @@ import {
 import {
   DEEP_DIVE_ITEM_WIDTH,
   buildModuleDeepDive,
+  createDeepDiveFitTracker,
+  fitModuleDeepDive,
   getNodeHeight,
+  withLiveNodePositions,
   type ModuleDeepDiveEdgeKind,
   type ModuleDeepDiveExternalNode,
   type ModuleDeepDiveItemNode
@@ -70,6 +93,10 @@ const emit = defineEmits<{
 type FlowNode
   = | Node<ModuleDeepDiveItemNode, Record<string, never>, 'item'>
     | Node<ModuleDeepDiveExternalNode, Record<string, never>, 'external'>
+
+/** What an edge carries: the reported cycles it is a step of. */
+type FlowEdgeData = { cycleIds: number[] }
+type CircularEdgeProps = EdgeProps<FlowEdgeData>
 
 const NAVIGATOR_PATH = '/view/navigator'
 /** How long a pointer has to rest on a node before its JSDoc appears. */
@@ -132,24 +159,201 @@ const flowNodes = computed<FlowNode[]>(() =>
   })
 )
 
-const flowEdges = computed<Edge[]>(() =>
+const flowEdges = computed<Edge<FlowEdgeData>[]>(() =>
   (deepDive.value?.edges ?? []).map((edge) => {
-    const color = EDGE_COLOR_BY_KIND[edge.kind]
+    const isCircular = edge.cycleIds.length > 0
+    const color = isCircular
+      ? CIRCULAR_DEPENDENCY_EDGE_COLOR
+      : EDGE_COLOR_BY_KIND[edge.kind]
 
     return {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: 'smoothstep',
+      // A cycle edge bows clear of the columns it doubles back across, and a
+      // self-loop can only be drawn that way, cycle report or not.
+      type: isCircular || edge.source === edge.target ? 'circular' : 'smoothstep',
+      data: { cycleIds: edge.cycleIds },
       style: {
         stroke: color,
-        strokeWidth: 1.5,
+        strokeWidth: isCircular ? 2.2 : 1.5,
         ...(edge.kind === 'external' ? { strokeDasharray: '6 4' } : {})
       },
       markerEnd: { type: MarkerType.ArrowClosed, color }
     }
   })
 )
+
+const hasCircularEdges = computed(() =>
+  Boolean(deepDive.value?.edges.some(edge => edge.cycleIds.length > 0))
+)
+
+function getCircularGeometry(edgeProps: CircularEdgeProps): CircularEdgeGeometry {
+  return getCircularEdgeGeometry({
+    sourceX: edgeProps.sourceX,
+    sourceY: edgeProps.sourceY,
+    sourcePosition: edgeProps.sourcePosition,
+    targetX: edgeProps.targetX,
+    targetY: edgeProps.targetY,
+    targetPosition: edgeProps.targetPosition,
+    isSelfLoop: edgeProps.source === edgeProps.target
+  })
+}
+
+const { fitBounds, getNodes, viewport, viewportHelper } = useVueFlow(flowId)
+
+/** Labels keep their own size on a zoomed-out canvas, so a phone can read them. */
+const circularLabelScale = computed(() => getCircularLabelScale(viewport.value.zoom))
+
+function getCircularEdgeLabelStyle(edgeProps: CircularEdgeProps): CSSProperties {
+  return {
+    position: 'absolute',
+    ...getCircularLabelPlacement(getCircularGeometry(edgeProps), circularLabelScale.value),
+    pointerEvents: 'all'
+  }
+}
+
+/** Room left around the deep dive, as Vue Flow reads a fit padding. */
+const DEEP_DIVE_FIT_PADDING = 0.12
+
+/**
+ * Whether the canvas still owes the deep dive a fit. Vue Flow can report its
+ * nodes measured before its viewport exists, and a fit asked for then does
+ * nothing — the canvas would stay at its default viewport, with the top of
+ * the graph and its cycle labels above it, under the header.
+ */
+let isDeepDiveFitPending = true
+const deepDiveFitTracker = createDeepDiveFitTracker()
+
+/**
+ * Where the canvas has each node now — the reader may have dragged some. The
+ * deep dive has no parent nodes, so a node's computed position is its place
+ * on the canvas.
+ */
+function getLiveNodePositions(): Map<string, { x: number, y: number }> {
+  return new Map(getNodes.value.map(node => [
+    node.id,
+    { x: node.computedPosition.x, y: node.computedPosition.y }
+  ]))
+}
+
+/**
+ * Frames the deep dive with its cycle curves and labels, not only its nodes:
+ * a label on a curve that bows past the nodes would otherwise sit outside the
+ * canvas. Nodes are framed where the canvas has them, so a node the reader
+ * dragged stays in view. Until the viewport is ready the fit stays pending,
+ * and is made the moment it is. A newer fit supersedes one still running.
+ */
+async function fitDeepDive(): Promise<void> {
+  const current = deepDive.value
+  const isCurrent = deepDiveFitTracker.begin()
+  isDeepDiveFitPending = true
+  if (!current || !viewportHelper.value.viewportInitialized) {
+    return
+  }
+
+  const liveDeepDive = withLiveNodePositions(current, getLiveNodePositions())
+  const isFitted = await fitModuleDeepDive(liveDeepDive, {
+    fitBounds: bounds => fitBounds(bounds, { padding: DEEP_DIVE_FIT_PADDING }),
+    getZoom: () => viewport.value.zoom,
+    isCurrent
+  })
+  if (isCurrent()) {
+    isDeepDiveFitPending = !isFitted
+  }
+}
+
+/** The reader asked for a fit — Controls' own frames the nodes alone. */
+function refitDeepDive(): void {
+  deepDiveFitTracker.reset()
+  void fitDeepDive()
+}
+
+/** A pan or zoom of the reader's own: resizes leave their view alone now. */
+function noteReaderMove(): void {
+  deepDiveFitTracker.noteReaderMove()
+}
+
+// Another module is a fresh frame, whatever the reader did to the last one.
+watch(() => props.moduleName, () => {
+  deepDiveFitTracker.reset()
+})
+
+watch(
+  () => viewportHelper.value.viewportInitialized,
+  (isInitialized) => {
+    if (isInitialized && isDeepDiveFitPending) {
+      void fitDeepDive()
+    }
+  }
+)
+
+// A resize reframes a fit still owed, or one the reader has not moved away
+// from — never a view they panned or zoomed themselves.
+const debouncedFitDeepDive = useDebounceFn(() => {
+  if (isDeepDiveFitPending || deepDiveFitTracker.shouldFitOnResize()) {
+    void fitDeepDive()
+  }
+}, 200)
+
+useResizeObserver(containerRef, debouncedFitDeepDive)
+
+// Cycle details — the navigator's "Circular Story", for the cycles a label
+// names, with every class on each cycle rather than only this module's.
+
+const cycleIssues = computed(() => collectCircularDependencyIssues(props.graphData))
+const openCycleIds = ref<number[]>([])
+const openCycleIssues = computed(() =>
+  cycleIssues.value.filter(issue => openCycleIds.value.includes(issue.id))
+)
+// Open or shut on its own, so closing keeps the story in the drawer while it
+// slides away, as the navigator's does; the next label opened replaces it.
+const showCycleDetails = ref(false)
+
+function openCycleDetails(cycleIds: readonly number[]): void {
+  closeJsDocHoverCard()
+  openCycleIds.value = [...cycleIds]
+  showCycleDetails.value = openCycleIssues.value.length > 0
+}
+
+/** A cycle label as a screen reader hears it: each cycle's whole path. */
+function describeCycles(cycleIds: readonly number[]): string {
+  const paths = cycleIssues.value
+    .filter(issue => cycleIds.includes(issue.id))
+    .map(issue => `Circular dependency #${issue.id}: ${issue.path.join(' -> ')}`)
+
+  return paths.length > 0
+    ? paths.join('. ')
+    : `Circular dependency ${formatCircularEdgeLabel(cycleIds)}`
+}
+
+// The module's JSDoc shows one line until asked for the rest, so a long
+// comment never pushes the canvas down the page.
+
+const jsDocId = `${flowId}-jsdoc`
+const jsDocBodyRef = ref<HTMLElement | null>(null)
+const isJsDocExpanded = ref(false)
+const isJsDocClipped = ref(false)
+
+/** Whether the one collapsed line hides any of the comment. */
+function measureJsDocClipping(): void {
+  const body = jsDocBodyRef.value
+  if (!body || isJsDocExpanded.value) {
+    return
+  }
+
+  const firstBlock = body.firstElementChild
+  isJsDocClipped.value = body.scrollHeight > body.clientHeight + 1
+    || (firstBlock instanceof HTMLElement
+      && firstBlock.scrollWidth > firstBlock.clientWidth + 1)
+}
+
+useResizeObserver(jsDocBodyRef, measureJsDocClipping)
+
+watch(moduleJsDoc, () => {
+  isJsDocExpanded.value = false
+  void nextTick(measureJsDocClipping)
+})
 
 // JSDoc hover card — the navigator's behaviour: open after a short rest, and
 // survive the pointer leaving the node long enough to be reached and scrolled.
@@ -424,80 +628,105 @@ function handlePaneClick(): void {
 
 <template>
   <div class="module-graph flex h-full min-h-0 flex-col">
-    <header class="border-b border-default px-4 py-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <UBreadcrumb :items="breadcrumbItems" />
+    <header class="relative z-10 border-b border-default bg-default px-4 py-2">
+      <div class="flex items-center justify-between gap-3">
+        <UBreadcrumb
+          :items="breadcrumbItems"
+          class="min-w-0"
+        />
         <UButton
           icon="i-lucide-arrow-left"
           label="Back to Application Graph"
           color="neutral"
           variant="outline"
-          size="sm"
+          size="xs"
+          class="shrink-0"
+          :ui="{ label: 'max-sm:sr-only' }"
           :to="NAVIGATOR_PATH"
         />
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <UIcon
-          name="i-lucide-package"
-          class="size-5 text-primary"
-          aria-hidden="true"
-        />
-        <h1 class="truncate font-mono text-lg font-semibold">
-          {{ props.moduleName }}
-        </h1>
-        <UBadge
-          v-if="isRoot"
-          label="Root"
-          color="error"
-          variant="subtle"
-          size="sm"
-        />
-      </div>
+      <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div class="flex min-w-0 items-center gap-2">
+          <UIcon
+            name="i-lucide-package"
+            class="size-4 shrink-0 text-primary"
+            aria-hidden="true"
+          />
+          <h1 class="truncate font-mono text-base font-semibold">
+            {{ props.moduleName }}
+          </h1>
+          <UBadge
+            v-if="isRoot"
+            label="Root"
+            color="error"
+            variant="subtle"
+            size="sm"
+          />
+        </div>
 
-      <ul
-        class="module-graph__stats"
-        aria-label="Module overview"
-      >
-        <li
-          v-for="stat in overviewStats"
-          :key="stat.label"
-          class="module-graph__stat"
+        <ul
+          class="module-graph__stats"
+          aria-label="Module overview"
         >
-          <span class="font-semibold tabular-nums">{{ stat.value }}</span>
-          <span class="text-muted">{{ stat.label }}</span>
-        </li>
-      </ul>
+          <li
+            v-for="stat in overviewStats"
+            :key="stat.label"
+            class="module-graph__stat"
+          >
+            <span class="font-semibold tabular-nums">{{ stat.value }}</span>
+            <span class="text-muted">{{ stat.label }}</span>
+          </li>
+        </ul>
+      </div>
 
       <div
         v-if="moduleJsDoc.length"
         class="module-graph__jsdoc text-sm text-muted"
+        :class="{ 'module-graph__jsdoc--expanded': isJsDocExpanded }"
       >
-        <template
-          v-for="(block, index) in moduleJsDoc"
-          :key="index"
+        <div
+          :id="jsDocId"
+          ref="jsDocBodyRef"
+          class="module-graph__jsdoc-body"
         >
-          <p v-if="block.kind === 'paragraph'">
-            {{ block.text }}
-          </p>
-          <ul
-            v-else
-            class="list-disc ps-5"
+          <template
+            v-for="(block, index) in moduleJsDoc"
+            :key="index"
           >
-            <li
-              v-for="(listItem, itemIndex) in block.items"
-              :key="itemIndex"
+            <p v-if="block.kind === 'paragraph'">
+              {{ block.text }}
+            </p>
+            <ul
+              v-else
+              class="list-disc ps-5"
             >
-              {{ listItem }}
-            </li>
-          </ul>
-        </template>
+              <li
+                v-for="(listItem, itemIndex) in block.items"
+                :key="itemIndex"
+              >
+                {{ listItem }}
+              </li>
+            </ul>
+          </template>
+        </div>
+        <UButton
+          v-if="isJsDocExpanded || isJsDocClipped"
+          :label="isJsDocExpanded ? 'Show less' : 'Show more'"
+          color="neutral"
+          variant="link"
+          size="xs"
+          class="shrink-0 py-0"
+          :aria-expanded="isJsDocExpanded"
+          :aria-controls="jsDocId"
+          @click="isJsDocExpanded = !isJsDocExpanded"
+        />
       </div>
     </header>
 
     <div
       ref="containerRef"
-      class="relative min-h-0 flex-1"
+      class="relative min-h-0 flex-1 overflow-hidden"
     >
       <VueFlow
         :id="flowId"
@@ -505,11 +734,44 @@ function handlePaneClick(): void {
         :edges="flowEdges"
         :nodes-connectable="false"
         :min-zoom="0.2"
-        fit-view-on-init
+        @nodes-initialized="fitDeepDive"
         @node-click="handleNodeClick"
         @pane-click="handlePaneClick"
         @move-start="closeJsDocHoverCard"
+        @move-end="noteReaderMove"
       >
+        <template #edge-circular="edgeProps">
+          <BaseEdge
+            :id="edgeProps.id"
+            :path="getCircularGeometry(edgeProps).path"
+            :marker-end="edgeProps.markerEnd"
+            :style="edgeProps.style"
+            :interaction-width="edgeProps.interactionWidth"
+          />
+
+          <EdgeLabelRenderer v-if="edgeProps.data?.cycleIds.length">
+            <UTooltip
+              text="Click for the whole cycle"
+              :delay-duration="0"
+            >
+              <button
+                type="button"
+                class="module-graph__cycle nodrag nopan"
+                :style="getCircularEdgeLabelStyle(edgeProps)"
+                :aria-label="describeCycles(edgeProps.data.cycleIds)"
+                @click.stop="openCycleDetails(edgeProps.data.cycleIds)"
+              >
+                <UIcon
+                  name="i-lucide-triangle-alert"
+                  class="module-graph__cycle-icon"
+                  aria-hidden="true"
+                />
+                {{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}
+              </button>
+            </UTooltip>
+          </EdgeLabelRenderer>
+        </template>
+
         <template #node-item="itemProps">
           <Handle
             type="target"
@@ -581,7 +843,11 @@ function handlePaneClick(): void {
         </template>
 
         <Background />
-        <Controls />
+        <Controls
+          @zoom-in="noteReaderMove"
+          @zoom-out="noteReaderMove"
+          @fit-view="refitDeepDive"
+        />
       </VueFlow>
 
       <div
@@ -640,6 +906,13 @@ function handlePaneClick(): void {
       <span class="module-graph__legend-item">
         <span class="module-graph__line module-graph__line--external" />
         External import
+      </span>
+      <span
+        v-if="hasCircularEdges"
+        class="module-graph__legend-item"
+      >
+        <span class="module-graph__line module-graph__line--circular" />
+        Circular dependency (#id)
       </span>
     </footer>
 
@@ -751,6 +1024,39 @@ function handlePaneClick(): void {
         </div>
       </template>
     </UDrawer>
+
+    <UDrawer
+      v-model:open="showCycleDetails"
+      :ui="{ content: 'w-screen max-w-none' }"
+    >
+      <template #header>
+        <div class="flex w-full items-start justify-between gap-3">
+          <p class="text-base font-semibold text-highlighted">
+            Circular Story
+          </p>
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            square
+            aria-label="Close drawer"
+            @click="showCycleDetails = false"
+          />
+        </div>
+      </template>
+
+      <template #body>
+        <div class="flex flex-col gap-2.5">
+          <CircularDependencyIssueCard
+            v-for="issue in openCycleIssues"
+            :key="issue.id"
+            :issue="issue"
+            :flow="buildCircularIssueFlow(issue)"
+            :flow-id="`${flowId}-cycle-${issue.id}`"
+          />
+        </div>
+      </template>
+    </UDrawer>
   </div>
 </template>
 
@@ -778,6 +1084,7 @@ function handlePaneClick(): void {
   --mg-edge-module: #0284c7;
   --mg-edge-provider: #059669;
   --mg-edge-controller: #7c3aed;
+  --mg-edge-circular: #d97706;
 }
 
 .dark .module-graph {
@@ -793,32 +1100,67 @@ function handlePaneClick(): void {
   --mg-edge-module: #38bdf8;
   --mg-edge-provider: #34d399;
   --mg-edge-controller: #c084fc;
+  --mg-edge-circular: #facc15;
 }
 
 .module-graph__stats {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
-  gap: 0.375rem;
-  margin-top: 0.75rem;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* One scrollable row on a phone, rather than three rows of pills. */
+@media (max-width: 639px) {
+  .module-graph__stats {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
 }
 
 .module-graph__stat {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: baseline;
-  gap: 0.375rem;
+  gap: 0.25rem;
   border: 1px solid var(--ui-border);
   border-radius: 999px;
-  padding: 0.125rem 0.625rem;
+  padding: 0 0.5rem;
   font-size: 0.75rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
 }
 
 .module-graph__jsdoc {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  line-height: 1.25rem;
+}
+
+/* Collapsed, the comment is its first line; the button opens the rest. */
+.module-graph__jsdoc-body {
+  flex: 1;
+  min-width: 0;
+  max-height: 1.25rem;
+  overflow: hidden;
+}
+
+.module-graph__jsdoc:not(.module-graph__jsdoc--expanded) .module-graph__jsdoc-body > p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-graph__jsdoc--expanded .module-graph__jsdoc-body {
   max-height: 6.5rem;
-  margin-top: 0.75rem;
   overflow-y: auto;
 }
 
-.module-graph__jsdoc > * + * {
+.module-graph__jsdoc-body > * + * {
   margin-top: 0.375rem;
 }
 
@@ -991,6 +1333,47 @@ function handlePaneClick(): void {
 .module-graph__line--external {
   border-top-style: dashed;
   border-color: var(--mg-edge-module);
+}
+
+.module-graph__line--circular {
+  border-color: var(--mg-edge-circular);
+}
+
+/* Cycle labels sit above the nodes a doubled-back edge passes beside. */
+.module-graph :deep(.vue-flow__edge-labels) {
+  z-index: 7;
+}
+
+/* The navigator's cycle chip: the ids of the cycles the edge is a step of. */
+.module-graph__cycle {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #facc15;
+  color: #713f12;
+  box-shadow: 0 1px 4px rgba(120, 53, 15, 0.28);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.module-graph__cycle:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.module-graph__cycle-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
 }
 
 .module-graph__result {

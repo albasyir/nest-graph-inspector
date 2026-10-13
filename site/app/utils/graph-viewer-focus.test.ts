@@ -7,7 +7,8 @@ import {
   MODULE_FOCUS_PADDING,
   buildModuleFocusFitViewOptions,
   getModuleNodeId,
-  resolveModuleFocusTargetNodeIds
+  resolveModuleFocusTargetNodeIds,
+  resolveModuleHeaderAction
 } from './graph-viewer-focus.ts'
 
 describe('getModuleNodeId', () => {
@@ -165,6 +166,54 @@ describe('buildModuleFocusFitViewOptions', () => {
         duration: undefined
       }).duration,
       MODULE_FOCUS_DURATION_MS
+    )
+  })
+})
+
+describe('resolveModuleHeaderAction', () => {
+  test('the navigator opens the deep dive, focus setting or not', () => {
+    for (const canFocusModule of [true, false]) {
+      assert.equal(
+        resolveModuleHeaderAction({
+          interactive: true,
+          canOpenModuleDeepDive: true,
+          canFocusModule
+        }),
+        'deep-dive'
+      )
+    }
+  })
+
+  test('without the deep dive, focus is the default fallback', () => {
+    assert.equal(
+      resolveModuleHeaderAction({
+        interactive: true,
+        canOpenModuleDeepDive: false,
+        canFocusModule: true
+      }),
+      'focus'
+    )
+  })
+
+  test('the docs Direct Run preview turns focus off, leaving no button', () => {
+    assert.equal(
+      resolveModuleHeaderAction({
+        interactive: true,
+        canOpenModuleDeepDive: false,
+        canFocusModule: false
+      }),
+      null
+    )
+  })
+
+  test('a non-interactive viewer offers nothing', () => {
+    assert.equal(
+      resolveModuleHeaderAction({
+        interactive: false,
+        canOpenModuleDeepDive: true,
+        canFocusModule: true
+      }),
+      null
     )
   })
 })
