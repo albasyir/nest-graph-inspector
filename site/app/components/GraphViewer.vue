@@ -80,6 +80,11 @@ import {
   resolveModuleFocusTargetNodeIds,
   resolveModuleHeaderAction
 } from '~/utils/graph-viewer-focus'
+import {
+  BRIGHT_LINE_LARGE_GRAPH_WARNING,
+  countGraphModules,
+  shouldWarnAboutBrightLine
+} from '~/utils/graph-viewer-bright-line'
 import { encodeModuleId } from '~/utils/module-id'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
@@ -230,6 +235,10 @@ const props = withDefaults(
     defaultOpenModuleDetail?: boolean
     fixBightline?: boolean | string
     excludeModules?: string[] | string
+    /**
+     * Whether the viewer offers Bright Line at all: its toggle and the hover
+     * highlight. Whether it is on is `v-model:show-bright-line`.
+     */
     enableBrightLine?: boolean
     collapsedModules?: string[] | string
     directRunUrl?: string
@@ -1780,10 +1789,30 @@ const collapsedModuleNames = ref<Set<string>>(
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
-const showBrightLine = ref(props.enableBrightLine)
+/**
+ * Whether Bright Line is switched on. `enableBrightLine` only says whether the
+ * viewer offers it at all; a page that decides when it starts on — the
+ * navigator does, by graph size — binds this, and anything else starts on.
+ */
+const showBrightLine = defineModel<boolean>('showBrightLine', { default: true })
+/** Whether hovering a node lights its path: offered here, and switched on. */
+const isBrightLineOn = computed(
+  () => props.enableBrightLine && showBrightLine.value
+)
+/**
+ * Whether to show the large-graph advisory: Bright Line is on, and the graph
+ * is at or past the cutoff. Counted from the `GraphOutput` as given, as the
+ * navigator's default is, so the two agree on what a large graph is.
+ */
+const showBrightLineWarning = computed(() =>
+  shouldWarnAboutBrightLine({
+    moduleCount: countGraphModules(props.data),
+    isOn: isBrightLineOn.value
+  })
+)
 const activeBrightLineNodeId = ref<string | null>(null)
 const hasInitialFixedBrightLine
-  = props.enableBrightLine
+  = isBrightLineOn.value
     && props.fixBightline !== false
     && props.fixBightline !== undefined
 const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
@@ -1847,7 +1876,7 @@ const fixedBrightLineTarget = computed(() => {
 const activeBrightLineConnectedNodeIds = computed(() => {
   const activeNodeId = activeBrightLineNodeId.value
   const connectedNodeIds = new Set<string>()
-  if (!showBrightLine.value || !activeNodeId) {
+  if (!isBrightLineOn.value || !activeNodeId) {
     return connectedNodeIds
   }
 
@@ -2007,7 +2036,8 @@ function resolveBrightLineNodeId(target: string): string | null {
 
 function syncFixedBrightLineNode(): void {
   const target = fixedBrightLineTarget.value
-  if (!target) {
+  // Off, no node is active — a fixed one included. Switching on syncs it.
+  if (!target || !isBrightLineOn.value) {
     return
   }
 
@@ -2015,7 +2045,7 @@ function syncFixedBrightLineNode(): void {
 }
 
 function hasActiveBrightLine(): boolean {
-  return showBrightLine.value && activeBrightLineNodeId.value !== null
+  return isBrightLineOn.value && activeBrightLineNodeId.value !== null
 }
 
 function getBrightLineNodeClass(nodeId: string): string[] {
@@ -2042,7 +2072,7 @@ function getBrightLineNodeClass(nodeId: string): string[] {
 
 function isBrightLineEdgeActive(sourceId: string, targetId: string): boolean {
   const activeNodeId = activeBrightLineNodeId.value
-  if (!showBrightLine.value || !activeNodeId) {
+  if (!isBrightLineOn.value || !activeNodeId) {
     return false
   }
 
@@ -2249,7 +2279,8 @@ function hasJsDocHoverCard(jsdoc: string | undefined): boolean {
 }
 
 function setActiveBrightLineNode(event: NodeMouseEvent): void {
-  if (!props.enableBrightLine) {
+  // Off, a hover lights nothing, so no node is recorded as active.
+  if (!isBrightLineOn.value) {
     return
   }
 
@@ -3654,24 +3685,17 @@ watch(showCircularDependencies, () => {
   refreshGraph()
 })
 
-watch(showBrightLine, (isEnabled) => {
-  if (!isEnabled) {
+// Covers `enableBrightLine` too. It never writes `showBrightLine`: what the
+// viewer offers is not the visitor's choice, and the navigator keeps whatever
+// is written there as exactly that.
+watch(isBrightLineOn, (isOn) => {
+  if (!isOn) {
     activeBrightLineNodeId.value = null
     return
   }
 
   syncFixedBrightLineNode()
 })
-
-watch(
-  () => props.enableBrightLine,
-  (isEnabled) => {
-    showBrightLine.value = isEnabled
-    if (!isEnabled) {
-      activeBrightLineNodeId.value = null
-    }
-  }
-)
 
 watch(
   fixedBrightLineTarget,
@@ -3942,6 +3966,17 @@ defineExpose({ centerGraph, focusModule })
                 />
               </UTooltip>
             </div>
+            <p
+              v-if="showBrightLineWarning"
+              class="graph-viewer-settings__warning"
+              role="status"
+            >
+              <UIcon
+                name="i-lucide-triangle-alert"
+                class="graph-viewer-settings__warning-icon"
+              />
+              <span>{{ BRIGHT_LINE_LARGE_GRAPH_WARNING }}</span>
+            </p>
             <div class="graph-viewer-settings__row">
               <UCheckbox
                 v-model="showModuleToModuleLine"
@@ -4812,6 +4847,24 @@ defineExpose({ centerGraph, focusModule })
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
+}
+
+/* Sits under the Bright Line toggle it qualifies, closer than the next row. */
+.graph-viewer-settings__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -4px 0 0;
+  color: var(--ui-warning);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.graph-viewer-settings__warning-icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
 }
 
 .graph-viewer-legends {
