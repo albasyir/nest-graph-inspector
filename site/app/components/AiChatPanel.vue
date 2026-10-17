@@ -8,6 +8,7 @@ import {
 } from '~/utils/device-detection'
 import { estimateGraphAgentPromptChars } from '~/utils/graph-agent-run'
 import type { GraphAgentEvent, GraphAgentTurn } from '~/utils/graph-agent-run'
+import { describeGraphEndpoint } from '~/utils/graph-viewer-analytics'
 import type { WebLlmCatalogModel } from '~/utils/web-llm-catalog'
 import type { WebLlmChatMessage } from '~/utils/web-llm-boundary'
 
@@ -757,7 +758,7 @@ async function ensureModelReady(modelId: string) {
     await prepareModel(modelId)
 
     posthog?.capture('Graph AI Model Loaded', {
-      url: graphStore.endpointUrl,
+      url: describeGraphEndpoint(graphStore.endpointUrl).graph_url,
       model: modelId
     })
 
@@ -827,7 +828,7 @@ watch(() => props.active, (value) => {
     graphStore.fetchMarkdown()
 
     posthog?.capture('Graph AI Chat Opened', {
-      url: graphStore.endpointUrl
+      url: describeGraphEndpoint(graphStore.endpointUrl).graph_url
     })
   }
 }, { immediate: true })
@@ -1317,7 +1318,7 @@ async function handleSubmit(event: Event) {
     })
 
     posthog?.capture('Graph AI Answer Completed', {
-      url: graphStore.endpointUrl,
+      url: describeGraphEndpoint(graphStore.endpointUrl).graph_url,
       model: modelId,
       mode: useAgent ? 'agent' : 'chat',
       toolCalls: getAssistantMessage()?.toolSteps?.length || 0

@@ -3,7 +3,6 @@ import type { GraphLayout } from 'nest-graph-inspector'
 import {
   GRAPH_LAYOUT_FILE_NAME,
   isGraphLayout,
-  readLayoutResponseError,
   readStoredLayout,
   serializeGraphLayout,
   writeStoredLayout,
@@ -133,26 +132,6 @@ for (const notALayout of [
     'the in-memory copy still serves this page'
   )
   assert.equal(readStoredLayout('http://no-storage.test', undefined), null)
-}
-
-// A rejected save reports what the inspector said, reasons included.
-assert.equal(
-  readLayoutResponseError({
-    statusCode: 400,
-    data: {
-      ok: false,
-      message: 'Invalid layout payload',
-      errors: ['layout/version must be "1"', 'layout/modules must be an object']
-    }
-  }),
-  'Invalid layout payload: layout/version must be "1"; layout/modules must be an object'
-)
-assert.equal(
-  readLayoutResponseError({ data: { ok: false, message: 'Request body is too large.' } }),
-  'Request body is too large.'
-)
-for (const unhelpful of [undefined, null, 'boom', {}, { data: { error: 'x' } }]) {
-  assert.equal(readLayoutResponseError(unhelpful), '')
 }
 
 console.log('graph-layout-persistence.test.ts ok')

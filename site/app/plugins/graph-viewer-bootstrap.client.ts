@@ -1,5 +1,5 @@
 import { writeGraphSession } from '~/utils/inspector-graph-session'
-import { resolveViewerBootstrap } from '~/utils/viewer-bootstrap-link'
+import { resolveViewerLanding } from '~/utils/viewer-bootstrap-link'
 
 /**
  * Spends the printed viewer link before anything else can read the address bar.
@@ -14,45 +14,39 @@ import { resolveViewerBootstrap } from '~/utils/viewer-bootstrap-link'
  * - Nuxt's own `nuxt:router` plugin (`enforce: 'pre'`, ordered ahead of every
  *   user plugin) captures the initial URL and force-navigates to it.
  *
- * So this takes custody of the link and rewrites the address bar first. It
- * cannot beat `nuxt:router` — nothing user-land can — which is why
+ * So this takes custody of the link and rewrites the address bar first — and
+ * of anything else standing where a printed link would: one under another
+ * spelling of `/view`, damaged on its way here, or arriving percent-encoded,
+ * cannot be spent but can still carry the token. It reads the route the way
+ * the router does, so it sees every link the router will route. It cannot beat
+ * `nuxt:router` — nothing user-land can — which is why
  * `middleware/graph-viewer-bootstrap.global.ts` still has to redirect the route
- * the router already captured.
+ * the router already captured, by the same `resolveViewerLink`.
  */
 export default defineNuxtPlugin({
   name: 'graph-viewer-bootstrap',
   enforce: 'pre',
   setup() {
-    const base = useRuntimeConfig().app.baseURL || '/'
-    const basePath = base.endsWith('/') ? base : `${base}/`
-    const { pathname, search, hash } = window.location
+    const landing = resolveViewerLanding(
+      window.location.pathname,
+      useRuntimeConfig().app.baseURL || '/'
+    )
 
-    if (!pathname.startsWith(basePath)) {
+    if (!landing) {
       return
     }
 
-    // `resolveViewerBootstrap` works in router paths, which exclude the base.
-    const routePath = pathname.slice(basePath.length - 1)
-    const bootstrap = resolveViewerBootstrap(routePath)
-
-    if (!bootstrap) {
-      return
+    if (landing.endpointUrl) {
+      writeGraphSession({ endpointUrl: landing.endpointUrl, token: landing.token })
     }
-
-    writeGraphSession({
-      endpointUrl: bootstrap.endpointUrl,
-      token: bootstrap.token
-    })
 
     // `replaceState` rather than a push: the entry the printed link opened is
     // overwritten, so neither the endpoint nor the token is a Back button away,
     // even when that link was the first thing opened in the tab. It stays in the
     // browser's own history database — nothing client-side can retract that —
-    // but it expires there with the token.
-    window.history.replaceState(
-      window.history.state,
-      '',
-      `${basePath}${bootstrap.path.slice(1)}${search}${hash}`
-    )
+    // but it expires there with the token. The query and fragment the link
+    // arrived with are dropped too: whatever travelled beside a credential is
+    // suspect as well.
+    window.history.replaceState(window.history.state, '', landing.address)
   }
 })

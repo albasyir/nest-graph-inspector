@@ -4,6 +4,7 @@ import { MOBILE_BREAKPOINT_PX, isMobileDevice } from './device-detection.ts'
 import {
   describeViewerGraphStatus,
   resolveAiChatAvailability,
+  resolveEndpointHost,
   resolveViewerHeaderPage,
   type ViewerGraphState,
   type ViewerGraphStatusInput
@@ -295,6 +296,9 @@ describe('an endpoint carrying a secret', () => {
     ['an access token, in no URL at all', `not a url ?__inspector_token=${TOKEN}`, undefined]
   ] as const) {
     test(`with ${secret} names ${host ?? 'no host'}, and nothing else of the address`, () => {
+      // All the loading state says of an endpoint, too.
+      assert.equal(resolveEndpointHost(endpointUrl), host)
+
       for (const state of STATES) {
         const status = describeViewerGraphStatus(loaded({ endpointUrl, ...state }))
         const shown = JSON.stringify(status)

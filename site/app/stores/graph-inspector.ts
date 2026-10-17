@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 import {
   GRAPH_LAYOUT_FILE_NAME,
   isGraphLayout,
-  readLayoutResponseError,
   readStoredLayout,
   serializeGraphLayout,
   writeStoredLayout
@@ -26,7 +25,7 @@ import {
   isSupportedGraphOutputVersion,
   type LegacyGraphOutput
 } from '~/utils/graph-output-support'
-import { readResponseError, readStatusCode } from '~/utils/http-error'
+import { describeFailedRequest, readStatusCode } from '~/utils/http-error'
 import {
   appendOutputPath,
   normalizeSourceUrl,
@@ -212,14 +211,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     $fetch: inspectorFetch
   })
 
-  const errorMessage = computed(
-    () =>
-      readResponseError(error.value)
-      || readResponseError(endpointInfoError.value)
-      || error.value?.message
-      || endpointInfoError.value?.message
-      || ''
-  )
+  /**
+   * HTTP status the load failed with, `0` when it got none — the one detail of
+   * a failure the viewer shows or reports. What a failed request *said* never
+   * is: a transport message quotes the URL, and a response body can quote
+   * anything.
+   *
+   * Set by the request that just failed, never read back from the fetches: a
+   * retry that stops at the handshake leaves the graph request's error from the
+   * attempt before, and would report that.
+   */
+  const errorStatus = ref(0)
   /**
    * Whether the load failed, for any of the reasons it can fail for.
    *
@@ -321,6 +323,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     acknowledgedVersionEndpointUrl.value = ''
     endpointRequiresAccessToken.value = false
     endpointUnreachable.value = false
+    errorStatus.value = 0
     resolveVersionAcknowledgement?.(false)
     resolveVersionAcknowledgement = undefined
     clearLayout()
@@ -487,10 +490,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
     // Every attempt starts without a verdict. `clearGraph()` only runs when the
     // endpoint changes, so a retry against the *same* endpoint would otherwise
-    // inherit the last one — and report "access token required" for what is
-    // really an application that has stopped answering.
+    // inherit the last one — and report "access token required", or the status
+    // of a request this attempt never made, for what is really an application
+    // that has stopped answering.
     endpointRequiresAccessToken.value = false
     endpointUnreachable.value = false
+    errorStatus.value = 0
 
     await executeEndpointInfo()
 
@@ -500,7 +505,9 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       return true
     }
 
-    if (readStatusCode(endpointInfoError.value) === 401) {
+    errorStatus.value = readStatusCode(endpointInfoError.value)
+
+    if (errorStatus.value === 401) {
       discardRejectedAccessToken()
       return false
     }
@@ -523,10 +530,15 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     }
 
     await executeJson()
+
+    // This request's own answer: its status when it failed, `0` once it has
+    // succeeded — never one left behind by an earlier attempt.
+    errorStatus.value = status.value === 'success' ? 0 : readStatusCode(error.value)
+
     if (status.value !== 'success') {
       shouldShowUpdateModal.value = false
 
-      if (readStatusCode(error.value) === 401) {
+      if (errorStatus.value === 401) {
         discardRejectedAccessToken()
       }
 
@@ -606,9 +618,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       }
 
       layoutData.value = null
-      layoutLoadError.value
-        = readLayoutResponseError(error)
-          || (error instanceof Error ? error.message : 'The layout could not be loaded.')
+      layoutLoadError.value = describeFailedRequest('The layout could not be loaded', statusCode)
     }
 
     return layoutData.value
@@ -679,9 +689,10 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       }
 
       if (isCurrent()) {
-        layoutSaveError.value
-          = readLayoutResponseError(error)
-            || (error instanceof Error ? error.message : 'The layout could not be saved.')
+        layoutSaveError.value = describeFailedRequest(
+          'The layout could not be saved',
+          readStatusCode(error)
+        )
       }
 
       return false
@@ -736,7 +747,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     const token = readAccessToken(sourceUrl)
 
     return {
-      endpointUrl: token ? redactAccessToken(sourceUrl) : sourceUrl,
+      endpointUrl: token === undefined ? sourceUrl : redactAccessToken(sourceUrl),
       token
     }
   }
@@ -852,7 +863,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     latestVersion,
     status,
     error,
-    errorMessage,
+    errorStatus,
     shouldShowUpdateModal,
     shouldShowVersionAcknowledgement,
     dependencyTraceEnabled,
