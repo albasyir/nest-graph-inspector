@@ -1,6 +1,7 @@
 import {
   createGraphViewerEventProperties,
   resolveGraphViewerLoadSource,
+  type GraphLoadFailure,
   type LoadSource
 } from '~/utils/graph-viewer-analytics'
 
@@ -58,7 +59,7 @@ export function useGraphViewerPage() {
     options: {
       loadSource: LoadSource
       isRetry?: boolean
-      errorMessage?: string
+      failure?: GraphLoadFailure
     }
   ) {
     posthog?.capture(
@@ -68,7 +69,7 @@ export function useGraphViewerPage() {
         viewerRoute: route.path,
         loadSource: options.loadSource,
         isRetry: options.isRetry,
-        errorMessage: options.errorMessage
+        failure: options.failure
       })
     )
   }
@@ -122,7 +123,11 @@ export function useGraphViewerPage() {
       trackGraphViewerEvent('graph_viewer_load_failed', {
         loadSource,
         isRetry,
-        errorMessage: graphStore.errorMessage || 'Unknown error'
+        failure: {
+          status: graphStore.errorStatus,
+          unreachable: graphStore.endpointUnreachable,
+          unsupported: graphStore.shouldShowUpdateModal
+        }
       })
     } finally {
       isPreparing.value = false

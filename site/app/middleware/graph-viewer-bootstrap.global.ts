@@ -1,6 +1,6 @@
 import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
 import {
-  resolveViewerBootstrap,
+  resolveViewerLink,
   resolveViewerPage
 } from '~/utils/viewer-bootstrap-link'
 
@@ -9,14 +9,15 @@ import {
  *
  * Two jobs, both of which have to happen before a page is created:
  *
- * 1. **Spend a printed link.** `plugins/graph-viewer-bootstrap.client.ts` has
- *    already cleaned `window.location`, but Nuxt's router plugin is ordered
- *    ahead of every user plugin and resolved its initial route from the
- *    original URL — so the router still intends to navigate to the link, and
- *    completing that navigation would write the endpoint and token straight
- *    back into the address bar. A redirect returned from a navigation guard
- *    aborts the pending navigation, so that route is never committed and the
- *    page is created once, against the final route.
+ * 1. **Spend a printed link** — or clear whatever stands where one would.
+ *    `plugins/graph-viewer-bootstrap.client.ts` has already cleaned
+ *    `window.location`, by the same `resolveViewerLink`, but Nuxt's router
+ *    plugin is ordered ahead of every user plugin and resolved its initial route
+ *    from the original URL — so the router still intends to navigate to the
+ *    link, and completing that navigation would write the endpoint and token
+ *    straight back into the address bar. A redirect returned from a navigation
+ *    guard aborts the pending navigation, so that route is never committed and
+ *    the page is created once, against the final route.
  *
  * 2. **Make sure a viewer page has a graph, and may open it.** `/view/navigator`
  *    names a view, not a graph, so on a reload the store is empty and the graph
@@ -30,17 +31,32 @@ export default defineNuxtRouteMiddleware((to) => {
   // Server rendering must not spend the link: redirecting there would drop the
   // token before the browser ever saw it, and keeping it would write a live
   // credential into the SSR payload. The client repeats this on hydration.
-  if (import.meta.server || !to.path.startsWith('/view/')) {
+  if (import.meta.server) {
     return
   }
 
   const graphStore = useGraphInspectorStore()
+  const link = resolveViewerLink(to.path)
 
-  // Exactly `/view/<page>`, or a module deep dive at
-  // `/view/navigator/modules/<moduleId>`. Any other deeper path
-  // (`/view/navigator/anything`) matches no page, so treating it as a viewer
-  // page would leave it stranded on the bootstrap placeholder's spinner; it
-  // belongs in the redirect branch below.
+  if (link) {
+    // A link that cannot be spent hands over nothing, and leaves the tab's
+    // session as it was.
+    if (link.endpointUrl) {
+      graphStore.setSession(link.endpointUrl, link.token)
+    }
+
+    // The page alone, as the plugin left the address bar: whatever travelled
+    // beside the credential — the link's query or fragment — stays out of the
+    // URL that analytics reads.
+    return navigateTo(link.path, { replace: true })
+  }
+
+  if (!to.path.startsWith('/view/')) {
+    return
+  }
+
+  // What is left is one of the viewer's own pages: `/view/` itself, exactly
+  // `/view/<page>`, or a module deep dive at `/view/navigator/modules/<moduleId>`.
   const segments = to.path.replace(/\/+$/, '').split('/')
   const viewerPage = segments.length === 3
     ? resolveViewerPage(segments[2] ?? '')
@@ -56,43 +72,24 @@ export default defineNuxtRouteMiddleware((to) => {
     )
   }
 
-  const isViewerRoute = Boolean(viewerPage)
-  const isModuleDeepDive = segments.length === 5
-    && segments[2] === 'navigator'
-    && segments[3] === 'modules'
-    && Boolean(segments[4])
-
-  if (isViewerRoute || isModuleDeepDive) {
-    const endpointUrl = graphStore.restoreSession()
-
-    if (!endpointUrl) {
-      return navigateTo('/view', { replace: true })
-    }
-
-    // A viewer page is not reachable without the credential for the graph it
-    // would show. The token is not in the URL any more, so the only way to hold
-    // one is to have come through the printed link — which is the point.
-    if (
-      !graphStore.hasAccessToken
-      && !canOpenWithoutAccessToken(endpointUrl, window.location.origin)
-    ) {
-      return navigateTo('/view', { replace: true })
-    }
-
-    return
-  }
-
-  const bootstrap = resolveViewerBootstrap(to.path)
-
-  // Not a viewer page and not a usable link — a stale or mistyped URL.
-  if (!bootstrap) {
+  // `/view/` is `/view` itself, and the session belongs to the pages below it.
+  if (segments.length === 2) {
     return navigateTo('/view', { replace: true })
   }
 
-  graphStore.setSession(bootstrap.endpointUrl, bootstrap.token)
+  const endpointUrl = graphStore.restoreSession()
 
-  return navigateTo(
-    { path: bootstrap.path, query: to.query, hash: to.hash },
-    { replace: true }
-  )
+  if (!endpointUrl) {
+    return navigateTo('/view', { replace: true })
+  }
+
+  // A viewer page is not reachable without the credential for the graph it
+  // would show. The token is not in the URL any more, so the only way to hold
+  // one is to have come through the printed link — which is the point.
+  if (
+    !graphStore.hasAccessToken
+    && !canOpenWithoutAccessToken(endpointUrl, window.location.origin)
+  ) {
+    return navigateTo('/view', { replace: true })
+  }
 })

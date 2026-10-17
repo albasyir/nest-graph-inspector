@@ -14,7 +14,7 @@ const {
   requestHeaders,
   graphData,
   graphIsStatic,
-  errorMessage,
+  errorStatus,
   endpointRequiresAccessToken,
   hasLoadError
 } = storeToRefs(graphStore)
@@ -84,7 +84,7 @@ function handleDirectRunDrawerClose() {
 
   <GraphViewerErrorState
     v-else-if="hasLoadError"
-    :message="errorMessage"
+    :status="errorStatus"
     :requires-access-token="endpointRequiresAccessToken"
     @retry="refresh()"
   />

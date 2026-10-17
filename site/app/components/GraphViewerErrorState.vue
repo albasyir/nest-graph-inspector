@@ -1,7 +1,13 @@
 <script setup lang="ts">
+import { describeLoadFailure } from '~/utils/http-error'
+
 const props = defineProps<{
-  /** Message the inspector or the transport reported. */
-  message?: string
+  /**
+   * HTTP status the load failed with, `0` when it got none. The only detail of
+   * a failure this shows: no message — the transport's or the endpoint's — is
+   * ever displayed, since either can quote the URL and what it carries.
+   */
+  status?: number
   /**
    * The endpoint answered 401. The token is no longer in the URL, so the only
    * way back is the link the application prints.
@@ -13,25 +19,9 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-const title = computed(() =>
-  props.requiresAccessToken
-    ? 'Access token required'
-    : 'Failed to fetch graph data'
+const failure = computed(() =>
+  describeLoadFailure(props.status ?? 0, props.requiresAccessToken)
 )
-
-const description = computed(() => {
-  if (props.requiresAccessToken) {
-    return (
-      props.message
-      || 'This inspector is gated behind a short-lived access token. Open the Graph Viewer link printed in your application console to load it again.'
-    )
-  }
-
-  return (
-    props.message
-    || 'Could not connect to the provided URL. Make sure your NestJS app is running and the endpoint is accessible.'
-  )
-})
 </script>
 
 <template>
@@ -51,10 +41,10 @@ const description = computed(() => {
     </div>
     <div class="space-y-2 text-center">
       <p class="text-lg font-medium">
-        {{ title }}
+        {{ failure.title }}
       </p>
       <p class="max-w-md text-sm text-muted">
-        {{ description }}
+        {{ failure.description }}
       </p>
       <div class="mt-4 flex items-center justify-center gap-2">
         <UButton

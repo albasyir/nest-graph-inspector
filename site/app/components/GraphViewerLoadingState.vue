@@ -1,9 +1,14 @@
 <script setup lang="ts">
-defineProps<{
+import { resolveEndpointHost } from '~/utils/viewer-header'
+
+const props = defineProps<{
+  /** The graph endpoint. Only its host is ever shown, and only when one can be read safely. */
   endpoint?: string
   /** Replaces the default sentence when something more specific is known. */
   message?: string
 }>()
+
+const host = computed(() => resolveEndpointHost(props.endpoint ?? ''))
 </script>
 
 <template>
@@ -29,10 +34,10 @@ defineProps<{
         {{ message || 'Fetching graph resources. The first visit can take a moment while your graph is generated.' }}
       </p>
       <p
-        v-if="endpoint"
+        v-if="host"
         class="break-all text-sm text-muted"
       >
-        Connecting to {{ endpoint }}
+        Connecting to {{ host }}
       </p>
     </div>
   </div>

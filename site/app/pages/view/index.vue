@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { redactAccessToken } from '~/utils/inspector-access-token'
+import { describeGraphEndpoint } from '~/utils/graph-viewer-analytics'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -157,7 +157,7 @@ async function tryLoadGraph(pollId: number) {
     if (shouldNavigateOnLoad.value) {
       isNavigating.value = true
       posthog?.capture('graph_auto_connected', {
-        url: redactAccessToken(probe.endpointUrl),
+        url: describeGraphEndpoint(probe.endpointUrl).graph_url,
         attempts: attemptCount.value
       })
       await navigateTo('/view/navigator')
@@ -166,7 +166,7 @@ async function tryLoadGraph(pollId: number) {
 
     isSiteDetected.value = true
     posthog?.capture('graph_endpoint_detected', {
-      url: redactAccessToken(probe.endpointUrl),
+      url: describeGraphEndpoint(probe.endpointUrl).graph_url,
       attempts: attemptCount.value
     })
   } catch {

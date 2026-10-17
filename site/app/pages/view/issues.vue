@@ -16,7 +16,7 @@ definePageMeta({
 const graphStore = useGraphInspectorStore()
 const {
   graphData,
-  errorMessage,
+  errorStatus,
   endpointRequiresAccessToken,
   hasLoadError
 } = storeToRefs(graphStore)
@@ -73,7 +73,7 @@ useSeoMeta({
 
     <GraphViewerErrorState
       v-else-if="hasLoadError"
-      :message="errorMessage"
+      :status="errorStatus"
       :requires-access-token="endpointRequiresAccessToken"
       @retry="refresh()"
     />

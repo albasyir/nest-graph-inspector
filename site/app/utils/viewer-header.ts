@@ -97,7 +97,8 @@ const UNNAMED_ENDPOINT_TITLE = 'Graph endpoint'
 
 /**
  * The host and port of an endpoint: what tells one application from another,
- * and the only part of its address the header shows.
+ * and the only part of its address the viewer shows — in the header, and in
+ * the loading state.
  *
  * The rest can carry a credential — user info, or an access token left in the
  * query however its name is spelled — and the host of an http(s) URL is the one
@@ -105,7 +106,7 @@ const UNNAMED_ENDPOINT_TITLE = 'Graph endpoint'
  * parse included, could be a secret as easily as an address, so it gets no host
  * at all rather than being shown as it is.
  */
-function resolveEndpointHost(endpointUrl: string): string | undefined {
+export function resolveEndpointHost(endpointUrl: string): string | undefined {
   try {
     const { protocol, host } = new URL(endpointUrl)
 
