@@ -6,6 +6,10 @@ const navigation = inject<Ref<ContentNavigationItem[]>>('navigation')
 const { header } = useAppConfig()
 const config = useRuntimeConfig()
 
+// The menu closes itself when the route changes, and a tap on the page that
+// is already open changes nothing.
+const isMenuOpen = ref(false)
+
 function resolveAsset(path: string | undefined) {
   if (!path) return ''
   if (path.startsWith('http') || path.startsWith('//')) return path
@@ -18,6 +22,7 @@ function resolveAsset(path: string | undefined) {
 
 <template>
   <UHeader
+    v-model:open="isMenuOpen"
     :ui="{ center: 'flex-1' }"
     :to="header?.to || '/'"
   >
@@ -99,6 +104,21 @@ function resolveAsset(path: string | undefined) {
     </template>
 
     <template #body>
+      <!-- The header's own "View Graph" sits in its centre, which the header
+           hides below `lg`, so on a phone or a tablet the menu is the way in.
+           On `/view` itself it goes nowhere new, so it closes the menu. -->
+      <UButton
+        to="/view"
+        icon="i-lucide-network"
+        label="View Graph"
+        color="neutral"
+        variant="subtle"
+        size="lg"
+        block
+        class="mb-6"
+        @click="isMenuOpen = false"
+      />
+
       <UContentNavigation
         highlight
         :navigation="navigation"
