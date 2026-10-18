@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
-import { registerHooks } from 'node:module'
+import { register } from 'node:module'
 import { describe, test } from 'node:test'
+import { MessageChannel } from 'node:worker_threads'
 import { MOBILE_DISCLAIMER_MESSAGE, type DeviceFlags } from './device-detection.ts'
 
 /**
@@ -14,23 +15,76 @@ import { MOBILE_DISCLAIMER_MESSAGE, type DeviceFlags } from './device-detection.
  *
  * The hook also records every request for `@mlc-ai/web-llm`, which is the
  * whole point of the mobile guard: the browser-only runtime is never loaded.
+ *
+ * It is registered with `module.register()` rather than
+ * `module.registerHooks()`: the synchronous hooks only arrived in Node 22.15,
+ * and this runner strips types from 22.6. Registered hooks run on their own
+ * thread, so they are a module of their own — inline, as a `data:` URL — that
+ * is handed this file's URL to resolve the alias against, and that reports each
+ * specifier back over a message port rather than into an array here.
  */
+const ALIAS_HOOKS = `
+let base
+let port
+
+export function initialize(data) {
+  base = data.base
+  port = data.port
+}
+
+export async function resolve(specifier, context, nextResolve) {
+  port.postMessage(specifier)
+
+  if (specifier.startsWith('~/')) {
+    return {
+      url: new URL('../' + specifier.slice(2) + '.ts', base).href,
+      shortCircuit: true
+    }
+  }
+
+  return nextResolve(specifier, context)
+}
+`
+
 const requestedSpecifiers: string[] = []
+const { port1: specifierReports, port2: hookPort } = new MessageChannel()
 
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    requestedSpecifiers.push(specifier)
+specifierReports.on('message', (specifier: string) => {
+  requestedSpecifiers.push(specifier)
+})
+// The reports are only listened for; they must not keep the runner alive.
+specifierReports.unref()
 
-    if (specifier.startsWith('~/')) {
-      return {
-        url: new URL(`../${specifier.slice(2)}.ts`, import.meta.url).href,
-        shortCircuit: true
+register(`data:text/javascript,${encodeURIComponent(ALIAS_HOOKS)}`, {
+  parentURL: import.meta.url,
+  data: { base: import.meta.url, port: hookPort },
+  transferList: [hookPort]
+})
+
+let flushCount = 0
+
+/**
+ * Waits until every specifier the hook has seen so far has been reported.
+ *
+ * The port delivers in order, so once a sentinel import made now comes back,
+ * everything requested before it has arrived too.
+ */
+async function flushSpecifierReports(): Promise<void> {
+  const sentinel = `data:text/javascript,export {}//flush-${++flushCount}`
+  const arrived = new Promise<void>((resolve) => {
+    const onReport = (specifier: string) => {
+      if (specifier === sentinel) {
+        specifierReports.off('message', onReport)
+        resolve()
       }
     }
 
-    return nextResolve(specifier, context)
-  }
-})
+    specifierReports.on('message', onReport)
+  })
+
+  await import(sentinel)
+  await arrived
+}
 
 const DESKTOP_FLAGS: DeviceFlags = { isMobileOrTablet: false, isMacOS: false }
 const PHONE_FLAGS: DeviceFlags = { isMobileOrTablet: true, isMacOS: true }
@@ -44,7 +98,9 @@ Object.assign(globalThis, {
 
 const { WebLlmError, useWebLlmEngine } = await import('../composables/useWebLlmEngine.ts')
 
-function hasRequestedWebLlm() {
+async function hasRequestedWebLlm(): Promise<boolean> {
+  await flushSpecifierReports()
+
   return requestedSpecifiers.some(specifier => specifier.includes('@mlc-ai/web-llm'))
 }
 
@@ -164,7 +220,7 @@ describe('useWebLlmEngine on a mobile device', () => {
     }
   })
 
-  test('never loads the browser-only web-llm runtime', () => {
-    assert.equal(hasRequestedWebLlm(), false)
+  test('never loads the browser-only web-llm runtime', async () => {
+    assert.equal(await hasRequestedWebLlm(), false)
   })
 })
