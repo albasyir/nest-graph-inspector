@@ -63,7 +63,8 @@ import {
  * The navigator answers "how do the modules fit together"; this answers "what
  * does this one module need, and from where" without tracing lines across the
  * whole application. The layout comes from `utils/module-deep-dive.ts`, so a
- * dependency always sits to the left of whatever injects it.
+ * dependency always sits to the left of whatever injects it — or above it on
+ * a phone, where the deep dive runs top to bottom.
  */
 const props = withDefaults(
   defineProps<{
@@ -118,8 +119,13 @@ const mod = computed(() =>
     ? props.graphData.modules[props.moduleName]
     : undefined
 )
+// A phone held upright reads the deep dive top to bottom: dependencies above,
+// whatever injects them below.
+const { isMobile } = useMobileDevice()
 const deepDive = computed(() =>
-  buildModuleDeepDive(props.graphData, props.moduleName)
+  buildModuleDeepDive(props.graphData, props.moduleName, {
+    orientation: isMobile.value ? 'vertical' : 'horizontal'
+  })
 )
 const isRoot = computed(() => props.moduleName === props.graphData.root)
 const moduleJsDoc = computed(() => parseJsDocPreview(mod.value?.jsdoc))
@@ -152,10 +158,18 @@ const flowNodes = computed<FlowNode[]>(() =>
       width: `${DEEP_DIVE_ITEM_WIDTH}px`,
       height: `${getNodeHeight(node)}px`
     }
+    // The sides the node's handles are on. The templates place the handles;
+    // these tell Vue Flow, which only measures a handle again when they
+    // change — without them, turning a phone would leave every edge on the
+    // sides its handles have just left.
+    const sides = {
+      sourcePosition: isMobile.value ? Position.Bottom : Position.Right,
+      targetPosition: isMobile.value ? Position.Top : Position.Left
+    }
 
     return node.type === 'item'
-      ? { id: node.id, type: 'item', position: node.position, data: node, style }
-      : { id: node.id, type: 'external', position: node.position, data: node, style }
+      ? { id: node.id, type: 'item', position: node.position, data: node, style, ...sides }
+      : { id: node.id, type: 'external', position: node.position, data: node, style, ...sides }
   })
 )
 
@@ -278,6 +292,16 @@ function noteReaderMove(): void {
 watch(() => props.moduleName, () => {
   deepDiveFitTracker.reset()
 })
+
+// So is the same module turned the other way: the view the reader left is of
+// a layout that is gone. Its nodes keep their size, so Vue Flow reports them
+// initialized only once — the fit waits for the canvas to take the new
+// positions instead.
+watch(isMobile, async () => {
+  deepDiveFitTracker.reset()
+  await nextTick()
+  void fitDeepDive()
+}, { flush: 'post' })
 
 watch(
   () => viewportHelper.value.viewportInitialized,
@@ -775,7 +799,7 @@ function handlePaneClick(): void {
         <template #node-item="itemProps">
           <Handle
             type="target"
-            :position="Position.Left"
+            :position="isMobile ? Position.Top : Position.Left"
           />
           <div
             class="module-graph-node"
@@ -811,14 +835,14 @@ function handlePaneClick(): void {
           </div>
           <Handle
             type="source"
-            :position="Position.Right"
+            :position="isMobile ? Position.Bottom : Position.Right"
           />
         </template>
 
         <template #node-external="externalProps">
           <Handle
             type="target"
-            :position="Position.Left"
+            :position="isMobile ? Position.Top : Position.Left"
           />
           <div class="module-graph-node module-graph-node--external">
             <span
@@ -838,7 +862,7 @@ function handlePaneClick(): void {
           </div>
           <Handle
             type="source"
-            :position="Position.Right"
+            :position="isMobile ? Position.Bottom : Position.Right"
           />
         </template>
 

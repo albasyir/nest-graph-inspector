@@ -621,7 +621,8 @@ viewer supports. A module's deep dive lives under the navigator at
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
 than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it
 draws the module alone, laid out by `app/utils/module-deep-dive.ts` from fields
-the graph already carries. `nuxt.config.ts` renders `/view/**` client-side only —
+the graph already carries (horizontally on desktop, or vertically on mobile
+viewports with dependencies at the top and dependents below). `nuxt.config.ts` renders `/view/**` client-side only —
 neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 

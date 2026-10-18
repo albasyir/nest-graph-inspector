@@ -22,7 +22,8 @@ import {
   getNodeHeight,
   withLiveNodePositions,
   type ModuleDeepDive,
-  type ModuleDeepDiveNode
+  type ModuleDeepDiveNode,
+  type ModuleDeepDiveOptions
 } from './module-deep-dive.ts'
 
 /** A module that declares and imports nothing, apart from what the test overrides. */
@@ -77,8 +78,12 @@ const GRAPH: Pick<GraphOutput, 'modules'> = {
 type DeepDiveGraph = Pick<GraphOutput, 'modules'> & Partial<Pick<GraphOutput, 'cycles'>>
 
 /** The deep dive of `moduleName`, failing the test outright when the graph has no such module. */
-function build(graph: DeepDiveGraph, moduleName: string): ModuleDeepDive {
-  const deepDive = buildModuleDeepDive(graph, moduleName)
+function build(
+  graph: DeepDiveGraph,
+  moduleName: string,
+  options?: ModuleDeepDiveOptions
+): ModuleDeepDive {
+  const deepDive = buildModuleDeepDive(graph, moduleName, options)
   assert.ok(deepDive, `${moduleName} should exist`)
   return deepDive
 }
@@ -249,6 +254,193 @@ describe('buildModuleDeepDive', () => {
       internalDependencies: 2,
       externalDependencies: 2
     })
+  })
+
+  test('is horizontal unless asked otherwise, and asking for horizontal changes nothing', () => {
+    const byDefault = build(GRAPH, 'OrderModule')
+
+    assert.equal(byDefault.orientation, 'horizontal')
+    assert.equal(build(GRAPH, 'OrderModule', {}).orientation, 'horizontal')
+    assert.deepEqual(build(GRAPH, 'OrderModule', { orientation: 'horizontal' }), byDefault)
+  })
+
+  test('the horizontal layout is where it always was', () => {
+    const deepDive = build(GRAPH, 'OrderModule')
+
+    assert.deepEqual(
+      deepDive.nodes.map(node => [node.label, node.position]),
+      [
+        ['ModuleRef', { x: 0, y: -36 }],
+        ['UserService', { x: 0, y: 36 }],
+        ['OrderRepository', { x: 340, y: 0 }],
+        ['OrderService', { x: 680, y: 0 }],
+        ['OrderController', { x: 1020, y: 0 }]
+      ]
+    )
+  })
+})
+
+describe('buildModuleDeepDive — vertical', () => {
+  /** A box a node covers. */
+  function boxOf(node: ModuleDeepDiveNode) {
+    return {
+      left: node.position.x,
+      right: node.position.x + DEEP_DIVE_ITEM_WIDTH,
+      top: node.position.y,
+      bottom: node.position.y + getNodeHeight(node)
+    }
+  }
+
+  // Ranks wider than one node: two externals, two level-0 providers, two controllers.
+  const WIDE_GRAPH: DeepDiveGraph = {
+    modules: {
+      ShopModule: module({
+        providers: [
+          { name: 'CartService', dependencies: [dep('ShopModule', 'PriceService'), dep('ShopModule', 'StockService')] },
+          { name: 'PriceService', dependencies: [dep('CurrencyModule', 'CurrencyService')] },
+          { name: 'StockService', dependencies: [dep('NestJSCoreModule', 'ModuleRef')] }
+        ],
+        controllers: [
+          { name: 'CartController', dependencies: [dep('ShopModule', 'CartService')] },
+          { name: 'AdminController', dependencies: [dep('ShopModule', 'StockService')] }
+        ]
+      })
+    }
+  }
+
+  test('says it is vertical, and draws the same nodes and edges as the horizontal layout', () => {
+    const horizontal = build(GRAPH, 'OrderModule')
+    const vertical = build(GRAPH, 'OrderModule', { orientation: 'vertical' })
+
+    assert.equal(vertical.orientation, 'vertical')
+    assert.deepEqual(
+      vertical.nodes.map(({ position: _position, ...node }) => node),
+      horizontal.nodes.map(({ position: _position, ...node }) => node)
+    )
+    assert.deepEqual(vertical.edges, horizontal.edges)
+    assert.deepEqual(vertical.stats, horizontal.stats)
+  })
+
+  test('dependencies at the top, providers by depth below them, controllers at the bottom', () => {
+    const deepDive = build(GRAPH, 'OrderModule', { orientation: 'vertical' })
+    const y = (label: string) => nodeByLabel(deepDive, label).position.y
+
+    assert.equal(y('ModuleRef'), y('UserService'))
+    assert.ok(y('UserService') < y('OrderRepository'))
+    assert.ok(y('OrderRepository') < y('OrderService'))
+    assert.ok(y('OrderService') < y('OrderController'))
+    // The rows start at the top: the external row is the first one.
+    assert.equal(Math.min(...deepDive.nodes.map(node => node.position.y)), y('ModuleRef'))
+  })
+
+  test('every edge that is not on a cycle runs downwards, from a dependency to what injects it', () => {
+    const deepDive = build(WIDE_GRAPH, 'ShopModule', { orientation: 'vertical' })
+    const nodeById = new Map(deepDive.nodes.map(node => [node.id, node]))
+
+    assert.ok(deepDive.edges.length > 0)
+    for (const edge of deepDive.edges) {
+      const source = nodeById.get(edge.source) as ModuleDeepDiveNode
+      const target = nodeById.get(edge.target) as ModuleDeepDiveNode
+      assert.ok(
+        boxOf(source).bottom < boxOf(target).top,
+        `${source.label} should sit above ${target.label}`
+      )
+    }
+  })
+
+  test('nodes in a row sit side by side, none overlapping, the row centred on the others', () => {
+    const deepDive = build(WIDE_GRAPH, 'ShopModule', { orientation: 'vertical' })
+    const rows = new Map<number, ModuleDeepDiveNode[]>()
+    for (const node of deepDive.nodes) {
+      rows.set(node.position.y, [...rows.get(node.position.y) ?? [], node])
+    }
+
+    assert.deepEqual(
+      [...rows.values()].map(row => row.map(node => node.label)),
+      [
+        ['ModuleRef', 'CurrencyService'],
+        ['PriceService', 'StockService'],
+        ['CartService'],
+        ['CartController', 'AdminController']
+      ].map(labels => labels.sort((left, right) =>
+        nodeByLabel(deepDive, left).position.x - nodeByLabel(deepDive, right).position.x
+      ))
+    )
+
+    for (const row of rows.values()) {
+      const sorted = [...row].sort((left, right) => left.position.x - right.position.x)
+      for (const [index, node] of sorted.entries()) {
+        const next = sorted[index + 1]
+        if (next) {
+          assert.ok(boxOf(node).right < boxOf(next).left, `${node.label} overlaps ${next.label}`)
+        }
+      }
+      // Every row's middle is the same line, x = DEEP_DIVE_ITEM_WIDTH / 2.
+      const middle = (boxOf(sorted[0] as ModuleDeepDiveNode).left
+        + boxOf(sorted.at(-1) as ModuleDeepDiveNode).right) / 2
+      assert.equal(middle, DEEP_DIVE_ITEM_WIDTH / 2)
+    }
+  })
+
+  test('no two nodes overlap, and rows leave room between them', () => {
+    const deepDive = build(WIDE_GRAPH, 'ShopModule', { orientation: 'vertical' })
+
+    for (const [index, left] of deepDive.nodes.entries()) {
+      for (const right of deepDive.nodes.slice(index + 1)) {
+        const a = boxOf(left)
+        const b = boxOf(right)
+        const apart = a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top
+        assert.ok(apart, `${left.label} overlaps ${right.label}`)
+      }
+    }
+  })
+
+  test('the taller external row pushes the row below it down rather than into it', () => {
+    const deepDive = build(GRAPH, 'OrderModule', { orientation: 'vertical' })
+    const external = boxOf(nodeByLabel(deepDive, 'ModuleRef'))
+    const firstProvider = boxOf(nodeByLabel(deepDive, 'OrderRepository'))
+    const secondProvider = boxOf(nodeByLabel(deepDive, 'OrderService'))
+
+    // The gap under the 52px external row is the gap under a 36px item row.
+    assert.equal(firstProvider.top - external.bottom, secondProvider.top - firstProvider.bottom)
+  })
+
+  test('a module with no external dependencies starts at the top row', () => {
+    const deepDive = build(GRAPH, 'UserModule', { orientation: 'vertical' })
+
+    assert.deepEqual(deepDive.nodes.map(node => [node.label, node.position]), [['UserService', { x: 0, y: 0 }]])
+  })
+
+  test('a provider cycle still lays out, every provider once, on different rows', () => {
+    const deepDive = build(
+      {
+        modules: {
+          CycleModule: module({
+            providers: [
+              { name: 'A', dependencies: [dep('CycleModule', 'B')] },
+              { name: 'B', dependencies: [dep('CycleModule', 'A')] },
+              { name: 'Self', dependencies: [dep('CycleModule', 'Self')] }
+            ]
+          })
+        }
+      },
+      'CycleModule',
+      { orientation: 'vertical' }
+    )
+
+    assert.deepEqual(deepDive.nodes.map(node => node.label).sort(), ['A', 'B', 'Self'])
+    assert.notEqual(nodeByLabel(deepDive, 'A').position.y, nodeByLabel(deepDive, 'B').position.y)
+  })
+
+  test('a module with nothing to draw has no nodes either way', () => {
+    const deepDive = build(
+      { modules: { AppModule: module({ imports: ['OrderModule'] }) } },
+      'AppModule',
+      { orientation: 'vertical' }
+    )
+
+    assert.deepEqual(deepDive.nodes, [])
+    assert.equal(deepDive.orientation, 'vertical')
   })
 })
 
@@ -562,15 +754,27 @@ describe('getModuleDeepDiveBounds', () => {
       .map((edge) => {
         const source = nodeById.get(edge.source) as ModuleDeepDiveNode
         const target = nodeById.get(edge.target) as ModuleDeepDiveNode
-        const geometry = getCircularEdgeGeometry({
-          sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH,
-          sourceY: source.position.y + getNodeHeight(source) / 2,
-          sourcePosition: 'right',
-          targetX: target.position.x,
-          targetY: target.position.y + getNodeHeight(target) / 2,
-          targetPosition: 'left',
-          isSelfLoop: edge.source === edge.target
-        })
+        const isSelfLoop = edge.source === edge.target
+        // Out of the bottom into the top when vertical, right into left otherwise.
+        const geometry = getCircularEdgeGeometry(deepDive.orientation === 'vertical'
+          ? {
+              sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+              sourceY: source.position.y + getNodeHeight(source),
+              sourcePosition: 'bottom',
+              targetX: target.position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+              targetY: target.position.y,
+              targetPosition: 'top',
+              isSelfLoop
+            }
+          : {
+              sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH,
+              sourceY: source.position.y + getNodeHeight(source) / 2,
+              sourcePosition: 'right',
+              targetX: target.position.x,
+              targetY: target.position.y + getNodeHeight(target) / 2,
+              targetPosition: 'left',
+              isSelfLoop
+            })
 
         return getCircularLabelBox(geometry, formatCircularEdgeLabel(edge.cycleIds), scale)
       })
@@ -645,6 +849,102 @@ describe('getModuleDeepDiveBounds', () => {
       'AppModule'
     )), null)
   })
+
+  test('vertical: frames every node and every cycle label, at any label scale', () => {
+    const deepDive = build(ORDER_CYCLE_GRAPH, 'OrderModule', { orientation: 'vertical' })
+
+    for (const scale of [1, 2.5]) {
+      const bounds = getModuleDeepDiveBounds(deepDive, scale)
+      assert.ok(bounds)
+
+      const labels = cycleLabelBoxes(deepDive, scale)
+      assert.equal(labels.length, 2)
+      for (const label of labels) {
+        assert.ok(contains(bounds, label), `a cycle label falls outside the box at scale ${scale}`)
+      }
+      for (const node of deepDive.nodes) {
+        assert.ok(contains(bounds, {
+          x: node.position.x,
+          y: node.position.y,
+          width: DEEP_DIVE_ITEM_WIDTH,
+          height: getNodeHeight(node)
+        }))
+      }
+    }
+  })
+
+  test('vertical: the edge closing a cycle leaves a node\'s bottom, so the box reaches past the rows', () => {
+    const vertical = build(ORDER_CYCLE_GRAPH, 'OrderModule', { orientation: 'vertical' })
+    const bounds = getModuleDeepDiveBounds(vertical)
+    assert.ok(bounds)
+
+    // OrderService injects OrderNotificationService, a row above it: the edge
+    // leaves OrderService's bottom and doubles back up, below its own row.
+    const service = nodeByLabel(vertical, 'OrderService')
+    const serviceBottom = service.position.y + getNodeHeight(service)
+    const geometry = getCircularEdgeGeometry({
+      sourceX: service.position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+      sourceY: serviceBottom,
+      sourcePosition: 'bottom',
+      targetX: nodeByLabel(vertical, 'OrderNotificationService').position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+      targetY: nodeByLabel(vertical, 'OrderNotificationService').position.y,
+      targetPosition: 'top',
+      isSelfLoop: false
+    })
+    const lowestControlPoint = Math.max(...geometry.points.map(point => point.y))
+    assert.ok(lowestControlPoint > serviceBottom)
+    assert.ok(bounds.y + bounds.height >= lowestControlPoint)
+  })
+
+  test('vertical: framed from bottom and top handles, not the horizontal right and left', () => {
+    const vertical = build(ORDER_CYCLE_GRAPH, 'OrderModule', { orientation: 'vertical' })
+    const asIfHorizontal = getModuleDeepDiveBounds({ nodes: vertical.nodes, edges: vertical.edges })
+
+    assert.notDeepEqual(getModuleDeepDiveBounds(vertical), asIfHorizontal)
+  })
+
+  test('vertical: a self-loop hangs below its node, and the box holds it and its label', () => {
+    const deepDive = build(
+      {
+        modules: {
+          SelfModule: module({
+            providers: [{ name: 'Self', dependencies: [dep('SelfModule', 'Self')] }]
+          })
+        },
+        cycles: cycles({
+          providers: [providerCycle(7, [['SelfModule', 'Self'], ['SelfModule', 'Self']])]
+        })
+      },
+      'SelfModule',
+      { orientation: 'vertical' }
+    )
+    const [node] = deepDive.nodes
+    assert.ok(node)
+    const bounds = getModuleDeepDiveBounds(deepDive)
+    assert.ok(bounds)
+
+    const nodeBottom = node.position.y + getNodeHeight(node)
+    // Below the node, not beside it: the box keeps the node's width and grows downwards.
+    assert.equal(bounds.x, node.position.x)
+    assert.equal(bounds.width, DEEP_DIVE_ITEM_WIDTH)
+    assert.equal(bounds.y, node.position.y)
+    assert.ok(bounds.y + bounds.height > nodeBottom + 40)
+    const [label] = cycleLabelBoxes(deepDive, 1)
+    assert.ok(label)
+    assert.ok(label.y >= nodeBottom)
+    assert.ok(contains(bounds, label))
+  })
+
+  test('vertical: a deep dive without cycles is framed by its nodes alone', () => {
+    const deepDive = build(GRAPH, 'OrderModule', { orientation: 'vertical' })
+    const bounds = getModuleDeepDiveBounds(deepDive)
+    const left = Math.min(...deepDive.nodes.map(node => node.position.x))
+    const right = Math.max(...deepDive.nodes.map(node => node.position.x + DEEP_DIVE_ITEM_WIDTH))
+    const top = Math.min(...deepDive.nodes.map(node => node.position.y))
+    const bottom = Math.max(...deepDive.nodes.map(node => node.position.y + getNodeHeight(node)))
+
+    assert.deepEqual(bounds, { x: left, y: top, width: right - left, height: bottom - top })
+  })
 })
 
 describe('withLiveNodePositions', () => {
@@ -690,6 +990,36 @@ describe('withLiveNodePositions', () => {
     // The self-loop and its label sit past the node's right side, where it was dragged.
     assert.ok(bounds.x + bounds.width > 1500 + DEEP_DIVE_ITEM_WIDTH + 40)
     assert.ok(bounds.y <= 600 && bounds.y + bounds.height >= 600 + getNodeHeight(node))
+  })
+
+  test('keeps the orientation, so a dragged vertical deep dive is still framed from its bottom and top', () => {
+    const deepDive = build(
+      {
+        modules: {
+          SelfModule: module({
+            providers: [{ name: 'Self', dependencies: [dep('SelfModule', 'Self')] }]
+          })
+        },
+        cycles: cycles({
+          providers: [providerCycle(7, [['SelfModule', 'Self'], ['SelfModule', 'Self']])]
+        })
+      },
+      'SelfModule',
+      { orientation: 'vertical' }
+    )
+    const [node] = deepDive.nodes
+    assert.ok(node)
+    const live = withLiveNodePositions(deepDive, new Map([[node.id, { x: 1500, y: 600 }]]))
+
+    assert.equal(live.orientation, 'vertical')
+    assert.equal(withLiveNodePositions(build(GRAPH, 'OrderModule'), new Map()).orientation, 'horizontal')
+
+    const bounds = getModuleDeepDiveBounds(live)
+    assert.ok(bounds)
+    // The self-loop hangs below the dragged node rather than past its right side.
+    assert.equal(bounds.x, 1500)
+    assert.equal(bounds.width, DEEP_DIVE_ITEM_WIDTH)
+    assert.ok(bounds.y + bounds.height > 600 + getNodeHeight(node) + 40)
   })
 })
 

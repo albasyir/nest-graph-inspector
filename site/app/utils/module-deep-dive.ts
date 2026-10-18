@@ -6,7 +6,8 @@
  * tracing lines across the whole canvas. The deep dive answers it for one
  * module: its providers and controllers, and every dependency it reaches
  * outside itself as a node of its own, laid out so a dependency always sits to
- * the left of whatever injects it.
+ * the left of whatever injects it — or, laid out vertically for a phone,
+ * above it.
  *
  * Pure data in, pure data out — the component only renders what this returns.
  */
@@ -101,17 +102,44 @@ export type ModuleDeepDiveStats = {
   externalDependencies: number
 }
 
+/**
+ * Which way dependencies flow across the canvas: `horizontal` puts each rank
+ * in a column, dependencies on the left; `vertical` puts each in a row,
+ * dependencies at the top — for a phone held upright.
+ */
+export type ModuleDeepDiveOrientation = 'horizontal' | 'vertical'
+
+export type ModuleDeepDiveOptions = {
+  /** `horizontal` unless asked otherwise. */
+  orientation?: ModuleDeepDiveOrientation
+}
+
 export type ModuleDeepDive = {
   nodes: ModuleDeepDiveNode[]
   edges: ModuleDeepDiveEdge[]
   stats: ModuleDeepDiveStats
+  /** Which way the ranks run, and so which sides of a node its edges use. */
+  orientation: ModuleDeepDiveOrientation
 }
+
+/**
+ * What a fit of the deep dive reads: its nodes, its edges, and which way it
+ * runs — horizontal when it does not say.
+ */
+export type ModuleDeepDiveDrawing = Pick<ModuleDeepDive, 'nodes' | 'edges'>
+  & Partial<Pick<ModuleDeepDive, 'orientation'>>
 
 export const DEEP_DIVE_ITEM_WIDTH = 220
 export const DEEP_DIVE_ITEM_HEIGHT = 36
 export const DEEP_DIVE_EXTERNAL_HEIGHT = 52
+/** Horizontal layout: between one rank's column and the next. */
 const COLUMN_GAP = 120
+/** Horizontal layout: between nodes stacked in one column. */
 const ROW_GAP = 20
+/** Vertical layout: between one rank's row and the next. */
+const RANK_ROW_GAP = 80
+/** Vertical layout: between nodes side by side in one row. */
+const SIBLING_GAP = 20
 
 /**
  * The deep dive of `moduleName`, or `null` when the graph has no such module.
@@ -125,11 +153,16 @@ const ROW_GAP = 20
  * own `cycles` rather than guessed from the layout. Cycles only mark edges the
  * module's own injections already draw — one passing through another module
  * marks the injection that reaches this one — and never add an edge.
+ *
+ * The ranks are the same either way; `options.orientation` only decides
+ * whether they run left to right or top to bottom.
  */
 export function buildModuleDeepDive(
   graph: Pick<GraphOutput, 'modules'> & Partial<Pick<GraphOutput, 'cycles'>>,
-  moduleName: string
+  moduleName: string,
+  options: ModuleDeepDiveOptions = {}
 ): ModuleDeepDive | null {
+  const orientation = options.orientation ?? 'horizontal'
   if (!Object.hasOwn(graph.modules, moduleName)) {
     return null
   }
@@ -261,21 +294,13 @@ export function buildModuleDeepDive(
     columns[column]?.push(node)
   }
 
-  const nodes: ModuleDeepDiveNode[] = []
-  const filledColumns = columns.filter(column => column.length > 0)
-
-  for (const [columnIndex, column] of filledColumns.entries()) {
-    const step = getNodeHeight(column[0] as ModuleDeepDiveNode) + ROW_GAP
-    const top = -((column.length - 1) * step) / 2
-
-    for (const [rowIndex, node] of column.entries()) {
-      node.position = {
-        x: columnIndex * (DEEP_DIVE_ITEM_WIDTH + COLUMN_GAP),
-        y: top + rowIndex * step
-      }
-      nodes.push(node)
-    }
+  const filledRanks = columns.filter(column => column.length > 0)
+  if (orientation === 'vertical') {
+    placeRanksInRows(filledRanks)
+  } else {
+    placeRanksInColumns(filledRanks)
   }
+  const nodes = filledRanks.flat()
 
   for (const step of getDependencyCycleSteps(graph.cycles)) {
     const edge = edges.get(
@@ -301,7 +326,45 @@ export function buildModuleDeepDive(
       controllers: mod.controllers.length,
       internalDependencies: edgeList.filter(edge => edge.kind !== 'external').length,
       externalDependencies: externals.size
+    },
+    orientation
+  }
+}
+
+/**
+ * Each rank a column, left to right, its nodes stacked down it and centred
+ * on the line the other columns share.
+ */
+function placeRanksInColumns(ranks: ModuleDeepDiveNode[][]): void {
+  for (const [rankIndex, rank] of ranks.entries()) {
+    const step = getNodeHeight(rank[0] as ModuleDeepDiveNode) + ROW_GAP
+    const top = -((rank.length - 1) * step) / 2
+
+    for (const [index, node] of rank.entries()) {
+      node.position = {
+        x: rankIndex * (DEEP_DIVE_ITEM_WIDTH + COLUMN_GAP),
+        y: top + index * step
+      }
     }
+  }
+}
+
+/**
+ * Each rank a row, top to bottom, its nodes side by side and centred on the
+ * line the other rows share. A row is as tall as its tallest node, so the
+ * taller external nodes push the rows below them down rather than into them.
+ */
+function placeRanksInRows(ranks: ModuleDeepDiveNode[][]): void {
+  const step = DEEP_DIVE_ITEM_WIDTH + SIBLING_GAP
+  let top = 0
+
+  for (const rank of ranks) {
+    const left = -((rank.length - 1) * step) / 2
+
+    for (const [index, node] of rank.entries()) {
+      node.position = { x: left + index * step, y: top }
+    }
+    top += Math.max(...rank.map(getNodeHeight)) + RANK_ROW_GAP
   }
 }
 
@@ -315,11 +378,12 @@ export function buildModuleDeepDive(
  * leaving them under the page header or past the canvas edge. So the box
  * holds every node and, for every cycle edge and self-loop, its curve and its
  * label at `labelScale`, the size labels are enlarged to at the fitted zoom.
- * Edges run from a node's right side into another's left, as the deep dive's
- * handles do.
+ * Edges run as the deep dive's handles do: from a node's right side into
+ * another's left, or — laid out vertically — from its bottom into another's
+ * top.
  */
 export function getModuleDeepDiveBounds(
-  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  deepDive: ModuleDeepDiveDrawing,
   labelScale = 1
 ): CircularEdgeRect | null {
   const nodeById = new Map(deepDive.nodes.map(node => [node.id, node]))
@@ -338,15 +402,27 @@ export function getModuleDeepDiveBounds(
       continue
     }
 
-    const geometry = getCircularEdgeGeometry({
-      sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH,
-      sourceY: source.position.y + getNodeHeight(source) / 2,
-      sourcePosition: 'right',
-      targetX: target.position.x,
-      targetY: target.position.y + getNodeHeight(target) / 2,
-      targetPosition: 'left',
-      isSelfLoop
-    })
+    const geometry = getCircularEdgeGeometry(
+      deepDive.orientation === 'vertical'
+        ? {
+            sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+            sourceY: source.position.y + getNodeHeight(source),
+            sourcePosition: 'bottom',
+            targetX: target.position.x + DEEP_DIVE_ITEM_WIDTH / 2,
+            targetY: target.position.y,
+            targetPosition: 'top',
+            isSelfLoop
+          }
+        : {
+            sourceX: source.position.x + DEEP_DIVE_ITEM_WIDTH,
+            sourceY: source.position.y + getNodeHeight(source) / 2,
+            sourcePosition: 'right',
+            targetX: target.position.x,
+            targetY: target.position.y + getNodeHeight(target) / 2,
+            targetPosition: 'left',
+            isSelfLoop
+          }
+    )
     rects.push(getCircularEdgeBounds(
       geometry,
       formatCircularEdgeLabel(edge.cycleIds),
@@ -364,18 +440,19 @@ export function getModuleDeepDiveBounds(
  * a fit framed from the layout would leave a dragged node — and the cycle
  * curves and labels that follow it — outside the view it settles on. A node
  * the canvas has no position for, such as one not drawn yet, keeps its layout
- * position. The deep dive passed in is left as it was.
+ * position. The deep dive passed in is left as it was, and the one returned
+ * keeps its orientation, so its edges are framed from the same sides.
  */
 export function withLiveNodePositions(
-  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  deepDive: ModuleDeepDiveDrawing,
   livePositions: ReadonlyMap<string, { x: number, y: number }>
-): Pick<ModuleDeepDive, 'nodes' | 'edges'> {
+): ModuleDeepDiveDrawing {
   return {
+    ...deepDive,
     nodes: deepDive.nodes.map((node) => {
       const position = livePositions.get(node.id)
       return position ? { ...node, position: { x: position.x, y: position.y } } : node
-    }),
-    edges: deepDive.edges
+    })
   }
 }
 
@@ -453,7 +530,7 @@ const DEEP_DIVE_FIT_MAX_PASSES = 3
  * newer fit owes whatever is left.
  */
 export async function fitModuleDeepDive(
-  deepDive: Pick<ModuleDeepDive, 'nodes' | 'edges'>,
+  deepDive: ModuleDeepDiveDrawing,
   viewport: ModuleDeepDiveViewport
 ): Promise<boolean> {
   const isCurrent = viewport.isCurrent ?? (() => true)
