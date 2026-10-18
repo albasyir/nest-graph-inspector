@@ -768,7 +768,11 @@ graph, the question, and the answer never leave the machine, and nothing has to
 be installed for the feature to work — at the cost of requiring a WebGPU-capable
 browser on a desktop, in a window at least `MOBILE_BREAKPOINT_PX` wide
 (`app/utils/device-detection.ts`), which the viewer checks for before offering
-the chat.
+the chat. What kind of device a tab is on comes from `@nuxtjs/device`
+(`useDevice()`), which classifies the user agent; `useMobileDevice` adds the two
+things a user agent cannot say — an iPad on iPadOS 13 or later, which reports a
+Mac's user agent and is told apart by its touchscreen, and the window's width,
+followed as it changes.
 
 **The chat talks to a LangChain model, not to web-llm.** The panel never calls
 `@mlc-ai/web-llm`. It builds a `ChatWebLlm` — a LangChain `BaseChatModel`
