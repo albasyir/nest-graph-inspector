@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { registerHooks } from 'node:module'
+import { register } from 'node:module'
 import { describe, test } from 'node:test'
 import {
   MOBILE_BREAKPOINT_PX,
@@ -22,25 +22,35 @@ import {
  * own entry point, and the crawler pattern Nuxt writes into `#build` at build
  * time is stood in for. If an upgrade moves the file, this is the import that
  * says so.
+ *
+ * The stand-in is a loader registered with `module.register()` rather than
+ * `module.registerHooks()`: the synchronous hooks only arrived in Node 22.15,
+ * and this runner strips types from 22.6. Registered hooks run on their own
+ * thread, so they are written as a module of their own — here, inline as a
+ * `data:` URL — and they apply to every import that starts after `register()`
+ * returns, which is why `generateFlags` is imported dynamically below.
  */
+const DEVICE_BUILD_HOOKS = `
 const DEVICE_BUILD_TEMPLATE = 'nuxtjs-device-build:crawler-pattern'
 
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === '#build/nuxtjs-device.mjs') {
-      return { url: DEVICE_BUILD_TEMPLATE, shortCircuit: true }
-    }
-
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url === DEVICE_BUILD_TEMPLATE) {
-      return { format: 'module', source: 'export const REGEX_CRAWLER = /(?!)/', shortCircuit: true }
-    }
-
-    return nextLoad(url, context)
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === '#build/nuxtjs-device.mjs') {
+    return { url: DEVICE_BUILD_TEMPLATE, shortCircuit: true }
   }
-})
+
+  return nextResolve(specifier, context)
+}
+
+export async function load(url, context, nextLoad) {
+  if (url === DEVICE_BUILD_TEMPLATE) {
+    return { format: 'module', source: 'export const REGEX_CRAWLER = /(?!)/', shortCircuit: true }
+  }
+
+  return nextLoad(url, context)
+}
+`
+
+register(`data:text/javascript,${encodeURIComponent(DEVICE_BUILD_HOOKS)}`, import.meta.url)
 
 const { default: generateFlags } = await import(
   new URL('./runtime/generateFlags.js', import.meta.resolve('@nuxtjs/device')).href
