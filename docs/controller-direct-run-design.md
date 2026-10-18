@@ -183,12 +183,16 @@ Graph node rendering already distinguishes controllers from providers (badge
 letter `C` vs `P`); this feature makes controller nodes *actionable* the same
 way provider nodes are, without merging their identities. Selecting a graph
 node generalizes from "selected provider" to "selected Direct Run target"
-(`{ moduleName, targetType, targetName }`); the same drawer, tabs, JSON-args
-editor, and run/inspect buttons are reused for both, with the drawer's eyebrow
-label reading "Controller Action" vs "Provider Action" and a persistent
-limitation note shown only for controllers. The outgoing request always states
-`target` explicitly (never relies on the default) and uses the matching
-`controller` / `provider` field.
+(`{ moduleName, targetType, targetName }`); one drawer component,
+`DirectRunDrawer.vue`, serves both targets in both the navigator and a module's
+deep dive — the same tabs, JSON-args editor, and Run / Inspect buttons — with a
+"Controller" vs "Provider" badge in its header and a persistent limitation note
+shown only for controllers. The outgoing request always states `target`
+explicitly (never relies on the default) and uses the matching
+`controller` / `provider` field; `directRunRequestSchema` in
+`site/app/utils/direct-run-provider.ts` refuses any other shape before it is
+sent, and the arguments are checked against the method's `parameterTypes` by a
+Zod schema the editor's JSON Schema is generated from.
 
 The target's identity travels as the graph node id —
 `controller-<module>-<name>` or `provider-<module>-<name>` — never as a bare

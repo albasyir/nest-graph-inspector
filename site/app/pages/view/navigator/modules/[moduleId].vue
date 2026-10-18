@@ -73,6 +73,10 @@ function handleDirectRunDrawerClose() {
   const { 'direct-run-on': _directRunOn, ...query } = route.query
   router.push({ query })
 }
+
+function handleTraceOpen() {
+  router.push('/view/trace')
+}
 </script>
 
 <template>
@@ -99,6 +103,7 @@ function handleDirectRunDrawerClose() {
       :direct-run-on="directRunOn"
       @direct-run-drawer-open="handleDirectRunDrawerOpen"
       @direct-run-drawer-close="handleDirectRunDrawerClose"
+      @trace-open="handleTraceOpen"
     />
   </ClientOnly>
 
