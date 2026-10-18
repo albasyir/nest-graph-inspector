@@ -7,10 +7,15 @@
  * less memory than that before it kills the tab, so offering the download there
  * trades a disabled button for a crash halfway through a multi-gigabyte fetch.
  *
- * Every check reads injected values first and the browser globals second, so the
- * whole module runs under the site's plain `node --test` runner, and asking on a
- * server — where there is no window to measure — answers "not mobile" rather
- * than throwing.
+ * What kind of device this is comes from `@nuxtjs/device`: its `useDevice()`
+ * flags classify the user agent, and this module reads them rather than keeping
+ * a pattern of its own. Two things no user agent says are added on top — an iPad
+ * on iPadOS 13 or later, which sends a Mac's user agent, and the window's width.
+ *
+ * The flags are handed in, and every other check reads injected values first and
+ * the browser globals second, so the whole module runs under the site's plain
+ * `node --test` runner, and asking on a server — where there is no window to
+ * measure — answers from the flags alone rather than throwing.
  */
 
 /** The viewport width, in CSS pixels, below which the chat stays off on any device. Tailwind's `md`. */
@@ -25,18 +30,21 @@ export const MOBILE_DRAWER_BANNER_TITLE = 'Unavailable on Mobile or in Narrow Br
 
 export const MOBILE_DRAWER_BANNER_MESSAGE = `In-browser AI inference is only supported in desktop browser windows at least ${MOBILE_BREAKPOINT_PX}px wide. WebLLM is disabled on mobile devices to prevent memory exhaustion and browser tab crashes; on a desktop, widen this window to use it.`
 
-/**
- * Phone and tablet browsers name themselves in the user agent. `Mobile` covers
- * Mobile Safari, Chrome on Android phones and Firefox for Android; the rest are
- * platforms whose browsers leave that word out.
- */
-const MOBILE_USER_AGENT_PATTERN = /Android|iPhone|iPad|iPod|BlackBerry|BB10|IEMobile|Windows Phone|Opera Mini|Opera Mobi|webOS|Silk|Kindle|Mobile/i
-
 const COARSE_POINTER_QUERY = '(pointer: coarse)'
+
+/**
+ * The `useDevice()` flags these checks read — a slice of `@nuxtjs/device`'s
+ * `Device`, so a test can hand in a plain object.
+ */
+export type DeviceFlags = {
+  /** A phone or a tablet, by its user agent. */
+  isMobileOrTablet: boolean
+  /** A user agent that names Mac OS X — which, since iPadOS 13, an iPad's does too. */
+  isMacOS: boolean
+}
 
 /** The parts of `Navigator` these checks read, so a test can hand in a plain object. */
 export type DeviceNavigator = {
-  userAgent?: string
   maxTouchPoints?: number
 }
 
@@ -48,8 +56,6 @@ export type DeviceWindow = {
 }
 
 export type DeviceDetectionOptions = {
-  /** Overrides the navigator's user agent. */
-  userAgent?: string
   /** Overrides the window's `innerWidth`. */
   viewportWidth?: number
   navigator?: DeviceNavigator
@@ -75,10 +81,6 @@ function matchesMedia(win: DeviceWindow | undefined, query: string): boolean {
   } catch {
     return false
   }
-}
-
-export function isMobileUserAgent(ua: string = browserNavigator()?.userAgent ?? ''): boolean {
-  return MOBILE_USER_AGENT_PATTERN.test(ua)
 }
 
 /**
@@ -111,26 +113,29 @@ export function isMobileViewport(width: number | undefined = browserWindow()?.in
     && width < MOBILE_BREAKPOINT_PX
 }
 
-/** An iPad on iPadOS 13 or later, which reports a Mac user agent. */
-function isIpadOs(ua: string, nav: DeviceNavigator | undefined, win: DeviceWindow | undefined): boolean {
-  return /Macintosh/i.test(ua) && isTouchDevice(nav, win)
+/**
+ * An iPad on iPadOS 13 or later, which reports a Mac user agent — so
+ * `@nuxtjs/device` counts it as a desktop, and only its touchscreen gives it away.
+ */
+function isIpadOs(device: DeviceFlags, nav: DeviceNavigator | undefined, win: DeviceWindow | undefined): boolean {
+  return device.isMacOS && isTouchDevice(nav, win)
 }
 
 /**
  * Whether the in-browser AI chat should stay off here.
  *
- * A mobile user agent, an iPad posing as a Mac, or a viewport narrower than
- * {@link MOBILE_BREAKPOINT_PX} — measured by `innerWidth`, or by the media query
- * when no width is known. With no window and nothing injected, which is a
- * server render, the answer is `false`: the server cannot see the device, and
- * the client asks again once it is mounted.
+ * A phone or a tablet as `useDevice()` classifies it, an iPad posing as a Mac,
+ * or a viewport narrower than {@link MOBILE_BREAKPOINT_PX} — measured by
+ * `innerWidth`, or by the media query when no width is known. With no window
+ * and nothing injected, which is a server render, only the flags can answer:
+ * the server sees at most a user agent, and the client asks again once it is
+ * mounted.
  */
-export function isMobileDevice(options: DeviceDetectionOptions = {}): boolean {
+export function isMobileDevice(device: DeviceFlags, options: DeviceDetectionOptions = {}): boolean {
   const win = options.window ?? browserWindow()
   const nav = options.navigator ?? browserNavigator()
-  const ua = options.userAgent ?? nav?.userAgent ?? ''
 
-  if (isMobileUserAgent(ua) || isIpadOs(ua, nav, win)) {
+  if (device.isMobileOrTablet || isIpadOs(device, nav, win)) {
     return true
   }
 

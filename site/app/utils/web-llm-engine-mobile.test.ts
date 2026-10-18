@@ -1,14 +1,16 @@
 import { strict as assert } from 'node:assert'
 import { registerHooks } from 'node:module'
 import { describe, test } from 'node:test'
-import { MOBILE_DISCLAIMER_MESSAGE } from './device-detection.ts'
+import { MOBILE_DISCLAIMER_MESSAGE, type DeviceFlags } from './device-detection.ts'
 
 /**
  * `useWebLlmEngine` is a Nuxt composable: it reaches its siblings through the
- * `~` alias and calls `ref` as an auto-import. Neither exists under the plain
- * runner, so both are supplied here — the alias by a resolve hook, `ref` by a
- * stand-in that only has to hold a value — instead of rewriting the composable
- * into something Nuxt would not write.
+ * `~` alias and calls `ref` and `useDevice` as auto-imports. None of them exists
+ * under the plain runner, so they are supplied here — the alias by a resolve
+ * hook, `ref` by a stand-in that only has to hold a value, and `useDevice` by
+ * one that hands back whatever flags the test has set, as `@nuxtjs/device`
+ * would from the Nuxt app — instead of rewriting the composable into something
+ * Nuxt would not write.
  *
  * The hook also records every request for `@mlc-ai/web-llm`, which is the
  * whole point of the mobile guard: the browser-only runtime is never loaded.
@@ -30,8 +32,14 @@ registerHooks({
   }
 })
 
+const DESKTOP_FLAGS: DeviceFlags = { isMobileOrTablet: false, isMacOS: false }
+const PHONE_FLAGS: DeviceFlags = { isMobileOrTablet: true, isMacOS: true }
+
+let deviceFlags = DESKTOP_FLAGS
+
 Object.assign(globalThis, {
-  ref: <T>(value: T) => ({ value })
+  ref: <T>(value: T) => ({ value }),
+  useDevice: () => deviceFlags
 })
 
 const { WebLlmError, useWebLlmEngine } = await import('../composables/useWebLlmEngine.ts')
@@ -135,11 +143,25 @@ describe('useWebLlmEngine on a mobile device', () => {
     assert.equal(engine.error.value, '')
   })
 
-  test('without an injected answer it asks the device, which a server cannot see', async () => {
+  test('without an injected answer it asks useDevice(), and a desktop is not refused', async () => {
+    deviceFlags = DESKTOP_FLAGS
     const engine = useWebLlmEngine()
 
     assert.equal(await engine.checkSupport(), false)
-    assert.equal(engine.supportReason.value, '', 'no window means not mobile, not refused')
+    assert.equal(engine.supportReason.value, '', 'a desktop with no window to measure is not refused')
+  })
+
+  test('without an injected answer a phone, as useDevice() classifies it, is refused', async () => {
+    deviceFlags = PHONE_FLAGS
+
+    try {
+      const engine = useWebLlmEngine()
+
+      assert.equal(await engine.checkSupport(), false)
+      assert.equal(engine.supportReason.value, MOBILE_DISCLAIMER_MESSAGE)
+    } finally {
+      deviceFlags = DESKTOP_FLAGS
+    }
   })
 
   test('never loads the browser-only web-llm runtime', () => {

@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { registerHooks } from 'node:module'
 import { describe, test } from 'node:test'
 import {
   MOBILE_BREAKPOINT_PX,
@@ -7,11 +8,43 @@ import {
   MOBILE_DRAWER_BANNER_TITLE,
   MOBILE_VIEWPORT_QUERY,
   isMobileDevice,
-  isMobileUserAgent,
   isMobileViewport,
   isTouchDevice,
+  type DeviceFlags,
   type DeviceWindow
 } from './device-detection.ts'
+
+/**
+ * The user agent is classified by `@nuxtjs/device`, so these tests ask it — the
+ * function its plugin builds `useDevice()` from — rather than a copy of what it
+ * answers. It is not an export the package names: its `runtime/*` export maps to
+ * `.mjs` files the package does not ship, so it is reached beside the module's
+ * own entry point, and the crawler pattern Nuxt writes into `#build` at build
+ * time is stood in for. If an upgrade moves the file, this is the import that
+ * says so.
+ */
+const DEVICE_BUILD_TEMPLATE = 'nuxtjs-device-build:crawler-pattern'
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === '#build/nuxtjs-device.mjs') {
+      return { url: DEVICE_BUILD_TEMPLATE, shortCircuit: true }
+    }
+
+    return nextResolve(specifier, context)
+  },
+  load(url, context, nextLoad) {
+    if (url === DEVICE_BUILD_TEMPLATE) {
+      return { format: 'module', source: 'export const REGEX_CRAWLER = /(?!)/', shortCircuit: true }
+    }
+
+    return nextLoad(url, context)
+  }
+})
+
+const { default: generateFlags } = await import(
+  new URL('./runtime/generateFlags.js', import.meta.resolve('@nuxtjs/device')).href
+) as { default: (userAgent: string) => DeviceFlags & { isMobile: boolean, isTablet: boolean } }
 
 const DESKTOP_USER_AGENTS = {
   'Chrome on Windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -72,37 +105,39 @@ describe('the copy the panel and the header show', () => {
   test('a narrow desktop window is restricted without being a mobile device, so the copy names both', () => {
     const desktop = DESKTOP_USER_AGENTS['Chrome on Windows']
 
-    assert.equal(isMobileUserAgent(desktop), false)
-    assert.equal(isMobileDevice({ userAgent: desktop, viewportWidth: MOBILE_BREAKPOINT_PX - 1 }), true)
+    assert.equal(generateFlags(desktop).isMobileOrTablet, false)
+    assert.equal(isMobileDevice(generateFlags(desktop), { viewportWidth: MOBILE_BREAKPOINT_PX - 1 }), true)
     assert.match(MOBILE_DISCLAIMER_MESSAGE, new RegExp(`mobile devices and in browser windows narrower than ${MOBILE_BREAKPOINT_PX}px`))
     assert.match(MOBILE_DRAWER_BANNER_TITLE, /Mobile or in Narrow Browser Windows/)
     assert.match(MOBILE_DRAWER_BANNER_MESSAGE, new RegExp(`desktop browser windows at least ${MOBILE_BREAKPOINT_PX}px wide`))
   })
 })
 
-describe('isMobileUserAgent', () => {
+describe('the device as useDevice() classifies it', () => {
   for (const [name, ua] of Object.entries(MOBILE_USER_AGENTS)) {
-    test(`recognises ${name}`, () => {
-      assert.equal(isMobileUserAgent(ua), true)
+    test(`${name} is a phone or a tablet`, () => {
+      assert.equal(generateFlags(ua).isMobileOrTablet, true)
     })
   }
 
   for (const [name, ua] of Object.entries(DESKTOP_USER_AGENTS)) {
-    test(`leaves ${name} alone`, () => {
-      assert.equal(isMobileUserAgent(ua), false)
+    test(`${name} is neither`, () => {
+      assert.equal(generateFlags(ua).isMobileOrTablet, false)
     })
   }
 
-  test('is case-insensitive', () => {
-    assert.equal(isMobileUserAgent('some browser on an IPHONE'), true)
+  test('a tablet is not a phone, which is why the chat reads isMobileOrTablet', () => {
+    const tablet = generateFlags(MOBILE_USER_AGENTS['Chrome on an Android tablet'])
+
+    assert.equal(tablet.isMobile, false)
+    assert.equal(tablet.isTablet, true)
   })
 
-  test('an empty user agent is not mobile', () => {
-    assert.equal(isMobileUserAgent(''), false)
-  })
-
-  test('with no browser to ask — this runner, or a server — the answer is no', () => {
-    assert.equal(isMobileUserAgent(), false)
+  test('an iPad on iPadOS 13 or later reads as a Mac, so the user agent alone cannot catch it', () => {
+    assert.deepEqual(
+      { isMobileOrTablet: generateFlags(IPADOS_USER_AGENT).isMobileOrTablet, isMacOS: generateFlags(IPADOS_USER_AGENT).isMacOS },
+      { isMobileOrTablet: false, isMacOS: true }
+    )
   })
 })
 
@@ -167,16 +202,19 @@ describe('isMobileViewport', () => {
 })
 
 describe('isMobileDevice', () => {
-  test('server rendering — no window, nothing injected — is not mobile', () => {
+  const desktop = generateFlags(DESKTOP_USER_AGENTS['Chrome on Windows'])
+
+  test('server rendering — no window, nothing injected — answers from the flags alone', () => {
     assert.equal(typeof window, 'undefined')
-    assert.equal(isMobileDevice(), false)
-    assert.equal(isMobileDevice({}), false)
+    assert.equal(isMobileDevice(desktop), false)
+    assert.equal(isMobileDevice(desktop, {}), false)
+    assert.equal(isMobileDevice(generateFlags(MOBILE_USER_AGENTS['Safari on iPhone'])), true)
   })
 
   for (const [name, ua] of Object.entries(DESKTOP_USER_AGENTS)) {
     test(`${name} in a wide window is a desktop`, () => {
-      assert.equal(isMobileDevice({
-        navigator: { userAgent: ua, maxTouchPoints: 0 },
+      assert.equal(isMobileDevice(generateFlags(ua), {
+        navigator: { maxTouchPoints: 0 },
         window: fakeWindow({ width: 1440 })
       }), false)
     })
@@ -184,72 +222,71 @@ describe('isMobileDevice', () => {
 
   for (const [name, ua] of Object.entries(MOBILE_USER_AGENTS)) {
     test(`${name} is mobile whatever the width`, () => {
-      assert.equal(isMobileDevice({
-        navigator: { userAgent: ua, maxTouchPoints: 5 },
+      assert.equal(isMobileDevice(generateFlags(ua), {
+        navigator: { maxTouchPoints: 5 },
         window: fakeWindow({ width: 1280 })
       }), true)
     })
   }
 
   test('an iPad posing as a Mac is told apart by its touchscreen', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: IPADOS_USER_AGENT, maxTouchPoints: 5 },
+    assert.equal(isMobileDevice(generateFlags(IPADOS_USER_AGENT), {
+      navigator: { maxTouchPoints: 5 },
       window: fakeWindow({ width: 1024 })
     }), true)
   })
 
   test('an iPad posing as a Mac is caught by touch events as well', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: IPADOS_USER_AGENT, maxTouchPoints: 0 },
+    assert.equal(isMobileDevice(generateFlags(IPADOS_USER_AGENT), {
+      navigator: { maxTouchPoints: 0 },
       window: fakeWindow({ width: 1366, touchEvents: true })
     }), true)
   })
 
   test('a real Mac has no touchscreen, so stays a desktop', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: IPADOS_USER_AGENT, maxTouchPoints: 0 },
+    assert.equal(isMobileDevice(generateFlags(IPADOS_USER_AGENT), {
+      navigator: { maxTouchPoints: 0 },
       window: fakeWindow({ width: 1512 })
     }), false)
   })
 
   test('a touchscreen laptop is a desktop: touch alone is not mobile', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 10 },
+    assert.equal(isMobileDevice(desktop, {
+      navigator: { maxTouchPoints: 10 },
       window: fakeWindow({ width: 1440, touchEvents: true, matchingQueries: ['(pointer: coarse)'] })
     }), false)
   })
 
   test('a desktop window narrower than the breakpoint is restricted too', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: DESKTOP_USER_AGENTS['Firefox on Linux'], maxTouchPoints: 0 },
+    assert.equal(isMobileDevice(generateFlags(DESKTOP_USER_AGENTS['Firefox on Linux']), {
+      navigator: { maxTouchPoints: 0 },
       window: fakeWindow({ width: 600 })
     }), true)
   })
 
   test('the breakpoint itself is a desktop width', () => {
-    const navigator = { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 }
+    const navigator = { maxTouchPoints: 0 }
 
-    assert.equal(isMobileDevice({ navigator, window: fakeWindow({ width: MOBILE_BREAKPOINT_PX - 1 }) }), true)
-    assert.equal(isMobileDevice({ navigator, window: fakeWindow({ width: MOBILE_BREAKPOINT_PX }) }), false)
+    assert.equal(isMobileDevice(desktop, { navigator, window: fakeWindow({ width: MOBILE_BREAKPOINT_PX - 1 }) }), true)
+    assert.equal(isMobileDevice(desktop, { navigator, window: fakeWindow({ width: MOBILE_BREAKPOINT_PX }) }), false)
   })
 
   test('with no width to read, the media query decides', () => {
-    const navigator = { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 }
+    const navigator = { maxTouchPoints: 0 }
 
-    assert.equal(isMobileDevice({ navigator, window: fakeWindow({ matchingQueries: [MOBILE_VIEWPORT_QUERY] }) }), true)
-    assert.equal(isMobileDevice({ navigator, window: fakeWindow() }), false)
+    assert.equal(isMobileDevice(desktop, { navigator, window: fakeWindow({ matchingQueries: [MOBILE_VIEWPORT_QUERY] }) }), true)
+    assert.equal(isMobileDevice(desktop, { navigator, window: fakeWindow() }), false)
   })
 
   test('a measured width outranks the media query', () => {
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 },
+    assert.equal(isMobileDevice(desktop, {
+      navigator: { maxTouchPoints: 0 },
       window: fakeWindow({ width: 1280, matchingQueries: [MOBILE_VIEWPORT_QUERY] })
     }), false)
   })
 
   test('a media query that throws is a no, not a crash', () => {
-    assert.equal(isMobileDevice({
-      userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'],
+    assert.equal(isMobileDevice(desktop, {
       window: {
         matchMedia: () => {
           throw new Error('unsupported query')
@@ -258,25 +295,21 @@ describe('isMobileDevice', () => {
     }), false)
   })
 
-  test('an injected user agent and width outrank the navigator and the window', () => {
-    const desktop = {
-      navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 },
-      window: fakeWindow({ width: 1440 })
-    }
+  test('an injected width outranks the window', () => {
+    const wide = { navigator: { maxTouchPoints: 0 }, window: fakeWindow({ width: 1440 }) }
 
-    assert.equal(isMobileDevice({ ...desktop, userAgent: MOBILE_USER_AGENTS['Safari on iPhone'] }), true)
-    assert.equal(isMobileDevice({ ...desktop, viewportWidth: 390 }), true)
-    assert.equal(isMobileDevice({
-      navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'] },
+    assert.equal(isMobileDevice(desktop, { ...wide, viewportWidth: 390 }), true)
+    assert.equal(isMobileDevice(desktop, {
+      navigator: { maxTouchPoints: 0 },
       window: fakeWindow({ width: 390 }),
       viewportWidth: 1440
     }), false)
   })
 
-  test('a user agent and a width are enough on their own, with no window at all', () => {
-    assert.equal(isMobileDevice({ userAgent: MOBILE_USER_AGENTS['Chrome on an Android phone'] }), true)
-    assert.equal(isMobileDevice({ userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], viewportWidth: 500 }), true)
-    assert.equal(isMobileDevice({ userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], viewportWidth: 1920 }), false)
+  test('the flags and a width are enough on their own, with no window at all', () => {
+    assert.equal(isMobileDevice(generateFlags(MOBILE_USER_AGENTS['Chrome on an Android phone'])), true)
+    assert.equal(isMobileDevice(desktop, { viewportWidth: 500 }), true)
+    assert.equal(isMobileDevice(desktop, { viewportWidth: 1920 }), false)
   })
 
   for (const [label, dimensions] of Object.entries({
@@ -288,8 +321,8 @@ describe('isMobileDevice', () => {
     '4K monitor': { width: 3840, mobile: false }
   })) {
     test(`a desktop user agent at ${label} width (${dimensions.width}px) is ${dimensions.mobile ? 'restricted' : 'not restricted'}`, () => {
-      assert.equal(isMobileDevice({
-        navigator: { userAgent: DESKTOP_USER_AGENTS['Chrome on Windows'], maxTouchPoints: 0 },
+      assert.equal(isMobileDevice(desktop, {
+        navigator: { maxTouchPoints: 0 },
         window: fakeWindow({ width: dimensions.width })
       }), dimensions.mobile)
     })
