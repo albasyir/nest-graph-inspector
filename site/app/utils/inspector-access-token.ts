@@ -61,16 +61,21 @@ export function redactAccessToken(endpointUrl: string): string {
     return ''
   }
 
+  // `URLSearchParams` and the `search` setter each drop one leading `?`, and a
+  // name may begin with one of its own — `?__inspector_token` is not the token,
+  // and `?mode` is not `mode` — so each is handed a `?` of ours to drop instead.
   const pairs = url.search.slice(1).split('&')
   const kept = pairs.filter(
-    pair => !new URLSearchParams(pair).has(INSPECTOR_ACCESS_TOKEN_PARAM)
+    pair => !new URLSearchParams(`?${pair}`).has(INSPECTOR_ACCESS_TOKEN_PARAM)
   )
 
   if (kept.length === pairs.length) {
     return endpointUrl
   }
 
-  url.search = kept.join('&')
+  const query = kept.join('&')
+
+  url.search = query ? `?${query}` : ''
 
   return url.toString()
 }

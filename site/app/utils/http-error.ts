@@ -12,11 +12,26 @@ function isHttpStatus(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599
 }
 
-/** HTTP status a request failed with, or `0` when it never got a real one. */
-export function readStatusCode(error: unknown): number {
-  const statusCode = (error as { statusCode?: unknown } | null)?.statusCode
+interface FailedRequest {
+  response?: { status?: unknown }
+  cause?: FailedRequest
+}
 
-  return isHttpStatus(statusCode) ? statusCode : 0
+/**
+ * HTTP status a request failed with, or `0` when it never got a real one.
+ *
+ * It is read off the response, because nothing else can say what the endpoint
+ * answered: `$fetch` throws an error carrying the response, and `useFetch` and
+ * `useAsyncData` hold that error as the cause of one h3's `createError` wraps it
+ * in — a wrapper that starts at 500 and stays there when the original carried
+ * no status, so a request that never got a response would read as a server
+ * error.
+ */
+export function readStatusCode(error: unknown): number {
+  const failure = error as FailedRequest | null | undefined
+  const status = (failure?.response ?? failure?.cause?.response)?.status
+
+  return isHttpStatus(status) ? status : 0
 }
 
 /**

@@ -94,6 +94,47 @@ for (const url of [
   assert.equal(redactAccessToken(url), url)
 }
 
+// Nor is a name that begins with `?`, however that `?` is spelled:
+// `??__inspector_token` names `?__inspector_token` — to the library and to
+// `readAccessToken` alike — so it neither authenticates nor is redacted.
+for (const url of [
+  `${ENDPOINT}??${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`,
+  `${ENDPOINT}?a=1&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`,
+  `${ENDPOINT}?%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`
+]) {
+  assert.equal(readAccessToken(url), undefined, `${url} authenticates`)
+  assert.equal(redactAccessToken(url), url, `${url} was redacted`)
+}
+
+// With the token's pair gone, the first pair left may begin with a `?` of its
+// own, and it keeps it: without it, `?mode` would be read as `mode`, and a
+// `?__inspector_token` as the token.
+for (const pair of ['?mode=graph', `?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`]) {
+  const url = redactAccessToken(
+    `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}&${pair}`
+  )
+
+  assert.equal(url, `${ENDPOINT}?${pair}`)
+  assert.equal(readAccessToken(url), undefined, `${pair} became the token`)
+}
+
+// Every spelling of the token goes, and every other pair stays byte for byte
+// and in order, so the URL reads back as the same entries less the token's.
+const mixed = `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}&?mode=graph&%5F%5Finspector_token=${TOKEN}&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&a=b%20c&plus=a+b&flag&next=?x=1`
+const mixedRedacted = redactAccessToken(mixed)
+
+assert.equal(
+  mixedRedacted,
+  `${ENDPOINT}??mode=graph&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&a=b%20c&plus=a+b&flag&next=?x=1`
+)
+assert.equal(readAccessToken(mixedRedacted), undefined)
+assert.deepEqual(
+  [...new URL(mixedRedacted).searchParams],
+  [...new URL(mixed).searchParams].filter(
+    ([name]) => name !== INSPECTOR_ACCESS_TOKEN_PARAM
+  )
+)
+
 // Requests authenticate through a header, so no derived URL has to carry a
 // token — which is what kept breaking when one was concatenated onto.
 assert.deepEqual(accessTokenHeaders(TOKEN), {
