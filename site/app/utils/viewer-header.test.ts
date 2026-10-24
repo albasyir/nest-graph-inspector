@@ -328,26 +328,29 @@ describe('the AI chat', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: true }), 'restricted')
   })
 
-  // The layout asks `isMobileDevice` through `useMobileDevice`; these are the
-  // devices the header is laid out for, decided by the same check.
-  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-  const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-  const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+  // The layout asks `isMobileDevice` through `useMobileDevice`, over the flags
+  // `useDevice()` gives it; these are the devices the header is laid out for,
+  // decided by the same check. What `@nuxtjs/device` makes of each user agent is
+  // covered in `device-detection.test.ts`.
+  // An iPhone and an iPad flag alike: both are `isMobileOrTablet`, and both
+  // user agents say "like Mac OS X".
+  const PHONE_OR_TABLET = { isMobileOrTablet: true, isMacOS: true }
+  const DESKTOP = { isMobileOrTablet: false, isMacOS: false }
 
-  for (const [label, device, available] of [
-    ['a 320px phone', { userAgent: IPHONE, viewportWidth: 320 }, false],
-    ['a 390px phone', { userAgent: IPHONE, viewportWidth: 390 }, false],
-    ['a phone on its side', { userAgent: IPHONE, viewportWidth: 844 }, false],
-    ['a 768px tablet', { userAgent: IPAD, viewportWidth: 768 }, false],
-    ['a tablet on its side', { userAgent: IPAD, viewportWidth: 1024 }, false],
-    ['a desktop window narrower than the breakpoint', { userAgent: DESKTOP, viewportWidth: MOBILE_BREAKPOINT_PX - 1 }, false],
-    ['a desktop window at the breakpoint', { userAgent: DESKTOP, viewportWidth: MOBILE_BREAKPOINT_PX }, true],
-    ['a desktop', { userAgent: DESKTOP, viewportWidth: 1280 }, true]
+  for (const [label, device, viewportWidth, available] of [
+    ['a 320px phone', PHONE_OR_TABLET, 320, false],
+    ['a 390px phone', PHONE_OR_TABLET, 390, false],
+    ['a phone on its side', PHONE_OR_TABLET, 844, false],
+    ['a 768px tablet', PHONE_OR_TABLET, 768, false],
+    ['a tablet on its side', PHONE_OR_TABLET, 1024, false],
+    ['a desktop window narrower than the breakpoint', DESKTOP, MOBILE_BREAKPOINT_PX - 1, false],
+    ['a desktop window at the breakpoint', DESKTOP, MOBILE_BREAKPOINT_PX, true],
+    ['a desktop', DESKTOP, 1280, true]
   ] as const) {
     test(`${available ? 'opens' : 'never opens'} on ${label}, with a graph loaded`, () => {
       const availability = resolveAiChatAvailability({
         hasGraphEndpoint: true,
-        isRestricted: isMobileDevice(device)
+        isRestricted: isMobileDevice(device, { viewportWidth })
       })
 
       assert.equal(availability === 'available', available, availability)

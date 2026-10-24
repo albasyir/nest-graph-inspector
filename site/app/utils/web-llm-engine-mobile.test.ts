@@ -1,42 +1,106 @@
 import { strict as assert } from 'node:assert'
-import { registerHooks } from 'node:module'
+import { register } from 'node:module'
 import { describe, test } from 'node:test'
-import { MOBILE_DISCLAIMER_MESSAGE } from './device-detection.ts'
+import { MessageChannel } from 'node:worker_threads'
+import { MOBILE_DISCLAIMER_MESSAGE, type DeviceFlags } from './device-detection.ts'
 
 /**
  * `useWebLlmEngine` is a Nuxt composable: it reaches its siblings through the
- * `~` alias and calls `ref` as an auto-import. Neither exists under the plain
- * runner, so both are supplied here — the alias by a resolve hook, `ref` by a
- * stand-in that only has to hold a value — instead of rewriting the composable
- * into something Nuxt would not write.
+ * `~` alias and calls `ref` and `useDevice` as auto-imports. None of them exists
+ * under the plain runner, so they are supplied here — the alias by a resolve
+ * hook, `ref` by a stand-in that only has to hold a value, and `useDevice` by
+ * one that hands back whatever flags the test has set, as `@nuxtjs/device`
+ * would from the Nuxt app — instead of rewriting the composable into something
+ * Nuxt would not write.
  *
  * The hook also records every request for `@mlc-ai/web-llm`, which is the
  * whole point of the mobile guard: the browser-only runtime is never loaded.
+ *
+ * It is registered with `module.register()` rather than
+ * `module.registerHooks()`: the synchronous hooks only arrived in Node 22.15,
+ * and this runner strips types from 22.6. Registered hooks run on their own
+ * thread, so they are a module of their own — inline, as a `data:` URL — that
+ * is handed this file's URL to resolve the alias against, and that reports each
+ * specifier back over a message port rather than into an array here.
  */
+const ALIAS_HOOKS = `
+let base
+let port
+
+export function initialize(data) {
+  base = data.base
+  port = data.port
+}
+
+export async function resolve(specifier, context, nextResolve) {
+  port.postMessage(specifier)
+
+  if (specifier.startsWith('~/')) {
+    return {
+      url: new URL('../' + specifier.slice(2) + '.ts', base).href,
+      shortCircuit: true
+    }
+  }
+
+  return nextResolve(specifier, context)
+}
+`
+
 const requestedSpecifiers: string[] = []
+const { port1: specifierReports, port2: hookPort } = new MessageChannel()
 
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    requestedSpecifiers.push(specifier)
+specifierReports.on('message', (specifier: string) => {
+  requestedSpecifiers.push(specifier)
+})
+// The reports are only listened for; they must not keep the runner alive.
+specifierReports.unref()
 
-    if (specifier.startsWith('~/')) {
-      return {
-        url: new URL(`../${specifier.slice(2)}.ts`, import.meta.url).href,
-        shortCircuit: true
+register(`data:text/javascript,${encodeURIComponent(ALIAS_HOOKS)}`, {
+  parentURL: import.meta.url,
+  data: { base: import.meta.url, port: hookPort },
+  transferList: [hookPort]
+})
+
+let flushCount = 0
+
+/**
+ * Waits until every specifier the hook has seen so far has been reported.
+ *
+ * The port delivers in order, so once a sentinel import made now comes back,
+ * everything requested before it has arrived too.
+ */
+async function flushSpecifierReports(): Promise<void> {
+  const sentinel = `data:text/javascript,export {}//flush-${++flushCount}`
+  const arrived = new Promise<void>((resolve) => {
+    const onReport = (specifier: string) => {
+      if (specifier === sentinel) {
+        specifierReports.off('message', onReport)
+        resolve()
       }
     }
 
-    return nextResolve(specifier, context)
-  }
-})
+    specifierReports.on('message', onReport)
+  })
+
+  await import(sentinel)
+  await arrived
+}
+
+const DESKTOP_FLAGS: DeviceFlags = { isMobileOrTablet: false, isMacOS: false }
+const PHONE_FLAGS: DeviceFlags = { isMobileOrTablet: true, isMacOS: true }
+
+let deviceFlags = DESKTOP_FLAGS
 
 Object.assign(globalThis, {
-  ref: <T>(value: T) => ({ value })
+  ref: <T>(value: T) => ({ value }),
+  useDevice: () => deviceFlags
 })
 
 const { WebLlmError, useWebLlmEngine } = await import('../composables/useWebLlmEngine.ts')
 
-function hasRequestedWebLlm() {
+async function hasRequestedWebLlm(): Promise<boolean> {
+  await flushSpecifierReports()
+
   return requestedSpecifiers.some(specifier => specifier.includes('@mlc-ai/web-llm'))
 }
 
@@ -135,14 +199,28 @@ describe('useWebLlmEngine on a mobile device', () => {
     assert.equal(engine.error.value, '')
   })
 
-  test('without an injected answer it asks the device, which a server cannot see', async () => {
+  test('without an injected answer it asks useDevice(), and a desktop is not refused', async () => {
+    deviceFlags = DESKTOP_FLAGS
     const engine = useWebLlmEngine()
 
     assert.equal(await engine.checkSupport(), false)
-    assert.equal(engine.supportReason.value, '', 'no window means not mobile, not refused')
+    assert.equal(engine.supportReason.value, '', 'a desktop with no window to measure is not refused')
   })
 
-  test('never loads the browser-only web-llm runtime', () => {
-    assert.equal(hasRequestedWebLlm(), false)
+  test('without an injected answer a phone, as useDevice() classifies it, is refused', async () => {
+    deviceFlags = PHONE_FLAGS
+
+    try {
+      const engine = useWebLlmEngine()
+
+      assert.equal(await engine.checkSupport(), false)
+      assert.equal(engine.supportReason.value, MOBILE_DISCLAIMER_MESSAGE)
+    } finally {
+      deviceFlags = DESKTOP_FLAGS
+    }
+  })
+
+  test('never loads the browser-only web-llm runtime', async () => {
+    assert.equal(await hasRequestedWebLlm(), false)
   })
 })

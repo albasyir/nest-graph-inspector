@@ -121,14 +121,23 @@ function toRequestMessages(messages: readonly WebLlmChatMessage[]): ChatCompleti
 export type WebLlmEngineOptions = {
   /**
    * Whether this is a mobile device, asked before anything touches WebGPU or
-   * web-llm. Defaults to {@link isMobileDevice}; the panel passes its own
-   * reactive answer so the engine and the UI never disagree.
+   * web-llm. Defaults to {@link isMobileDevice} over this app's `useDevice()`
+   * flags; the panel passes its own reactive answer so the engine and the UI
+   * never disagree.
    */
   isMobile?: () => boolean
 }
 
+function askDevice(): () => boolean {
+  // Asked now, while the caller's setup still has the Nuxt app; the flags are
+  // fixed for the life of the page, so the check can read them on any later call.
+  const device = useDevice()
+
+  return () => isMobileDevice(device)
+}
+
 export function useWebLlmEngine(options: WebLlmEngineOptions = {}) {
-  const isMobile = options.isMobile ?? (() => isMobileDevice())
+  const isMobile = options.isMobile ?? askDevice()
 
   const isSupported = ref(false)
   const supportReason = ref('')

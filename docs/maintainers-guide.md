@@ -508,6 +508,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|
 | `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
 | `useWebLlmEngine.ts` | The only surface a chat model talks to: WebGPU support check, curated model catalog and cache state, model download progress, streaming generation, interrupt, and teardown. Imports `@mlc-ai/web-llm` lazily inside function bodies, since the module touches browser globals and the site is prerendered. Never sends `tools` on a request — see `web-llm-langchain.ts` for why that allowlist is not worth paying for |
+| `useMobileDevice.ts` | Whether the AI chat treats this tab as mobile, kept current as the window changes. The device class is `useDevice()` from `@nuxtjs/device`, called once in setup; it adds an iPad posing as a Mac and a window narrower than 768px, and answers `false` until mounted so a hydrated page agrees with its server render |
 | `useGraphAgent.ts` | Agent mode as the panel sees it: the `isRunning` flag and the dynamic `import()` that keeps `langchain` out of the prerendered server bundle. The loop itself is `~/utils/graph-agent-run`, which is testable without a browser |
 | `use-nodepod-demo-graph.ts` | Starts the in-browser demo when a docs preview asks for it, and exposes the graph, status label, and idle state that preview needs |
 | `use-nodepod-demo-session.ts` | Restarts the in-browser demo behind a restored session, because its endpoint is only answerable by the tab that started it |
@@ -683,6 +684,8 @@ that cannot reach into a Pinia setup store.
 | `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |
 | `nodepod-demo-bridge.ts` | Conversions between the browser's `fetch` types and the ones the in-browser runtime speaks, and the deadline a bridged request is given |
 | `nodepod-demo-bridge.test.ts` | Assert-based test for `nodepod-demo-bridge.ts` (no framework) |
+| `device-detection.ts` | The AI chat's mobile rule as a pure function over `useDevice()`'s flags: `isMobileOrTablet`, an iPad on iPadOS 13+ told apart from a Mac by its touchscreen, and the 768px viewport breakpoint. Also the copy the header and the panel show while restricted |
+| `device-detection.test.ts` | Assert-based test for `device-detection.ts`. Runs real user agents through `@nuxtjs/device`'s own flag generator, loaded beside the package entry with the `#build` crawler template stubbed by a module hook |
 | `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
 | `web-llm-boundary.ts` | The wire shapes the engine and the chat model both speak — messages, stream deltas, `response_format`, and the `WebLlmStreamer` handshake. One declaration on purpose: the two sides used to keep private copies and agree by inspection |
 | `web-llm-catalog.ts` | The curated list of in-browser models: which ones the viewer offers, their download size, context window, whether they can think, and how well they were tuned to pick a tool (`toolCallingQuality` — a hint to show, never a gate) |

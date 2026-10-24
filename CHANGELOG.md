@@ -12,6 +12,40 @@ for the published history.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-19
+
+### Added
+
+- **Vertical layout for mobile module zoom / deep dive.** The module zoom view (`/view/navigator/modules/<id>`) now lays out vertically on mobile devices and narrow viewports (< 768px), placing upstream module dependencies at the top and downstream dependents at the bottom. The horizontal orientation is preserved for desktop viewports (>= 768px). Dynamic handle positions adjust to top/bottom on mobile and left/right on desktop, and the camera automatically reframes and re-measures bounds across viewport orientation shifts (#107).
+- **Unified Direct Run drawer with type-safe inputs.** Unified the Direct Run drawer across the Navigator and Module Zoom views into a single reusable component (`DirectRunDrawer.vue`). Parameters are validated at runtime with Zod schemas and coerced appropriately (boolean checkboxes, number inputs, string/JSON inputs) with instant inline error display and execution feedback (#108).
+- **Adaptive Bright Line default in Navigator.** The Bright Line overlay in Navigator now automatically defaults to enabled on small and medium graphs (< 10 modules) for clear dependency highlighting and defaults to disabled on large graphs (>= 10 modules) to prevent visual noise, with an informative advisory banner and manual override toggle in Graph Settings (#103, #25).
+
+### Changed
+
+- **Standardized mobile device detection with `@nuxtjs/device`.** Device detection across the documentation site and graph viewer is now standardized using `@nuxtjs/device` (^4.0.0). Centralized device classification in `useMobileDevice` and `useWebLlmEngine` via `useDevice()`, while preserving critical device heuristics (iPadOS desktop-mode touchscreen detection and viewport width < 768px responsiveness) for WebLLM engine gating (#106).
+
+### Fixed
+
+- **Mobile viewer header usability and endpoint credential sanitization.** Redesigned the graph viewer header on mobile devices into a compact, responsive toolbar. Fixed viewer telemetry and header display to sanitize and strip sensitive credentials (basic auth user-info and `__inspector_token` query parameters) from displayed host endpoints (#104).
+
+## [0.13.4] - 2026-10-13
+
+### Fixed
+
+- Clarified module and provider cycles with curved, labeled connections (including self-loops) and a dedicated cycle-detail drawer. Module deep dives fit cycle curves and labels around dragged nodes while preserving user pan and zoom states across window resizes. Shared graph behavior with the Run documentation preview (#102).
+
+## [0.13.3] - 2026-10-12
+
+### Changed
+
+- Standardized AI Chat button label, drawer heading, and documentation preview to concise "AI Chat" copy with accessible device explanation on mobile. Fixed GitHub Actions Pages deployment OIDC permissions (#100, #101).
+
+## [0.13.2] - 2026-10-11
+
+### Changed
+
+- Disabled browser-based WebLLM model loading and Ask AI on mobile devices and viewports narrower than 768px, with clear device availability messaging in the graph viewer and drawer while keeping graph viewing and inspection intact (#99).
+
 ## [0.13.1] - 2026-10-04
 
 ### Changed

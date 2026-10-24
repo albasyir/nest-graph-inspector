@@ -15,14 +15,6 @@ import type { CSSProperties } from 'vue'
 import type { Edge, EdgeProps, Node, NodeMouseEvent } from '@vue-flow/core'
 import type { BreadcrumbItem } from '@nuxt/ui'
 import type { GraphOutput } from 'nest-graph-inspector'
-import {
-  buildDirectRunRequest,
-  buildDirectRunSnapshot,
-  getDirectRunProviderState,
-  type DirectRunAnyMethod,
-  type DirectRunExecutionSnapshot,
-  type DirectRunResultPayload
-} from '~/utils/direct-run-provider'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import {
   formatCircularEdgeLabel,
@@ -63,7 +55,8 @@ import {
  * The navigator answers "how do the modules fit together"; this answers "what
  * does this one module need, and from where" without tracing lines across the
  * whole application. The layout comes from `utils/module-deep-dive.ts`, so a
- * dependency always sits to the left of whatever injects it.
+ * dependency always sits to the left of whatever injects it — or above it on
+ * a phone, where the deep dive runs top to bottom.
  */
 const props = withDefaults(
   defineProps<{
@@ -88,6 +81,7 @@ const emit = defineEmits<{
   // The node id, not the class name: only the id says provider or controller.
   directRunDrawerOpen: [nodeId: string]
   directRunDrawerClose: []
+  traceOpen: []
 }>()
 
 type FlowNode
@@ -118,8 +112,13 @@ const mod = computed(() =>
     ? props.graphData.modules[props.moduleName]
     : undefined
 )
+// A phone held upright reads the deep dive top to bottom: dependencies above,
+// whatever injects them below.
+const { isMobile } = useMobileDevice()
 const deepDive = computed(() =>
-  buildModuleDeepDive(props.graphData, props.moduleName)
+  buildModuleDeepDive(props.graphData, props.moduleName, {
+    orientation: isMobile.value ? 'vertical' : 'horizontal'
+  })
 )
 const isRoot = computed(() => props.moduleName === props.graphData.root)
 const moduleJsDoc = computed(() => parseJsDocPreview(mod.value?.jsdoc))
@@ -152,10 +151,18 @@ const flowNodes = computed<FlowNode[]>(() =>
       width: `${DEEP_DIVE_ITEM_WIDTH}px`,
       height: `${getNodeHeight(node)}px`
     }
+    // The sides the node's handles are on. The templates place the handles;
+    // these tell Vue Flow, which only measures a handle again when they
+    // change — without them, turning a phone would leave every edge on the
+    // sides its handles have just left.
+    const sides = {
+      sourcePosition: isMobile.value ? Position.Bottom : Position.Right,
+      targetPosition: isMobile.value ? Position.Top : Position.Left
+    }
 
     return node.type === 'item'
-      ? { id: node.id, type: 'item', position: node.position, data: node, style }
-      : { id: node.id, type: 'external', position: node.position, data: node, style }
+      ? { id: node.id, type: 'item', position: node.position, data: node, style, ...sides }
+      : { id: node.id, type: 'external', position: node.position, data: node, style, ...sides }
   })
 )
 
@@ -278,6 +285,16 @@ function noteReaderMove(): void {
 watch(() => props.moduleName, () => {
   deepDiveFitTracker.reset()
 })
+
+// So is the same module turned the other way: the view the reader left is of
+// a layout that is gone. Its nodes keep their size, so Vue Flow reports them
+// initialized only once — the fit waits for the canvas to take the new
+// positions instead.
+watch(isMobile, async () => {
+  deepDiveFitTracker.reset()
+  await nextTick()
+  void fitDeepDive()
+}, { flush: 'post' })
 
 watch(
   () => viewportHelper.value.viewportInitialized,
@@ -456,55 +473,11 @@ function holdJsDocHoverCard(): void {
 
 onBeforeUnmount(closeJsDocHoverCard)
 
-// Direct Run — a compact drawer over the same request and snapshot helpers the
-// navigator's drawer uses. Arguments are a JSON array, checked for shape only.
+// Direct Run — the same drawer the navigator opens, on a runnable item of
+// this module.
 
+/** Node id of the provider or controller whose Direct Run drawer is open. */
 const selectedNodeId = ref<string | null>(null)
-/** Keyed `nodeId:method`, so two items' same-named methods never share state. */
-const argsInputByKey = ref<Record<string, string>>({})
-const argsErrorByKey = ref<Record<string, string>>({})
-const snapshotByKey = ref<Record<string, DirectRunExecutionSnapshot>>({})
-const pendingKey = ref<string | null>(null)
-
-const selectedItem = computed(() => {
-  const node = deepDive.value?.nodes.find(
-    candidate => candidate.id === selectedNodeId.value
-  )
-  return node?.type === 'item' ? node : null
-})
-
-const selectedMethods = computed<DirectRunAnyMethod[]>(() => {
-  const item = selectedItem.value
-  if (!item) {
-    return []
-  }
-
-  const entries = item.kind === 'controller'
-    ? mod.value?.controllers
-    : mod.value?.providers
-  const entry = entries?.find(candidate => candidate.name === item.label)
-
-  return entry ? getDirectRunProviderState(entry).methods : []
-})
-
-const directRunUnavailableReason = computed(() => {
-  if (props.directRunDisabled) {
-    return 'This graph was read from a file, so there is no running application to call.'
-  }
-  if (!props.directRunUrl) {
-    return 'Direct Run endpoint is unavailable for this graph URL.'
-  }
-  return ''
-})
-
-const showDirectRunDrawer = computed({
-  get: () => Boolean(selectedItem.value),
-  set: (open) => {
-    if (!open) {
-      selectNode(null)
-    }
-  }
-})
 
 function selectNode(nodeId: string | null): void {
   const hadSelection = Boolean(selectedNodeId.value)
@@ -527,92 +500,6 @@ watch(
   },
   { immediate: true }
 )
-
-function getMethodKey(methodName: string): string {
-  return `${selectedNodeId.value}:${methodName}`
-}
-
-/** `[]` is how the library writes a method that takes nothing. */
-function hasParameters(method: DirectRunAnyMethod): boolean {
-  const parameterTypes = method.parameterTypes.trim()
-  return parameterTypes !== '' && parameterTypes !== '[]'
-}
-
-function getMethodHttpLabel(method: DirectRunAnyMethod): string {
-  const http = 'http' in method ? method.http : undefined
-  return http ? `${http.method} ${http.path}` : ''
-}
-
-function parseArgs(
-  method: DirectRunAnyMethod,
-  input: string
-): { ok: true, args: unknown[] | undefined } | { ok: false, error: string } {
-  if (!hasParameters(method)) {
-    return { ok: true, args: undefined }
-  }
-
-  const trimmed = input.trim()
-  if (!trimmed) {
-    return { ok: false, error: `Enter JSON arguments for ${method.name}().` }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch {
-    return { ok: false, error: 'Arguments must be valid JSON.' }
-  }
-
-  return Array.isArray(parsed)
-    ? { ok: true, args: parsed }
-    : { ok: false, error: `${method.name}() takes its arguments as a JSON array.` }
-}
-
-async function runMethod(method: DirectRunAnyMethod): Promise<void> {
-  const item = selectedItem.value
-  if (!item || !props.directRunUrl || props.directRunDisabled || pendingKey.value) {
-    return
-  }
-
-  const key = getMethodKey(method.name)
-  const parsed = parseArgs(method, argsInputByKey.value[key] ?? '')
-  if (!parsed.ok) {
-    argsErrorByKey.value = { ...argsErrorByKey.value, [key]: parsed.error }
-    return
-  }
-
-  const { [key]: _cleared, ...remainingErrors } = argsErrorByKey.value
-  argsErrorByKey.value = remainingErrors
-  pendingKey.value = key
-
-  let response: DirectRunResultPayload
-  try {
-    response = await $fetch<DirectRunResultPayload>(props.directRunUrl, {
-      method: 'POST',
-      headers: props.directRunHeaders,
-      body: buildDirectRunRequest({
-        moduleName: props.moduleName,
-        targetType: item.kind,
-        targetName: item.label,
-        methodName: method.name,
-        args: parsed.args
-      })
-    })
-  } catch (error) {
-    // A refused call still answers with the payload saying why.
-    response = (error as { data?: DirectRunResultPayload }).data ?? {
-      ok: false,
-      error: error instanceof Error ? error.message : 'Direct run failed.'
-    }
-  } finally {
-    pendingKey.value = null
-  }
-
-  snapshotByKey.value = {
-    ...snapshotByKey.value,
-    [key]: buildDirectRunSnapshot({ response, requestedMethod: method.name })
-  }
-}
 
 function handleNodeClick(event: NodeMouseEvent): void {
   closeJsDocHoverCard()
@@ -775,7 +662,7 @@ function handlePaneClick(): void {
         <template #node-item="itemProps">
           <Handle
             type="target"
-            :position="Position.Left"
+            :position="isMobile ? Position.Top : Position.Left"
           />
           <div
             class="module-graph-node"
@@ -811,14 +698,14 @@ function handlePaneClick(): void {
           </div>
           <Handle
             type="source"
-            :position="Position.Right"
+            :position="isMobile ? Position.Bottom : Position.Right"
           />
         </template>
 
         <template #node-external="externalProps">
           <Handle
             type="target"
-            :position="Position.Left"
+            :position="isMobile ? Position.Top : Position.Left"
           />
           <div class="module-graph-node module-graph-node--external">
             <span
@@ -838,7 +725,7 @@ function handlePaneClick(): void {
           </div>
           <Handle
             type="source"
-            :position="Position.Right"
+            :position="isMobile ? Position.Bottom : Position.Right"
           />
         </template>
 
@@ -916,114 +803,15 @@ function handlePaneClick(): void {
       </span>
     </footer>
 
-    <UDrawer
-      v-model:open="showDirectRunDrawer"
-      direction="right"
-      :ui="{ content: 'w-screen max-w-md' }"
-    >
-      <template #header>
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-wide text-muted">
-              {{ selectedItem?.kind === 'controller' ? 'Controller Action' : 'Provider Action' }}
-            </p>
-            <p class="truncate font-mono font-semibold">
-              {{ selectedItem?.label }}
-            </p>
-            <p class="text-sm text-muted">
-              {{ props.moduleName }}
-            </p>
-          </div>
-          <UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            square
-            aria-label="Close direct run drawer"
-            @click="showDirectRunDrawer = false"
-          />
-        </div>
-      </template>
-
-      <template #body>
-        <div class="space-y-4">
-          <UAlert
-            v-if="directRunUnavailableReason"
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-info"
-            :description="directRunUnavailableReason"
-          />
-
-          <section
-            v-for="method in selectedMethods"
-            :key="method.name"
-            class="space-y-2 rounded-lg border border-default p-3"
-          >
-            <div class="flex flex-wrap items-center gap-2">
-              <code class="font-semibold">{{ method.name }}()</code>
-              <UBadge
-                v-if="getMethodHttpLabel(method)"
-                :label="getMethodHttpLabel(method)"
-                color="neutral"
-                variant="subtle"
-                size="sm"
-              />
-            </div>
-            <p class="font-mono text-xs text-muted">
-              {{ method.parameterTypes }}
-            </p>
-
-            <UTextarea
-              v-if="hasParameters(method)"
-              v-model="argsInputByKey[getMethodKey(method.name)]"
-              :rows="3"
-              autoresize
-              class="w-full font-mono"
-              placeholder="[ ...arguments as a JSON array ]"
-              :aria-label="`Arguments for ${method.name}`"
-            />
-            <p
-              v-if="argsErrorByKey[getMethodKey(method.name)]"
-              class="text-xs text-error"
-            >
-              {{ argsErrorByKey[getMethodKey(method.name)] }}
-            </p>
-
-            <UButton
-              icon="i-lucide-play"
-              label="Run"
-              size="sm"
-              :loading="pendingKey === getMethodKey(method.name)"
-              :disabled="Boolean(directRunUnavailableReason) || Boolean(pendingKey)"
-              @click="runMethod(method)"
-            />
-
-            <div
-              v-if="snapshotByKey[getMethodKey(method.name)]"
-              class="space-y-2"
-            >
-              <UBadge
-                :label="snapshotByKey[getMethodKey(method.name)]?.state === 'success' ? 'Success' : 'Failed'"
-                :color="snapshotByKey[getMethodKey(method.name)]?.state === 'success' ? 'success' : 'error'"
-                variant="subtle"
-                size="sm"
-              />
-              <pre class="module-graph__result">{{ snapshotByKey[getMethodKey(method.name)]?.summary }}</pre>
-              <UButton
-                v-if="snapshotByKey[getMethodKey(method.name)]?.traceId"
-                icon="i-lucide-activity"
-                label="Open Trace"
-                color="neutral"
-                variant="link"
-                size="sm"
-                to="/view/trace"
-              />
-            </div>
-          </section>
-        </div>
-      </template>
-    </UDrawer>
+    <DirectRunDrawer
+      :graph="props.graphData"
+      :node-id="selectedNodeId"
+      :direct-run-url="props.directRunUrl"
+      :direct-run-headers="props.directRunHeaders"
+      :direct-run-disabled="props.directRunDisabled"
+      @close="selectNode(null)"
+      @trace-open="emit('traceOpen')"
+    />
 
     <UDrawer
       v-model:open="showCycleDetails"
@@ -1374,16 +1162,5 @@ function handlePaneClick(): void {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
-}
-
-.module-graph__result {
-  max-height: 12rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  border-radius: 0.375rem;
-  background: var(--ui-bg-elevated);
-  padding: 0.5rem;
-  font-size: 12px;
 }
 </style>

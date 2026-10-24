@@ -621,7 +621,8 @@ viewer supports. A module's deep dive lives under the navigator at
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
 than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it
 draws the module alone, laid out by `app/utils/module-deep-dive.ts` from fields
-the graph already carries. `nuxt.config.ts` renders `/view/**` client-side only —
+the graph already carries (horizontally on desktop, or vertically on mobile
+viewports with dependencies at the top and dependents below). `nuxt.config.ts` renders `/view/**` client-side only —
 neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 
@@ -768,7 +769,11 @@ graph, the question, and the answer never leave the machine, and nothing has to
 be installed for the feature to work — at the cost of requiring a WebGPU-capable
 browser on a desktop, in a window at least `MOBILE_BREAKPOINT_PX` wide
 (`app/utils/device-detection.ts`), which the viewer checks for before offering
-the chat.
+the chat. What kind of device a tab is on comes from `@nuxtjs/device`
+(`useDevice()`), which classifies the user agent; `useMobileDevice` adds the two
+things a user agent cannot say — an iPad on iPadOS 13 or later, which reports a
+Mac's user agent and is told apart by its touchscreen, and the window's width,
+followed as it changes.
 
 **The chat talks to a LangChain model, not to web-llm.** The panel never calls
 `@mlc-ai/web-llm`. It builds a `ChatWebLlm` — a LangChain `BaseChatModel`
