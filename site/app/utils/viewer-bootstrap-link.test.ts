@@ -5,7 +5,10 @@ import {
   VIEWER_PAGES,
   decodeEndpointUrl,
   isViewerPage,
+  isViewerPagePath,
   resolveViewerBootstrap,
+  resolveViewerLanding,
+  resolveViewerLink,
   resolveViewerPage
 } from './viewer-bootstrap-link.ts'
 
@@ -52,6 +55,32 @@ assert.ok(
 
 // A trailing slash is the same link.
 assert.deepEqual(resolveViewerBootstrap(`/view/${encoded}/`), bootstrap)
+
+// The library reads the token parameter by its decoded name, so a link spelling
+// it percent-encoded still authenticates — and the endpoint it leaves behind
+// carries the token under no spelling, while every other parameter, the user
+// info and the fragment stay exactly as the link had them.
+for (const name of ['%5F%5Finspector_token', '%5f%5finspector%5ftoken', '__inspector%5Ftoken']) {
+  const link = Buffer.from(
+    `http://dev:pw@0.0.0.0:53371/__graph-inspector?mode=a%20b&${name}=${TOKEN}#here`
+  ).toString('base64url')
+  const spent = resolveViewerBootstrap(`/view/${link}`)
+
+  assert.equal(spent?.token, TOKEN, name)
+  assert.equal(
+    spent?.endpointUrl,
+    'http://dev:pw@0.0.0.0:53371/__graph-inspector?mode=a%20b#here',
+    name
+  )
+}
+
+// A token parameter left empty is still one: the empty value is what is read,
+// and a second spelling behind it must not survive into the endpoint.
+const shadowed = resolveViewerBootstrap(
+  `/view/${Buffer.from(`${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=&%5F%5Finspector_token=${TOKEN}`).toString('base64url')}`
+)
+assert.equal(shadowed?.endpointUrl, ENDPOINT)
+assert.equal(shadowed?.token, '')
 
 // A link with no token is a graph the viewer can open without a credential —
 // the demo fixture is one.
@@ -134,6 +163,132 @@ for (const path of [
     undefined,
     `treated ${path} as a bootstrap link`
   )
+}
+
+// Before anything reads the address bar — PostHog included — whatever stands
+// where a printed link would is replaced. The viewer's own pages are not links,
+// and are left exactly as they are.
+const PAGE_PATHS = [
+  '/view',
+  '/view/',
+  '/view/navigator',
+  '/view/issues/',
+  '/view/trace',
+  '/view/execution-sequence',
+  '/view/navigator/modules/UserModule',
+  '/view/navigator/modules/Already%2520Encoded'
+]
+
+for (const path of PAGE_PATHS) {
+  assert.ok(isViewerPagePath(path), `${path} is one of the viewer's pages`)
+  assert.equal(resolveViewerLink(path), undefined, `${path} was rewritten`)
+}
+
+for (const path of ['/', '/getting-started', '/viewer/navigator', '/views/x']) {
+  assert.ok(!isViewerPagePath(path), path)
+  assert.equal(resolveViewerLink(path), undefined, `${path} is outside the viewer`)
+}
+
+// A link that can be spent lands on the page it names, as the plugin found it.
+assert.deepEqual(resolveViewerLink(`/view/${encoded}`), bootstrap)
+assert.equal(resolveViewerLink(`/view/${encoded}/issues`)?.path, '/view/issues')
+
+// One that cannot be spent may still carry the token — damaged in copying,
+// percent-encoded, hidden beneath a page — so it lands on `/view` and hands
+// over nothing.
+for (const path of [
+  `/view/${encoded})`,
+  `/view/${encoded}.`,
+  `/view/%${encoded}`,
+  '/view/%6Eavigator',
+  `/view/navigator%2F${encoded}`,
+  `/view/%2E%2E%2F${encoded}`,
+  `/view/navigator/${encoded}`,
+  `/view/issues/${encoded}`,
+  `/view/execution-sequence/${encoded}`,
+  `/view//${encoded}`,
+  '/view/navigator/modules',
+  `/view/navigator/modules/UserModule/${encoded}`,
+  '/view/NAVIGATOR'
+]) {
+  assert.ok(!isViewerPagePath(path), `${path} is not a page`)
+  assert.deepEqual(
+    resolveViewerLink(path),
+    { path: '/view', endpointUrl: '', token: '' },
+    `${path} was not replaced with /view`
+  )
+}
+
+// The router matches paths without regard to case, so another spelling of
+// `/view` reaches the viewer too. Only the spelling the library prints is ever
+// spent: a link under any other lands on `/view` and hands over nothing, however
+// valid the link — and a page under one is no longer the canonical page.
+for (const path of [
+  `/VIEW/${encoded}`,
+  `/View/${encoded}`,
+  `/vIeW/${encoded}/issues`,
+  `/VIEW/${encodeURIComponent(Buffer.from(BOOTSTRAP_ENDPOINT).toString('base64'))}`,
+  `/VIEW/${encoded})`,
+  '/VIEW/navigator',
+  '/View/navigator/modules/UserModule',
+  '/VIEW/'
+]) {
+  assert.ok(!isViewerPagePath(path), `${path} is not one of the viewer's pages`)
+  assert.deepEqual(
+    resolveViewerLink(path),
+    { path: '/view', endpointUrl: '', token: '' },
+    `${path} was not replaced with /view`
+  )
+}
+
+// `/VIEW` alone stands where no link could: there is nothing after it.
+assert.equal(resolveViewerLink('/VIEW'), undefined)
+
+// More than one slash before `view` is still the link's place, and is not the
+// spelling the library prints: it lands on `/view` and hands over nothing.
+for (const path of [`//view/${encoded}`, `///VIEW/${encoded}/issues`, '//view/navigator']) {
+  assert.deepEqual(
+    resolveViewerLink(path),
+    { path: '/view', endpointUrl: '', token: '' },
+    `${path} was not replaced with /view`
+  )
+}
+
+// The plugin reads the route out of the address bar with `withoutBase`, as
+// Nuxt's router reads its first route, and replaces the path beneath the base.
+const BASE = '/nest-graph-inspector/'
+
+assert.deepEqual(
+  resolveViewerLanding(`${BASE}view/${encoded}`, BASE),
+  { ...bootstrap, address: `${BASE}view/navigator` }
+)
+assert.equal(resolveViewerLanding(`/view/${encoded}/issues`, '/')?.address, '/view/issues')
+
+// A doubled slash after the base: whether the route keeps it or collapses it,
+// the link is spent or cleared — never left in the address bar for PostHog.
+for (const [pathname, base] of [
+  [`${BASE}/view/${encoded}`, BASE],
+  [`${BASE}//VIEW/${encoded}`, BASE],
+  [`//view/${encoded}`, '/']
+] as const) {
+  const landing = resolveViewerLanding(pathname, base)
+
+  assert.ok(landing, `${pathname} was left in the address bar`)
+  assert.ok(
+    [`${base}view`, `${base}view/navigator`].includes(landing.address),
+    `${pathname} landed on ${landing.address}`
+  )
+}
+
+// The viewer's own pages, and everything outside the viewer, are left alone.
+for (const pathname of [
+  BASE,
+  `${BASE}view`,
+  `${BASE}view/navigator`,
+  `${BASE}view/navigator/modules/UserModule`,
+  `${BASE}getting-started`
+]) {
+  assert.equal(resolveViewerLanding(pathname, BASE), undefined, pathname)
 }
 
 console.log('viewer-bootstrap-link.test.ts ok')

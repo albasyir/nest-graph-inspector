@@ -564,7 +564,11 @@ link carrying no token and therefore cannot be opened in the hosted viewer.
 **`/view/<base64url(endpoint)>` is the printed link** — the one channel that
 hands the viewer an endpoint and, with it, an access token. It is spent on
 arrival: endpoint and token go to the store, and the address bar is replaced with
-a plain `/view/<page>`. Old links carrying a second segment
+a plain `/view/<page>`, without the query or fragment the link arrived with. A
+path in its place that cannot be spent — a link damaged in copying, a segment
+arriving percent-encoded, `/view` in another case (which the router matches
+all the same) or after a doubled slash — may carry the token all the same, so
+it is replaced with `/view` and hands over nothing. Old links carrying a second segment
 (`/view/<blob>/issues`) still land on the view they named — under its current
 name, so `/view/<blob>/execution-sequence` lands on `/view/trace`.
 
@@ -572,8 +576,8 @@ Two pieces spend it, because one cannot cover both consumers:
 
 | File | Job |
 |---|---|
-| `app/plugins/graph-viewer-bootstrap.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: takes custody of the link and rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` |
-| `app/middleware/graph-viewer-bootstrap.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the link is never committed. Also guards the viewer's own pages: no session means nothing to show, so it sends the visitor to `/view` |
+| `app/plugins/graph-viewer-bootstrap.client.ts` | `enforce: 'pre'`, so it runs ahead of every module plugin: takes custody of the link and rewrites `window.location` with `history.replaceState` before PostHog initialises and reads it as `$current_url` / `$initial_current_url` — for any path in the link's place, spendable or not, leaving the viewer's own pages untouched. It reads the route with `withoutBase`, as Nuxt's router reads its first route (`resolveViewerLanding`), so a doubled slash after the base is caught too |
+| `app/middleware/graph-viewer-bootstrap.global.ts` | Redirects the pending navigation, because Nuxt's own router plugin is ordered ahead of *all* user plugins and already resolved its initial route from the original URL — a redirect from a guard aborts that navigation, so the link is never committed, and it lands on the page alone, without the link's query or fragment — decided by the same `resolveViewerLink` as the plugin. Also guards the viewer's own pages: no session means nothing to show, so it sends the visitor to `/view` |
 
 Requests then authenticate with the `x-graph-inspector-token` header, so no URL
 the viewer builds or fetches carries a token.
@@ -651,11 +655,12 @@ that cannot reach into a Pinia setup store.
 
 | File | What it contains |
 |---|---|
-| `graph-viewer-analytics.ts` | PostHog event property builders; `resolveGraphViewerLoadSource`; redacts access tokens out of every property |
+| `graph-viewer-analytics.ts` | PostHog event property builders and `resolveGraphViewerLoadSource`. Every property is built from parts known to be safe rather than redacted — an endpoint's origin, and its path only when it is the library's own (`describeGraphEndpoint`); the viewer's own pages, every other route by its shape; a failure's status, or its kind when it got none — never its message |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
-| `inspector-access-token.ts` | The token contract shared with the library: parameter and header names, reading a token out of a printed link, redacting one out of anything else |
+| `graph-viewer-analytics.test.ts` | Assert-based test for `graph-viewer-analytics.ts`: synthetic secrets — user info, encoded token names, fragments, configured paths, printed links — through every property it builds |
+| `inspector-access-token.ts` | The token contract shared with the library: parameter and header names, reading a token out of a printed link, and redacting it out of a URL under any spelling of its name while leaving the URL usable |
 | `inspector-access-token.test.ts` | Assert-based test for `inspector-access-token.ts`, including the analytics payload as a leak sink |
-| `viewer-bootstrap-link.ts` | Decodes the printed `/view/<base64url endpoint>` link and says which viewer page it should land on |
+| `viewer-bootstrap-link.ts` | Decodes the printed `/view/<base64url endpoint>` link and says which viewer page it should land on — and where anything else standing in its place lands (`resolveViewerLink`) |
 | `viewer-bootstrap-link.test.ts` | Assert-based test for `viewer-bootstrap-link.ts` |
 | `inspector-graph-session.ts` | The tab's record of which graph it is on, and the token for it — memory plus `sessionStorage` — so a reload survives a URL that names neither |
 | `inspector-graph-session.test.ts` | Assert-based test for `inspector-graph-session.ts`, with an injected fake `Storage` |
@@ -667,9 +672,9 @@ that cannot reach into a Pinia setup store.
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
 | `graph-layout-placement.ts` | Incremental layout: `resolveIncrementalLayout` keeps every saved module and item exactly where the layout says, places items the layout has not seen in the first free slot of their module (growing it to fit), and places new modules beside a module they import or are imported by, else in the nearest free slot — never displacing anything saved. `LAYOUT_GEOMETRY` mirrors the sizes `GraphViewer.vue` draws with; item keys are the viewer's node ids (`provider-<Module>-<Name>`) |
 | `graph-layout-placement.test.ts` | Assert-based test for `graph-layout-placement.ts` |
-| `graph-layout-persistence.ts` | Where a layout lives when the inspector cannot keep it — static graphs, the in-browser demo, and libraries without a layout route keep it per endpoint in memory and `sessionStorage`. Also the shape check for a layout the viewer receives, the file serialization a download uses (byte-for-byte the library's), and reading a failed layout request's `message` and `errors` |
+| `graph-layout-persistence.ts` | Where a layout lives when the inspector cannot keep it — static graphs, the in-browser demo, and libraries without a layout route keep it per endpoint in memory and `sessionStorage`. Also the shape check for a layout the viewer receives, and the file serialization a download uses (byte-for-byte the library's) |
 | `graph-layout-persistence.test.ts` | Assert-based test for `graph-layout-persistence.ts`, with an injected fake `Storage` |
-| `http-error.ts` | Reads the reason and status out of a failed request, so the inspector's own message wins over the transport's |
+| `http-error.ts` | Reads the status out of a failed request, and words a failure from that status alone — never from a transport message or a response body, either of which can quote the URL and what it carries |
 | `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |

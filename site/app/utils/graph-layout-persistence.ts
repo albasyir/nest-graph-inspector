@@ -115,25 +115,6 @@ export function writeStoredLayout(
   }
 }
 
-/**
- * What a failed layout request said. The layout routes answer with `message`
- * and, for a layout that failed validation, the reasons in `errors`.
- */
-export function readLayoutResponseError(error: unknown): string {
-  const data = isRecord(error) ? error.data : undefined
-  if (!isRecord(data) || typeof data.message !== 'string') {
-    return ''
-  }
-
-  const reasons = Array.isArray(data.errors)
-    ? data.errors.filter((reason): reason is string => typeof reason === 'string')
-    : []
-
-  return reasons.length
-    ? `${data.message}: ${reasons.join('; ')}`
-    : data.message
-}
-
 function isPosition(value: unknown): boolean {
   return (
     isRecord(value)

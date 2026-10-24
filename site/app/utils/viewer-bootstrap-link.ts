@@ -1,3 +1,4 @@
+import { withoutBase } from 'ufo'
 import { readAccessToken, redactAccessToken } from './inspector-access-token.ts'
 
 /**
@@ -103,7 +104,72 @@ export function resolveViewerBootstrap(
 
   return {
     path: `/view/${page}`,
-    endpointUrl: token ? redactAccessToken(endpointUrl) : endpointUrl,
+    // Redacted whenever the parameter is there at all: an empty first value is
+    // what `readAccessToken` reports, and a second spelling can sit behind it.
+    endpointUrl: token === undefined ? endpointUrl : redactAccessToken(endpointUrl),
     token: token ?? ''
   }
+}
+
+/**
+ * Whether a path is one of the viewer's own pages: `/view` itself, a page under
+ * its current name or a former one, or a module's deep dive beneath the
+ * navigator. Nothing else under `/view/` is a page.
+ */
+export function isViewerPagePath(path: string): boolean {
+  const [, root, page, ...rest] = path.replace(/\/+$/, '').split('/')
+
+  if (root !== 'view') {
+    return false
+  }
+
+  if (page === undefined) {
+    return true
+  }
+
+  return Boolean(resolveViewerPage(page)) && (
+    rest.length === 0
+    || (page === 'navigator' && rest.length === 2 && rest[0] === 'modules')
+  )
+}
+
+/**
+ * What a path standing where a printed link would becomes, before anything
+ * reads the address bar — `undefined` for every other path, which is left as
+ * it is: the viewer's own pages, and everything outside `/view/`.
+ *
+ * The router matches paths without regard to case, so `/VIEW/<link>` reaches
+ * the viewer as surely as `/view/<link>`. Only the spelling the library prints
+ * is ever spent, landing on the page it names and handing over its graph. Any
+ * other — `/view` in another case or after more than one slash, a link damaged
+ * on its way here, or one arriving percent-encoded — may still carry the
+ * token, so it lands on `/view` and hands over nothing.
+ */
+export function resolveViewerLink(path: string): ViewerBootstrap | undefined {
+  if (!/^\/+view\//i.test(path) || isViewerPagePath(path)) {
+    return undefined
+  }
+
+  const bootstrap = path.startsWith('/view/') ? resolveViewerBootstrap(path) : undefined
+
+  return bootstrap ?? { path: '/view', endpointUrl: '', token: '' }
+}
+
+/**
+ * What a page load on `pathname` does with the address bar before anything
+ * reads it: the link it found and the `address` that replaces it, or
+ * `undefined` to leave the address bar as it is.
+ *
+ * The route is read with `withoutBase`, exactly as Nuxt's router reads its first
+ * route, so whatever the router will route — a doubled slash after the site's
+ * base included — is caught here first.
+ */
+export function resolveViewerLanding(
+  pathname: string,
+  baseURL: string
+): (ViewerBootstrap & { address: string }) | undefined {
+  const link = resolveViewerLink(withoutBase(pathname, baseURL))
+  const basePath = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+
+  return link && { ...link, address: `${basePath}${link.path.slice(1)}` }
 }

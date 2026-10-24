@@ -39,33 +39,45 @@ export function readAccessToken(endpointUrl: string): string | undefined {
 }
 
 /**
- * Removes the access token from a URL.
+ * Removes the access token from a URL, leaving the URL usable.
  *
  * The token is a live credential for the inspected application, so it is
- * stripped the moment the bootstrap link is read, and stripped again from
- * anything that ships a graph URL onward — analytics, error reports, logs.
+ * stripped the moment the bootstrap link is read. A query pair is the token's
+ * when its name *decodes* to the parameter — that is how `readAccessToken` and
+ * the library both read it, so `%5F%5Finspector_token` is the token too. Every
+ * such pair goes; every other pair, the user info and the fragment stay exactly
+ * as they were, and a URL with no token pair comes back unchanged.
+ *
+ * A URL that does not parse cannot be searched reliably, so none of it comes
+ * back. This keeps a URL working; it does not make one safe to report —
+ * analytics describes an endpoint with `describeGraphEndpoint` instead.
  */
 export function redactAccessToken(endpointUrl: string): string {
-  if (!endpointUrl || !endpointUrl.includes(INSPECTOR_ACCESS_TOKEN_PARAM)) {
+  let url: URL
+
+  try {
+    url = new URL(endpointUrl)
+  } catch {
+    return ''
+  }
+
+  // `URLSearchParams` and the `search` setter each drop one leading `?`, and a
+  // name may begin with one of its own — `?__inspector_token` is not the token,
+  // and `?mode` is not `mode` — so each is handed a `?` of ours to drop instead.
+  const pairs = url.search.slice(1).split('&')
+  const kept = pairs.filter(
+    pair => !new URLSearchParams(`?${pair}`).has(INSPECTOR_ACCESS_TOKEN_PARAM)
+  )
+
+  if (kept.length === pairs.length) {
     return endpointUrl
   }
 
-  try {
-    const url = new URL(endpointUrl)
-    url.searchParams.delete(INSPECTOR_ACCESS_TOKEN_PARAM)
+  const query = kept.join('&')
 
-    return url.toString()
-  } catch {
-    // Not parseable as a URL, but it still mentions the parameter, so strip it
-    // textually rather than let a token through. The value ends at a query
-    // separator or at whitespace or a quote, because the input here is as
-    // likely to be a URL quoted inside an error message as a URL on its own —
-    // and cutting to the end of the line would take the message with it.
-    return endpointUrl.replace(
-      new RegExp(`([?&]?)${INSPECTOR_ACCESS_TOKEN_PARAM}=[^&#\\s"']*&?`, 'g'),
-      '$1'
-    )
-  }
+  url.search = query ? `?${query}` : ''
+
+  return url.toString()
 }
 
 /**

@@ -44,6 +44,97 @@ const malformed = redactAccessToken(
 )
 assert.ok(!malformed.includes(TOKEN), 'malformed url leaked the token')
 
+// Something that does not parse cannot be searched reliably — a percent-encoded
+// name defeats any textual match — so none of it comes back.
+for (const input of [
+  `not a url %5F%5Finspector_token=${TOKEN}`,
+  `http://local host:53371/?%5F%5Finspector_token=${TOKEN}`
+]) {
+  assert.equal(redactAccessToken(input), '', input)
+}
+
+// The library and `readAccessToken` decode a parameter's name before comparing
+// it, so a name spelled with percent-escapes is the token all the same: it has
+// to keep authenticating, and redaction has to recognise every such spelling.
+for (const name of [
+  '%5F%5Finspector_token',
+  '%5f%5finspector%5ftoken',
+  '__inspector%5Ftoken',
+  '__%69nspector_token'
+]) {
+  const url = `${ENDPOINT}?${name}=${TOKEN}`
+
+  assert.equal(readAccessToken(url), TOKEN, `${name} no longer authenticates`)
+  assert.equal(redactAccessToken(url), ENDPOINT, `${name} survived redaction`)
+}
+
+// Only the token's pairs go. Every other parameter stays exactly as written,
+// and so do the user info and the fragment, which the URL may still need.
+assert.equal(
+  redactAccessToken(
+    `http://dev:pw@0.0.0.0:53371/__graph-inspector?a=b%20c&flag&%5F%5Finspector_token=${TOKEN}&x=~y&${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}#frag`
+  ),
+  'http://dev:pw@0.0.0.0:53371/__graph-inspector?a=b%20c&flag&x=~y#frag'
+)
+
+// A token parameter left empty is still the token's: `readAccessToken` reports
+// that empty value, and a second spelling behind it must not survive.
+const shadowed = `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=&%5F%5Finspector_token=${TOKEN}`
+assert.equal(readAccessToken(shadowed), '')
+assert.equal(redactAccessToken(shadowed), ENDPOINT)
+
+// A URL with no token pair comes back exactly as given, not even normalised,
+// and a parameter that merely contains the name is not the token.
+for (const url of [
+  ENDPOINT,
+  `${ENDPOINT}?`,
+  'HTTP://LocalHost:53371/__graph-inspector?keep=a+b',
+  `${ENDPOINT}?x${INSPECTOR_ACCESS_TOKEN_PARAM}=1&${INSPECTOR_ACCESS_TOKEN_PARAM}_old=2`
+]) {
+  assert.equal(redactAccessToken(url), url)
+}
+
+// Nor is a name that begins with `?`, however that `?` is spelled:
+// `??__inspector_token` names `?__inspector_token` — to the library and to
+// `readAccessToken` alike — so it neither authenticates nor is redacted.
+for (const url of [
+  `${ENDPOINT}??${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`,
+  `${ENDPOINT}?a=1&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`,
+  `${ENDPOINT}?%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`
+]) {
+  assert.equal(readAccessToken(url), undefined, `${url} authenticates`)
+  assert.equal(redactAccessToken(url), url, `${url} was redacted`)
+}
+
+// With the token's pair gone, the first pair left may begin with a `?` of its
+// own, and it keeps it: without it, `?mode` would be read as `mode`, and a
+// `?__inspector_token` as the token.
+for (const pair of ['?mode=graph', `?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy`]) {
+  const url = redactAccessToken(
+    `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}&${pair}`
+  )
+
+  assert.equal(url, `${ENDPOINT}?${pair}`)
+  assert.equal(readAccessToken(url), undefined, `${pair} became the token`)
+}
+
+// Every spelling of the token goes, and every other pair stays byte for byte
+// and in order, so the URL reads back as the same entries less the token's.
+const mixed = `${ENDPOINT}?${INSPECTOR_ACCESS_TOKEN_PARAM}=${TOKEN}&?mode=graph&%5F%5Finspector_token=${TOKEN}&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&a=b%20c&plus=a+b&flag&next=?x=1`
+const mixedRedacted = redactAccessToken(mixed)
+
+assert.equal(
+  mixedRedacted,
+  `${ENDPOINT}??mode=graph&?${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&%3F${INSPECTOR_ACCESS_TOKEN_PARAM}=decoy&a=b%20c&plus=a+b&flag&next=?x=1`
+)
+assert.equal(readAccessToken(mixedRedacted), undefined)
+assert.deepEqual(
+  [...new URL(mixedRedacted).searchParams],
+  [...new URL(mixed).searchParams].filter(
+    ([name]) => name !== INSPECTOR_ACCESS_TOKEN_PARAM
+  )
+)
+
 // Requests authenticate through a header, so no derived URL has to carry a
 // token — which is what kept breaking when one was concatenated onto.
 assert.deepEqual(accessTokenHeaders(TOKEN), {
@@ -72,20 +163,21 @@ assert.equal(properties.graph_url, ENDPOINT)
 assert.equal(properties.graph_url_host, '0.0.0.0:53371')
 assert.equal(properties.graph_url_path, '/__graph-inspector')
 
-// A transport error quotes the URL it failed on, so the error message is a URL
-// in disguise — and the failing request is exactly the one a token was on.
+// A transport error quotes the URL it failed on — exactly the request a token
+// was on — so a failure is reported by its status, never in its own words.
 const failure = createGraphViewerEventProperties({
   graphUrl: BOOTSTRAP_ENDPOINT,
   viewerRoute: `/view/${encoded}`,
   loadSource: 'manual_refresh',
-  errorMessage: `[GET] "${BOOTSTRAP_ENDPOINT}": 401 Unauthorized`
+  failure: { status: 401, unreachable: false, unsupported: false }
 })
 
 assert.ok(
   !JSON.stringify(failure).includes(TOKEN),
-  'analytics leaked the access token through an error message'
+  'analytics leaked the access token through a failure'
 )
-assert.ok(failure.error_message?.includes('401 Unauthorized'))
+assert.equal(failure.error_status, 401)
+assert.equal(failure.error_message, 'HTTP 401')
 
 // A partially stripped token is still a leak, and a scrub that stops early
 // leaves the tail behind while an assertion on the whole token still passes.
