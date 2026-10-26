@@ -25,8 +25,10 @@ describe(NestGraphInspectorModule.name, () => {
           },
         },
       ],
-      ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
-      ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
+      ignore: {
+        modules: ['InternalCoreModule', 'NestGraphInspectorModule'],
+        providers: ['ModuleRef', 'ApplicationConfig'],
+      },
       nestCoreModuleName: 'NestJSCoreModule',
       nestCoreProviders: [
         'ModuleRef',

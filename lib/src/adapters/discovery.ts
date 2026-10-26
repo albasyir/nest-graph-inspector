@@ -1,4 +1,5 @@
 import { Inject, Injectable, Type } from "@nestjs/common";
+import { MODULE_PATH, PATH_METADATA } from "@nestjs/common/constants";
 import type {
   InjectionToken,
   OptionalFactoryDependency,
@@ -7,7 +8,11 @@ import { ModulesContainer } from "@nestjs/core";
 import type { InstanceWrapper } from "@nestjs/core/injector/instance-wrapper";
 import type { Module } from "@nestjs/core/injector/module";
 import { MODULE_OPTIONS_TOKEN } from "../nest-graph-inspector.config";
-import type { NestGraphInspectorModuleOptions } from "../nest-graph-inspector.type";
+import type {
+  IgnorePattern,
+  NestGraphInspectorIgnoreOptions,
+  NestGraphInspectorModuleOptions,
+} from "../nest-graph-inspector.type";
 import {
   defaultOptions,
   NestGraphInspectorModule,
@@ -64,10 +69,156 @@ export function getOriginalTracedMethod(
   return originalTracedMethods.get(method);
 }
 
+type IgnoreMatcher = (value: string) => boolean;
+
+type IgnoreCategory = "modules" | "providers" | "controllers" | "paths";
+
+/** Every key that feeds a category; singular keys are aliases. */
+const IGNORE_CATEGORY_KEYS: Record<
+  IgnoreCategory,
+  (keyof NestGraphInspectorIgnoreOptions)[]
+> = {
+  modules: ["modules", "module"],
+  providers: ["providers", "provider", "inject"],
+  controllers: ["controllers", "controller"],
+  paths: ["paths", "path"],
+};
+
+/**
+ * The patterns configured for one category, falling back to the default
+ * for that category alone when none of its keys is set — so configuring
+ * `controllers` does not discard the default module and provider lists.
+ */
+function resolveIgnorePatterns(
+  category: IgnoreCategory,
+  configured: NestGraphInspectorIgnoreOptions | undefined,
+  fallback: NestGraphInspectorIgnoreOptions | undefined,
+): IgnorePattern[] {
+  const collect = (
+    options: NestGraphInspectorIgnoreOptions | undefined,
+  ): IgnorePattern[] | undefined => {
+    const values = IGNORE_CATEGORY_KEYS[category].flatMap((key) => {
+      const value = options?.[key];
+      return value === undefined ? [] : [value];
+    });
+
+    return values.length ? values.flat() : undefined;
+  };
+
+  return collect(configured) ?? collect(fallback) ?? [];
+}
+
+/**
+ * `*` matches within one path segment, `**` across segments, and `**\/`
+ * also matches no segment at all, so `'**\/admin'` matches `'admin'`.
+ */
+function globToRegExp(glob: string): RegExp {
+  let source = "";
+
+  for (let index = 0; index < glob.length; index++) {
+    const char = glob[index];
+    if (char !== "*") {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      continue;
+    }
+
+    if (glob[index + 1] !== "*") {
+      source += "[^/]*";
+      continue;
+    }
+
+    index++;
+    if (glob[index + 1] === "/") {
+      index++;
+      source += "(?:.*/)?";
+    } else {
+      source += ".*";
+    }
+  }
+
+  return new RegExp(`^${source}$`);
+}
+
+/**
+ * A copy without the `g` and `y` flags, whose `lastIndex` would otherwise
+ * make `test()` alternate between results on repeated calls.
+ */
+function statelessRegExp(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""));
+}
+
+function createNameMatcher(pattern: IgnorePattern): IgnoreMatcher {
+  if (pattern instanceof RegExp) {
+    const regExp = statelessRegExp(pattern);
+    return (value) => regExp.test(value);
+  }
+
+  const text = String(pattern);
+  if (!text.includes("*")) {
+    return (value) => value === text;
+  }
+
+  const regExp = globToRegExp(text);
+  return (value) => regExp.test(value);
+}
+
+/** Expects values already passed through `normalizePath`. */
+function createPathMatcher(pattern: IgnorePattern): IgnoreMatcher {
+  if (pattern instanceof RegExp) {
+    const regExp = statelessRegExp(pattern);
+    return (value) => regExp.test(value);
+  }
+
+  const text = normalizePath(String(pattern));
+  if (text.includes("*")) {
+    const regExp = globToRegExp(text);
+    return (value) => regExp.test(value);
+  }
+
+  return (value) => value === text || value.startsWith(`${text}/`);
+}
+
+/**
+ * One leading slash, no trailing slash, no empty segments, and `/` as the
+ * only separator, so `'admin/'`, `'/admin'`, and `'\\admin'` compare equal.
+ */
+function normalizePath(path: string): string {
+  return `/${path.replace(/\\/g, "/").split("/").filter(Boolean).join("/")}`;
+}
+
+function matchesAny(
+  matchers: IgnoreMatcher[],
+  values: Iterable<string | null | undefined>,
+): boolean {
+  if (!matchers.length) {
+    return false;
+  }
+
+  for (const value of values) {
+    if (value && matchers.some((matcher) => matcher(value))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function stringMetadata(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 @Injectable()
 export class DiscoveryAdapter {
-  private readonly ignoreProvider: string[];
-  private readonly ignoreImport: string[];
+  private readonly moduleIgnoreMatchers: IgnoreMatcher[];
+  private readonly providerIgnoreMatchers: IgnoreMatcher[];
+  private readonly controllerIgnoreMatchers: IgnoreMatcher[];
+  private readonly pathIgnoreMatchers: IgnoreMatcher[];
   private readonly nestCoreModuleName: string;
   private readonly nestCoreProviders: string[];
   private cachedTree: ModuleTree | undefined;
@@ -79,12 +230,19 @@ export class DiscoveryAdapter {
     private readonly runtimeTraceRecorder: RuntimeTraceRecorder,
     private readonly sourceMetadata: SourceMetadataService,
   ) {
-    this.ignoreProvider = [
-      ...(this.options.ignoreProvider ?? defaultOptions.ignoreProvider ?? []),
-    ];
-    this.ignoreImport = [
-      ...(this.options.ignoreImport ?? defaultOptions.ignoreImport ?? []),
-    ];
+    const ignorePatterns = (category: IgnoreCategory) =>
+      resolveIgnorePatterns(
+        category,
+        this.options.ignore,
+        defaultOptions.ignore,
+      );
+    this.moduleIgnoreMatchers =
+      ignorePatterns("modules").map(createNameMatcher);
+    this.providerIgnoreMatchers =
+      ignorePatterns("providers").map(createNameMatcher);
+    this.controllerIgnoreMatchers =
+      ignorePatterns("controllers").map(createNameMatcher);
+    this.pathIgnoreMatchers = ignorePatterns("paths").map(createPathMatcher);
     this.nestCoreModuleName =
       this.options.nestCoreModuleName ??
       defaultOptions.nestCoreModuleName ??
@@ -149,8 +307,8 @@ export class DiscoveryAdapter {
       const moduleName = this.moduleName(moduleRef);
 
       if (
-        this.ignoreImport.includes(moduleName) ||
-        moduleName === "InternalCoreModule"
+        moduleName === "InternalCoreModule" ||
+        this.shouldIgnoreModule(moduleRef)
       ) {
         continue;
       }
@@ -239,13 +397,16 @@ export class DiscoveryAdapter {
         moduleName: node.name,
         type: "provider",
         wrappers: node.moduleRef.providers.values(),
-        shouldIgnore: (name) =>
-          name === node.name || this.ignoreProvider.includes(name),
+        shouldIgnore: (name, wrapper) =>
+          name === node.name || this.shouldIgnoreProvider(name, wrapper),
       });
+      const moduleRef = node.moduleRef;
       this.instrumentRuntimeTraceWrappers({
         moduleName: node.name,
         type: "controller",
-        wrappers: node.moduleRef.controllers.values(),
+        wrappers: moduleRef.controllers.values(),
+        shouldIgnore: (name, wrapper) =>
+          this.shouldIgnoreController(name, wrapper, moduleRef),
       });
     });
   }
@@ -254,7 +415,7 @@ export class DiscoveryAdapter {
     moduleName: string;
     type: RuntimeTraceSpanType;
     wrappers: Iterable<InstanceWrapper<unknown>>;
-    shouldIgnore?: (name: string) => boolean;
+    shouldIgnore?: (name: string, wrapper: InstanceWrapper<unknown>) => boolean;
   }): void {
     for (const wrapper of param.wrappers) {
       const instance = wrapper.instance;
@@ -263,7 +424,7 @@ export class DiscoveryAdapter {
       }
 
       const className = this.wrapperClassName(wrapper);
-      if (!className || param.shouldIgnore?.(className)) {
+      if (!className || param.shouldIgnore?.(className, wrapper)) {
         continue;
       }
 
@@ -407,7 +568,136 @@ export class DiscoveryAdapter {
   }
 
   private shouldIgnoreModule(moduleRef: Module): boolean {
-    return this.ignoreImport.includes(this.moduleName(moduleRef));
+    if (matchesAny(this.moduleIgnoreMatchers, [this.moduleName(moduleRef)])) {
+      return true;
+    }
+
+    if (!this.pathIgnoreMatchers.length) {
+      return false;
+    }
+
+    return (
+      matchesAny(this.pathIgnoreMatchers, this.moduleRoutePaths(moduleRef)) ||
+      matchesAny(this.pathIgnoreMatchers, [
+        this.classFilePath(moduleRef.metatype?.name),
+      ])
+    );
+  }
+
+  private shouldIgnoreProvider(
+    name: string,
+    wrapper?: InstanceWrapper<unknown>,
+  ): boolean {
+    if (
+      matchesAny(this.providerIgnoreMatchers, [
+        name,
+        ...this.tokenNames(wrapper?.token),
+      ])
+    ) {
+      return true;
+    }
+
+    if (!wrapper || !this.pathIgnoreMatchers.length) {
+      return false;
+    }
+
+    return matchesAny(this.pathIgnoreMatchers, [
+      this.classFilePath(this.wrapperClassName(wrapper)),
+    ]);
+  }
+
+  private shouldIgnoreController(
+    name: string,
+    wrapper?: InstanceWrapper<unknown>,
+    moduleRef?: Module,
+  ): boolean {
+    if (matchesAny(this.controllerIgnoreMatchers, [name])) {
+      return true;
+    }
+
+    if (!wrapper || !this.pathIgnoreMatchers.length) {
+      return false;
+    }
+
+    return (
+      matchesAny(
+        this.pathIgnoreMatchers,
+        this.controllerRoutePaths(wrapper, moduleRef),
+      ) ||
+      matchesAny(this.pathIgnoreMatchers, [
+        this.classFilePath(this.wrapperClassName(wrapper)),
+      ])
+    );
+  }
+
+  /**
+   * Where `RouterModule` mounted a module. Nest stores it under
+   * `MODULE_PATH` suffixed with the application id, so every key with that
+   * prefix counts.
+   */
+  private moduleRoutePaths(moduleRef: Module | undefined): string[] {
+    const metatype: unknown = moduleRef?.metatype;
+    if (typeof metatype !== "function") {
+      return [];
+    }
+
+    return Reflect.getMetadataKeys(metatype)
+      .filter(
+        (key): key is string =>
+          typeof key === "string" && key.startsWith(MODULE_PATH),
+      )
+      .flatMap((key) => stringMetadata(Reflect.getMetadata(key, metatype)))
+      .map(normalizePath);
+  }
+
+  /**
+   * A controller's `@Controller()` paths, both alone and joined with each
+   * path its module is mounted at.
+   */
+  private controllerRoutePaths(
+    wrapper: InstanceWrapper<unknown>,
+    moduleRef: Module | undefined,
+  ): string[] {
+    const metatype: unknown = wrapper.metatype;
+    if (typeof metatype !== "function") {
+      return [];
+    }
+
+    const controllerPaths = stringMetadata(
+      Reflect.getMetadata(PATH_METADATA, metatype),
+    ).map(normalizePath);
+    const modulePaths = this.moduleRoutePaths(moduleRef);
+
+    return [
+      ...controllerPaths,
+      ...modulePaths.flatMap((modulePath) =>
+        controllerPaths.map((controllerPath) =>
+          normalizePath(`${modulePath}/${controllerPath}`),
+        ),
+      ),
+    ];
+  }
+
+  private classFilePath(
+    className: string | null | undefined,
+  ): string | undefined {
+    const filePath = className
+      ? this.sourceMetadata.getClassFilePath(className)
+      : undefined;
+
+    return filePath ? normalizePath(filePath) : undefined;
+  }
+
+  /** A symbol token answers to both `Symbol(NAME)` and `NAME`. */
+  private tokenNames(token: InjectionToken | null | undefined): string[] {
+    const name = this.tokenName(token);
+    if (!name) {
+      return [];
+    }
+
+    return typeof token === "symbol" && token.description
+      ? [name, token.description]
+      : [name];
   }
 
   private extractNestCoreProviderName(dependencyName: string): string | null {
@@ -431,17 +721,34 @@ export class DiscoveryAdapter {
 
   private extractImports(moduleRef: Module): string[] {
     return [...moduleRef.imports.values()]
-      .map((importedModuleRef) => this.moduleName(importedModuleRef))
-      .filter((importName) => !this.ignoreImport.includes(importName));
+      .filter((importedModuleRef) => !this.shouldIgnoreModule(importedModuleRef))
+      .map((importedModuleRef) => this.moduleName(importedModuleRef));
   }
 
   private extractExports(moduleRef: Module): string[] {
-    return [...moduleRef.exports.values()]
-      .map((exportedItem) => this.exportName(exportedItem))
-      .filter(
-        (exportName): exportName is string =>
-          !!exportName && !this.ignoreProvider.includes(exportName),
-      );
+    return [...moduleRef.exports.values()].flatMap((exportedItem) => {
+      const exportName = this.exportName(exportedItem);
+      if (!exportName) {
+        return [];
+      }
+
+      // Judged by the same name the provider list uses, so a `useClass`
+      // provider ignored by its class name is not still exported by token.
+      const wrapper = moduleRef.providers.get(exportedItem);
+      if (wrapper) {
+        const providerName = this.wrapperClassName(wrapper) || exportName;
+        return this.shouldIgnoreProvider(providerName, wrapper)
+          ? []
+          : [exportName];
+      }
+
+      // Not one of this module's providers: a re-exported module, or a
+      // token provided elsewhere.
+      return matchesAny(this.moduleIgnoreMatchers, [exportName]) ||
+        matchesAny(this.providerIgnoreMatchers, this.tokenNames(exportedItem))
+        ? []
+        : [exportName];
+    });
   }
 
   private extractProviders(
@@ -455,7 +762,8 @@ export class DiscoveryAdapter {
         this.extractModuleMember({
           wrapper,
           moduleRef,
-          shouldIgnore: (name) => this.ignoreProvider.includes(name),
+          shouldIgnore: (name, providerWrapper) =>
+            this.shouldIgnoreProvider(name, providerWrapper),
         }),
       shouldSkip: (provider) => provider.name === moduleName,
     });
@@ -483,7 +791,13 @@ export class DiscoveryAdapter {
     return this.extractModuleMembers<ModuleController>({
       wrappers: moduleRef.controllers.values(),
       moduleRef,
-      extract: (wrapper) => this.extractModuleMember({ wrapper, moduleRef }),
+      extract: (wrapper) =>
+        this.extractModuleMember({
+          wrapper,
+          moduleRef,
+          shouldIgnore: (name, controllerWrapper) =>
+            this.shouldIgnoreController(name, controllerWrapper, moduleRef),
+        }),
     });
   }
 
@@ -531,13 +845,13 @@ export class DiscoveryAdapter {
   private extractModuleMember(param: {
     wrapper: InstanceWrapper<object>;
     moduleRef: Module;
-    shouldIgnore?: (name: string) => boolean;
+    shouldIgnore?: (name: string, wrapper: InstanceWrapper<object>) => boolean;
   }): ModuleProvider | null {
     const { wrapper, moduleRef, shouldIgnore = () => false } = param;
     const name =
       this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
 
-    if (!name || shouldIgnore(name)) {
+    if (!name || shouldIgnore(name, wrapper)) {
       return null;
     }
 

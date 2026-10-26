@@ -171,6 +171,61 @@ export interface NestGraphInspectorUiOptions {
   layout?: NestGraphInspectorLayoutOptions;
 }
 
+/**
+ * A name, token, or path to match.
+ *
+ * A string matches exactly, or as a glob when it contains `*` (any run of
+ * characters except `/`) or `**` (any run of characters, `/` included). A
+ * `RegExp` is tested against the value — under `ignore.paths`, against the
+ * normalized path (one leading slash, no trailing slash, `/` separators).
+ */
+export type IgnorePattern = string | RegExp;
+
+/**
+ * What `NestGraphInspectorModuleOptions.ignore` leaves out of the graph.
+ * Singular keys are aliases of their plural forms and are combined with them.
+ */
+export interface NestGraphInspectorIgnoreOptions {
+  /**
+   * Module class names. An ignored module is omitted together with
+   * everything reached only through it — its providers, controllers, and
+   * imports.
+   */
+  modules?: IgnorePattern | IgnorePattern[];
+  /** Alias of `modules`. */
+  module?: IgnorePattern | IgnorePattern[];
+
+  /**
+   * Provider class names or injection tokens. A symbol token matches by its
+   * description (`'CONFIG'`) or its string form (`'Symbol(CONFIG)'`).
+   */
+  providers?: IgnorePattern | IgnorePattern[];
+  /** Alias of `providers`. */
+  provider?: IgnorePattern | IgnorePattern[];
+  /** Alias of `providers`, for naming injection tokens. */
+  inject?: IgnorePattern | IgnorePattern[];
+
+  /** Controller class names. */
+  controllers?: IgnorePattern | IgnorePattern[];
+  /** Alias of `controllers`. */
+  controller?: IgnorePattern | IgnorePattern[];
+
+  /**
+   * Route paths or source file paths.
+   *
+   * Matched against a controller's `@Controller()` path (alone and joined
+   * with its module's `RouterModule` mount path), a module's `RouterModule`
+   * mount path, and the source file declaring a module, provider, or
+   * controller. A plain string such as `'/admin'` matches that path and
+   * every path beneath it (`'/admin/users'`); leading and trailing slashes
+   * are not significant. Use a glob such as `'**\/internal/**'` for source
+   * files, whose paths are absolute.
+   */
+  paths?: IgnorePattern | IgnorePattern[];
+  /** Alias of `paths`. */
+  path?: IgnorePattern | IgnorePattern[];
+}
+
 export interface NestGraphInspectorModuleOptions {
   /**
    * Which "Root" of module that need to be inspect
@@ -208,19 +263,16 @@ export interface NestGraphInspectorModuleOptions {
   accessToken?: NestGraphInspectorAccessTokenOptions;
 
   /**
-   * Provider names that should be hidden from module exports, provider lists,
-   * and dependency resolution.
+   * Modules, providers, and controllers to leave out of the graph, by name,
+   * injection token, route path, or source file path.
    *
-   * Defaults to `['ModuleRef', 'ApplicationConfig']`.
+   * Defaults to
+   * `{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }`.
+   * Each category replaces its own default only: setting `controllers` keeps
+   * the default `modules` and `providers`, while setting `modules` (or its
+   * alias `module`) replaces the default module list entirely.
    */
-  ignoreProvider?: string[];
-
-  /**
-   * Module names that should be hidden from imports and graph output.
-   *
-   * Defaults to `['InternalCoreModule', 'NestGraphInspectorModule']`.
-   */
-  ignoreImport?: string[];
+  ignore?: NestGraphInspectorIgnoreOptions;
 
   /**
    * Virtual module name used when NestJS core providers are referenced.

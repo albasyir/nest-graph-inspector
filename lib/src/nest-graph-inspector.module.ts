@@ -26,8 +26,10 @@ export const defaultOptions: NestGraphInspectorModuleOptions = {
       },
     },
   ],
-  ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
-  ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
+  ignore: {
+    modules: ['InternalCoreModule', 'NestGraphInspectorModule'],
+    providers: ['ModuleRef', 'ApplicationConfig'],
+  },
   nestCoreModuleName: 'NestJSCoreModule',
   nestCoreProviders: [
     'ModuleRef',

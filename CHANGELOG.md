@@ -12,6 +12,10 @@ for the published history.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `ignoreProvider` and `ignoreImport` are replaced by `ignore`.** The new `ignore` option (`NestGraphInspectorIgnoreOptions`) takes `modules`, `providers` / `inject`, `controllers`, and `paths` — each with a singular alias — as strings, globs (`*`, `**`), or `RegExp`s. Controllers can now be ignored, and `paths` matches `@Controller()` routes, `RouterModule` mount paths, and source file paths. Each category falls back to its own default when unset. Move `ignoreProvider: [...]` to `ignore: { providers: [...] }` and `ignoreImport: [...]` to `ignore: { modules: [...] }`; see `docs/public-api.md`.
+
 ## [0.14.0] - 2026-10-19
 
 ### Added
