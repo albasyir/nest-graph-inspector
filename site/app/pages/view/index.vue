@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { describeGraphEndpoint } from '~/utils/graph-viewer-analytics'
+import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
+import {
+  resolveViewerLandingAction,
+  resolveViewerLandingPath
+} from '~/utils/viewer-landing'
 
 useSeoMeta({
   title: 'Graph Viewer',
@@ -26,8 +31,24 @@ const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
 /** Whether the visitor asked this page for the demo, retries included. */
 const wasDemoRequested = ref(false)
+/**
+ * Whether this page is on its way to the viewer without being asked: booting
+ * the demo, or returning to the tab's own graph. Seeded from the query alone so
+ * the server renders the same loading state the client starts in, instead of
+ * the landing card flashing before the demo takes over.
+ */
+const isAutoOpening = ref(
+  resolveViewerLandingAction({
+    query: route.query,
+    restoredEndpointUrl: '',
+    canOpenRestoredSession: false,
+    demoFailed: false
+  }).kind !== 'manual'
+)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 let activePollId = 0
+/** Retires a demo start the visitor cancelled while it was still booting. */
+let activeDemoRequestId = 0
 
 /**
  * Opens the viewer on the demo application running in this tab.
@@ -60,11 +81,9 @@ async function openDemo() {
   // to add here.
   graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
   graphStore.trustEndpointVersion(demoStore.endpointUrl)
-  // `execution-sequence` is what the trace page was called before it was
-  // renamed, and what older docs previews still ask for.
-  const wantsTrace = route.query.trace === 'true'
-    || route.query['execution-sequence'] === 'true'
-  await navigateTo(wantsTrace ? '/view/trace' : '/view/navigator')
+  // Replaced rather than pushed: this page opens the demo on arrival, so Back
+  // from the viewer landing here would only send the visitor forward again.
+  await navigateTo(resolveViewerLandingPath(route.query), { replace: true })
 }
 
 /**
@@ -79,12 +98,20 @@ async function loadExample() {
   activePollId += 1
   clearPolling()
 
-  if (await demoStore.start()) {
+  const requestId = ++activeDemoRequestId
+  const started = await demoStore.start()
+
+  if (requestId !== activeDemoRequestId) {
+    return
+  }
+
+  if (started) {
     await openDemo()
 
     return
   }
 
+  isAutoOpening.value = false
   posthog?.capture('graph_demo_start_failed', {
     reason: demoStore.errorMessage
   })
@@ -94,6 +121,67 @@ async function loadExample() {
   // looking for the developer's own application.
   startPolling(activeOrigin.value)
 }
+
+/**
+ * Stops a demo this page is still booting and goes back to the landing card.
+ *
+ * The page started it without a click, so the visitor needs a way to say no —
+ * to connect their own application instead, or to keep the download off a
+ * metered connection.
+ */
+function cancelDemo() {
+  activeDemoRequestId += 1
+  wasDemoRequested.value = false
+  isAutoOpening.value = false
+  demoStore.stop()
+  graphStore.openModuleDetail = false
+  startPolling(activeOrigin.value)
+}
+
+/**
+ * Decides, once the tab's session is readable, whether to start the demo,
+ * return to the graph the tab was already on, or wait on the landing card.
+ */
+function openOnArrival() {
+  const restoredEndpointUrl = graphStore.restoreSession()
+  const action = resolveViewerLandingAction({
+    query: route.query,
+    restoredEndpointUrl,
+    canOpenRestoredSession: graphStore.hasAccessToken
+      || canOpenWithoutAccessToken(restoredEndpointUrl, window.location.origin),
+    demoFailed: demoStore.status === 'error'
+  })
+
+  if (action.kind === 'start-demo') {
+    void loadExample()
+    return
+  }
+
+  if (action.kind === 'open-session') {
+    isNavigating.value = true
+    void navigateTo(action.path, { replace: true })
+    return
+  }
+
+  isAutoOpening.value = false
+  graphStore.openModuleDetail = false
+  startPolling(DEFAULT_ORIGIN)
+}
+
+/** What the loading card says while the page is opening the viewer. */
+const openingLabel = computed(() =>
+  demoStore.isBusy ? demoStore.statusLabel : 'Opening the graph viewer…'
+)
+
+/**
+ * The same, for screen readers: the stage alone, so a download is announced
+ * once rather than at every percent.
+ */
+const openingAnnouncement = computed(() =>
+  demoStore.status === 'downloading'
+    ? 'Downloading the demo application…'
+    : openingLabel.value
+)
 
 /**
  * Last few lines the demo application printed, so a slow start is visibly a
@@ -198,15 +286,7 @@ function startPolling(origin: string, navigateOnLoad = false) {
   }, RETRY_INTERVAL_MS)
 }
 
-onMounted(() => {
-  if (route.query.preview == 'true') {
-    void loadExample()
-    return
-  }
-
-  graphStore.openModuleDetail = false
-  startPolling(DEFAULT_ORIGIN)
-})
+onMounted(openOnArrival)
 
 onBeforeUnmount(() => {
   activePollId += 1
@@ -237,21 +317,42 @@ watch(shouldShowUpdateModal, (visible) => {
 
     <div class="w-full max-w-3xl space-y-5">
       <UCard
-        v-if="demoStore.isBusy"
+        v-if="isAutoOpening || demoStore.isBusy"
+        data-testid="demo-loading"
+        :aria-busy="true"
         :ui="{ body: 'p-5 sm:p-6 space-y-3' }"
       >
         <div class="flex items-center gap-3">
           <UIcon
             name="i-lucide-loader-circle"
-            class="size-5 shrink-0 animate-spin text-primary"
+            class="size-5 shrink-0 motion-safe:animate-spin text-primary"
+            aria-hidden="true"
           />
-          <p class="text-sm font-medium">
-            {{ demoStore.statusLabel }}
+          <p
+            aria-hidden="true"
+            class="min-w-0 flex-1 text-sm font-medium tabular-nums"
+          >
+            {{ openingLabel }}
           </p>
+          <span
+            role="status"
+            class="sr-only"
+          >{{ openingAnnouncement }}</span>
+          <UButton
+            v-if="demoStore.isBusy && wasDemoRequested"
+            label="Cancel"
+            aria-label="Cancel starting the demo"
+            size="sm"
+            color="neutral"
+            variant="ghost"
+            class="shrink-0 cursor-pointer"
+            @click="cancelDemo"
+          />
         </div>
         <UProgress
           v-if="demoStore.status === 'downloading' && demoStore.totalBytes"
           :model-value="Math.round(demoStore.downloadProgress * 100)"
+          aria-label="Demo download progress"
         />
         <pre
           v-if="demoConsole"
@@ -325,7 +426,7 @@ watch(shouldShowUpdateModal, (visible) => {
               variant="solid"
               class="cursor-pointer"
               :loading="demoStore.isBusy"
-              :disabled="isNavigating || demoStore.isBusy"
+              :disabled="isNavigating || isAutoOpening || demoStore.isBusy"
               block
               @click="loadExample"
             />
