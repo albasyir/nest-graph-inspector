@@ -57,7 +57,7 @@ const failure = computed(() =>
           icon="i-lucide-link"
           label="Try Another URL"
           variant="soft"
-          to="/view"
+          to="/view?autoload=false"
         />
       </div>
     </div>

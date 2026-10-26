@@ -602,7 +602,7 @@ instead of shared across every tab in the browser.
 The token never goes back into a URL: it lives in the Pinia store and leaves
 only as the `x-graph-inspector-token` header, added by a `$fetch` instance that
 reads it per request. `probeEndpoint` — used by the `/view` entry page to guess
-at a local inspector — pointedly does *not* use that authenticated fetch, so
+at a local inspector when it is not starting the demo — pointedly does *not* use that authenticated fetch, so
 probing a host never hands it a live credential for another one.
 
 The viewer pages are `navigator` (the Vue Flow graph), `issues` (architecture
@@ -645,7 +645,7 @@ hover" in the graph settings panel turns it off.
 ### 3. The in-browser demo
 
 Everything the site shows as a demo — the previews in the documentation pages,
-and "Open Demo" on `/view` — is the `demo/` application actually running, on
+and the demo `/view` opens on arrival — is the `demo/` application actually running, on
 the [nodepod](https://www.npmjs.com/package/@scelar/nodepod) browser-native
 Node.js runtime, in the visitor's own tab. Nothing is captured ahead of time:
 Direct Run really invokes provider and controller methods, runtime traces
@@ -694,8 +694,8 @@ generates the site runs it right after building the payload.
 **Boot sequence.**
 
 ```
-1. The visitor asks: "Run the demo application" in a docs preview, or "Open
-   Demo" on /view
+1. The visitor asks: "Run the demo application" in a docs preview, or opens
+   /view, which starts it on arrival (see below)
 2. nodepod-demo store downloads manifest.json, main.js, and sources.json
 3. Nodepod.boot({ files, workdir, env, headless: true })
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
@@ -708,9 +708,22 @@ generates the site runs it right after building the payload.
    the graph through the same HTTP contract as any other endpoint
 ```
 
-Nothing starts on its own: downloading an application and booting a Node
-runtime is not something a page should do because it was scrolled past, so
-every entry point is a click. One pod then serves every preview on the page and
+Downloading an application and booting a Node runtime is not something a page
+should do because it was scrolled past, so every docs preview waits for a
+click. `/view` is the one exception, because opening the viewer is itself the
+request to see a graph: on arrival it starts the demo, behind a loading card
+with a Cancel that stops the pod and falls back to the landing card. Three
+things come first, decided by `resolveViewerLandingAction`
+(`app/utils/viewer-landing.ts`): `?autoload=false` keeps the landing card and
+its local-inspector polling — the viewer's "Try Another URL" links there; a
+tab whose session names the visitor's own application, with a token the
+viewer would accept, goes straight back to `/view/navigator` (`/view/trace`
+with `?trace=true` or `?execution-sequence=true`); and a demo that already
+failed in the tab is not started again until the visitor retries. A restored
+*demo* session is not redirected but started from `/view`, so a failed restart
+lands on the landing card instead of bouncing between `/view` and the viewer.
+`/view` always hands off with a history replace, so Back from the viewer does
+not return to a page that would only send the visitor forward again. One pod then serves every preview on the page and
 the viewer, so the payload is downloaded and the application booted once for as
 long as it keeps running. A failure opens one dialog, wherever it was started
 from, carrying what the application itself printed; the retry it offers, and

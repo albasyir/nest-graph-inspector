@@ -539,7 +539,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|---|
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
-| `view/index.vue` | `/view` | Graph viewer entry; polls for a live endpoint, shows URL input, and starts the in-browser demo behind "Open Demo" |
+| `view/index.vue` | `/view` | Graph viewer entry; starts the in-browser demo on arrival (Cancel or `?autoload=false` keeps the landing card and polls for a live endpoint), or returns a tab with a usable session to its graph |
 | `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
 | `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
@@ -761,7 +761,7 @@ resolves the import graph itself.
 
 #### `site/public/nodepod-demo/`
 
-**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews in the docs pages and "Open Demo" on `/view` — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
+**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews in the docs pages and the demo `/view` opens on arrival — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
 
 **Contents:**
 
