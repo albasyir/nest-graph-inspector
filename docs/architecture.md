@@ -113,7 +113,9 @@ Changing one side of any of these alone breaks the other.
 
 Everything re-exported there is public: adding is a feature, changing or
 removing is breaking. It currently exports the module and its options types,
-the graph output types and JSON Schema, the graph layout types, JSON Schema
+the default ignore constants (`DEFAULT_IGNORE_OPTIONS`, `DEFAULT_IGNORE_PATHS`)
+so an application can extend the default rather than replace it, the graph
+output types and JSON Schema, the graph layout types, JSON Schema
 and `validateGraphLayout`, the Direct Run and runtime-trace types,
 and the access-token/rate-limiter surface (`AccessTokenService`,
 `AccessAttemptLimiter`, and their constants) so an application can mint its own
@@ -181,7 +183,7 @@ than implementing the port.
 
 | Component | File | Role |
 |---|---|---|
-| `NestGraphInspectorModule` | `nest-graph-inspector.module.ts` | `@Module` entry point; owns `defaultOptions`; exports `AccessTokenService` |
+| `NestGraphInspectorModule` | `nest-graph-inspector.module.ts` | `@Module` entry point; owns `defaultOptions` and the default ignore constants; exports `AccessTokenService` |
 | `ConfigurableModuleClass` | `nest-graph-inspector.config.ts` | Nest's `ConfigurableModuleBuilder`, giving `forRoot` / `forRootAsync` |
 | `NestGraphInspectorSetup` | `nest-graph-inspector.setup.ts` | `OnModuleInit`; orchestrates extraction, enrichment, and dispatch |
 | `DiscoveryAdapter` | `adapters/discovery.ts` | Walks `ModulesContainer` into a `ModuleTree`; instruments providers for tracing |
@@ -262,10 +264,24 @@ broken output is a log line, not a crash, and easy to miss.
 2. **Walk the tree.** Imports, exports, providers, and controllers per module,
    with the `ignore` option applied — by name, injection token, route path, or
    source file path, and an ignored module takes everything reached only
-   through it along (`InternalCoreModule` and `NestGraphInspectorModule` hide
-   themselves by default). Ignored providers and controllers are also left
-   uninstrumented for runtime tracing. Source files are looked up for this
-   only when `ignore.paths` is set.
+   through it along. Ignored providers and controllers are also left
+   uninstrumented for runtime tracing. The default `ignore` is
+   `{ paths: ['**/node_modules/**'] }` — `DEFAULT_IGNORE_OPTIONS`, built from
+   `DEFAULT_IGNORE_PATHS` — so source files are looked up unless `paths` is
+   configured empty. A class's source file is whichever file in the
+   `SourceMetadataService` project declares a class of that name, and that
+   project never holds files under `node_modules` (ts-morph leaves
+   dependencies resolved there out of `getSourceFiles()`). Classes from
+   installed packages therefore have no file to match, and the default
+   pattern hides them only if the host's own project places a declaring file
+   under `node_modules`. `InternalCoreModule`, `ModuleRef`, and
+   `ApplicationConfig` are no longer hidden by default.
+   The inspector's own module is the one exception `ignore` cannot undo:
+   `DiscoveryAdapter` skips any module whose class is
+   `NestGraphInspectorModule`, along with its providers and any re-export of
+   it, because tracing the inspector's own `RuntimeTraceRecorder` recurses
+   into itself and would crash bootstrap, and its adapters would otherwise
+   become Direct Run targets.
 3. **Fold in NestJS core.** Providers named in `nestCoreProviders`
    (`ModuleRef`, `ApplicationConfig`, `Reflector`, `REQUEST`, `INQUIRER`) are
    collected under one virtual module named by `nestCoreModuleName`
@@ -969,6 +985,10 @@ Facts a code change can invalidate, and the file to check:
 - Default host/port `0.0.0.0:53371` — `lib/src/adapters/http-output.adapter.ts`
 - Default paths `/__graph-inspector` (viewer) and `/__nest-graph-inspector`
   (http) — the respective adapters
+- Default ignore `{ paths: ['**/node_modules/**'] }` — `DEFAULT_IGNORE_PATHS`
+  and `DEFAULT_IGNORE_OPTIONS` in `lib/src/nest-graph-inspector.module.ts`
+- That the source index excludes `node_modules` — `SourceMetadataService` in
+  `lib/src/source-metadata.service.ts`, and the ts-morph version it runs on
 - Layout schema version `'1'` — `lib/src/types/graph-layout.schema.ts`
 - Default layout file `./.muse` and the 10 MiB layout body limit —
   `DEFAULT_LAYOUT_FILE_PATH` and `MAX_LAYOUT_BODY_BYTES` in

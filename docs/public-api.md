@@ -15,7 +15,8 @@ Everything re-exported from `index.ts` is the intended public API.
 the access-token and rate-limiter surface:
 
 ```ts
-export * from './nest-graph-inspector.module';   // class + const
+export * from './nest-graph-inspector.module';   // class + consts
+export { DEFAULT_IGNORE_OPTIONS, DEFAULT_IGNORE_PATHS } from './nest-graph-inspector.module';
 export * from './nest-graph-inspector.type';     // config types
 export * from './types/graph-output.schema';     // schema constant + object
 export * from './types/graph-output.type';       // graph output types
@@ -41,6 +42,32 @@ supported public API.
 ---
 
 ## Breaking changes
+
+### Unreleased — `ignore` defaults to `node_modules` paths only
+
+The default `ignore` is now `{ paths: ['**/node_modules/**'] }`
+([`DEFAULT_IGNORE_OPTIONS`](#default_ignore_options-and-default_ignore_paths)).
+The default module list (`InternalCoreModule`, `NestGraphInspectorModule`) and
+provider list (`ModuleRef`, `ApplicationConfig`) are gone, so a graph built
+with the default shows `InternalCoreModule` among every module's imports and
+`ModuleRef` and `ApplicationConfig` among every module's providers. The
+inspector's own module stays out of the graph regardless; see
+[`NestGraphInspectorIgnoreOptions`](#nestgraphinspectorignoreoptions).
+
+**What a consumer must do:** nothing, unless the graph should keep hiding those
+framework classes. To do that, name them and keep the default paths:
+
+```ts
+import { DEFAULT_IGNORE_PATHS, NestGraphInspectorModule } from 'nest-graph-inspector';
+
+NestGraphInspectorModule.forRoot({
+  ignore: {
+    modules: ['InternalCoreModule'],
+    providers: ['ModuleRef', 'ApplicationConfig'],
+    paths: [...DEFAULT_IGNORE_PATHS],
+  },
+});
+```
 
 ### Unreleased — `ignoreProvider` and `ignoreImport` are replaced by `ignore`
 
@@ -69,9 +96,9 @@ NestGraphInspectorModule.forRoot({
 });
 ```
 
-Defaults behave as before, category by category: configuring `providers`
-replaces the default provider list exactly as `ignoreProvider` did, and leaves
-the default module list in place.
+Defaults apply category by category: configuring `providers` replaces only
+the default for providers, exactly as `ignoreProvider` did. The defaults
+themselves have since changed; see the entry above.
 
 ### Unreleased — the Ollama proxy is gone
 
@@ -164,10 +191,7 @@ imported without `forRoot`. Current value:
     port: 53371,
     directRun: { path: '/direct-run' },
   }],
-  ignore: {
-    modules: ['InternalCoreModule', 'NestGraphInspectorModule'],
-    providers: ['ModuleRef', 'ApplicationConfig'],
-  },
+  ignore: { paths: ['**/node_modules/**'] },     // DEFAULT_IGNORE_OPTIONS
   nestCoreModuleName: 'NestJSCoreModule',
   nestCoreProviders: ['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER'],
 }
@@ -177,6 +201,40 @@ imported without `forRoot`. Current value:
 but carries no documented stability guarantee. It appears to be a module-level
 implementation detail that became public incidentally. Consumers should not depend
 on this value being stable. See [Exports that may not belong](#exports-that-may-not-belong).
+To build on the default `ignore`, use the constants below instead.
+
+---
+
+### `DEFAULT_IGNORE_OPTIONS` and `DEFAULT_IGNORE_PATHS`
+
+| | |
+|---|---|
+| **Kind** | Exported `const`s |
+| **Source** | `src/nest-graph-inspector.module.ts` |
+| **Stability** | Stable |
+| **Documented** | This document, JSDoc |
+
+```ts
+const DEFAULT_IGNORE_PATHS = ['**/node_modules/**'] as const;
+const DEFAULT_IGNORE_OPTIONS: NestGraphInspectorIgnoreOptions = {
+  paths: [...DEFAULT_IGNORE_PATHS],
+};
+```
+
+`DEFAULT_IGNORE_OPTIONS` is the `ignore` applied when none is configured, and
+`defaultOptions.ignore` is the same object. Both are exported by name so a
+consumer can extend the defaults rather than replace them. Configuring
+`paths` replaces `DEFAULT_IGNORE_PATHS` entirely, so spread it into the new
+list to keep it:
+
+```ts
+NestGraphInspectorModule.forRoot({
+  ignore: { paths: [...DEFAULT_IGNORE_PATHS, '**/legacy/**'] },
+});
+```
+
+Treat both as read-only. Neither is frozen, and mutating one changes the
+default for every inspector in the process.
 
 ---
 
@@ -198,7 +256,7 @@ The options object passed to `forRoot()`.
 |---|---|---|---|---|
 | `rootModule` | `Type` | No | auto-detected | Entry module for graph traversal |
 | `outputs` | `NestGraphInspectorOutput[]` | No | viewer on port 53371 | Output channel configuration |
-| `ignore` | `NestGraphInspectorIgnoreOptions` | No | `{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }` | Modules, providers, and controllers to omit from the graph, by name, token, route path, or source file path; see [`NestGraphInspectorIgnoreOptions`](#nestgraphinspectorignoreoptions) |
+| `ignore` | `NestGraphInspectorIgnoreOptions` | No | `{ paths: ['**/node_modules/**'] }` (`DEFAULT_IGNORE_OPTIONS`) | Modules, providers, and controllers to omit from the graph, by name, token, route path, or source file path; see [`NestGraphInspectorIgnoreOptions`](#nestgraphinspectorignoreoptions) |
 | `nestCoreModuleName` | `string` | No | `'NestJSCoreModule'` | Name for the virtual NestJS core module |
 | `nestCoreProviders` | `string[]` | No | `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']` | Providers grouped under the virtual core module |
 | `directRun` | `NestGraphInspectorViewerDirectRunOptions` | No | `{ allowUnsafeMethods: true, maxBodySizeBytes: 50 MiB }` | Module-wide Direct Run defaults, applied to every `viewer` output that does not set its own `directRun.allowUnsafeMethods` or `directRun.maxBodySizeBytes`; a `viewer` output's own `directRun` wins where it sets a value |
@@ -249,13 +307,29 @@ and path are first normalised to one leading slash, no trailing slash, and `/`
 as the only separator, and a plain string also matches every path beneath it:
 `'/admin'` matches `/admin` and `/admin/users`, not `/administrator`. Source
 file paths are absolute, so match them with a glob such as `'**/legacy/**'` or a
-`RegExp`. Source files are looked up only when `paths` is set.
+`RegExp`. Source files are looked up whenever `paths` is non-empty, which the
+default makes it; `paths: []` turns the lookup off.
 
-**Defaults.** The default is
-`{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }`,
-and each category falls back to its own default only when none of its keys is
-set. `ignore: { controllers: ['HealthController'] }` keeps both default lists;
-`ignore: { modules: [] }` shows the inspector's own module.
+**Defaults.** The default is `{ paths: ['**/node_modules/**'] }`, exported as
+[`DEFAULT_IGNORE_OPTIONS`](#default_ignore_options-and-default_ignore_paths),
+with the path list itself as `DEFAULT_IGNORE_PATHS`. Each category falls back
+to its own default only when none of its keys is set:
+`ignore: { controllers: ['HealthController'] }` keeps the default paths, while
+`ignore: { paths: ['/admin'] }` drops them. Write
+`paths: [...DEFAULT_IGNORE_PATHS, '/admin']` to keep both.
+
+**Which source file a class has.** A class's source file is the file that
+declares a class of that name in the application's own TypeScript project, the
+files its `tsconfig.json` includes. Installed packages under `node_modules` are
+not part of that project, so a class from an installed package has no source
+file to match and is kept. In practice the default pattern therefore matches
+only a declaring file the project itself places under a `node_modules`
+directory.
+
+**The inspector's own module is never in the graph**, whatever `ignore` says,
+and neither its providers nor a re-export of it appear. Tracing the inspector's
+own `RuntimeTraceRecorder` would recurse into itself, and its adapters would
+otherwise become Direct Run targets.
 
 An ignored provider still appears in the `dependencies` of the providers and
 controllers that inject it: `ignore` removes graph nodes, not the edges into
@@ -1135,6 +1209,8 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 |---|---|---|---|---|
 | `NestGraphInspectorModule` | Class | Stable | ✅ | ✅ |
 | `defaultOptions` | Const | Uncertain | ✅ via module re-export | ❌ |
+| `DEFAULT_IGNORE_OPTIONS` | Const | Stable | ✅ | ✅ |
+| `DEFAULT_IGNORE_PATHS` | Const | Stable | ✅ | ✅ |
 | `NestGraphInspectorModuleOptions` | Interface | Stable | ✅ | ✅ |
 | `NestGraphInspectorIgnoreOptions` | Interface | Stable | ✅ | ✅ |
 | `IgnorePattern` | Type | Stable | ✅ | ✅ |

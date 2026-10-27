@@ -512,7 +512,9 @@ describe(NestGraphInspectorSetup.name, () => {
     });
   });
 
-  it("should use the default inspector filtering options when none are configured", () => {
+  it("should ignore no provider by name when no filtering options are configured", () => {
+    // The default ignores only node_modules paths; these classes are
+    // declared here, outside node_modules, so every one of them is kept.
     class ModuleRef {}
     class ApplicationConfig {}
     class Reflector {}
@@ -526,10 +528,9 @@ describe(NestGraphInspectorSetup.name, () => {
     const moduleMap = service.buildModuleMap(TestRootModule);
 
     expect(moduleMap.modules[TestRootModule.name].providers).toEqual([
-      {
-        name: Reflector.name,
-        dependencies: [],
-      },
+      { name: ModuleRef.name, dependencies: [] },
+      { name: ApplicationConfig.name, dependencies: [] },
+      { name: Reflector.name, dependencies: [] },
     ]);
   });
 
