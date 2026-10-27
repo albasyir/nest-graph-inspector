@@ -12,7 +12,17 @@ for the published history.
 
 ## [Unreleased]
 
+### Added
+
+- **`DEFAULT_IGNORE_PATHS` and `DEFAULT_IGNORE_OPTIONS` are exported**, so an application can extend the default `ignore` rather than replace it: `ignore: { paths: [...DEFAULT_IGNORE_PATHS, '**/legacy/**'] }`.
+
 ### Changed
+
+- **BREAKING: `ignore` defaults to `{ paths: ['**/node_modules/**'] }` only.** The default module list (`InternalCoreModule`, `NestGraphInspectorModule`) and provider list (`ModuleRef`, `ApplicationConfig`) are gone, so the default graph now shows `InternalCoreModule`, `ModuleRef`, and `ApplicationConfig`. Name them under `ignore.modules` / `ignore.providers` to hide them again; see `docs/public-api.md`.
+
+### Fixed
+
+- **The inspector no longer crashes when its own module is not ignored.** It used to trace its own `RuntimeTraceRecorder`, recursing until `RangeError: Maximum call stack size exceeded` escaped bootstrap (for example with `ignore: { modules: [] }`). The inspector's own module is now always left out of the graph, whatever `ignore` says.
 
 - **BREAKING: `ignoreProvider` and `ignoreImport` are replaced by `ignore`.** The new `ignore` option (`NestGraphInspectorIgnoreOptions`) takes `modules`, `providers` / `inject`, `controllers`, and `paths` — each with a singular alias — as strings, globs (`*`, `**`), or `RegExp`s. Controllers can now be ignored, and `paths` matches `@Controller()` routes, `RouterModule` mount paths, and source file paths. Each category falls back to its own default when unset. Move `ignoreProvider: [...]` to `ignore: { providers: [...] }` and `ignoreImport: [...]` to `ignore: { modules: [...] }`; see `docs/public-api.md`.
 

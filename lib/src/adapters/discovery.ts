@@ -568,6 +568,13 @@ export class DiscoveryAdapter {
   }
 
   private shouldIgnoreModule(moduleRef: Module): boolean {
+    // Never the inspector itself, whatever `ignore` says: instrumenting its
+    // own RuntimeTraceRecorder makes every traced call recurse into itself,
+    // and its adapters would become Direct Run targets.
+    if (moduleRef.metatype === NestGraphInspectorModule) {
+      return true;
+    }
+
     if (matchesAny(this.moduleIgnoreMatchers, [this.moduleName(moduleRef)])) {
       return true;
     }
@@ -744,7 +751,8 @@ export class DiscoveryAdapter {
 
       // Not one of this module's providers: a re-exported module, or a
       // token provided elsewhere.
-      return matchesAny(this.moduleIgnoreMatchers, [exportName]) ||
+      return exportedItem === NestGraphInspectorModule ||
+        matchesAny(this.moduleIgnoreMatchers, [exportName]) ||
         matchesAny(this.providerIgnoreMatchers, this.tokenNames(exportedItem))
         ? []
         : [exportName];

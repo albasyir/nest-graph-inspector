@@ -2,10 +2,13 @@ import { Test } from '@nestjs/testing';
 import { MODULE_OPTIONS_TOKEN } from './nest-graph-inspector.config';
 import { HttpOutputAdapter } from './adapters/http-output.adapter';
 import {
+  DEFAULT_IGNORE_OPTIONS,
+  DEFAULT_IGNORE_PATHS,
   defaultOptions,
   NestGraphInspectorModule,
 } from './nest-graph-inspector.module';
 import { NestGraphInspectorModuleOptions } from './nest-graph-inspector.type';
+import * as publicApi from './index';
 
 describe(NestGraphInspectorModule.name, () => {
   it('uses viewer output by default when imported without forRoot', async () => {
@@ -25,10 +28,7 @@ describe(NestGraphInspectorModule.name, () => {
           },
         },
       ],
-      ignore: {
-        modules: ['InternalCoreModule', 'NestGraphInspectorModule'],
-        providers: ['ModuleRef', 'ApplicationConfig'],
-      },
+      ignore: { paths: ['**/node_modules/**'] },
       nestCoreModuleName: 'NestJSCoreModule',
       nestCoreProviders: [
         'ModuleRef',
@@ -37,6 +37,22 @@ describe(NestGraphInspectorModule.name, () => {
         'REQUEST',
         'INQUIRER',
       ],
+    });
+  });
+
+  it('ignores only node_modules paths by default', () => {
+    expect(DEFAULT_IGNORE_PATHS).toEqual(['**/node_modules/**']);
+    expect(DEFAULT_IGNORE_OPTIONS).toEqual({ paths: ['**/node_modules/**'] });
+    expect(defaultOptions.ignore).toBe(DEFAULT_IGNORE_OPTIONS);
+  });
+
+  it('exports the default ignore constants from the package entry point', () => {
+    // Consumers spread these to extend the defaults rather than replace them.
+    expect(publicApi.DEFAULT_IGNORE_PATHS).toBe(DEFAULT_IGNORE_PATHS);
+    expect(publicApi.DEFAULT_IGNORE_OPTIONS).toBe(DEFAULT_IGNORE_OPTIONS);
+    expect(publicApi.DEFAULT_IGNORE_PATHS).toEqual(['**/node_modules/**']);
+    expect(publicApi.DEFAULT_IGNORE_OPTIONS).toEqual({
+      paths: ['**/node_modules/**'],
     });
   });
 

@@ -1,4 +1,8 @@
 export * from './nest-graph-inspector.module';
+export {
+  DEFAULT_IGNORE_OPTIONS,
+  DEFAULT_IGNORE_PATHS,
+} from './nest-graph-inspector.module';
 export * from './nest-graph-inspector.type';
 export {
   ACCESS_TOKEN_HEADER,

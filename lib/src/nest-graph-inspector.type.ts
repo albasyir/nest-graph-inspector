@@ -220,6 +220,9 @@ export interface NestGraphInspectorIgnoreOptions {
    * every path beneath it (`'/admin/users'`); leading and trailing slashes
    * are not significant. Use a glob such as `'**\/internal/**'` for source
    * files, whose paths are absolute.
+   *
+   * Defaults to `DEFAULT_IGNORE_PATHS`, `['**\/node_modules/**']`; set
+   * `paths: []` to ignore no path at all.
    */
   paths?: IgnorePattern | IgnorePattern[];
   /** Alias of `paths`. */
@@ -266,11 +269,12 @@ export interface NestGraphInspectorModuleOptions {
    * Modules, providers, and controllers to leave out of the graph, by name,
    * injection token, route path, or source file path.
    *
-   * Defaults to
-   * `{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }`.
-   * Each category replaces its own default only: setting `controllers` keeps
-   * the default `modules` and `providers`, while setting `modules` (or its
-   * alias `module`) replaces the default module list entirely.
+   * Defaults to `{ paths: ['**\/node_modules/**'] }`, exported as
+   * `DEFAULT_IGNORE_OPTIONS`. Each category replaces its own default only:
+   * setting `modules` keeps the default `paths`, while setting `paths` (or
+   * its alias `path`) replaces it entirely — spread `DEFAULT_IGNORE_PATHS`
+   * into the new list to keep it. The inspector never graphs its own
+   * module, whatever this says.
    */
   ignore?: NestGraphInspectorIgnoreOptions;
 

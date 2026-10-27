@@ -1,6 +1,10 @@
 import { Controller, type Type } from "@nestjs/common";
 import { MODULE_PATH } from "@nestjs/common/constants";
 import { Project } from "ts-morph";
+import {
+  DEFAULT_IGNORE_PATHS,
+  NestGraphInspectorModule,
+} from "../nest-graph-inspector.module";
 import type { NestGraphInspectorIgnoreOptions } from "../nest-graph-inspector.type";
 import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
 import { SourceMetadataService } from "../source-metadata.service";
@@ -727,13 +731,99 @@ describe(`${DiscoveryAdapter.name} ignore options`, () => {
     const sourceMetadata = sourceMetadataFor();
     const getClassFilePath = jest.spyOn(sourceMetadata, "getClassFilePath");
 
+    // `paths` defaults to node_modules, so turning path matching off takes
+    // an explicitly empty list.
     scanIgnoring(
-      { providers: ["Unrelated"] },
+      { providers: ["Unrelated"], paths: [] },
       moduleFixture(RootModule, { providers: [classWrapper(SomeService)] }),
       sourceMetadata,
     );
 
     expect(getClassFilePath).not.toHaveBeenCalled();
+  });
+
+  it("ignores modules, providers, and controllers declared under node_modules by default", () => {
+    class ExternalModule {}
+    class ExternalChildModule {}
+    class ExternalService {
+      run(): string {
+        return "external";
+      }
+    }
+    class ExternalController {}
+    class AppService {
+      run(): string {
+        return "app";
+      }
+    }
+    class AppController {}
+    const sourceMetadata = sourceMetadataFor({
+      "/repo/node_modules/external/pkg.ts": [
+        "class ExternalModule {}",
+        "class ExternalService {}",
+        "class ExternalController {}",
+      ].join("\n"),
+      "/repo/src/app.service.ts": "class AppService {}",
+      "/repo/src/app.controller.ts": "class AppController {}",
+    });
+
+    const tree = scanIgnoring(
+      undefined,
+      moduleFixture(RootModule, {
+        imports: [
+          moduleFixture(ExternalModule, {
+            imports: [moduleFixture(ExternalChildModule)],
+          }),
+        ],
+        providers: [
+          classWrapper(ExternalService, new ExternalService()),
+          classWrapper(AppService, new AppService()),
+        ],
+        controllers: [
+          classWrapper(ExternalController),
+          classWrapper(AppController),
+        ],
+        exports: [ExternalService, AppService],
+      }),
+      sourceMetadata,
+    );
+
+    expect(moduleNames(tree)).toEqual([RootModule.name]);
+    expect(memberNames(tree.providers)).toEqual([AppService.name]);
+    expect(tree.exports).toEqual([AppService.name]);
+    expect(memberNames(tree.controllers)).toEqual([AppController.name]);
+    expect(isInstrumented(ExternalService, "run")).toBe(false);
+    expect(isInstrumented(AppService, "run")).toBe(true);
+  });
+
+  it("never walks, instruments, or exports the inspector's own module, even when nothing is ignored", () => {
+    class InspectorInternalService {
+      run(): string {
+        return "internal";
+      }
+    }
+
+    const tree = scanIgnoring(
+      { modules: [], providers: [], controllers: [], paths: [] },
+      moduleFixture(RootModule, {
+        imports: [
+          moduleFixture(NestGraphInspectorModule, {
+            providers: [
+              classWrapper(
+                InspectorInternalService,
+                new InspectorInternalService(),
+              ),
+            ],
+          }),
+        ],
+        exports: [NestGraphInspectorModule],
+      }),
+    );
+
+    expect(moduleNames(tree)).toEqual([RootModule.name]);
+    expect(tree.imports).toEqual([]);
+    expect(tree.exports).toEqual([]);
+    expect(isInstrumented(InspectorInternalService, "run")).toBe(false);
   });
 
   it("accepts singular aliases and single patterns, combined with their plural keys", () => {
@@ -778,27 +868,56 @@ describe(`${DiscoveryAdapter.name} ignore options`, () => {
   });
 
   it("replaces a category's default only when that category is configured", () => {
-    class InternalCoreModule {}
-    class ModuleRef {}
+    class VendorModule {}
+    class VendorService {}
+    class LegacyService {}
+    class AppService {}
+    const files = {
+      "/repo/node_modules/vendor/vendor.module.ts": "class VendorModule {}",
+      "/repo/node_modules/vendor/vendor.service.ts": "class VendorService {}",
+      "/repo/src/legacy/legacy.service.ts": "class LegacyService {}",
+      "/repo/src/app.service.ts": "class AppService {}",
+    };
+    const scan = (ignore: NestGraphInspectorIgnoreOptions) =>
+      scanIgnoring(
+        ignore,
+        moduleFixture(RootModule, {
+          imports: [moduleFixture(VendorModule)],
+          providers: [
+            classWrapper(VendorService),
+            classWrapper(LegacyService),
+            classWrapper(AppService),
+          ],
+        }),
+        sourceMetadataFor(files),
+      );
 
-    const fixture = () =>
-      moduleFixture(RootModule, {
-        imports: [moduleFixture(InternalCoreModule)],
-        providers: [classWrapper(ModuleRef)],
-      });
-
-    const withDefaults = scanIgnoring({ controllers: ["Unrelated"] }, fixture());
-    expect(moduleNames(withDefaults)).toEqual([RootModule.name]);
-    expect(withDefaults.providers).toEqual([]);
-
-    const withoutDefaults = scanIgnoring(
-      { modules: [], providers: [] },
-      fixture(),
-    );
-    expect(moduleNames(withoutDefaults)).toEqual([
-      RootModule.name,
-      InternalCoreModule.name,
+    // Configuring other categories keeps the default node_modules paths.
+    const withDefaultPaths = scan({
+      modules: ["Unrelated"],
+      providers: ["Unrelated"],
+      controllers: ["Unrelated"],
+    });
+    expect(moduleNames(withDefaultPaths)).toEqual([RootModule.name]);
+    expect(memberNames(withDefaultPaths.providers)).toEqual([
+      LegacyService.name,
+      AppService.name,
     ]);
-    expect(memberNames(withoutDefaults.providers)).toEqual([ModuleRef.name]);
+
+    // Configuring `paths` replaces the default list entirely...
+    const replaced = scan({ paths: ["**/legacy/**"] });
+    expect(moduleNames(replaced)).toEqual([
+      RootModule.name,
+      VendorModule.name,
+    ]);
+    expect(memberNames(replaced.providers)).toEqual([
+      VendorService.name,
+      AppService.name,
+    ]);
+
+    // ...unless the defaults are spread into it.
+    const extended = scan({ paths: [...DEFAULT_IGNORE_PATHS, "**/legacy/**"] });
+    expect(moduleNames(extended)).toEqual([RootModule.name]);
+    expect(memberNames(extended.providers)).toEqual([AppService.name]);
   });
 });
