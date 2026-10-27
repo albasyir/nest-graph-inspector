@@ -42,6 +42,37 @@ supported public API.
 
 ## Breaking changes
 
+### Unreleased — `ignoreProvider` and `ignoreImport` are replaced by `ignore`
+
+`NestGraphInspectorModuleOptions` no longer accepts `ignoreProvider` or
+`ignoreImport`. Both are folded into one `ignore` object
+([`NestGraphInspectorIgnoreOptions`](#nestgraphinspectorignoreoptions)), which
+also ignores controllers, matches by `RegExp` and glob as well as exact name,
+and matches route and source file paths.
+
+**What a consumer must do:** move the arrays under `ignore`. Passing either old
+key is now a type error.
+
+```ts
+// before
+NestGraphInspectorModule.forRoot({
+  ignoreProvider: ['ModuleRef', 'ApplicationConfig', 'MetricsService'],
+  ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule', 'HealthModule'],
+});
+
+// after
+NestGraphInspectorModule.forRoot({
+  ignore: {
+    providers: ['ModuleRef', 'ApplicationConfig', 'MetricsService'],
+    modules: ['InternalCoreModule', 'NestGraphInspectorModule', 'HealthModule'],
+  },
+});
+```
+
+Defaults behave as before, category by category: configuring `providers`
+replaces the default provider list exactly as `ignoreProvider` did, and leaves
+the default module list in place.
+
 ### Unreleased — the Ollama proxy is gone
 
 The `viewer` output no longer accepts an `ollama` option, and
@@ -133,8 +164,10 @@ imported without `forRoot`. Current value:
     port: 53371,
     directRun: { path: '/direct-run' },
   }],
-  ignoreProvider: ['ModuleRef', 'ApplicationConfig'],
-  ignoreImport: ['InternalCoreModule', 'NestGraphInspectorModule'],
+  ignore: {
+    modules: ['InternalCoreModule', 'NestGraphInspectorModule'],
+    providers: ['ModuleRef', 'ApplicationConfig'],
+  },
   nestCoreModuleName: 'NestJSCoreModule',
   nestCoreProviders: ['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER'],
 }
@@ -165,12 +198,68 @@ The options object passed to `forRoot()`.
 |---|---|---|---|---|
 | `rootModule` | `Type` | No | auto-detected | Entry module for graph traversal |
 | `outputs` | `NestGraphInspectorOutput[]` | No | viewer on port 53371 | Output channel configuration |
-| `ignoreProvider` | `string[]` | No | `['ModuleRef', 'ApplicationConfig']` | Provider names to omit from the graph |
-| `ignoreImport` | `string[]` | No | `['InternalCoreModule', 'NestGraphInspectorModule']` | Module names to omit from imports |
+| `ignore` | `NestGraphInspectorIgnoreOptions` | No | `{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }` | Modules, providers, and controllers to omit from the graph, by name, token, route path, or source file path; see [`NestGraphInspectorIgnoreOptions`](#nestgraphinspectorignoreoptions) |
 | `nestCoreModuleName` | `string` | No | `'NestJSCoreModule'` | Name for the virtual NestJS core module |
 | `nestCoreProviders` | `string[]` | No | `['ModuleRef', 'ApplicationConfig', 'Reflector', 'REQUEST', 'INQUIRER']` | Providers grouped under the virtual core module |
 | `directRun` | `NestGraphInspectorViewerDirectRunOptions` | No | `{ allowUnsafeMethods: true, maxBodySizeBytes: 50 MiB }` | Module-wide Direct Run defaults, applied to every `viewer` output that does not set its own `directRun.allowUnsafeMethods` or `directRun.maxBodySizeBytes`; a `viewer` output's own `directRun` wins where it sets a value |
 | `ui` | `NestGraphInspectorUiOptions` | No | `{ layout: { saveAs: 'file' } }` | UI-facing settings, applied to every `viewer` and `http` output. Currently holds only `layout.saveAs`; see [Graph layout](#graph-layout-types) |
+
+---
+
+### `NestGraphInspectorIgnoreOptions`
+
+| | |
+|---|---|
+| **Kind** | Interface |
+| **Stability** | Stable |
+| **Documented** | This document, JSDoc on each field |
+
+```ts
+type IgnorePattern = string | RegExp;
+
+interface NestGraphInspectorIgnoreOptions {
+  modules?: IgnorePattern | IgnorePattern[];
+  module?: IgnorePattern | IgnorePattern[];      // alias of modules
+  providers?: IgnorePattern | IgnorePattern[];
+  provider?: IgnorePattern | IgnorePattern[];    // alias of providers
+  inject?: IgnorePattern | IgnorePattern[];      // alias of providers
+  controllers?: IgnorePattern | IgnorePattern[];
+  controller?: IgnorePattern | IgnorePattern[];  // alias of controllers
+  paths?: IgnorePattern | IgnorePattern[];
+  path?: IgnorePattern | IgnorePattern[];        // alias of paths
+}
+```
+
+Set on `NestGraphInspectorModuleOptions.ignore`. `IgnorePattern` is exported
+too. Each key takes one pattern or an array; a singular key is combined with
+its plural form.
+
+| Category | Matched against | Effect |
+|---|---|---|
+| `modules` | Module class name | The module is omitted together with everything reached only through it: its providers, controllers, and imports |
+| `providers` / `inject` | Provider class name and injection token; a symbol token by its description (`'CONFIG'`) or string form (`'Symbol(CONFIG)'`) | Omitted from provider lists, exports, and runtime-trace instrumentation |
+| `controllers` | Controller class name | Omitted from controller lists and runtime-trace instrumentation |
+| `paths` | A controller's `@Controller()` path, alone and joined with its module's `RouterModule` mount path; a module's mount path; the source file declaring a module, provider, or controller | As for the category of whatever matched |
+
+**Matching.** A `RegExp` is tested with any `g` or `y` flag dropped, so it
+answers the same way on every call. A string without `*` matches exactly; with
+`*` it is a glob, where `*` matches within one `/`-separated segment and `**`
+across segments (`**/` also matches no segment). Under `paths`, both pattern
+and path are first normalised to one leading slash, no trailing slash, and `/`
+as the only separator, and a plain string also matches every path beneath it:
+`'/admin'` matches `/admin` and `/admin/users`, not `/administrator`. Source
+file paths are absolute, so match them with a glob such as `'**/legacy/**'` or a
+`RegExp`. Source files are looked up only when `paths` is set.
+
+**Defaults.** The default is
+`{ modules: ['InternalCoreModule', 'NestGraphInspectorModule'], providers: ['ModuleRef', 'ApplicationConfig'] }`,
+and each category falls back to its own default only when none of its keys is
+set. `ignore: { controllers: ['HealthController'] }` keeps both default lists;
+`ignore: { modules: [] }` shows the inspector's own module.
+
+An ignored provider still appears in the `dependencies` of the providers and
+controllers that inject it: `ignore` removes graph nodes, not the edges into
+them.
 
 ---
 
@@ -233,7 +322,7 @@ interface NestGraphInspectorUiOptions {
 
 Set on `NestGraphInspectorModuleOptions.ui`. Currently a single field; grouped
 under `ui` so viewer-facing settings have one place to grow into, separate
-from graph-extraction options like `ignoreProvider`.
+from graph-extraction options like `ignore`.
 
 ---
 
@@ -1047,6 +1136,8 @@ references the `RuntimeTraceSpanInput` internal type that uses it — however
 | `NestGraphInspectorModule` | Class | Stable | ✅ | ✅ |
 | `defaultOptions` | Const | Uncertain | ✅ via module re-export | ❌ |
 | `NestGraphInspectorModuleOptions` | Interface | Stable | ✅ | ✅ |
+| `NestGraphInspectorIgnoreOptions` | Interface | Stable | ✅ | ✅ |
+| `IgnorePattern` | Type | Stable | ✅ | ✅ |
 | `NestGraphInspectorOutput` | Union type | Stable / partial | ✅ | ✅ |
 | `NestGraphInspectorViewerDirectRunOptions` | Type | Experimental | ✅ | ✅ |
 | `NestGraphInspectorViewerOptions` | Type | Stable | ✅ | ✅ |

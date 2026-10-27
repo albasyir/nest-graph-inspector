@@ -142,4 +142,23 @@ describe(SourceMetadataService.name, () => {
       service.isPublicMethod("AmbiguousProvider", "publicMethod"),
     ).toBe(false);
   });
+
+  it("resolves the file declaring a class, and nothing for an unknown or ambiguous name", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    project.createSourceFile(
+      "/repo/src/users/users.service.ts",
+      "class UsersService {}",
+    );
+    project.createSourceFile("/repo/src/a.ts", "class SharedName {}");
+    project.createSourceFile("/repo/src/b.ts", "class SharedName {}");
+    const service = new SourceMetadataService();
+    const internals = service as unknown as SourceMetadataServiceInternals;
+    jest.spyOn(internals, "createProject").mockReturnValue(project);
+
+    expect(service.getClassFilePath("UsersService")).toBe(
+      "/repo/src/users/users.service.ts",
+    );
+    expect(service.getClassFilePath("UnknownClass")).toBeUndefined();
+    expect(service.getClassFilePath("SharedName")).toBeUndefined();
+  });
 });

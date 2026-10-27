@@ -45,6 +45,14 @@ export class SourceMetadataService {
     return jsdoc;
   }
 
+  /**
+   * The source file declaring a class, or `undefined` when no class — or
+   * more than one — carries that name.
+   */
+  getClassFilePath(className: string): string | undefined {
+    return this.getClass(className)?.getSourceFile()?.getFilePath();
+  }
+
   getInstanceMethod(
     className: string,
     methodName: string,

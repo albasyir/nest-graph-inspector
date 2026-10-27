@@ -260,9 +260,12 @@ broken output is a log line, not a crash, and easy to miss.
 1. **Find the root.** Either `options.rootModule`, or inferred by locating the
    module that imported the inspector.
 2. **Walk the tree.** Imports, exports, providers, and controllers per module,
-   with `ignoreImport` and `ignoreProvider` applied
-   (`InternalCoreModule` and `NestGraphInspectorModule` hide themselves by
-   default).
+   with the `ignore` option applied — by name, injection token, route path, or
+   source file path, and an ignored module takes everything reached only
+   through it along (`InternalCoreModule` and `NestGraphInspectorModule` hide
+   themselves by default). Ignored providers and controllers are also left
+   uninstrumented for runtime tracing. Source files are looked up for this
+   only when `ignore.paths` is set.
 3. **Fold in NestJS core.** Providers named in `nestCoreProviders`
    (`ModuleRef`, `ApplicationConfig`, `Reflector`, `REQUEST`, `INQUIRER`) are
    collected under one virtual module named by `nestCoreModuleName`

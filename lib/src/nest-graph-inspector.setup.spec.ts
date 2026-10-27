@@ -1035,8 +1035,10 @@ describe(NestGraphInspectorSetup.name, () => {
     const customOptions: NestGraphInspectorModuleOptions = {
       rootModule: TestRootModule,
       outputs: [{ type: "json", path: "graph.json" }],
-      ignoreProvider: [HiddenProvider.name],
-      ignoreImport: [IgnoredModule.name],
+      ignore: {
+        providers: [HiddenProvider.name],
+        modules: [IgnoredModule.name],
+      },
       nestCoreModuleName: "CustomCoreModule",
       nestCoreProviders: ["CUSTOM_CONTEXT"],
     };
