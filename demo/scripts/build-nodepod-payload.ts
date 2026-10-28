@@ -15,7 +15,7 @@
  * Run it through `pnpm --filter nest-graph-inspector-demo run build:nodepod`,
  * which compiles this file and the application before executing it.
  */
-import { build } from 'esbuild';
+import { build, type Plugin } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -89,6 +89,81 @@ const RUNTIME_ACCOMMODATIONS = `
   setInterval(() => undefined, 60000);
 })();
 `;
+
+/**
+ * Guards prepended to the compiled discovery adapter's ignore checks, keyed by
+ * the method signature each one is inserted after.
+ *
+ * The in-browser demo shows the application's own graph and nothing else, so
+ * anything whose class is not declared under `src/` — framework internals,
+ * third-party modules, the inspector itself — is left out, and the virtual
+ * NestJS core module is not appended. This is the demo payload's view only;
+ * the library's own defaults are untouched.
+ */
+const DISCOVERY_PATCHES: ReadonlyArray<[signature: string, guard: string]> = [
+  [
+    'shouldIgnoreModule(moduleRef) {',
+    String.raw`
+        if (moduleRef.metatype === nest_graph_inspector_module_1.NestGraphInspectorModule) {
+            return true;
+        }
+        const moduleFilePath = this.classFilePath(moduleRef.metatype?.name);
+        if (!moduleFilePath || !/(?:^|\/)src\//.test(moduleFilePath)) {
+            return true;
+        }`,
+  ],
+  [
+    'shouldIgnoreProvider(name, wrapper) {',
+    String.raw`
+        const providerFilePath = wrapper
+            ? this.classFilePath(this.wrapperClassName(wrapper))
+            : undefined;
+        if (!providerFilePath || !/(?:^|\/)src\//.test(providerFilePath)) {
+            return true;
+        }`,
+  ],
+  [
+    'shouldIgnoreController(name, wrapper, moduleRef) {',
+    String.raw`
+        const controllerFilePath = wrapper
+            ? this.classFilePath(this.wrapperClassName(wrapper))
+            : undefined;
+        if (!controllerFilePath || !/(?:^|\/)src\//.test(controllerFilePath)) {
+            return true;
+        }`,
+  ],
+  [
+    'appendNestCoreModule(moduleTree) {',
+    `
+        return;`,
+  ],
+];
+
+/**
+ * Applies `DISCOVERY_PATCHES` to the library's compiled discovery adapter as
+ * it is bundled. A signature that is no longer found fails the build rather
+ * than shipping an unfiltered graph.
+ */
+const demoDiscoveryFilterPlugin: Plugin = {
+  name: 'demo-discovery-filter',
+  setup(pluginBuild) {
+    pluginBuild.onLoad({ filter: /[/\\]adapters[/\\]discovery\.js$/ }, async (args) => {
+      let contents = await readFile(args.path, 'utf8');
+
+      for (const [signature, guard] of DISCOVERY_PATCHES) {
+        if (!contents.includes(signature)) {
+          throw new Error(
+            `Cannot patch ${args.path}: "${signature}" not found. The discovery adapter changed; update DISCOVERY_PATCHES.`,
+          );
+        }
+
+        contents = contents.replace(signature, `${signature}${guard}`);
+      }
+
+      return { contents, loader: 'js' };
+    });
+  },
+};
 
 type JsonObject = Record<string, unknown>;
 
@@ -217,6 +292,7 @@ async function main(): Promise<void> {
     format: 'cjs',
     external: OPTIONAL_NEST_PEERS,
     banner: { js: RUNTIME_ACCOMMODATIONS },
+    plugins: [demoDiscoveryFilterPlugin],
     write: false,
     logLevel: 'warning',
   });

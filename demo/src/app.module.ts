@@ -21,6 +21,16 @@ import { UserModule } from './user/user.module';
         { type: 'json', path: 'tmp/graph/output.json' },
         { type: 'http', host: 'localhost', port: 53372, path: 'graph' },
       ],
+      ignore: {
+        modules: ['InternalCoreModule'],
+        providers: [
+          'ModuleRef',
+          'ApplicationConfig',
+          'Reflector',
+          'noop',
+          'useFactory',
+        ],
+      },
     }),
 
     // NestGraphInspectorModule,
