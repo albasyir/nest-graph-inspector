@@ -10,7 +10,8 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "nuxt typecheck",
     "test": "node --experimental-strip-types --test app/**/*.test.ts",
-    "test:demo-payload": "node --experimental-strip-types scripts/verify-nodepod-payload.ts"
+    "test:demo-payload": "node --experimental-strip-types scripts/verify-nodepod-payload.ts",
+    "test:raw-nestjs-spike": "node --experimental-strip-types scripts/verify-raw-nestjs-spike.ts"
   },
   "dependencies": {
     "@guolao/vue-monaco-editor": "^1.6.0",
