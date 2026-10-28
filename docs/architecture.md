@@ -671,7 +671,7 @@ Direct Run really invokes provider and controller methods, runtime traces
 really accumulate, and the JSDoc and parameter types in the graph come from
 the sources of the application that is answering.
 
-**The payload.** `demo/scripts/build-nodepod-payload.ts` writes three files
+**The payload.** `demo/scripts/build-nodepod-payload.ts` writes these files
 into `site/public/nodepod-demo/`:
 
 | File | What it is |
@@ -679,6 +679,7 @@ into `site/public/nodepod-demo/`:
 | `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
+| `vendor-snapshot.json.gz` | The NestJS runtime packages as a prebuilt virtual `node_modules` (~1.66 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; listed in `manifest.json` only when present |
 
 **Two constraints shape this design.**
 
@@ -713,10 +714,13 @@ generates the site runs it right after building the payload.
 **Boot sequence.**
 
 ```
-1. The visitor asks: "Run the demo application" in a docs preview, or opens
-   /view, which starts it on arrival (see below)
-2. nodepod-demo store downloads manifest.json, main.js, and sources.json
-3. Nodepod.boot({ files, workdir, env, headless: true })
+1. A docs preview mounts and starts it on its own, the visitor clicks "Run the
+   demo application" in a preview with autoload off, or /view is opened, which
+   starts it on arrival (see below)
+2. nodepod-demo store downloads manifest.json, main.js, sources.json, and the
+   vendor snapshot
+3. Nodepod.boot({ files, workdir, env, headless: true }), then the vendor
+   snapshot is restored into the pod's node_modules
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
 5. pod.spawn('node', ['main.js']) → the NestJS application starts
 6. The store reads the printed viewer link out of the application's own startup
@@ -727,11 +731,21 @@ generates the site runs it right after building the payload.
    the graph through the same HTTP contract as any other endpoint
 ```
 
-Downloading an application and booting a Node runtime is not something a page
-should do because it was scrolled past, so every docs preview waits for a
-click. `/view` is the one exception, because opening the viewer is itself the
-request to see a graph: on arrival it starts the demo, behind a loading card
-with a Cancel that stops the pod and falls back to the landing card. Three
+The docs previews start the demo on their own. Downloading an application and
+booting a Node runtime used to be too heavy for a page to do because it was
+scrolled past, but the NestJS runtime packages now arrive as the prebuilt
+vendor snapshot restored straight into the pod rather than installed, so a
+warm boot takes under a second — and the landing page (`/`) opens on the live
+graph instead of a button. `useNodepodDemoGraph` (`app/composables/`) starts
+it from `onMounted`, never during server rendering, so the page's text renders
+and stays readable while the preview shows a spinner and the store's status
+over a skeleton; a demo that already failed in the tab is not started again
+until the visitor retries, from the preview's inline error or the dialog. A
+preview given `autoload: false` (`RuntimeGraphPreview`'s `autoload` prop)
+waits for a click instead. `/view` starts the demo on arrival too, because
+opening the viewer is itself the request to see a graph: it does so behind a
+loading card with a Cancel that stops the pod and falls back to the landing
+card. Three
 things come first, decided by `resolveViewerLandingAction`
 (`app/utils/viewer-landing.ts`): `?autoload=false` keeps the landing card and
 its local-inspector polling — the viewer's "Try Another URL" links there; a
@@ -783,7 +797,9 @@ Known limitations, accepted deliberately:
 
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
-- The payload is a few megabytes, downloaded once per visit.
+- The payload is a few megabytes, downloaded once per visit — and, since the
+  landing page's previews start the demo on mount, on every visit to `/`,
+  whether or not the visitor scrolls to a preview.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing

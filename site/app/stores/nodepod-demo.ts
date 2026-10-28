@@ -75,7 +75,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
   let pod: Nodepod | undefined
   let startPromise: Promise<boolean> | undefined
-  let graphPromise: Promise<GraphOutput | null> | undefined
+  /**
+   * The graph request every preview shares. Held in a ref rather than a plain
+   * variable so {@link isLoadingGraph} can follow it: between the application
+   * reporting `ready` and its graph arriving, nothing else says a request is
+   * still in flight.
+   */
+  const graphPromise = shallowRef<Promise<GraphOutput | null>>()
   let bridgedFetch: FetchLike | undefined
   let originalFetch: FetchLike | undefined
   let logBuffer = ''
@@ -107,6 +113,10 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     () => status.value === 'downloading'
       || status.value === 'booting'
       || status.value === 'starting'
+  )
+  /** The graph has been asked for and has neither arrived nor failed yet. */
+  const isLoadingGraph = computed(
+    () => Boolean(graphPromise.value) && !graphOutput.value
   )
   /** Direct-run endpoint of the running application, and what authenticates it. */
   const directRunUrl = computed(() => resolveDirectRunUrl(endpointUrl.value, false))
@@ -680,12 +690,16 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * that asks for it.
    */
   function loadGraphOutput(): Promise<GraphOutput | null> {
-    graphPromise ??= start()
+    if (graphPromise.value) {
+      return graphPromise.value
+    }
+
+    const request = start()
       .then(async (started) => {
         if (!started) {
           // Remembering a failed start would leave every preview mounted
           // afterwards looking at a cached null, even once the demo runs.
-          graphPromise = undefined
+          graphPromise.value = undefined
 
           return null
         }
@@ -715,12 +729,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
             : 'The demo graph could not be read.'
         }
 
-        graphPromise = undefined
+        graphPromise.value = undefined
 
         return null
       })
 
-    return graphPromise
+    graphPromise.value = request
+
+    return request
   }
 
   /**
@@ -768,7 +784,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   function stop() {
     disposePod()
     startPromise = undefined
-    graphPromise = undefined
+    graphPromise.value = undefined
     graphOutput.value = null
     status.value = 'idle'
   }
@@ -799,6 +815,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     directRunUrl,
     isRunning,
     isBusy,
+    isLoadingGraph,
     statusLabel,
     downloadedBytes,
     totalBytes,
