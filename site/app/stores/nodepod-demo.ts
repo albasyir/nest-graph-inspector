@@ -34,6 +34,8 @@ type DemoManifest = {
   workdir: string
   entry: string
   sources: string
+  snapshot?: string
+  snapshotBytes?: number
   env: Record<string, string>
   bundleBytes: number
   sourceFileCount: number
@@ -241,13 +243,15 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     // size on the wire, which is the compressed one wherever the host
     // compresses, and counting decompressed bytes against it reads as done
     // long before it is.
-    const declaredLength = Number(response.headers.get('content-length'))
-    totalBytes.value = expectedBytes
-      || (Number.isFinite(declaredLength) ? declaredLength : 0)
+    if (!totalBytes.value) {
+      const declaredLength = Number(response.headers.get('content-length'))
+      totalBytes.value = expectedBytes
+        || (Number.isFinite(declaredLength) ? declaredLength : 0)
+    }
 
     if (!response.body) {
       const text = await response.text()
-      downloadedBytes.value = text.length
+      downloadedBytes.value += text.length
 
       return text
     }
@@ -268,6 +272,49 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     }
 
     return text + decoder.decode()
+  }
+
+  /**
+   * Reads the prebuilt vendor snapshot as a byte buffer.
+   */
+  async function fetchSnapshot(url: string): Promise<ArrayBuffer> {
+    const response = await fetch(url, { cache: 'force-cache' })
+
+    if (!response.ok) {
+      throw new Error(`Could not download the vendor snapshot (${response.status}).`)
+    }
+
+    if (!response.body) {
+      const buffer = await response.arrayBuffer()
+      downloadedBytes.value += buffer.byteLength
+
+      return buffer
+    }
+
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let received = 0
+
+    for (;;) {
+      const { done, value } = await reader.read()
+
+      if (done) {
+        break
+      }
+
+      chunks.push(value)
+      received += value.byteLength
+      downloadedBytes.value += value.byteLength
+    }
+
+    const combined = new Uint8Array(received)
+    let offset = 0
+    for (const chunk of chunks) {
+      combined.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+
+    return combined.buffer
   }
 
   /**
@@ -447,24 +494,23 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     manifest.value = demoManifest
 
-    const [bundle, sources] = await Promise.all([
+    totalBytes.value = demoManifest.bundleBytes + (demoManifest.snapshotBytes ?? 0)
+
+    const [bundle, sources, snapshotData] = await Promise.all([
       fetchBundle(
         payloadUrl(demoManifest.entry, demoManifest.revision),
         demoManifest.bundleBytes
       ),
-      fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision))
+      fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision)),
+      demoManifest.snapshot
+        ? fetchSnapshot(
+            payloadUrl(demoManifest.snapshot, demoManifest.revision)
+          )
+        : Promise.resolve(null)
     ])
 
     if (!isCurrentRun()) {
       return false
-    }
-
-    const files: Record<string, string> = {
-      [`${demoManifest.workdir}/${demoManifest.entry}`]: bundle
-    }
-
-    for (const [path, content] of Object.entries(sources)) {
-      files[`${demoManifest.workdir}/${path}`] = content
     }
 
     status.value = 'booting'
@@ -472,7 +518,6 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     const { Nodepod: NodepodRuntime } = await import('@scelar/nodepod')
 
     const booted = await NodepodRuntime.boot({
-      files,
       workdir: demoManifest.workdir,
       env: {
         ...demoManifest.env,
@@ -505,6 +550,27 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       booted.teardown()
 
       return false
+    }
+
+    if (snapshotData) {
+      const { decodeRawSpikeSnapshot } = await import('~/utils/raw-nestjs-spike')
+      const { snapshot } = await decodeRawSpikeSnapshot(snapshotData)
+      await booted.restore({ entries: snapshot.entries }, { autoInstall: false })
+    }
+
+    if (!isCurrentRun()) {
+      booted.teardown()
+
+      return false
+    }
+
+    await booted.fs.writeFile(
+      `${demoManifest.workdir}/${demoManifest.entry}`,
+      bundle
+    )
+
+    for (const [path, content] of Object.entries(sources)) {
+      await booted.fs.writeFile(`${demoManifest.workdir}/${path}`, content)
     }
 
     pod = booted

@@ -35,6 +35,7 @@ import type { RawSpikeVendorSnapshot } from '../app/utils/raw-nestjs-spike.ts'
 type Entry = Snapshot['entries'][number]
 
 const OUTPUT_FILE = fileURLToPath(new URL(`../public${RAW_SPIKE_SNAPSHOT_PATH}`, import.meta.url))
+const ASSETS_FILE = fileURLToPath(new URL('../assets/nodepod-demo/vendor-snapshot.json.gz', import.meta.url))
 
 /** Directories whose whole subtree is test or fixture code. */
 const PRUNED_DIRECTORIES = new Set(['test', 'tests', '__tests__', '__mocks__'])
@@ -116,8 +117,10 @@ try {
 
   await mkdir(dirname(OUTPUT_FILE), { recursive: true })
   await writeFile(OUTPUT_FILE, compressed)
+  await mkdir(dirname(ASSETS_FILE), { recursive: true })
+  await writeFile(ASSETS_FILE, compressed)
 
-  console.log(`wrote ${OUTPUT_FILE}`)
+  console.log(`wrote ${OUTPUT_FILE} and ${ASSETS_FILE}`)
   console.table({
     'installed packages': installed,
     'entries (kept / total)': `${kept.length.toLocaleString()} / ${full.entries.length.toLocaleString()}`,

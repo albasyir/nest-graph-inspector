@@ -35,6 +35,20 @@ const OPTIONAL_NEST_PEERS = [
 ];
 
 /**
+ * Packages provided inside the virtual container from the pre-cached
+ * 1.66 MB vendor snapshot instead of being bundled ahead-of-time.
+ */
+const VENDOR_SNAPSHOT_PACKAGES = [
+  '@nestjs/common',
+  '@nestjs/core',
+  '@nestjs/platform-express',
+  'rxjs',
+  'reflect-metadata',
+];
+
+const VENDOR_SNAPSHOT_FILE = 'vendor-snapshot.json.gz';
+
+/**
  * Compiler options that only describe how this repository builds, and would
  * mean nothing to the copy of the sources that travels into the browser.
  */
@@ -290,7 +304,7 @@ async function main(): Promise<void> {
     platform: 'node',
     target: 'node20',
     format: 'cjs',
-    external: OPTIONAL_NEST_PEERS,
+    external: [...VENDOR_SNAPSHOT_PACKAGES, ...OPTIONAL_NEST_PEERS],
     banner: { js: RUNTIME_ACCOMMODATIONS },
     plugins: [demoDiscoveryFilterPlugin],
     write: false,
@@ -325,6 +339,13 @@ async function main(): Promise<void> {
     sources[key] = await readFile(path, 'utf8');
   }
 
+  const snapshotSource = join(repoDir, 'site/assets/nodepod-demo', VENDOR_SNAPSHOT_FILE);
+  let snapshotBytes = 0;
+  if (existsSync(snapshotSource)) {
+    const data = await readFile(snapshotSource);
+    snapshotBytes = data.byteLength;
+  }
+
   const sourcesJson = `${JSON.stringify(sources, null, 2)}\n`;
   const revision = sha256(`${bundle}${sourcesJson}`).slice(0, 12);
   const manifest = {
@@ -336,6 +357,8 @@ async function main(): Promise<void> {
     workdir: WORKDIR,
     entry: 'main.js',
     sources: 'sources.json',
+    snapshot: VENDOR_SNAPSHOT_FILE,
+    snapshotBytes,
     env: {
       NODE_ENV: 'development',
     },
@@ -345,6 +368,10 @@ async function main(): Promise<void> {
 
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
+  if (snapshotBytes > 0) {
+    const data = await readFile(snapshotSource);
+    await writeFile(join(outputDir, VENDOR_SNAPSHOT_FILE), data);
+  }
   await writeFile(join(outputDir, 'main.js'), bundle, 'utf8');
   await writeFile(join(outputDir, 'sources.json'), sourcesJson, 'utf8');
   await writeFile(
@@ -353,9 +380,10 @@ async function main(): Promise<void> {
     'utf8',
   );
 
-  const megabytes = (manifest.bundleBytes / 1024 / 1024).toFixed(1);
+  const megabytes = (manifest.bundleBytes / 1024 / 1024).toFixed(2);
+  const snapshotMb = (snapshotBytes / 1024 / 1024).toFixed(2);
   console.log(
-    `Wrote nodepod demo payload to ${outputDir} (${megabytes} MB bundle, ${manifest.sourceFileCount} source files, revision ${revision})`,
+    `Wrote nodepod demo payload to ${outputDir} (${megabytes} MB bundle, ${snapshotMb} MB vendor snapshot, ${manifest.sourceFileCount} source files, revision ${revision})`,
   );
 }
 

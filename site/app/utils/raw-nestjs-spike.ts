@@ -161,7 +161,8 @@ export function isRawSpikeHelloBody(value: unknown): value is RawSpikeHelloBody 
  * Where `scripts/build-raw-spike-snapshot.ts` writes the vendor snapshot,
  * relative to the site's public directory — and so to the site's base URL.
  */
-export const RAW_SPIKE_SNAPSHOT_PATH = '/raw-spike/raw-nestjs-vendor-snapshot.json.gz'
+export const VENDOR_SNAPSHOT_PATH = '/nodepod-demo/vendor-snapshot.json.gz'
+export const RAW_SPIKE_SNAPSHOT_PATH = VENDOR_SNAPSHOT_PATH
 
 /**
  * The file behind {@link RAW_SPIKE_SNAPSHOT_PATH}: a nodepod volume snapshot
