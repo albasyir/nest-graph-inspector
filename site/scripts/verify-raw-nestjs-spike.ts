@@ -1,32 +1,53 @@
 /**
  * Boots a hand-written, multi-file NestJS application under nodepod and checks
- * that it answers an HTTP request.
+ * that it answers an HTTP request, within a startup budget.
  *
  * Where `verify-nodepod-payload.ts` boots the demo as one prebuilt bundle, this
- * installs `@nestjs/*` from the registry into the pod's own `node_modules` and
- * starts four separate CommonJS files, so module resolution, the package
- * installer, and Express's response path are all exercised by the runtime
- * itself. The files come from `app/utils/raw-nestjs-spike.ts`, the same source
- * the `/raw-spike` page boots.
+ * restores `@nestjs/*` into the pod's own `node_modules` from the vendor
+ * snapshot and starts four separate CommonJS files, so module resolution and
+ * Express's response path are both exercised by the runtime itself. The files
+ * and the restore helper come from `app/utils/raw-nestjs-spike.ts`, the same
+ * source the `/raw-spike` page uses.
  *
- * Needs network access to the npm registry.
+ * Needs the snapshot `build:raw-spike-snapshot` writes; no network access.
+ * `RAW_SPIKE_STARTUP_BUDGET_MS` overrides the budget on a slow machine.
  */
 import { strict as assert } from 'node:assert'
+import { readFile } from 'node:fs/promises'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import { Nodepod } from '@scelar/nodepod/headless'
 import {
   RAW_SPIKE_ENTRY,
   RAW_SPIKE_FILES,
-  RAW_SPIKE_PACKAGES,
   RAW_SPIKE_PORT,
   RAW_SPIKE_READY_LINE,
   RAW_SPIKE_REQUEST_PATH,
+  RAW_SPIKE_SNAPSHOT_PATH,
   RAW_SPIKE_WORKDIR,
-  isRawSpikeHelloBody
+  isRawSpikeHelloBody,
+  loadAndRestoreSnapshot
 } from '../app/utils/raw-nestjs-spike.ts'
+import type { RawSpikeSnapshotStats } from '../app/utils/raw-nestjs-spike.ts'
 
 const STARTUP_TIMEOUT_MS = 120_000
+const STARTUP_BUDGET_MS = Number(process.env.RAW_SPIKE_STARTUP_BUDGET_MS ?? 3_500)
+const SNAPSHOT_FILE = fileURLToPath(new URL(`../public${RAW_SPIKE_SNAPSHOT_PATH}`, import.meta.url))
 
 const ms = (value: number) => `${value.toFixed(0)} ms`
+const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MB`
+
+let snapshotBytes: Buffer
+
+try {
+  snapshotBytes = await readFile(SNAPSHOT_FILE)
+} catch {
+  console.error(
+    `No vendor snapshot at ${SNAPSHOT_FILE}.\n`
+    + 'Build it first: pnpm --filter nest-graph-inspector-site run build:raw-spike-snapshot'
+  )
+  process.exit(1)
+}
 
 const bootStartedAt = performance.now()
 const pod = await Nodepod.boot({ workdir: RAW_SPIKE_WORKDIR })
@@ -45,6 +66,17 @@ function fail(message: string): never {
   process.exit(1)
 }
 
+// Restore replaces the whole volume, so it runs before the project is written.
+let snapshot: RawSpikeSnapshotStats
+
+try {
+  snapshot = await loadAndRestoreSnapshot(pod, snapshotBytes)
+} catch (error) {
+  fail(`Restoring the vendor snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+const ingestMs = snapshot.fetchMs + snapshot.decodeMs + snapshot.restoreMs
+
 const writeStartedAt = performance.now()
 
 for (const [path, content] of Object.entries(RAW_SPIKE_FILES)) {
@@ -52,18 +84,6 @@ for (const [path, content] of Object.entries(RAW_SPIKE_FILES)) {
 }
 
 const writeMs = performance.now() - writeStartedAt
-
-const installStartedAt = performance.now()
-
-for (const [name, version] of RAW_SPIKE_PACKAGES) {
-  try {
-    await pod.packages.install(name, version)
-  } catch (error) {
-    fail(`Installing ${name}@${version} failed: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
-const installMs = performance.now() - installStartedAt
 
 const spawnStartedAt = performance.now()
 const app = await pod.spawn('node', [RAW_SPIKE_ENTRY], { cwd: RAW_SPIKE_WORKDIR })
@@ -87,10 +107,11 @@ while (!log.includes(RAW_SPIKE_READY_LINE)) {
     fail(`The application did not print "${RAW_SPIKE_READY_LINE}" within ${ms(STARTUP_TIMEOUT_MS)}.`)
   }
 
-  await new Promise(resolve => setTimeout(resolve, 50))
+  await new Promise(resolve => setTimeout(resolve, 10))
 }
 
 const startupMs = performance.now() - spawnStartedAt
+const totalMs = bootMs + ingestMs + writeMs + startupMs
 
 const requestStartedAt = performance.now()
 const response = await pod.request(RAW_SPIKE_PORT, { path: RAW_SPIKE_REQUEST_PATH })
@@ -120,20 +141,27 @@ const installed = pod.packages.listInstalled()
 console.log(`raw NestJS spike ok: GET ${RAW_SPIKE_REQUEST_PATH} → ${response.statusCode} ${body}`)
 console.table({
   'pod boot': ms(bootMs),
+  'snapshot ingestion': `${ms(ingestMs)} (read ${ms(snapshot.fetchMs)}, decode ${ms(snapshot.decodeMs)}, restore ${ms(snapshot.restoreMs)})`,
   'VFS write': ms(writeMs),
-  'package install': ms(installMs),
   'startup (spawn → ready)': ms(startupMs),
-  'request latency': ms(requestMs)
+  'request latency': ms(requestMs),
+  'total startup': `${ms(totalMs)} (budget ${ms(STARTUP_BUDGET_MS)})`
 })
 console.table({
+  'snapshot (gzip → JSON)': `${mb(snapshot.compressedBytes)} → ${mb(snapshot.uncompressedBytes)}`,
+  'snapshot entries': `${snapshot.entryCount.toLocaleString()} (${snapshot.fileCount.toLocaleString()} files)`,
   'installed packages': Object.keys(installed).length,
   'VFS files': memory.vfs.fileCount,
-  'VFS size': `${(memory.vfs.totalBytes / 1024 / 1024).toFixed(1)} MB`,
+  'VFS size': mb(memory.vfs.totalBytes),
   'module cache entries': memory.engine.moduleCacheSize,
   'processes': memory.runtime.processes,
   'heap used': memory.heap ? `${memory.heap.usedMB.toFixed(1)} MB` : 'n/a',
-  'host RSS': `${(process.memoryUsage().rss / 1024 / 1024).toFixed(1)} MB`
+  'host RSS': mb(process.memoryUsage().rss)
 })
+
+if (totalMs > STARTUP_BUDGET_MS) {
+  fail(`Total startup took ${ms(totalMs)}, over the ${ms(STARTUP_BUDGET_MS)} budget.`)
+}
 
 pod.teardown()
 process.exit(0)
