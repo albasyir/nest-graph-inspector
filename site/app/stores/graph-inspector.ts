@@ -32,6 +32,7 @@ import {
   resolveDirectRunUrl
 } from '~/utils/inspector-endpoint-url'
 import {
+  clearGraphSession,
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
@@ -417,17 +418,19 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   /**
-   * Forgets the endpoint held in memory, without forgetting the tab's session.
+   * Forgets the endpoint, in memory and in the tab's session.
    *
-   * Used while the in-browser demo is restarted: the endpoint the tab was on
-   * died with the document that started it, and nothing may be fetched from it
-   * in the meantime — least of all with the credential that went with it. The
-   * session stays, so a failed restart can still say which graph it was.
+   * For an in-browser demo endpoint nothing in this document answers any more:
+   * the pod died with the document that started it, or is being stopped or
+   * waited on. Nothing may be fetched from it in the meantime — least of all
+   * with the credential that went with it — and a reload must not restore it,
+   * since only a demo the visitor starts again mints a session worth keeping.
    */
   function releaseEndpoint() {
     endpoint.value = ''
     accessToken.value = ''
     clearGraph()
+    clearGraphSession()
   }
 
   /**

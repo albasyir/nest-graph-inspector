@@ -4,8 +4,7 @@ import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
-  readViewerLinkEndpoint,
-  redactViewerLinks
+  readViewerLinkEndpoint
 } from '~/utils/nodepod-demo-endpoint'
 import {
   accessTokenHeaders,
@@ -62,7 +61,6 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const errorMessage = ref('')
   const downloadedBytes = ref(0)
   const totalBytes = ref(0)
-  const logLines = ref<string[]>([])
   const manifest = ref<DemoManifest | null>(null)
   /** Graph endpoint of the running application, never carrying a token. */
   const endpointUrl = ref('')
@@ -84,6 +82,11 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const graphPromise = shallowRef<Promise<GraphOutput | null>>()
   let bridgedFetch: FetchLike | undefined
   let originalFetch: FetchLike | undefined
+  /**
+   * What the application printed, kept only to read its viewer link from and
+   * never shown: the visitor sees the store's status and error messages.
+   */
+  let logLines: string[] = []
   let logBuffer = ''
   let exitCode: number | undefined
   /**
@@ -93,20 +96,6 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * publishing itself over its successor.
    */
   const runs = createNodepodDemoRunGuard()
-
-  /**
-   * The application's output as it may be shown and copied.
-   *
-   * The startup card and the error dialog put these lines on screen, and a
-   * visitor reporting a problem copies them out of there. The link the
-   * inspector prints carries the access token base64url-encoded inside it, so
-   * a log on its way to a screenshot or a bug report goes through the same
-   * redaction the CI check uses.
-   *
-   * Redacted here rather than on the way in: {@link waitForEndpoint} reads the
-   * endpoint back out of the raw log, and a redacted one has none to read.
-   */
-  const consoleLines = computed(() => logLines.value.map(redactViewerLinks))
 
   const isRunning = computed(() => status.value === 'ready')
   const isBusy = computed(
@@ -187,7 +176,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   }
 
   /**
-   * Adds a chunk of application output to the log shown in the startup card.
+   * Adds a chunk of application output to the log the viewer link is read from.
    *
    * The runtime hands over whatever it has, which may stop mid-line, so a
    * trailing partial line is held back until the rest of it arrives. Only the
@@ -203,8 +192,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       return
     }
 
-    const next = [...logLines.value, ...lines]
-    logLines.value = next.slice(Math.max(0, next.length - MAX_LOG_LINES))
+    const next = [...logLines, ...lines]
+    logLines = next.slice(Math.max(0, next.length - MAX_LOG_LINES))
   }
 
   /**
@@ -447,7 +436,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       }
 
       const endpoint = readViewerLinkEndpoint(
-        [...logLines.value, logBuffer].join('\n')
+        [...logLines, logBuffer].join('\n')
       )
 
       if (endpoint) {
@@ -491,7 +480,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     status.value = 'downloading'
     errorMessage.value = ''
-    logLines.value = []
+    logLines = []
     logBuffer = ''
     exitCode = undefined
     downloadedBytes.value = 0
@@ -534,7 +523,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
         ...demoManifest.env,
         /**
          * The application prints its viewer link with this base, so the link
-         * in the demo console is a link into the site the visitor is on.
+         * it logs points into the site the visitor is on.
          */
         ____DEV_VIEWER_BASE_URL: siteBaseUrl().replace(/\/+$/, '')
       },
@@ -770,13 +759,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     runs.supersede()
   }
 
-  /**
-   * Puts the demo back to waiting after a failure has been read.
-   *
-   * The logs stay: the dialog that showed them is the only place the visitor
-   * could have seen what the application said, and reopening it should not
-   * come back empty.
-   */
+  /** Puts the demo back to waiting after a failure has been read. */
   function dismissError() {
     if (status.value === 'error') {
       status.value = 'idle'
@@ -800,23 +783,24 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   }
 
   /**
-   * Replaces the running application with a freshly booted one.
+   * Waits for the demo application this tab is already running or starting,
+   * and never boots one: resolves to whether it is up, and to `false` straight
+   * away when nothing was started.
    *
-   * A pod whose token the endpoint has begun refusing is as unusable as a pod
-   * that is gone, and {@link start} would hand the running one straight back,
-   * so recovering means stopping first — the boot after that mints a new token
-   * on a new port.
+   * For the pages that may only reuse the demo — `/view` and the viewer pages
+   * below it — so that asking for it can never be what starts it.
    */
-  function restart(): Promise<boolean> {
-    stop()
+  function join(): Promise<boolean> {
+    if (status.value === 'ready') {
+      return Promise.resolve(true)
+    }
 
-    return start()
+    return startPromise ?? Promise.resolve(false)
   }
 
   return {
     status,
     errorMessage,
-    consoleLines,
     manifest,
     endpointUrl,
     accessToken,
@@ -831,7 +815,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     totalBytes,
     downloadProgress,
     start,
-    restart,
+    join,
     loadGraphOutput,
     dismissError,
     stop

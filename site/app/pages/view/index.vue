@@ -31,18 +31,21 @@ const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
 /** Whether the visitor asked this page for the demo, retries included. */
 const wasDemoRequested = ref(false)
+/** The tab's demo is running, or on its way up — what `?preview=true` joins. */
+const isDemoActive = computed(() => demoStore.isRunning || demoStore.isBusy)
 /**
- * Whether this page is on its way to the viewer without being asked: booting
- * the demo, or returning to the tab's own graph. Seeded from the query alone so
- * the server renders the same loading state the client starts in, instead of
- * the landing card flashing before the demo takes over.
+ * Whether this page is on its way to the viewer without a click: joining the
+ * demo a preview is running, or returning to the tab's own graph. Seeded
+ * without the tab's session, which the server cannot read: a hard load has no
+ * demo running yet, so the server and the client agree on the landing card,
+ * and a preview whose demo is up opens this page straight on the loading card.
  */
 const isAutoOpening = ref(
   resolveViewerLandingAction({
     query: route.query,
     restoredEndpointUrl: '',
     canOpenRestoredSession: false,
-    demoFailed: false
+    isDemoActive: isDemoActive.value
   }).kind !== 'manual'
 )
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
@@ -53,9 +56,10 @@ let activeDemoRequestId = 0
 /**
  * Opens the viewer on the demo application running in this tab.
  *
- * Reached from the click that asked for the demo, and again from the retry in
- * the error dialog — which is mounted for the whole app and can only start the
- * application, so what asking for it was for is this page's to finish.
+ * Reached once the demo this page asked for — clicked for, or joined from a
+ * preview — is up, and again from the retry in the error dialog, which is
+ * mounted for the whole app and can only start the application, so what asking
+ * for it was for is this page's to finish.
  */
 async function openDemo() {
   if (isNavigating.value) {
@@ -81,17 +85,23 @@ async function openDemo() {
   // to add here.
   graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
   graphStore.trustEndpointVersion(demoStore.endpointUrl)
-  // Replaced rather than pushed: this page opens the demo on arrival, so Back
-  // from the viewer landing here would only send the visitor forward again.
+  // Replaced rather than pushed, like every hand-off from this page: Back from
+  // the viewer should leave it, not return to the card that opened it — which,
+  // reached from a preview, would only join the demo and send the visitor
+  // forward again.
   await navigateTo(resolveViewerLandingPath(route.query), { replace: true })
 }
 
 /**
- * Starts the demo application inside this browser tab and opens the viewer on
- * the endpoint it reports. There is no fixture behind it: the graph, the
+ * Waits for the demo application inside this browser tab and opens the viewer
+ * on the endpoint it reports. There is no fixture behind it: the graph, the
  * direct-run endpoint, and the history all come from that running application.
+ *
+ * `start` boots it, and is only ever the visitor's click on "Open Demo";
+ * `join` waits for the demo a preview is already running or starting, and
+ * never boots one.
  */
-async function loadExample() {
+async function requestDemo(how: 'start' | 'join') {
   graphStore.showCircularDependencies = true
   graphStore.openModuleDetail = true
   wasDemoRequested.value = true
@@ -99,7 +109,7 @@ async function loadExample() {
   clearPolling()
 
   const requestId = ++activeDemoRequestId
-  const started = await demoStore.start()
+  const started = await (how === 'start' ? demoStore.start() : demoStore.join())
 
   if (requestId !== activeDemoRequestId) {
     return
@@ -116,18 +126,17 @@ async function loadExample() {
     reason: demoStore.errorMessage
   })
 
-  // The page was watching for a local inspector before the demo was asked for,
-  // and it still is: a demo that would not start is not a reason to stop
-  // looking for the developer's own application.
+  // A demo that would not come up is not a reason to stop looking for the
+  // developer's own application, so the page goes back to watching for it.
   startPolling(activeOrigin.value)
 }
 
 /**
- * Stops a demo this page is still booting and goes back to the landing card.
+ * Stops a demo this page is still waiting on and goes back to the landing card.
  *
- * The page started it without a click, so the visitor needs a way to say no —
- * to connect their own application instead, or to keep the download off a
- * metered connection.
+ * Getting it up takes a while — a download, then a boot — and the visitor may
+ * change their mind on the way: connect their own application instead, or
+ * keep the download off a metered connection.
  */
 function cancelDemo() {
   activeDemoRequestId += 1
@@ -139,8 +148,9 @@ function cancelDemo() {
 }
 
 /**
- * Decides, once the tab's session is readable, whether to start the demo,
- * return to the graph the tab was already on, or wait on the landing card.
+ * Decides, once the tab's session is readable, whether to join the demo a
+ * preview is running, return to the graph the tab was already on, or wait on
+ * the landing card. It never starts the demo: that takes the visitor's click.
  */
 function openOnArrival() {
   const restoredEndpointUrl = graphStore.restoreSession()
@@ -149,15 +159,17 @@ function openOnArrival() {
     restoredEndpointUrl,
     canOpenRestoredSession: graphStore.hasAccessToken
       || canOpenWithoutAccessToken(restoredEndpointUrl, window.location.origin),
-    demoFailed: demoStore.status === 'error'
+    isDemoActive: isDemoActive.value
   })
 
-  if (action.kind === 'start-demo') {
-    void loadExample()
+  if (action.kind === 'join-demo') {
+    isAutoOpening.value = true
+    void requestDemo('join')
     return
   }
 
   if (action.kind === 'open-session') {
+    isAutoOpening.value = true
     isNavigating.value = true
     void navigateTo(action.path, { replace: true })
     return
@@ -182,12 +194,6 @@ const openingAnnouncement = computed(() =>
     ? 'Downloading the demo application…'
     : openingLabel.value
 )
-
-/**
- * Last few lines the demo application printed, so a slow start is visibly a
- * real application starting rather than a stalled page.
- */
-const demoConsole = computed(() => demoStore.consoleLines.slice(-6).join('\n'))
 
 function clearPolling() {
   if (pollingTimer.value) {
@@ -354,11 +360,6 @@ watch(shouldShowUpdateModal, (visible) => {
           :model-value="Math.round(demoStore.downloadProgress * 100)"
           aria-label="Demo download progress"
         />
-        <pre
-          v-if="demoConsole"
-          data-testid="demo-console"
-          class="max-h-56 overflow-auto rounded-lg bg-muted/50 p-3 text-xs text-muted whitespace-pre-wrap"
-        >{{ demoConsole }}</pre>
         <p class="text-xs text-muted">
           The demo is this repository's NestJS application, running in your
           browser on
@@ -428,7 +429,7 @@ watch(shouldShowUpdateModal, (visible) => {
               :loading="demoStore.isBusy"
               :disabled="isNavigating || isAutoOpening || demoStore.isBusy"
               block
-              @click="loadExample"
+              @click="requestDemo('start')"
             />
           </div>
         </div>
