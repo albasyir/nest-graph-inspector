@@ -562,25 +562,34 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       return false
     }
 
-    if (snapshotData) {
-      const { decodeRawSpikeSnapshot } = await import('~/utils/raw-nestjs-spike')
-      const { snapshot } = await decodeRawSpikeSnapshot(snapshotData)
-      await booted.restore({ entries: snapshot.entries }, { autoInstall: false })
-    }
+    // Until it is published as `pod`, this run is the only thing holding the
+    // pod, and disposePod() cannot reach it: a failure here tears it down
+    // before passing the error on, or it would be left running.
+    try {
+      if (snapshotData) {
+        const { decodeRawSpikeSnapshot } = await import('~/utils/raw-nestjs-spike')
+        const { snapshot } = await decodeRawSpikeSnapshot(snapshotData)
+        await booted.restore({ entries: snapshot.entries }, { autoInstall: false })
+      }
 
-    if (!isCurrentRun()) {
+      if (!isCurrentRun()) {
+        booted.teardown()
+
+        return false
+      }
+
+      await booted.fs.writeFile(
+        `${demoManifest.workdir}/${demoManifest.entry}`,
+        bundle
+      )
+
+      for (const [path, content] of Object.entries(sources)) {
+        await booted.fs.writeFile(`${demoManifest.workdir}/${path}`, content)
+      }
+    } catch (error) {
       booted.teardown()
 
-      return false
-    }
-
-    await booted.fs.writeFile(
-      `${demoManifest.workdir}/${demoManifest.entry}`,
-      bundle
-    )
-
-    for (const [path, content] of Object.entries(sources)) {
-      await booted.fs.writeFile(`${demoManifest.workdir}/${path}`, content)
+      throw error
     }
 
     pod = booted

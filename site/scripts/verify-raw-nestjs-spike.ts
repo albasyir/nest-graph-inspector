@@ -34,6 +34,15 @@ const STARTUP_TIMEOUT_MS = 120_000
 const STARTUP_BUDGET_MS = Number(process.env.RAW_SPIKE_STARTUP_BUDGET_MS ?? 3_500)
 const SNAPSHOT_FILE = fileURLToPath(new URL(`../public${RAW_SPIKE_SNAPSHOT_PATH}`, import.meta.url))
 
+// A malformed override reads as NaN, and no comparison with NaN is true, so the
+// budget check would pass however long the startup took.
+if (!Number.isFinite(STARTUP_BUDGET_MS) || STARTUP_BUDGET_MS <= 0) {
+  console.error(
+    `RAW_SPIKE_STARTUP_BUDGET_MS must be a positive number of milliseconds, got "${process.env.RAW_SPIKE_STARTUP_BUDGET_MS}".`
+  )
+  process.exit(1)
+}
+
 const ms = (value: number) => `${value.toFixed(0)} ms`
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MB`
 

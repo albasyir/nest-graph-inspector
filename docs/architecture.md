@@ -679,7 +679,7 @@ into `site/public/nodepod-demo/`:
 | `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
-| `vendor-snapshot.json.gz` | The NestJS runtime packages as a prebuilt virtual `node_modules` (~1.66 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; listed in `manifest.json` only when present |
+| `vendor-snapshot.json.gz` | The NestJS runtime packages as a prebuilt virtual `node_modules` (~1.66 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
 
 **Two constraints shape this design.**
 
@@ -719,8 +719,9 @@ generates the site runs it right after building the payload.
    starts it on arrival (see below)
 2. nodepod-demo store downloads manifest.json, main.js, sources.json, and the
    vendor snapshot
-3. Nodepod.boot({ files, workdir, env, headless: true }), then the vendor
-   snapshot is restored into the pod's node_modules
+3. Nodepod.boot({ workdir, env, headless: true }) boots a pod with no files;
+   the vendor snapshot is restored into it, which replaces the pod's whole
+   volume, and only then are main.js and the sources written into the workdir
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
 5. pod.spawn('node', ['main.js']) → the NestJS application starts
 6. The store reads the printed viewer link out of the application's own startup

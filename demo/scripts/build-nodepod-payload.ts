@@ -284,17 +284,31 @@ async function buildPodTsConfig(
 
 /**
  * Builds the payload: bundles the compiled demo, collects its sources, and
- * writes the three files the site downloads into `site/public/nodepod-demo`.
+ * writes the four files the site downloads into `site/public/nodepod-demo`.
  */
 async function main(): Promise<void> {
   const repoDir = findRepoDir(process.cwd());
   const demoDir = join(repoDir, 'demo');
   const entryPath = join(demoDir, 'dist/src/main.js');
+  const snapshotSource = join(
+    repoDir,
+    'site/assets/nodepod-demo',
+    VENDOR_SNAPSHOT_FILE,
+  );
   const outputDir = join(repoDir, 'site/public/nodepod-demo');
 
   if (!existsSync(entryPath)) {
     throw new Error(
       `Compiled demo entry not found at ${entryPath}. Run "nest build" in demo/ first.`,
+    );
+  }
+
+  // The bundle leaves VENDOR_SNAPSHOT_PACKAGES external and only the snapshot
+  // supplies them, so a payload without it would build and then fail in the
+  // browser on its first require.
+  if (!existsSync(snapshotSource)) {
+    throw new Error(
+      `Vendor snapshot not found at ${snapshotSource}. Build it with "pnpm --filter nest-graph-inspector-site run build:raw-spike-snapshot".`,
     );
   }
 
@@ -339,13 +353,7 @@ async function main(): Promise<void> {
     sources[key] = await readFile(path, 'utf8');
   }
 
-  const snapshotSource = join(repoDir, 'site/assets/nodepod-demo', VENDOR_SNAPSHOT_FILE);
-  let snapshotBytes = 0;
-  if (existsSync(snapshotSource)) {
-    const data = await readFile(snapshotSource);
-    snapshotBytes = data.byteLength;
-  }
-
+  const snapshot = await readFile(snapshotSource);
   const sourcesJson = `${JSON.stringify(sources, null, 2)}\n`;
   const revision = sha256(`${bundle}${sourcesJson}`).slice(0, 12);
   const manifest = {
@@ -358,7 +366,7 @@ async function main(): Promise<void> {
     entry: 'main.js',
     sources: 'sources.json',
     snapshot: VENDOR_SNAPSHOT_FILE,
-    snapshotBytes,
+    snapshotBytes: snapshot.byteLength,
     env: {
       NODE_ENV: 'development',
     },
@@ -368,10 +376,7 @@ async function main(): Promise<void> {
 
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
-  if (snapshotBytes > 0) {
-    const data = await readFile(snapshotSource);
-    await writeFile(join(outputDir, VENDOR_SNAPSHOT_FILE), data);
-  }
+  await writeFile(join(outputDir, VENDOR_SNAPSHOT_FILE), snapshot);
   await writeFile(join(outputDir, 'main.js'), bundle, 'utf8');
   await writeFile(join(outputDir, 'sources.json'), sourcesJson, 'utf8');
   await writeFile(
@@ -381,7 +386,7 @@ async function main(): Promise<void> {
   );
 
   const megabytes = (manifest.bundleBytes / 1024 / 1024).toFixed(2);
-  const snapshotMb = (snapshotBytes / 1024 / 1024).toFixed(2);
+  const snapshotMb = (manifest.snapshotBytes / 1024 / 1024).toFixed(2);
   console.log(
     `Wrote nodepod demo payload to ${outputDir} (${megabytes} MB bundle, ${snapshotMb} MB vendor snapshot, ${manifest.sourceFileCount} source files, revision ${revision})`,
   );

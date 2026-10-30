@@ -49,6 +49,12 @@ const PRUNED_FILES = [
   /\.(test|spec)\.[cm]?[jt]s$/
 ]
 
+/**
+ * Licence and notice files, whatever their extension. `LICENSE.md` and
+ * `LICENSE.txt` are prose to the rules above, so this is checked first.
+ */
+const LICENCE_FILE = /^(licen[cs]e|notice|copying)/i
+
 /** Is this entry inside a package and of no use to a running program? */
 function isPrunable(path: string) {
   // The innermost package, so a nested `node_modules` is judged on its own.
@@ -60,6 +66,10 @@ function isPrunable(path: string) {
 
   const segments = path.slice(index + '/node_modules/'.length).split('/')
   const name = segments[segments.length - 1]!
+
+  if (LICENCE_FILE.test(name)) {
+    return false
+  }
 
   // Skip the package's own name: only directories inside a package are
   // test directories, so a package that is itself called `test` survives.
