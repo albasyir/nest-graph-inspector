@@ -13,34 +13,62 @@ const fresh = {
   query: {},
   restoredEndpointUrl: '',
   canOpenRestoredSession: false,
-  demoFailed: false
+  isDemoActive: false
 }
 
-// A fresh tab opening the viewer is asking to see a graph: the demo starts.
-assert.deepEqual(resolveViewerLandingAction(fresh), { kind: 'start-demo' })
-
-// `autoload=false` keeps the landing card, and nothing else counts as false.
-assert.deepEqual(
-  resolveViewerLandingAction({ ...fresh, query: { autoload: 'false' } }),
-  { kind: 'manual' }
-)
-for (const autoload of ['true', '0', '', null, ['false']]) {
+// A fresh tab opening the viewer gets the landing card: the demo is the
+// visitor's to start, so nothing is downloaded or booted on arrival.
+assert.deepEqual(resolveViewerLandingAction(fresh), { kind: 'manual' })
+for (const autoload of ['true', 'false', '0', '', null, ['false']]) {
   assert.deepEqual(
     resolveViewerLandingAction({ ...fresh, query: { autoload } }),
-    { kind: 'start-demo' }
+    { kind: 'manual' }
   )
 }
 
-// A docs preview asks for the demo by name, over the opt-out and a session.
+// Nor does a demo already running in the tab pull the plain `/view` into it.
+assert.deepEqual(
+  resolveViewerLandingAction({ ...fresh, isDemoActive: true }),
+  { kind: 'manual' }
+)
+
+// A preview's "Open full-screen demo" joins the demo that preview is running or
+// starting, over the opt-out and a session for another graph…
+assert.deepEqual(
+  resolveViewerLandingAction({ ...fresh, query: { preview: 'true' }, isDemoActive: true }),
+  { kind: 'join-demo' }
+)
+assert.deepEqual(
+  resolveViewerLandingAction({
+    query: { preview: 'true', autoload: 'false' },
+    restoredEndpointUrl: OWN_ENDPOINT,
+    canOpenRestoredSession: true,
+    isDemoActive: true
+  }),
+  { kind: 'join-demo' }
+)
+
+// …but never boots one: with no demo in the tab it is the landing card, even
+// when the tab could go back to the visitor's own graph instead.
+assert.deepEqual(
+  resolveViewerLandingAction({ ...fresh, query: { preview: 'true' } }),
+  { kind: 'manual' }
+)
 assert.deepEqual(
   resolveViewerLandingAction({
     ...fresh,
-    query: { preview: 'true', autoload: 'false' },
+    query: { preview: 'true', trace: 'true' },
     restoredEndpointUrl: OWN_ENDPOINT,
     canOpenRestoredSession: true
   }),
-  { kind: 'start-demo' }
+  { kind: 'manual' }
 )
+for (const preview of ['false', '1', '', ['true']]) {
+  assert.deepEqual(
+    resolveViewerLandingAction({ ...fresh, query: { preview }, isDemoActive: true }),
+    { kind: 'manual' }
+  )
+}
 
 // A tab already on somebody's own graph goes back to it.
 assert.deepEqual(
@@ -63,7 +91,7 @@ for (const query of [{ trace: 'true' }, { 'execution-sequence': 'true' }]) {
   )
 }
 
-// The opt-out also holds a restored session back: "Try Another URL" lands here.
+// The opt-out holds a restored session back: "Try Another URL" lands here.
 assert.deepEqual(
   resolveViewerLandingAction({
     ...fresh,
@@ -82,34 +110,22 @@ assert.deepEqual(
     restoredEndpointUrl: OWN_ENDPOINT,
     canOpenRestoredSession: false
   }),
-  { kind: 'start-demo' }
-)
-
-// A restored demo session is recovered by starting the demo from here.
-assert.deepEqual(
-  resolveViewerLandingAction({
-    ...fresh,
-    restoredEndpointUrl: DEMO_ENDPOINT,
-    canOpenRestoredSession: true
-  }),
-  { kind: 'start-demo' }
-)
-
-// A demo that already failed in this tab is not started again on its own…
-assert.deepEqual(
-  resolveViewerLandingAction({ ...fresh, demoFailed: true }),
   { kind: 'manual' }
 )
-// …though a usable session of the visitor's own still opens.
-assert.deepEqual(
-  resolveViewerLandingAction({
-    ...fresh,
-    demoFailed: true,
-    restoredEndpointUrl: OWN_ENDPOINT,
-    canOpenRestoredSession: true
-  }),
-  { kind: 'open-session', path: '/view/navigator' }
-)
+
+// A restored demo session is never redirected, with or without a demo running:
+// the landing card is where the visitor starts or opens it.
+for (const isDemoActive of [false, true]) {
+  assert.deepEqual(
+    resolveViewerLandingAction({
+      ...fresh,
+      restoredEndpointUrl: DEMO_ENDPOINT,
+      canOpenRestoredSession: true,
+      isDemoActive
+    }),
+    { kind: 'manual' }
+  )
+}
 
 assert.equal(resolveViewerLandingPath({}), '/view/navigator')
 assert.equal(resolveViewerLandingPath({ trace: 'true' }), '/view/trace')

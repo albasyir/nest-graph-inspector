@@ -43,10 +43,10 @@ export function useGraphViewerPage() {
    * Whether the page is getting a graph on screen.
    *
    * Wider than the store's own load, and true from the first synchronous moment
-   * of it: a restored demo session has to have its application started again
-   * before there is an endpoint to load at all, and a page that called that
-   * "not loading" would render its empty state — and mount fetchers against the
-   * endpoint that just died — for as long as the start takes.
+   * of it: a restored demo session may have to wait for the demo this tab is
+   * still starting before there is an endpoint to load at all, and a page that
+   * called that "not loading" would render its empty state — and mount fetchers
+   * against the endpoint that just died — for as long as the start takes.
    */
   const isPreparing = ref(false)
   const isGraphLoading = computed(
@@ -76,10 +76,10 @@ export function useGraphViewerPage() {
 
   /**
    * Brings up everything the page needs: the stored session, the demo behind it
-   * where there is one, and the graph itself.
+   * where this tab is running one, and the graph itself.
    *
-   * Sends the visitor back to `/view` when there is no session to restore —
-   * there is nothing for a viewer page to show without one.
+   * Sends the visitor back to `/view` when there is nothing to show: no session
+   * to restore, or a demo session nothing in this tab answers any more.
    */
   async function loadGraphResources(loadSource: LoadSource, isRetry = false) {
     // Every request goes to the inspected application on the developer's own
@@ -99,7 +99,8 @@ export function useGraphViewerPage() {
 
     try {
       // The in-browser demo lives in the tab that started it, so a session
-      // restored without one has to start it again — on a new endpoint.
+      // restored without one cannot be shown here: the visitor starts the demo
+      // again from the `/view` landing card.
       const endpoint = await ensureEndpoint(restored)
 
       if (!endpoint) {

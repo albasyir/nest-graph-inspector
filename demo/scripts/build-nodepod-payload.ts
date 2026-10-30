@@ -35,6 +35,20 @@ const OPTIONAL_NEST_PEERS = [
 ];
 
 /**
+ * Packages provided inside the virtual container from the pre-cached
+ * vendor snapshot (3.05 MB gzipped) instead of being bundled ahead-of-time.
+ */
+const VENDOR_SNAPSHOT_PACKAGES = [
+  '@nestjs/common',
+  '@nestjs/core',
+  '@nestjs/platform-express',
+  'rxjs',
+  'reflect-metadata',
+];
+
+const VENDOR_SNAPSHOT_FILE = 'vendor-snapshot.json.gz';
+
+/**
  * Compiler options that only describe how this repository builds, and would
  * mean nothing to the copy of the sources that travels into the browser.
  */
@@ -237,10 +251,17 @@ async function readJsonFile(path: string): Promise<JsonObject> {
 
 /**
  * Digest identifying one build of the payload. It becomes the manifest's
- * revision, which is what keeps a cached bundle paired with its own sources.
+ * revision, which is what keeps a cached bundle paired with its own sources
+ * and vendor snapshot: a change to any of them changes it.
  */
-function sha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+function sha256(...parts: (string | Buffer)[]): string {
+  const hash = createHash('sha256');
+
+  for (const part of parts) {
+    hash.update(part);
+  }
+
+  return hash.digest('hex');
 }
 
 /**
@@ -270,17 +291,31 @@ async function buildPodTsConfig(
 
 /**
  * Builds the payload: bundles the compiled demo, collects its sources, and
- * writes the three files the site downloads into `site/public/nodepod-demo`.
+ * writes the four files the site downloads into `site/public/nodepod-demo`.
  */
 async function main(): Promise<void> {
   const repoDir = findRepoDir(process.cwd());
   const demoDir = join(repoDir, 'demo');
   const entryPath = join(demoDir, 'dist/src/main.js');
+  const snapshotSource = join(
+    repoDir,
+    'site/assets/nodepod-demo',
+    VENDOR_SNAPSHOT_FILE,
+  );
   const outputDir = join(repoDir, 'site/public/nodepod-demo');
 
   if (!existsSync(entryPath)) {
     throw new Error(
       `Compiled demo entry not found at ${entryPath}. Run "nest build" in demo/ first.`,
+    );
+  }
+
+  // The bundle leaves VENDOR_SNAPSHOT_PACKAGES external and only the snapshot
+  // supplies them, so a payload without it would build and then fail in the
+  // browser on its first require.
+  if (!existsSync(snapshotSource)) {
+    throw new Error(
+      `Vendor snapshot not found at ${snapshotSource}. Build it with "pnpm --filter nest-graph-inspector-site run build:raw-spike-snapshot".`,
     );
   }
 
@@ -290,7 +325,7 @@ async function main(): Promise<void> {
     platform: 'node',
     target: 'node20',
     format: 'cjs',
-    external: OPTIONAL_NEST_PEERS,
+    external: [...VENDOR_SNAPSHOT_PACKAGES, ...OPTIONAL_NEST_PEERS],
     banner: { js: RUNTIME_ACCOMMODATIONS },
     plugins: [demoDiscoveryFilterPlugin],
     write: false,
@@ -325,8 +360,9 @@ async function main(): Promise<void> {
     sources[key] = await readFile(path, 'utf8');
   }
 
+  const snapshot = await readFile(snapshotSource);
   const sourcesJson = `${JSON.stringify(sources, null, 2)}\n`;
-  const revision = sha256(`${bundle}${sourcesJson}`).slice(0, 12);
+  const revision = sha256(bundle, sourcesJson, snapshot).slice(0, 12);
   const manifest = {
     payloadVersion: 1,
     revision,
@@ -336,6 +372,8 @@ async function main(): Promise<void> {
     workdir: WORKDIR,
     entry: 'main.js',
     sources: 'sources.json',
+    snapshot: VENDOR_SNAPSHOT_FILE,
+    snapshotBytes: snapshot.byteLength,
     env: {
       NODE_ENV: 'development',
     },
@@ -345,6 +383,7 @@ async function main(): Promise<void> {
 
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, VENDOR_SNAPSHOT_FILE), snapshot);
   await writeFile(join(outputDir, 'main.js'), bundle, 'utf8');
   await writeFile(join(outputDir, 'sources.json'), sourcesJson, 'utf8');
   await writeFile(
@@ -353,9 +392,10 @@ async function main(): Promise<void> {
     'utf8',
   );
 
-  const megabytes = (manifest.bundleBytes / 1024 / 1024).toFixed(1);
+  const megabytes = (manifest.bundleBytes / 1024 / 1024).toFixed(2);
+  const snapshotMb = (manifest.snapshotBytes / 1024 / 1024).toFixed(2);
   console.log(
-    `Wrote nodepod demo payload to ${outputDir} (${megabytes} MB bundle, ${manifest.sourceFileCount} source files, revision ${revision})`,
+    `Wrote nodepod demo payload to ${outputDir} (${megabytes} MB bundle, ${snapshotMb} MB vendor snapshot, ${manifest.sourceFileCount} source files, revision ${revision})`,
   );
 }
 

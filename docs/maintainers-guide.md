@@ -476,7 +476,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `TraceWaterfall.vue` | The trace page: Direct Run trace history, each trace a waterfall of timed, nested spans, with re-run for provider spans |
 | `ExecutionSequence.vue` | Deprecated alias for `TraceWaterfall`, kept from before the rename; renders it with every prop and event passed through |
 | `GraphInspectorUpdateModal.vue` | Modal shown when the graph version is unsupported |
-| `NodepodDemoErrorDialog.vue` | Mounted once for the whole app; reports a demo that would not start, with what the application printed before it stopped |
+| `NodepodDemoErrorDialog.vue` | Mounted once for the whole app; reports a demo that would not start in the store's own words (the application's output is never shown) and offers to start it again |
 | `JsonMonacoEditor.client.vue` | Monaco editor (client-only) for JSON viewing |
 | `AppHeader.vue` / `AppFooter.vue` / `AppLogo.vue` | Layout chrome |
 | `PageHeaderLinks.vue` | Links in page headers |
@@ -511,7 +511,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | `useMobileDevice.ts` | Whether the AI chat treats this tab as mobile, kept current as the window changes. The device class is `useDevice()` from `@nuxtjs/device`, called once in setup; it adds an iPad posing as a Mac and a window narrower than 768px, and answers `false` until mounted so a hydrated page agrees with its server render |
 | `useGraphAgent.ts` | Agent mode as the panel sees it: the `isRunning` flag and the dynamic `import()` that keeps `langchain` out of the prerendered server bundle. The loop itself is `~/utils/graph-agent-run`, which is testable without a browser |
 | `use-nodepod-demo-graph.ts` | Starts the in-browser demo when a docs preview asks for it, and exposes the graph, status label, and idle state that preview needs |
-| `use-nodepod-demo-session.ts` | Restarts the in-browser demo behind a restored session, because its endpoint is only answerable by the tab that started it |
+| `use-nodepod-demo-session.ts` | Reuses the in-browser demo the tab is running (or starting) behind a restored session; a session nothing answers any more — its endpoint is only answerable by the tab that started it — is forgotten and the visitor sent to `/view`. A viewer page never starts the demo |
 
 **What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
 
@@ -539,7 +539,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|---|
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
-| `view/index.vue` | `/view` | Graph viewer entry; starts the in-browser demo on arrival (Cancel or `?autoload=false` keeps the landing card and polls for a live endpoint), or returns a tab with a usable session to its graph |
+| `view/index.vue` | `/view` | Graph viewer entry; shows the landing card and polls for a live endpoint, and starts the in-browser demo only when "Open Demo" is clicked (with a Cancel). `?preview=true` joins a demo already running in the tab and never boots one; a tab with a usable session returns to its graph unless `?autoload=false` |
 | `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
 | `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
@@ -761,13 +761,13 @@ resolves the import graph itself.
 
 #### `site/public/nodepod-demo/`
 
-**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews in the docs pages and the demo `/view` opens on arrival — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
+**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews on the landing page and the demo `/view` opens when the visitor asks for it — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
 
 **Contents:**
 
 | File | Role |
 |---|---|
-| `main.js` | The demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GraphOutput } from 'nest-graph-inspector'
 
-const { demo, graph, isIdle, statusLabel, start } = useNodepodDemoGraph()
+const { demo, graph, isIdle, hasError, statusLabel, start, retry } = useNodepodDemoGraph()
 
 /**
  * The section is about one provider, so the preview keeps that provider and
@@ -71,9 +71,40 @@ function openTrace() {
           v-else
           class="relative"
         >
-          <USkeleton class="h-80 w-full rounded-none" />
+          <USkeleton
+            class="h-80 w-full rounded-none"
+            :class="{ 'animate-none': hasError }"
+          />
           <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
-            <template v-if="isIdle">
+            <div
+              v-if="hasError"
+              role="alert"
+              class="flex max-w-sm flex-col items-center gap-3"
+            >
+              <UIcon
+                name="i-lucide-circle-alert"
+                class="size-6 text-error"
+                aria-hidden="true"
+              />
+              <p class="text-sm text-highlighted">
+                The live demo could not load.
+              </p>
+              <p
+                v-if="statusLabel"
+                class="text-sm text-muted text-pretty"
+              >
+                {{ statusLabel }}
+              </p>
+              <UButton
+                icon="i-lucide-refresh-cw"
+                label="Try again"
+                color="neutral"
+                variant="subtle"
+                class="cursor-pointer"
+                @click="retry"
+              />
+            </div>
+            <template v-else-if="isIdle">
               <UButton
                 icon="i-lucide-play"
                 label="Run the demo application"
@@ -87,12 +118,21 @@ function openTrace() {
                 Direct Run has something real to call.
               </p>
             </template>
-            <p
+            <div
               v-else
-              class="text-sm text-muted"
+              role="status"
+              aria-live="polite"
+              class="flex flex-col items-center gap-3"
             >
-              {{ statusLabel }}
-            </p>
+              <UIcon
+                name="i-lucide-loader-2"
+                class="size-6 animate-spin text-primary"
+                aria-hidden="true"
+              />
+              <p class="text-sm text-muted tabular-nums">
+                {{ statusLabel }}
+              </p>
+            </div>
           </div>
         </div>
 

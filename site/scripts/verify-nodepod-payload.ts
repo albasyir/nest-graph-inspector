@@ -22,6 +22,7 @@ import {
   readViewerLinkEndpoint,
   redactViewerLinks
 } from '../app/utils/nodepod-demo-endpoint.ts'
+import { decodeRawSpikeSnapshot } from '../app/utils/raw-nestjs-spike.ts'
 
 /**
  * Ceiling on the bundled application, so a dependency that doubles what every
@@ -37,6 +38,8 @@ type Manifest = {
   workdir: string
   entry: string
   sources: string
+  snapshot?: string
+  snapshotBytes?: number
   env: Record<string, string>
   bundleBytes: number
 }
@@ -85,10 +88,19 @@ for (const [path, content] of Object.entries(sources)) {
 
 const startedAt = Date.now()
 const pod = await Nodepod.boot({
-  files,
   workdir: manifest.workdir,
   env: { ...manifest.env, ____DEV_VIEWER_BASE_URL: 'http://localhost:3000' }
 })
+
+if (manifest.snapshot) {
+  const snapshotData = await readFile(join(payloadDir, manifest.snapshot))
+  const { snapshot } = await decodeRawSpikeSnapshot(snapshotData)
+  await pod.restore({ entries: snapshot.entries }, { autoInstall: false })
+}
+
+for (const [path, content] of Object.entries(files)) {
+  await pod.fs.writeFile(path, content)
+}
 
 let log = ''
 let exitCode: number | undefined

@@ -11,6 +11,10 @@ const props = withDefaults(defineProps<{
   showBrightLine?: BooleanProp
   collapsedModules?: ModuleListProp
   caption?: string
+  interactive?: BooleanProp
+  autoload?: BooleanProp
+  showControls?: BooleanProp
+  showMiniMap?: BooleanProp
 }>(), {
   previewId: undefined,
   fixBightline: false,
@@ -19,7 +23,11 @@ const props = withDefaults(defineProps<{
   showCircularDependencies: true,
   showBrightLine: true,
   collapsedModules: () => [],
-  caption: 'Live graph of the demo application running in your browser.'
+  caption: 'Live graph of the demo application running in your browser.',
+  interactive: true,
+  autoload: true,
+  showControls: false,
+  showMiniMap: false
 })
 
 function parseBooleanProp(value: BooleanProp | undefined, fallback: boolean) {
@@ -47,6 +55,11 @@ const shouldShowBrightLine = computed(() =>
   parseBooleanProp(props.showBrightLine, true)
 )
 
+const isInteractive = computed(() => parseBooleanProp(props.interactive, true))
+const shouldAutoload = computed(() => parseBooleanProp(props.autoload, true))
+const shouldShowControls = computed(() => parseBooleanProp(props.showControls, false))
+const shouldShowMiniMap = computed(() => parseBooleanProp(props.showMiniMap, false))
+
 const previewCaption = computed(() => {
   if (fixedBrightLineLabel.value) {
     return null
@@ -69,7 +82,10 @@ const fixedBrightLineLabel = computed(() => {
   return 'UserRepository'
 })
 
-const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
+// Read once: whether to start on mount is decided when the preview mounts.
+const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodepodDemoGraph({
+  autoload: shouldAutoload.value
+})
 </script>
 
 <template>
@@ -80,7 +96,9 @@ const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
         :data="graph"
         :flow-id="viewerFlowId"
         :height="props.height"
-        :interactive="false"
+        :interactive="isInteractive"
+        :show-controls="shouldShowControls"
+        :show-mini-map="shouldShowMiniMap"
         :fix-bightline="props.fixBightline"
         :exclude-modules="props.excludeModules"
         :collapsed-modules="props.collapsedModules"
@@ -94,10 +112,39 @@ const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
       >
         <USkeleton
           class="runtime-graph-preview__skeleton w-full rounded-xl"
+          :class="{ 'animate-none': hasError }"
           :style="{ height: props.height }"
         />
         <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
-          <template v-if="isIdle">
+          <div
+            v-if="hasError"
+            role="alert"
+            class="flex max-w-sm flex-col items-center gap-3"
+          >
+            <UIcon
+              name="i-lucide-circle-alert"
+              class="size-6 text-error"
+              aria-hidden="true"
+            />
+            <p class="text-sm text-highlighted">
+              The live demo could not load.
+            </p>
+            <p
+              v-if="statusLabel"
+              class="text-sm text-muted text-pretty"
+            >
+              {{ statusLabel }}
+            </p>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              label="Try again"
+              color="neutral"
+              variant="subtle"
+              class="cursor-pointer"
+              @click="retry"
+            />
+          </div>
+          <template v-else-if="isIdle">
             <UButton
               icon="i-lucide-play"
               label="Run the demo application"
@@ -111,12 +158,21 @@ const { graph, isReady, isIdle, statusLabel, start } = useNodepodDemoGraph()
               graphs it live.
             </p>
           </template>
-          <p
+          <div
             v-else
-            class="text-sm text-muted"
+            role="status"
+            aria-live="polite"
+            class="flex flex-col items-center gap-3"
           >
-            {{ statusLabel }}
-          </p>
+            <UIcon
+              name="i-lucide-loader-2"
+              class="size-6 animate-spin text-primary"
+              aria-hidden="true"
+            />
+            <p class="text-sm text-muted tabular-nums">
+              {{ statusLabel }}
+            </p>
+          </div>
         </div>
       </div>
 

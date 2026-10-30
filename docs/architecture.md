@@ -620,8 +620,8 @@ instead of shared across every tab in the browser.
 
 The token never goes back into a URL: it lives in the Pinia store and leaves
 only as the `x-graph-inspector-token` header, added by a `$fetch` instance that
-reads it per request. `probeEndpoint` — used by the `/view` entry page to guess
-at a local inspector when it is not starting the demo — pointedly does *not* use that authenticated fetch, so
+reads it per request. `probeEndpoint` — used by the `/view` landing card to guess
+at a local inspector — pointedly does *not* use that authenticated fetch, so
 probing a host never hands it a live credential for another one.
 
 The viewer pages are `navigator` (the Vue Flow graph), `issues` (architecture
@@ -663,22 +663,23 @@ hover" in the graph settings panel turns it off.
 
 ### 3. The in-browser demo
 
-Everything the site shows as a demo — the previews in the documentation pages,
-and the demo `/view` opens on arrival — is the `demo/` application actually running, on
+Everything the site shows as a demo — the previews on the landing page, and the
+demo `/view` opens when the visitor asks for it — is the `demo/` application actually running, on
 the [nodepod](https://www.npmjs.com/package/@scelar/nodepod) browser-native
 Node.js runtime, in the visitor's own tab. Nothing is captured ahead of time:
 Direct Run really invokes provider and controller methods, runtime traces
 really accumulate, and the JSDoc and parameter types in the graph come from
 the sources of the application that is answering.
 
-**The payload.** `demo/scripts/build-nodepod-payload.ts` writes three files
+**The payload.** `demo/scripts/build-nodepod-payload.ts` writes these files
 into `site/public/nodepod-demo/`:
 
 | File | What it is |
 |---|---|
-| `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped); the NestJS runtime packages (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `rxjs`, `reflect-metadata`) are left external and supplied by the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
+| `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.05 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
 
 **Two constraints shape this design.**
 
@@ -713,10 +714,15 @@ generates the site runs it right after building the payload.
 **Boot sequence.**
 
 ```
-1. The visitor asks: "Run the demo application" in a docs preview, or opens
-   /view, which starts it on arrival (see below)
-2. nodepod-demo store downloads manifest.json, main.js, and sources.json
-3. Nodepod.boot({ files, workdir, env, headless: true })
+1. A preview on the landing page (/) mounts and starts it on its own, or the
+   visitor asks for it: "Run the demo application" in a preview with autoload
+   off, or "Open Demo" on the /view landing card. /view and the pages under it
+   never start it on arrival (see below)
+2. nodepod-demo store downloads manifest.json, main.js, sources.json, and the
+   vendor snapshot
+3. Nodepod.boot({ workdir, env, headless: true }) boots a pod with no files;
+   the vendor snapshot is restored into it, which replaces the pod's whole
+   volume, and only then are main.js and the sources written into the workdir
 4. The fetch bridge is installed for <site base>/__nodepod__/<port>/…
 5. pod.spawn('node', ['main.js']) → the NestJS application starts
 6. The store reads the printed viewer link out of the application's own startup
@@ -727,36 +733,52 @@ generates the site runs it right after building the payload.
    the graph through the same HTTP contract as any other endpoint
 ```
 
-Downloading an application and booting a Node runtime is not something a page
-should do because it was scrolled past, so every docs preview waits for a
-click. `/view` is the one exception, because opening the viewer is itself the
-request to see a graph: on arrival it starts the demo, behind a loading card
-with a Cancel that stops the pod and falls back to the landing card. Three
-things come first, decided by `resolveViewerLandingAction`
-(`app/utils/viewer-landing.ts`): `?autoload=false` keeps the landing card and
-its local-inspector polling — the viewer's "Try Another URL" links there; a
-tab whose session names the visitor's own application, with a token the
-viewer would accept, goes straight back to `/view/navigator` (`/view/trace`
-with `?trace=true` or `?execution-sequence=true`); and a demo that already
-failed in the tab is not started again until the visitor retries. A restored
-*demo* session is not redirected but started from `/view`, so a failed restart
-lands on the landing card instead of bouncing between `/view` and the viewer.
-`/view` always hands off with a history replace, so Back from the viewer does
-not return to a page that would only send the visitor forward again. One pod then serves every preview on the page and
-the viewer, so the payload is downloaded and the application booted once for as
-long as it keeps running. A failure opens one dialog, wherever it was started
-from, carrying what the application itself printed; the retry it offers, and
-the recovery below, are what boot another one.
+The landing page's previews start the demo on their own, and they are the only
+thing that does. Downloading an application and booting a Node runtime used to
+be too heavy for a page to do because it was scrolled past, but the NestJS
+runtime packages now arrive as the prebuilt vendor snapshot restored straight
+into the pod rather than installed from npm — and the landing page (`/`) opens
+on the live graph instead of a button.
+Measured on a local static build in Chromium: pod boot and snapshot restore
+take ~1.0 s, the runtime is ready to spawn ~2.2 s after navigation, and the
+live graph arrives at ~11.6 s, most of it the NestJS application starting from
+`main.js`. `useNodepodDemoGraph` (`app/composables/`) starts it from
+`onMounted`, never during server rendering, so the page's text renders and
+stays readable while the preview shows a spinner and the store's status over a
+skeleton; a demo that already failed in the tab is not started again until the
+visitor retries, from the preview's inline error or the dialog. A preview
+given `autoload: false` (`RuntimeGraphPreview`'s `autoload` prop) waits for a
+click instead. `/view` never starts the demo on arrival: it opens on the
+landing card and its local-inspector polling, and starts the demo when the
+visitor clicks "Open Demo" — behind a loading card with a Cancel that stops the
+pod and falls back to the landing card. Two things move on without a click,
+decided by `resolveViewerLandingAction` (`app/utils/viewer-landing.ts`):
+`?preview=true` — a preview's "Open full-screen demo" link — joins the demo that
+preview is already running or starting in the tab and opens the viewer on it,
+and shows the landing card when there is no demo to join; and a tab whose
+session names the visitor's own application, with a token the viewer would
+accept, goes straight back to `/view/navigator` (`/view/trace` with
+`?trace=true` or `?execution-sequence=true`) unless `?autoload=false` holds it
+back — the viewer's "Try Another URL" links there. A restored *demo* session is
+never redirected. `/view` always hands off with a history replace, so Back from
+the viewer does not return to a page that would only send the visitor forward
+again. One pod then serves every preview on the page and the viewer, so the
+payload is downloaded and the application booted once for as long as it keeps
+running. A failure opens one dialog, wherever it was started from, saying what
+went wrong in the store's own words — the application's output is never shown;
+the retry it offers boots another one.
 
 A reload restores the endpoint from the tab's session (a viewer page names a
 view, not a graph) — and for the demo that endpoint is answerable only by the
 tab that started it. `use-nodepod-demo-session.ts` recognises such an endpoint
-and starts the demo again, which means a new port and a new token, so it
-replaces the session rather than reusing it. A token the endpoint has begun refusing —
-the demo's expires on the library's own schedule, and a tab left open outlives
-it — is recovered the same way, except that the application behind it is still
-running, so it is stopped first: joining it would only hand back the credential
-that was just refused.
+and never starts the demo to answer it: it forgets the session and sends the
+visitor to the `/view` landing card, where "Open Demo" boots a fresh demo with
+a fresh token. A demo still running or starting in the tab is reused instead. A
+token the endpoint has begun refusing — the demo's expires on the library's own
+schedule, and a tab left open outlives it — is handled the same way, except
+that the application behind it is still running, so it is stopped as well:
+"Open Demo" would otherwise join it and hand back the credential that was just
+refused.
 
 **What the payload build accommodates.** The bundle is prepended with a few
 lines the application never sees, because the browser runtime differs from Node
@@ -783,12 +805,14 @@ Known limitations, accepted deliberately:
 
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
-- The payload is a few megabytes, downloaded once per visit.
+- The payload is a few megabytes, downloaded once per visit — and, since the
+  landing page's previews start the demo on mount, on every visit to `/`,
+  whether or not the visitor scrolls to a preview.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
-  that graph while every new request to it fails; the exit line in the demo
-  console is the only signal.
+  that graph while every new request to it fails, and nothing on screen says
+  why: the application's output is never shown.
 
 ### 4. The AI chat, which runs entirely in the browser
 
@@ -999,3 +1023,11 @@ Facts a code change can invalidate, and the file to check:
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
 - Which controller methods permissive Direct Run resolves —
   `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`
+- Demo bundle size `~13.9 MB`, `~2.2 MB` gzipped —
+  `site/public/nodepod-demo/main.js`, written by
+  `demo/scripts/build-nodepod-payload.ts`
+- Vendor snapshot size `~3.05 MB` gzipped —
+  `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
+  `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
+  `demo/scripts/build-nodepod-payload.ts` and
+  `site/app/composables/use-nodepod-demo-graph.ts`

@@ -4,8 +4,7 @@ import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
-  readViewerLinkEndpoint,
-  redactViewerLinks
+  readViewerLinkEndpoint
 } from '~/utils/nodepod-demo-endpoint'
 import {
   accessTokenHeaders,
@@ -34,6 +33,8 @@ type DemoManifest = {
   workdir: string
   entry: string
   sources: string
+  snapshot?: string
+  snapshotBytes?: number
   env: Record<string, string>
   bundleBytes: number
   sourceFileCount: number
@@ -60,7 +61,6 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const errorMessage = ref('')
   const downloadedBytes = ref(0)
   const totalBytes = ref(0)
-  const logLines = ref<string[]>([])
   const manifest = ref<DemoManifest | null>(null)
   /** Graph endpoint of the running application, never carrying a token. */
   const endpointUrl = ref('')
@@ -73,9 +73,22 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
   let pod: Nodepod | undefined
   let startPromise: Promise<boolean> | undefined
-  let graphPromise: Promise<GraphOutput | null> | undefined
+  /**
+   * The graph request every preview shares. Held in a ref rather than a plain
+   * variable so {@link isLoadingGraph} can follow it: between the application
+   * reporting `ready` and its graph arriving, nothing else says a request is
+   * still in flight.
+   */
+  const graphPromise = shallowRef<Promise<GraphOutput | null>>()
+  /** Cancels the graph request in {@link graphPromise}, for {@link stop}. */
+  let graphRequest: AbortController | undefined
   let bridgedFetch: FetchLike | undefined
   let originalFetch: FetchLike | undefined
+  /**
+   * What the application printed, kept only to read its viewer link from and
+   * never shown: the visitor sees the store's status and error messages.
+   */
+  let logLines: string[] = []
   let logBuffer = ''
   let exitCode: number | undefined
   /**
@@ -86,25 +99,15 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    */
   const runs = createNodepodDemoRunGuard()
 
-  /**
-   * The application's output as it may be shown and copied.
-   *
-   * The startup card and the error dialog put these lines on screen, and a
-   * visitor reporting a problem copies them out of there. The link the
-   * inspector prints carries the access token base64url-encoded inside it, so
-   * a log on its way to a screenshot or a bug report goes through the same
-   * redaction the CI check uses.
-   *
-   * Redacted here rather than on the way in: {@link waitForEndpoint} reads the
-   * endpoint back out of the raw log, and a redacted one has none to read.
-   */
-  const consoleLines = computed(() => logLines.value.map(redactViewerLinks))
-
   const isRunning = computed(() => status.value === 'ready')
   const isBusy = computed(
     () => status.value === 'downloading'
       || status.value === 'booting'
       || status.value === 'starting'
+  )
+  /** The graph has been asked for and has neither arrived nor failed yet. */
+  const isLoadingGraph = computed(
+    () => Boolean(graphPromise.value) && !graphOutput.value
   )
   /** Direct-run endpoint of the running application, and what authenticates it. */
   const directRunUrl = computed(() => resolveDirectRunUrl(endpointUrl.value, false))
@@ -161,7 +164,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * URL of one file in the published payload.
    *
    * The revision from the manifest is carried as a query parameter so a cached
-   * bundle is never paired with the sources of a different build.
+   * bundle is never paired with the sources or vendor snapshot of a different
+   * build; the payload build derives it from all three.
    */
   function payloadUrl(fileName: string, revision?: string) {
     const url = new URL(`nodepod-demo/${fileName}`, siteBaseUrl())
@@ -174,7 +178,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   }
 
   /**
-   * Adds a chunk of application output to the log shown in the startup card.
+   * Adds a chunk of application output to the log the viewer link is read from.
    *
    * The runtime hands over whatever it has, which may stop mid-line, so a
    * trailing partial line is held back until the rest of it arrives. Only the
@@ -190,8 +194,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       return
     }
 
-    const next = [...logLines.value, ...lines]
-    logLines.value = next.slice(Math.max(0, next.length - MAX_LOG_LINES))
+    const next = [...logLines, ...lines]
+    logLines = next.slice(Math.max(0, next.length - MAX_LOG_LINES))
   }
 
   /**
@@ -241,13 +245,15 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     // size on the wire, which is the compressed one wherever the host
     // compresses, and counting decompressed bytes against it reads as done
     // long before it is.
-    const declaredLength = Number(response.headers.get('content-length'))
-    totalBytes.value = expectedBytes
-      || (Number.isFinite(declaredLength) ? declaredLength : 0)
+    if (!totalBytes.value) {
+      const declaredLength = Number(response.headers.get('content-length'))
+      totalBytes.value = expectedBytes
+        || (Number.isFinite(declaredLength) ? declaredLength : 0)
+    }
 
     if (!response.body) {
       const text = await response.text()
-      downloadedBytes.value = text.length
+      downloadedBytes.value += text.length
 
       return text
     }
@@ -268,6 +274,49 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     }
 
     return text + decoder.decode()
+  }
+
+  /**
+   * Reads the prebuilt vendor snapshot as a byte buffer.
+   */
+  async function fetchSnapshot(url: string): Promise<ArrayBuffer> {
+    const response = await fetch(url, { cache: 'force-cache' })
+
+    if (!response.ok) {
+      throw new Error(`Could not download the vendor snapshot (${response.status}).`)
+    }
+
+    if (!response.body) {
+      const buffer = await response.arrayBuffer()
+      downloadedBytes.value += buffer.byteLength
+
+      return buffer
+    }
+
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let received = 0
+
+    for (;;) {
+      const { done, value } = await reader.read()
+
+      if (done) {
+        break
+      }
+
+      chunks.push(value)
+      received += value.byteLength
+      downloadedBytes.value += value.byteLength
+    }
+
+    const combined = new Uint8Array(received)
+    let offset = 0
+    for (const chunk of chunks) {
+      combined.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+
+    return combined.buffer
   }
 
   /**
@@ -389,7 +438,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       }
 
       const endpoint = readViewerLinkEndpoint(
-        [...logLines.value, logBuffer].join('\n')
+        [...logLines, logBuffer].join('\n')
       )
 
       if (endpoint) {
@@ -433,7 +482,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     status.value = 'downloading'
     errorMessage.value = ''
-    logLines.value = []
+    logLines = []
     logBuffer = ''
     exitCode = undefined
     downloadedBytes.value = 0
@@ -447,24 +496,23 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     manifest.value = demoManifest
 
-    const [bundle, sources] = await Promise.all([
+    totalBytes.value = demoManifest.bundleBytes + (demoManifest.snapshotBytes ?? 0)
+
+    const [bundle, sources, snapshotData] = await Promise.all([
       fetchBundle(
         payloadUrl(demoManifest.entry, demoManifest.revision),
         demoManifest.bundleBytes
       ),
-      fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision))
+      fetchSources(payloadUrl(demoManifest.sources, demoManifest.revision)),
+      demoManifest.snapshot
+        ? fetchSnapshot(
+            payloadUrl(demoManifest.snapshot, demoManifest.revision)
+          )
+        : Promise.resolve(null)
     ])
 
     if (!isCurrentRun()) {
       return false
-    }
-
-    const files: Record<string, string> = {
-      [`${demoManifest.workdir}/${demoManifest.entry}`]: bundle
-    }
-
-    for (const [path, content] of Object.entries(sources)) {
-      files[`${demoManifest.workdir}/${path}`] = content
     }
 
     status.value = 'booting'
@@ -472,13 +520,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     const { Nodepod: NodepodRuntime } = await import('@scelar/nodepod')
 
     const booted = await NodepodRuntime.boot({
-      files,
       workdir: demoManifest.workdir,
       env: {
         ...demoManifest.env,
         /**
          * The application prints its viewer link with this base, so the link
-         * in the demo console is a link into the site the visitor is on.
+         * it logs points into the site the visitor is on.
          */
         ____DEV_VIEWER_BASE_URL: siteBaseUrl().replace(/\/+$/, '')
       },
@@ -505,6 +552,36 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       booted.teardown()
 
       return false
+    }
+
+    // Until it is published as `pod`, this run is the only thing holding the
+    // pod, and disposePod() cannot reach it: a failure here tears it down
+    // before passing the error on, or it would be left running.
+    try {
+      if (snapshotData) {
+        const { decodeRawSpikeSnapshot } = await import('~/utils/raw-nestjs-spike')
+        const { snapshot } = await decodeRawSpikeSnapshot(snapshotData)
+        await booted.restore({ entries: snapshot.entries }, { autoInstall: false })
+      }
+
+      if (!isCurrentRun()) {
+        booted.teardown()
+
+        return false
+      }
+
+      await booted.fs.writeFile(
+        `${demoManifest.workdir}/${demoManifest.entry}`,
+        bundle
+      )
+
+      for (const [path, content] of Object.entries(sources)) {
+        await booted.fs.writeFile(`${demoManifest.workdir}/${path}`, content)
+      }
+    } catch (error) {
+      booted.teardown()
+
+      throw error
     }
 
     pod = booted
@@ -614,12 +691,29 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * that asks for it.
    */
   function loadGraphOutput(): Promise<GraphOutput | null> {
-    graphPromise ??= start()
+    if (graphPromise.value) {
+      return graphPromise.value
+    }
+
+    // A stop() aborts this request, and a newer one replaces it. Either way it
+    // no longer speaks for the store: a request failing because its pod was
+    // torn down is not the demo failing, and must not open the error dialog or
+    // overwrite what the request after it reports.
+    const controller = new AbortController()
+    graphRequest = controller
+    const isCurrent = () =>
+      !controller.signal.aborted && graphPromise.value === request
+
+    const request: Promise<GraphOutput | null> = start()
       .then(async (started) => {
+        if (!isCurrent()) {
+          return null
+        }
+
         if (!started) {
           // Remembering a failed start would leave every preview mounted
           // afterwards looking at a cached null, even once the demo runs.
-          graphPromise = undefined
+          graphPromise.value = undefined
 
           return null
         }
@@ -628,7 +722,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
         url.pathname = `${url.pathname.replace(/\/+$/, '')}/output.json`
 
         const response = await fetch(url.toString(), {
-          headers: requestHeaders.value
+          headers: requestHeaders.value,
+          signal: controller.signal
         })
 
         if (!response.ok) {
@@ -637,11 +732,21 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
           )
         }
 
-        graphOutput.value = (await response.json()) as GraphOutput
+        const output = (await response.json()) as GraphOutput
+
+        if (!isCurrent()) {
+          return null
+        }
+
+        graphOutput.value = output
 
         return graphOutput.value
       })
       .catch((error: unknown) => {
+        if (!isCurrent()) {
+          return null
+        }
+
         if (status.value !== 'error') {
           status.value = 'error'
           errorMessage.value = error instanceof Error
@@ -649,12 +754,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
             : 'The demo graph could not be read.'
         }
 
-        graphPromise = undefined
+        graphPromise.value = undefined
 
         return null
       })
 
-    return graphPromise
+    graphPromise.value = request
+
+    return request
   }
 
   /**
@@ -678,13 +785,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     runs.supersede()
   }
 
-  /**
-   * Puts the demo back to waiting after a failure has been read.
-   *
-   * The logs stay: the dialog that showed them is the only place the visitor
-   * could have seen what the application said, and reopening it should not
-   * come back empty.
-   */
+  /** Puts the demo back to waiting after a failure has been read. */
   function dismissError() {
     if (status.value === 'error') {
       status.value = 'idle'
@@ -700,31 +801,34 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * be shown.
    */
   function stop() {
+    graphRequest?.abort()
+    graphRequest = undefined
     disposePod()
     startPromise = undefined
-    graphPromise = undefined
+    graphPromise.value = undefined
     graphOutput.value = null
     status.value = 'idle'
   }
 
   /**
-   * Replaces the running application with a freshly booted one.
+   * Waits for the demo application this tab is already running or starting,
+   * and never boots one: resolves to whether it is up, and to `false` straight
+   * away when nothing was started.
    *
-   * A pod whose token the endpoint has begun refusing is as unusable as a pod
-   * that is gone, and {@link start} would hand the running one straight back,
-   * so recovering means stopping first — the boot after that mints a new token
-   * on a new port.
+   * For the pages that may only reuse the demo — `/view` and the viewer pages
+   * below it — so that asking for it can never be what starts it.
    */
-  function restart(): Promise<boolean> {
-    stop()
+  function join(): Promise<boolean> {
+    if (status.value === 'ready') {
+      return Promise.resolve(true)
+    }
 
-    return start()
+    return startPromise ?? Promise.resolve(false)
   }
 
   return {
     status,
     errorMessage,
-    consoleLines,
     manifest,
     endpointUrl,
     accessToken,
@@ -733,12 +837,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     directRunUrl,
     isRunning,
     isBusy,
+    isLoadingGraph,
     statusLabel,
     downloadedBytes,
     totalBytes,
     downloadProgress,
     start,
-    restart,
+    join,
     loadGraphOutput,
     dismissError,
     stop

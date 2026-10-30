@@ -11,7 +11,7 @@ const ANSI_PATTERN = /\u001b\[[0-9;]*m/g
 
 /**
  * Removes the colour codes the application writes around its log lines, so the
- * text can be matched against and shown in the startup card as it is.
+ * text can be matched against as it is.
  */
 export function stripAnsi(value: string): string {
   return value.replace(ANSI_PATTERN, '')
