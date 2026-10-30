@@ -679,7 +679,7 @@ into `site/public/nodepod-demo/`:
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped); the NestJS runtime packages (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `rxjs`, `reflect-metadata`) are left external and supplied by the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
-| `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.03 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
+| `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.05 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
 
 **Two constraints shape this design.**
 
@@ -740,16 +740,15 @@ vendor snapshot restored straight into the pod rather than installed from npm
 Measured on a local static build in Chromium: pod boot and snapshot restore
 take ~1.0 s, the runtime is ready to spawn ~2.2 s after navigation, and the
 live graph arrives at ~11.6 s, most of it the NestJS application starting from
-`main.js`. `useNodepodDemoGraph` (`app/composables/`) starts
-it from `onMounted`, never during server rendering, so the page's text renders
-and stays readable while the preview shows a spinner and the store's status
-over a skeleton; a demo that already failed in the tab is not started again
-until the visitor retries, from the preview's inline error or the dialog. A
-preview given `autoload: false` (`RuntimeGraphPreview`'s `autoload` prop)
-waits for a click instead. `/view` starts the demo on arrival too, because
-opening the viewer is itself the request to see a graph: it does so behind a
-loading card with a Cancel that stops the pod and falls back to the landing
-card. Three
+`main.js`. `useNodepodDemoGraph` (`app/composables/`) starts it from
+`onMounted`, never during server rendering, so the page's text renders and
+stays readable while the preview shows a spinner and the store's status over a
+skeleton; a demo that already failed in the tab is not started again until the
+visitor retries, from the preview's inline error or the dialog. A preview
+given `autoload: false` (`RuntimeGraphPreview`'s `autoload` prop) waits for a
+click instead. `/view` starts the demo on arrival too, because opening the
+viewer is itself the request to see a graph: it does so behind a loading card
+with a Cancel that stops the pod and falls back to the landing card. Three
 things come first, decided by `resolveViewerLandingAction`
 (`app/utils/viewer-landing.ts`): `?autoload=false` keeps the landing card and
 its local-inspector polling — the viewer's "Try Another URL" links there; a
@@ -760,11 +759,12 @@ failed in the tab is not started again until the visitor retries. A restored
 *demo* session is not redirected but started from `/view`, so a failed restart
 lands on the landing card instead of bouncing between `/view` and the viewer.
 `/view` always hands off with a history replace, so Back from the viewer does
-not return to a page that would only send the visitor forward again. One pod then serves every preview on the page and
-the viewer, so the payload is downloaded and the application booted once for as
-long as it keeps running. A failure opens one dialog, wherever it was started
-from, carrying what the application itself printed; the retry it offers, and
-the recovery below, are what boot another one.
+not return to a page that would only send the visitor forward again. One pod
+then serves every preview on the page and the viewer, so the payload is
+downloaded and the application booted once for as long as it keeps running. A
+failure opens one dialog, wherever it was started from, carrying what the
+application itself printed; the retry it offers, and the recovery below, are
+what boot another one.
 
 A reload restores the endpoint from the tab's session (a viewer page names a
 view, not a graph) — and for the demo that endpoint is answerable only by the
@@ -1022,7 +1022,7 @@ Facts a code change can invalidate, and the file to check:
 - Demo bundle size `~13.9 MB`, `~2.2 MB` gzipped —
   `site/public/nodepod-demo/main.js`, written by
   `demo/scripts/build-nodepod-payload.ts`
-- Vendor snapshot size `~3.03 MB` gzipped —
+- Vendor snapshot size `~3.05 MB` gzipped —
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
   `demo/scripts/build-nodepod-payload.ts` and

@@ -36,7 +36,7 @@ const OPTIONAL_NEST_PEERS = [
 
 /**
  * Packages provided inside the virtual container from the pre-cached
- * 3.03 MB vendor snapshot instead of being bundled ahead-of-time.
+ * vendor snapshot (3.05 MB gzipped) instead of being bundled ahead-of-time.
  */
 const VENDOR_SNAPSHOT_PACKAGES = [
   '@nestjs/common',

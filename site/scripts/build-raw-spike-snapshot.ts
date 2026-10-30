@@ -81,7 +81,7 @@ try {
   assertRawSpikeVendorSnapshot(snapshot)
 
   const json = JSON.stringify(snapshot)
-  const compressed = gzipSync(json, { level: 9 })
+  const compressed = gzipSync(json)
 
   await mkdir(dirname(OUTPUT_FILE), { recursive: true })
   await writeFile(OUTPUT_FILE, compressed)
@@ -93,7 +93,7 @@ try {
     'installed packages': installed,
     'entries': entries.length.toLocaleString(),
     'files': entries.filter(entry => entry.kind === 'file').length.toLocaleString(),
-    'uncompressed JSON': mb(json.length),
+    'uncompressed JSON': mb(Buffer.byteLength(json)),
     'gzip': mb(compressed.byteLength),
     'build time': `${((performance.now() - startedAt) / 1000).toFixed(1)} s`
   })
