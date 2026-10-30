@@ -1,18 +1,22 @@
 /**
  * Installs the raw-NestJS spike's packages into a headless pod once, here, and
- * writes the resulting volume to `public/` as a gzipped snapshot, so the
- * `/raw-spike` page and `verify-raw-nestjs-spike.ts` restore `node_modules` in
- * one step instead of resolving and downloading ~100 packages from npm on
- * every run.
+ * writes the resulting volume as a gzipped snapshot — to `assets/nodepod-demo/`,
+ * the committed copy the demo payload ships to the browser, and to `public/`
+ * for `verify-raw-nestjs-spike.ts` — so a pod restores `node_modules` in one
+ * step instead of resolving and downloading ~100 packages from npm on every
+ * run.
  *
- * `restore` replaces a pod's whole volume, so the snapshot keeps the base
- * filesystem the pod booted with and prunes only inside `node_modules`, and
- * only files nothing executes: type declarations, source maps, prose, and
- * tests. Licence files stay — the snapshot redistributes these packages from
- * a public site, and their licences require the notice to travel with them.
+ * The snapshot is the unfiltered install: every entry the pod's volume holds
+ * goes in, with the source maps, type definitions, docs, licences, and tests a
+ * production `node_modules` has. When the application fails inside the pod,
+ * the source maps and type definitions are what trace the error back to its
+ * cause, and a larger download is the accepted cost of having them there.
  *
- * Volatile metadata (inodes, timestamps, owners) is dropped, so building twice
- * from the same versions writes the same bytes.
+ * Volatile metadata (inodes, timestamps, owners) is dropped. A rebuild is
+ * still not reproducible: transitive dependencies resolve to whatever the
+ * registry serves at the time, two runs can hoist the same packages into a
+ * different layout, and the lockfiles the install writes list packages in
+ * resolution order, which varies from run to run too.
  *
  * Needs network access to the npm registry. Run it again whenever
  * `RAW_SPIKE_PACKAGES` changes; the loader refuses a snapshot built from other
@@ -36,48 +40,6 @@ type Entry = Snapshot['entries'][number]
 
 const OUTPUT_FILE = fileURLToPath(new URL(`../public${RAW_SPIKE_SNAPSHOT_PATH}`, import.meta.url))
 const ASSETS_FILE = fileURLToPath(new URL('../assets/nodepod-demo/vendor-snapshot.json.gz', import.meta.url))
-
-/** Directories whose whole subtree is test or fixture code. */
-const PRUNED_DIRECTORIES = new Set(['test', 'tests', '__tests__', '__mocks__'])
-
-/** File names nothing `require`s at runtime. */
-const PRUNED_FILES = [
-  /\.d\.[cm]?ts$/,
-  /\.map$/,
-  /\.(md|markdown|txt)$/i,
-  /^(changelog|history|changes)(\..*)?$/i,
-  /\.(test|spec)\.[cm]?[jt]s$/
-]
-
-/**
- * Licence and notice files, whatever their extension. `LICENSE.md` and
- * `LICENSE.txt` are prose to the rules above, so this is checked first.
- */
-const LICENCE_FILE = /^(licen[cs]e|notice|copying)/i
-
-/** Is this entry inside a package and of no use to a running program? */
-function isPrunable(path: string) {
-  // The innermost package, so a nested `node_modules` is judged on its own.
-  const index = path.lastIndexOf('/node_modules/')
-
-  if (index === -1) {
-    return false
-  }
-
-  const segments = path.slice(index + '/node_modules/'.length).split('/')
-  const name = segments[segments.length - 1]!
-
-  if (LICENCE_FILE.test(name)) {
-    return false
-  }
-
-  // Skip the package's own name: only directories inside a package are
-  // test directories, so a package that is itself called `test` survives.
-  const insidePackage = segments.slice(segments[0]!.startsWith('@') ? 2 : 1)
-
-  return insidePackage.some(segment => PRUNED_DIRECTORIES.has(segment))
-    || PRUNED_FILES.some(pattern => pattern.test(name))
-}
 
 /** Keeps only what `restore` reads, and nothing that changes between builds. */
 function stable({ path, kind, data, target, mode, symlinkType }: Entry): Entry {
@@ -103,21 +65,17 @@ try {
   }
 
   const installed = Object.keys(pod.packages.listInstalled()).length
-  const full = pod.snapshot({ shallow: false })
-  const kept = full.entries.filter(entry => !isPrunable(entry.path)).map(stable)
-  const prunedBytes = full.entries
-    .filter(entry => isPrunable(entry.path))
-    .reduce((total, entry) => total + (entry.data?.length ?? 0), 0)
+  const entries = pod.snapshot({ shallow: false }).entries.map(stable)
 
   // Packages install into `/node_modules` at the virtual filesystem root, and
   // Node module resolution from `/app` walks up to `/node_modules` automatically.
   // We avoid a symlink at `/app/node_modules` because Nodepod's worker sandbox
   // VFS throws ENOTDIR when resolving paths through directory symlinks.
-  kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   const snapshot: RawSpikeVendorSnapshot = {
     packages: Object.fromEntries(RAW_SPIKE_PACKAGES),
-    entries: kept
+    entries
   }
 
   assertRawSpikeVendorSnapshot(snapshot)
@@ -133,9 +91,8 @@ try {
   console.log(`wrote ${OUTPUT_FILE} and ${ASSETS_FILE}`)
   console.table({
     'installed packages': installed,
-    'entries (kept / total)': `${kept.length.toLocaleString()} / ${full.entries.length.toLocaleString()}`,
-    'files kept': kept.filter(entry => entry.kind === 'file').length.toLocaleString(),
-    'pruned (base64)': mb(prunedBytes),
+    'entries': entries.length.toLocaleString(),
+    'files': entries.filter(entry => entry.kind === 'file').length.toLocaleString(),
     'uncompressed JSON': mb(json.length),
     'gzip': mb(compressed.byteLength),
     'build time': `${((performance.now() - startedAt) / 1000).toFixed(1)} s`

@@ -679,7 +679,7 @@ into `site/public/nodepod-demo/`:
 | `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
-| `vendor-snapshot.json.gz` | The NestJS runtime packages as a prebuilt virtual `node_modules` (~1.66 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
+| `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.03 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
 
 **Two constraints shape this design.**
 
@@ -1016,3 +1016,8 @@ Facts a code change can invalidate, and the file to check:
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
 - Which controller methods permissive Direct Run resolves —
   `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`
+- Vendor snapshot size `~3.03 MB` gzipped —
+  `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
+  `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
+  `demo/scripts/build-nodepod-payload.ts` and
+  `site/app/composables/use-nodepod-demo-graph.ts`

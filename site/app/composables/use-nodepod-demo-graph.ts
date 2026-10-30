@@ -13,7 +13,7 @@ export interface UseNodepodDemoGraphOptions {
  * reports about itself.
  *
  * By default it starts on its own once mounted. The NestJS runtime packages
- * arrive as a prebuilt vendor snapshot (1.66 MB gzipped) restored straight into
+ * arrive as a prebuilt vendor snapshot (3.03 MB gzipped) restored straight into
  * the pod instead of being installed, so a warm boot takes under a second and
  * a page can afford to show the real graph without asking first. Only the
  * mount starts it — never server rendering — so the surrounding text renders

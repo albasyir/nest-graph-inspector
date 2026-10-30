@@ -36,7 +36,7 @@ const OPTIONAL_NEST_PEERS = [
 
 /**
  * Packages provided inside the virtual container from the pre-cached
- * 1.66 MB vendor snapshot instead of being bundled ahead-of-time.
+ * 3.03 MB vendor snapshot instead of being bundled ahead-of-time.
  */
 const VENDOR_SNAPSHOT_PACKAGES = [
   '@nestjs/common',
@@ -251,10 +251,17 @@ async function readJsonFile(path: string): Promise<JsonObject> {
 
 /**
  * Digest identifying one build of the payload. It becomes the manifest's
- * revision, which is what keeps a cached bundle paired with its own sources.
+ * revision, which is what keeps a cached bundle paired with its own sources
+ * and vendor snapshot: a change to any of them changes it.
  */
-function sha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+function sha256(...parts: (string | Buffer)[]): string {
+  const hash = createHash('sha256');
+
+  for (const part of parts) {
+    hash.update(part);
+  }
+
+  return hash.digest('hex');
 }
 
 /**
@@ -355,7 +362,7 @@ async function main(): Promise<void> {
 
   const snapshot = await readFile(snapshotSource);
   const sourcesJson = `${JSON.stringify(sources, null, 2)}\n`;
-  const revision = sha256(`${bundle}${sourcesJson}`).slice(0, 12);
+  const revision = sha256(bundle, sourcesJson, snapshot).slice(0, 12);
   const manifest = {
     payloadVersion: 1,
     revision,

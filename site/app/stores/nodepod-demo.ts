@@ -173,7 +173,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * URL of one file in the published payload.
    *
    * The revision from the manifest is carried as a query parameter so a cached
-   * bundle is never paired with the sources of a different build.
+   * bundle is never paired with the sources or vendor snapshot of a different
+   * build; the payload build derives it from all three.
    */
   function payloadUrl(fileName: string, revision?: string) {
     const url = new URL(`nodepod-demo/${fileName}`, siteBaseUrl())
