@@ -45,7 +45,7 @@
     "minimark": "^0.2.0",
     "monaco-editor": "^0.55.1",
     "nest-graph-inspector": "workspace:*",
-    "nuxt": "^4.5.2",
+    "nuxt": "^4.6.2",
     "nuxt-llms": "0.2.0",
     "nuxt-og-image": "^6.4.9",
     "pinia": "^3.0.4",
