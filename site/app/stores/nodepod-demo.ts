@@ -80,6 +80,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * still in flight.
    */
   const graphPromise = shallowRef<Promise<GraphOutput | null>>()
+  /** Cancels the graph request in {@link graphPromise}, for {@link stop}. */
+  let graphRequest: AbortController | undefined
   let bridgedFetch: FetchLike | undefined
   let originalFetch: FetchLike | undefined
   /**
@@ -693,8 +695,21 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
       return graphPromise.value
     }
 
-    const request = start()
+    // A stop() aborts this request, and a newer one replaces it. Either way it
+    // no longer speaks for the store: a request failing because its pod was
+    // torn down is not the demo failing, and must not open the error dialog or
+    // overwrite what the request after it reports.
+    const controller = new AbortController()
+    graphRequest = controller
+    const isCurrent = () =>
+      !controller.signal.aborted && graphPromise.value === request
+
+    const request: Promise<GraphOutput | null> = start()
       .then(async (started) => {
+        if (!isCurrent()) {
+          return null
+        }
+
         if (!started) {
           // Remembering a failed start would leave every preview mounted
           // afterwards looking at a cached null, even once the demo runs.
@@ -707,7 +722,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
         url.pathname = `${url.pathname.replace(/\/+$/, '')}/output.json`
 
         const response = await fetch(url.toString(), {
-          headers: requestHeaders.value
+          headers: requestHeaders.value,
+          signal: controller.signal
         })
 
         if (!response.ok) {
@@ -716,11 +732,21 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
           )
         }
 
-        graphOutput.value = (await response.json()) as GraphOutput
+        const output = (await response.json()) as GraphOutput
+
+        if (!isCurrent()) {
+          return null
+        }
+
+        graphOutput.value = output
 
         return graphOutput.value
       })
       .catch((error: unknown) => {
+        if (!isCurrent()) {
+          return null
+        }
+
         if (status.value !== 'error') {
           status.value = 'error'
           errorMessage.value = error instanceof Error
@@ -775,6 +801,8 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * be shown.
    */
   function stop() {
+    graphRequest?.abort()
+    graphRequest = undefined
     disposePod()
     startPromise = undefined
     graphPromise.value = undefined
