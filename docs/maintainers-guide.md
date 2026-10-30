@@ -767,7 +767,7 @@ resolves the import graph itself.
 
 | File | Role |
 |---|---|
-| `main.js` | The demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
 

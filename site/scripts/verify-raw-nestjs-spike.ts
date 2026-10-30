@@ -6,8 +6,8 @@
  * restores `@nestjs/*` into the pod's own `node_modules` from the vendor
  * snapshot and starts four separate CommonJS files, so module resolution and
  * Express's response path are both exercised by the runtime itself. The files
- * and the restore helper come from `app/utils/raw-nestjs-spike.ts`, the same
- * source the `/raw-spike` page uses.
+ * and the restore helper come from `app/utils/raw-nestjs-spike.ts`, whose
+ * snapshot decoder the in-browser demo uses too.
  *
  * Needs the snapshot `build:raw-spike-snapshot` writes; no network access.
  * `RAW_SPIKE_STARTUP_BUDGET_MS` overrides the budget on a slow machine.

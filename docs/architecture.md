@@ -676,7 +676,7 @@ into `site/public/nodepod-demo/`:
 
 | File | What it is |
 |---|---|
-| `main.js` | The whole demo application bundled into one CommonJS file (~17 MB, ~2 MB gzipped) |
+| `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped); the NestJS runtime packages (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `rxjs`, `reflect-metadata`) are left external and supplied by the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
 | `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.03 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
@@ -735,9 +735,12 @@ generates the site runs it right after building the payload.
 The docs previews start the demo on their own. Downloading an application and
 booting a Node runtime used to be too heavy for a page to do because it was
 scrolled past, but the NestJS runtime packages now arrive as the prebuilt
-vendor snapshot restored straight into the pod rather than installed, so a
-warm boot takes under a second — and the landing page (`/`) opens on the live
-graph instead of a button. `useNodepodDemoGraph` (`app/composables/`) starts
+vendor snapshot restored straight into the pod rather than installed from npm
+— and the landing page (`/`) opens on the live graph instead of a button.
+Measured on a local static build in Chromium: pod boot and snapshot restore
+take ~1.0 s, the runtime is ready to spawn ~2.2 s after navigation, and the
+live graph arrives at ~11.6 s, most of it the NestJS application starting from
+`main.js`. `useNodepodDemoGraph` (`app/composables/`) starts
 it from `onMounted`, never during server rendering, so the page's text renders
 and stays readable while the preview shows a spinner and the store's status
 over a skeleton; a demo that already failed in the tab is not started again
@@ -1016,6 +1019,9 @@ Facts a code change can invalidate, and the file to check:
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
 - Which controller methods permissive Direct Run resolves —
   `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`
+- Demo bundle size `~13.9 MB`, `~2.2 MB` gzipped —
+  `site/public/nodepod-demo/main.js`, written by
+  `demo/scripts/build-nodepod-payload.ts`
 - Vendor snapshot size `~3.03 MB` gzipped —
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in

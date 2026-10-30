@@ -5,9 +5,11 @@
  *
  * The demo payload proves a prebuilt bundle starts under nodepod; this proves
  * an ordinary multi-file project does, resolving `@nestjs/*` out of a real
- * `node_modules`. Both `scripts/verify-raw-nestjs-spike.ts` and the
- * `/raw-spike` page boot exactly these files, so the page shows what the check
- * verifies.
+ * `node_modules`. `scripts/verify-raw-nestjs-spike.ts` boots exactly these
+ * files. The snapshot helpers below are shared more widely: the nodepod-demo
+ * store and `scripts/verify-nodepod-payload.ts` decode the demo payload's
+ * vendor snapshot with them, and `scripts/build-raw-spike-snapshot.ts` checks
+ * the snapshot it writes against `RAW_SPIKE_PACKAGES`.
  *
  * The sources are JavaScript with no decorator syntax: `Reflect.decorate` and
  * an explicit `design:paramtypes` entry stand in for what `tsc` would emit
