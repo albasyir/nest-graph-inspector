@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -11,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import ts from "typescript";
 import type { GraphOutput } from "../types/graph-output.type";
 
@@ -92,6 +93,13 @@ console.log("app.module loaded");
 @Module({
   imports: [
     NestGraphInspectorModule.forRoot({
+      // Outputs of its own, none of which an export may run: each would write
+      // a file, or listen, as the application starts.
+      outputs: [
+        { type: "json", path: "graph-output/output.json" },
+        { type: "markdown", path: "graph-output/output.md" },
+        { type: "viewer", host: "127.0.0.1", port: 53399 },
+      ],
       ignore: {
         modules: ["InternalCoreModule"],
         providers: ["ModuleRef", "ApplicationConfig"],
@@ -120,11 +128,13 @@ export class AppModule {
 import { Module } from "@nestjs/common";
 
 // Writes after it has loaded, holds a handle open, and replaces
-// process.stderr.write with one that never calls back.
+// process.stderr.write with one that never calls back, and process.exit with
+// one that does nothing.
 setTimeout(() => console.log("late output from a timer"), 0);
 setImmediate(() => console.log("late output from setImmediate"));
 setInterval(() => undefined, 60_000);
 process.stderr.write = () => true;
+Object.defineProperty(process, "exit", { value: () => undefined });
 
 // Enough providers for a graph larger than a pipe's 64 KiB buffer.
 @Module({
@@ -191,6 +201,9 @@ type Run = { status: number | string | null; stdout: string; stderr: string };
 
 /** Generous: a busy CI runner may boot two Node processes for one export. */
 const SPAWN_TIMEOUT_MS = 60_000;
+/** Whether this Node.js can load an --env-file: 20.12 and later. */
+const hasLoadEnvFile =
+  typeof (process as { loadEnvFile?: unknown }).loadEnvFile === "function";
 
 let workDir: string;
 let projectDir: string;
@@ -404,6 +417,13 @@ describe("nest-graph-inspector bin", () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
+  /** Every file in the project, outside its installed packages. */
+  function projectFiles(): string[] {
+    return readdirSync(projectDir, { recursive: true, encoding: "utf8" })
+      .filter((file) => !file.split(sep).includes("node_modules"))
+      .sort();
+  }
+
   /**
    * The graph a plain `export` of the application writes, for the tests that
    * check another way of exporting against it. Exported the first time one of
@@ -425,6 +445,8 @@ describe("nest-graph-inspector bin", () => {
   }
 
   it("exports the application's graph without running any of it", async () => {
+    rmSync(join(projectDir, "nest-graph.json"), { force: true });
+    const before = projectFiles();
     const result = await run(bin, ["export"]);
 
     expect(result.status).toBe(0);
@@ -432,6 +454,11 @@ describe("nest-graph-inspector bin", () => {
     // Nothing the application's modules do on construction, in a factory,
     // or in a hook happened, and main.ts was never loaded.
     expect(existsSync(join(projectDir, "ran.log"))).toBe(false);
+    // Nor did any output the application configures: the export's own file
+    // is the one thing written in the project.
+    expect(projectFiles().filter((file) => !before.includes(file))).toEqual([
+      "nest-graph.json",
+    ]);
     // What a module file prints when it loads goes to stderr.
     expect(result.stderr).toContain("app.module loaded\n");
     expect(result.stderr).toContain(
@@ -621,7 +648,7 @@ describe("nest-graph-inspector bin", () => {
       );
     }, SPAWN_TIMEOUT_MS);
 
-    it("loads with --env-file, where a later file and the environment win, as with node --env-file", async () => {
+    (hasLoadEnvFile ? it : it.skip)("loads with --env-file, where a later file and the environment win, as with node --env-file", async () => {
       expect(
         await exportEnvModule(["--env-file", "first.env"]),
       ).toMatchObject({ status: 0, databaseUrl: "DATABASE_URL=first" });

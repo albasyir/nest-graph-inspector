@@ -97,7 +97,12 @@ describe(runCli.name, () => {
     );
   });
 
-  it("fails when an --env-file cannot be read", async () => {
+  // Reading the file is process.loadEnvFile's, which Node.js 20.0-20.11 lack;
+  // what the CLI says without it is the test after this one.
+  const hasLoadEnvFile =
+    typeof (process as { loadEnvFile?: unknown }).loadEnvFile === "function";
+
+  (hasLoadEnvFile ? it : it.skip)("fails when an --env-file cannot be read", async () => {
     await expect(run("export", "--env-file", "missing.env")).resolves.toBe(1);
 
     expect(stderr).toMatch(
