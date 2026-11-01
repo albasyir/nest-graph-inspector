@@ -135,6 +135,21 @@ process.stderr.write = () => true;
 })
 export class NoisyModule {}
 `,
+  "src/env.module.ts": `
+import { Module } from "@nestjs/common";
+
+// Read when the file loads, as a config file that validates its environment
+// does: main.ts would have loaded the environment before importing this.
+const databaseUrl = process.env.FIXTURE_DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("FIXTURE_DATABASE_URL is not set");
+}
+
+@Module({
+  providers: [{ provide: "DATABASE_URL=" + databaseUrl, useValue: databaseUrl }],
+})
+export class EnvModule {}
+`,
   "src/broken.module.ts": `
 import { Inject, Injectable, Module } from "@nestjs/common";
 
@@ -187,8 +202,13 @@ let bareBin: string;
 /** The application, installed with a version of the package without the CLI. */
 let olderProjectDir: string;
 
-function run(binPath: string, args: string[], cwd = projectDir): Promise<Run> {
-  const env = { ...process.env };
+function run(
+  binPath: string,
+  args: string[],
+  cwd = projectDir,
+  extraEnv: Record<string, string> = {},
+): Promise<Run> {
+  const env = { ...process.env, ...extraEnv };
   delete env.NEST_GRAPH_INSPECTOR_CLI_DELEGATED;
   // pnpm's bin shims export a NODE_PATH into its whole store, which would let
   // the CLI find packages a user's installation would not have beside it.
@@ -320,6 +340,15 @@ describe("nest-graph-inspector bin", () => {
         outDir: join(projectDir, "dist"),
       },
     );
+    // Environment for EnvModule: two files, and a module that sets it when
+    // required, as dotenv/config does.
+    writeFileSync(join(projectDir, "first.env"), "FIXTURE_DATABASE_URL=first\n");
+    writeFileSync(join(projectDir, "second.env"), "FIXTURE_DATABASE_URL=second\n");
+    writeFileSync(
+      join(projectDir, "load-env.js"),
+      'process.env.FIXTURE_DATABASE_URL = "from-require";\n',
+    );
+
     // ES module entries, which require() cannot load on every Node version.
     writeFileSync(
       join(projectDir, "dist/app.module.mjs"),
@@ -536,6 +565,63 @@ describe("nest-graph-inspector bin", () => {
       "Install nest-graph-inspector in the project and run the export there.",
     );
   }, SPAWN_TIMEOUT_MS);
+
+  describe("an application whose main.ts loads its environment first", () => {
+    const exportEnvModule = async (
+      args: string[],
+      env: Record<string, string> = {},
+    ) => {
+      const out = join(workDir, "env.json");
+      const result = await run(
+        bin,
+        ["export", "--entry", "dist/env.module.js", "--out", out, ...args],
+        projectDir,
+        env,
+      );
+      const databaseUrl =
+        result.status === 0
+          ? readGraph(out)
+              .modules.EnvModule.providers.map((provider) => provider.name)
+              .find((name) => name.startsWith("DATABASE_URL="))
+          : undefined;
+
+      return { ...result, databaseUrl };
+    };
+
+    it("cannot load without that environment", async () => {
+      const result = await exportEnvModule([]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "nest-graph-inspector: Loading dist/env.module.js failed: FIXTURE_DATABASE_URL is not set",
+      );
+    }, SPAWN_TIMEOUT_MS);
+
+    it("loads with --env-file, where a later file and the environment win, as with node --env-file", async () => {
+      expect(
+        await exportEnvModule(["--env-file", "first.env"]),
+      ).toMatchObject({ status: 0, databaseUrl: "DATABASE_URL=first" });
+      expect(
+        await exportEnvModule([
+          "--env-file",
+          "first.env",
+          "--env-file",
+          "second.env",
+        ]),
+      ).toMatchObject({ status: 0, databaseUrl: "DATABASE_URL=second" });
+      expect(
+        await exportEnvModule(["--env-file", "first.env"], {
+          FIXTURE_DATABASE_URL: "from-environment",
+        }),
+      ).toMatchObject({ status: 0, databaseUrl: "DATABASE_URL=from-environment" });
+    }, SPAWN_TIMEOUT_MS);
+
+    it("loads with a --require module that sets it, as --require dotenv/config does", async () => {
+      expect(
+        await exportEnvModule(["--require", "./load-env.js"]),
+      ).toMatchObject({ status: 0, databaseUrl: "DATABASE_URL=from-require" });
+    }, SPAWN_TIMEOUT_MS);
+  });
 
   it("fails with Nest's reason when the application cannot bootstrap", async () => {
     const result = await run(bin, [

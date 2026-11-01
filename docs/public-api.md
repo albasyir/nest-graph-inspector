@@ -268,11 +268,13 @@ the inspector builds from that container. Nothing is added to `index.ts`.
 | `--module <name>` | `AppModule` | Export name of the root module class. Unset, a file without `AppModule` that exports exactly one class with `@Module()` metadata uses that one |
 | `-o, --out <file>` | `nest-graph.json` | Output file, created with its directories; `-` for stdout |
 | `-p, --project <dir>` | Current directory | Project root: `@nestjs/core`, `reflect-metadata`, and `--require` modules resolve from it, and the export runs with it as the working directory |
+| `--env-file <file>` | — | Loaded into `process.env` with `process.loadEnvFile()` before the entry is located and before anything is required; repeatable. A variable already set in the environment keeps its value, and a later file wins over an earlier one, as with `node --env-file`. Node.js 20.12 or later; otherwise the command fails, suggesting `--require dotenv/config` |
 | `-r, --require <module>` | — | Loaded before anything else, resolved from the project; repeatable |
 | `--compact` | Off | One-line JSON, byte for byte what `/output.json` serves; the default is `JSON.stringify(graph, null, 2)`, byte for byte what the `json` output writes |
 | `-h, --help` / `-v, --version` | | Help or version on stdout |
 
-`--entry`, `--out`, and `--project` resolve against the current directory.
+`--entry`, `--out`, `--project`, and `--env-file` resolve against the current
+directory.
 The output carries no trailing newline. Everything else the command prints —
 the summary, warnings, Nest's errors, and anything the application writes
 through `process.stdout` — goes to stderr; a write straight to file

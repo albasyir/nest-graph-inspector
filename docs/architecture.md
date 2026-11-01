@@ -588,28 +588,32 @@ on trust:
    copy is not this one and ships the bin, spawn it with the same argv
    (NEST_GRAPH_INSPECTOR_CLI_DELEGATED stops a second hop); a copy without the
    bin gets a warning, and the export carries on
-3. Find the entry: --entry, or from nest-cli.json's sourceRoot and the outDir
+3. Load --env-file files into process.env with process.loadEnvFile(), last
+   to first, so that — as with node --env-file — the environment wins and a
+   later file beats an earlier one. The export never loads main.ts, which is
+   where an application usually loads its environment before AppModule
+4. Find the entry: --entry, or from nest-cli.json's sourceRoot and the outDir
    of the tsconfig `nest build` compiles with — <outDir>/app.module.js,
    <outDir>/<sourceRoot>/app.module.js, or the only app.module.js under
    <outDir>. Never main.js, which would start the application
-4. chdir to the project, so .env files and tsconfig.json resolve as they do
+5. chdir to the project, so .env files and tsconfig.json resolve as they do
    when the application starts there
-5. Divert process.stdout to stderr for the rest of the process, then load the
+6. Divert process.stdout to stderr for the rest of the process, then load the
    --require modules, the project's own reflect-metadata and @nestjs/core, and
    the entry — import() when Node treats it as an ES module (.mjs, or .js
    under "type": "module"), require() otherwise — and pick the root module
    export
-6. Boot: NestFactory.create(root, { preview: true, snapshot: true,
+7. Boot: NestFactory.create(root, { preview: true, snapshot: true,
    abortOnError: false, logger }), or createApplicationContext() when
    @nestjs/platform-express does not resolve from @nestjs/core
-7. Read the options: the MODULE_OPTIONS_TOKEN value NestGraphInspectorModule
+8. Read the options: the MODULE_OPTIONS_TOKEN value NestGraphInspectorModule
    registered, through forRoot() or a plain import. forRootAsync() registers a
    factory preview mode never runs: defaults, the entry module as root, and a
    warning. A NestGraphInspectorModule from another copy: the same, with that
    module ignored by name. No inspector at all: defaults, the entry as root
-8. Build: GraphOutputBuilder over a DiscoveryAdapter subclass that skips
+9. Build: GraphOutputBuilder over a DiscoveryAdapter subclass that skips
    runtime-trace instrumentation, with a fresh SourceMetadataService
-9. close() the application, write the JSON, print a summary to stderr, and
+10. close() the application, write the JSON, print a summary to stderr, and
    exit explicitly, since a module file may have left a handle open
 ```
 

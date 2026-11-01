@@ -15,6 +15,7 @@ const OPTIONS = {
   out: { type: "string", short: "o" },
   project: { type: "string", short: "p" },
   require: { type: "string", short: "r", multiple: true },
+  "env-file": { type: "string", multiple: true },
   compact: { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
@@ -39,13 +40,18 @@ Options:
                       (default: nest-graph.json)
   -p, --project <dir> Project root; the application is booted from there, as
                       it is when started (default: the current directory)
+  --env-file <file>   Load environment variables from a file before anything
+                      else, for an application whose main.ts loads them
+                      before importing AppModule; repeatable. Needs Node.js
+                      20.12 or later; --require dotenv/config also works
   -r, --require <id>  Module to load first, resolved from the project, such as
                       ts-node/register or tsconfig-paths/register; repeatable
   --compact           Write the JSON on one line, as /output.json serves it
   -h, --help          Show this help
   -v, --version       Show the version
 
---entry, --out and --project are relative to the current directory.
+--entry, --out, --project and --env-file are relative to the current
+directory.
 `;
 
 /**

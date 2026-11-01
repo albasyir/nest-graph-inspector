@@ -34,6 +34,7 @@ describe(runCli.name, () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     rmSync(cwd, { recursive: true, force: true });
   });
 
@@ -94,6 +95,40 @@ describe(runCli.name, () => {
     expect(stderr).toBe(
       "nest-graph-inspector: Entry file not found: dist/main.module.js. Check the --entry path, and build your project first (nest build) if it points at compiled output.\n",
     );
+  });
+
+  it("fails when an --env-file cannot be read", async () => {
+    await expect(run("export", "--env-file", "missing.env")).resolves.toBe(1);
+
+    expect(stderr).toMatch(
+      /^nest-graph-inspector: Cannot load --env-file missing\.env: ENOENT/,
+    );
+  });
+
+  it("points at dotenv where Node.js cannot load an --env-file", async () => {
+    writeFileSync(join(cwd, "app.env"), "SOME_VARIABLE=1\n");
+    // Node.js before 20.12 has no process.loadEnvFile.
+    const loadEnvFile = Object.getOwnPropertyDescriptor(process, "loadEnvFile");
+    Object.defineProperty(process, "loadEnvFile", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      await expect(run("export", "--env-file", "app.env")).resolves.toBe(1);
+    } finally {
+      if (loadEnvFile) {
+        Object.defineProperty(process, "loadEnvFile", loadEnvFile);
+      } else {
+        delete (process as { loadEnvFile?: unknown }).loadEnvFile;
+      }
+    }
+
+    expect(stderr).toBe(
+      `nest-graph-inspector: --env-file needs Node.js 20.12 or later, which has process.loadEnvFile(); this is Node.js ${process.versions.node}. Use --require dotenv/config instead.\n`,
+    );
+    expect(process.env.SOME_VARIABLE).toBeUndefined();
   });
 
   it("asks for a loader before loading a TypeScript entry", async () => {

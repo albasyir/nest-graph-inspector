@@ -42,8 +42,10 @@ built with the options the application passes to
 `nest-cli.json` and the tsconfig `outDir`; `--entry`, `--module`, `--project`,
 `--require` (for example `ts-node/register`, to export TypeScript sources
 without building) and `--compact` are listed by
-`npx nest-graph-inspector --help`. Your module files are still loaded, so code
-at their top level runs; see the
+`npx nest-graph-inspector --help`. If your `main.ts` loads environment
+variables before it imports `AppModule` (`import 'dotenv/config'`), pass them
+with `--env-file .env` (Node.js 20.12+) or `--require dotenv/config`. Your
+module files are still loaded, so code at their top level runs; see the
 [documentation](https://albasyir.github.io/nest-graph-inspector/getting-started/export-graph)
 for this and the other limits of preview mode.
 

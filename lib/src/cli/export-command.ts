@@ -30,6 +30,7 @@ export type ExportCommandOptions = {
   out?: string;
   project?: string;
   require?: string[];
+  "env-file"?: string[];
   compact?: boolean;
 };
 
@@ -54,6 +55,7 @@ export async function runExportCommand(
     return delegatedExitCode;
   }
 
+  loadEnvFiles(options["env-file"] ?? [], io.cwd);
   const entryPath = resolveEntry(options, projectDir, io.cwd);
   const out = options.out ?? DEFAULT_OUT_FILE;
   const outPath = out === "-" ? undefined : resolve(io.cwd, out);
@@ -221,6 +223,38 @@ function delegateToProjectPackage(
     `nest-graph-inspector: warning: the project installs nest-graph-inspector@${projectPackage.version} (${projectPackage.root}), ${cannotRun}; exporting with nest-graph-inspector@${ownPackage.version} (${ownPackage.root}) instead. Upgrade the project's nest-graph-inspector for a graph built with its own options.\n`,
   );
   return undefined;
+}
+
+/**
+ * Loads `--env-file`s into `process.env` before any of the application's
+ * code runs, as a `main.ts` that loads its environment before importing
+ * `AppModule` would — and the export never loads `main.ts`. Precedence is
+ * `node --env-file`'s: a variable already set in the environment keeps its
+ * value, and of two files the later one wins. `process.loadEnvFile()` never
+ * overrides a variable, so the files are loaded from the last to the first.
+ */
+function loadEnvFiles(paths: readonly string[], cwd: string): void {
+  if (!paths.length) {
+    return;
+  }
+
+  const { loadEnvFile } = process as { loadEnvFile?: (path: string) => void };
+  if (typeof loadEnvFile !== "function") {
+    throw new CliError(
+      `--env-file needs Node.js 20.12 or later, which has process.loadEnvFile(); this is Node.js ${process.versions.node}. Use --require dotenv/config instead.`,
+    );
+  }
+
+  for (const path of [...paths].reverse()) {
+    const envFile = resolve(cwd, path);
+    try {
+      loadEnvFile(envFile);
+    } catch (error) {
+      throw new CliError(
+        `Cannot load --env-file ${displayPath(envFile, cwd)}: ${describeError(error)}`,
+      );
+    }
+  }
 }
 
 function resolveEntry(
