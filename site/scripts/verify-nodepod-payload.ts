@@ -18,6 +18,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Nodepod } from '@scelar/nodepod/headless'
+import { readGraphFileText } from '../app/utils/graph-file.ts'
 import {
   readViewerLinkEndpoint,
   redactViewerLinks
@@ -210,6 +211,38 @@ assert.ok(
   'UserService is missing from the graph, so dependency metadata did not survive the bundle'
 )
 
+// The static graph the landing page draws until a visitor loads the example,
+// exported from the same build and published beside this payload. It has to
+// be there, be a graph the viewer opens — read by the viewer's own reader —
+// and be this application's: the same root, and every module the running demo
+// serves. Not only those: the payload build keeps the demo to what its own
+// `src/` declares (DISCOVERY_PATCHES in demo/scripts/build-nodepod-payload.ts),
+// and the export, which runs the library as published, keeps the rest.
+const exampleGraphPath = join(payloadDir, 'graph.json')
+const exampleGraph = readGraphFileText(
+  await readFile(exampleGraphPath, 'utf8').catch(() =>
+    fail(
+      `No example graph at ${exampleGraphPath}. Build it with "pnpm --filter nest-graph-inspector-demo run build:nodepod".`
+    )
+  ),
+  'graph.json'
+)
+
+if (!exampleGraph.ok) {
+  fail(`The example graph is not one the viewer opens: ${exampleGraph.message}`)
+}
+
+assert.equal(exampleGraph.graph.root, parsed.root, 'graph.json has another root module than the demo')
+
+const missingFromExample = Object.keys(parsed.modules).filter(
+  name => !Object.hasOwn(exampleGraph.graph.modules, name)
+)
+assert.deepEqual(
+  missingFromExample,
+  [],
+  'graph.json lacks modules the demo serves: build it again with build:nodepod'
+)
+
 // Without an access token the endpoint has to refuse, in the browser as anywhere.
 const unauthorized = await call(graphPath)
 assert.equal(unauthorized.status, 401, 'the endpoint answered without a token')
@@ -258,7 +291,8 @@ console.log(
   + `${documented.length} documented, `
   + `${typedFromSource.length}/${parameterTypes.length} parameters typed from source, `
   + `${(manifest.bundleBytes / 1024 / 1024).toFixed(1)} MB bundle, `
-  + `viewer link after ${Date.now() - startedAt} ms`
+  + `viewer link after ${Date.now() - startedAt} ms, `
+  + `example graph.json ok`
 )
 
 pod.teardown()
