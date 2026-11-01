@@ -341,8 +341,9 @@ const importModule = new Function(
 
 /**
  * The root module class among a module's exports: the one named `name`, or —
- * when no name was asked for and there is no `AppModule` — the only exported
- * class carrying `@Module()` metadata.
+ * when no name was asked for and there is no `AppModule`, or the `AppModule`
+ * export is not a Nest module — the only exported class carrying `@Module()`
+ * metadata.
  */
 export function selectEntryModule(
   moduleExports: unknown,
@@ -357,13 +358,19 @@ export function selectEntryModule(
   ) as Record<string, unknown>;
   const name = requestedName ?? "AppModule";
   const candidate = exported[name];
-  if (typeof candidate === "function") {
-    return { name, module: candidate as Type<unknown> };
-  }
-
   const modules = Object.entries(exported).filter(
     (entry): entry is [string, Type<unknown>] => isNestModuleClass(entry[1]),
   );
+
+  // An explicit --module is taken at its word. The default `AppModule` gives
+  // way to the one export that is a Nest module when it is not one itself —
+  // a function that only shares the name. It is still taken otherwise:
+  // `@Module({})` with nothing in it defines no metadata to recognise.
+  const appModuleGivesWay =
+    !requestedName && !isNestModuleClass(candidate) && modules.length === 1;
+  if (typeof candidate === "function" && !appModuleGivesWay) {
+    return { name, module: candidate as Type<unknown> };
+  }
   const file = displayPath(entryPath, cwd);
   const exportedModules = modules.length
     ? `It exports these Nest modules: ${modules.map(([exportName]) => exportName).join(", ")}.`

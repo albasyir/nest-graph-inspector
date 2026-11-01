@@ -133,6 +133,36 @@ describe("project", () => {
       expect(
         selectEntryModule({ AppModule, RootModule }, "RootModule", "app.js", "/"),
       ).toEqual({ name: "RootModule", module: RootModule });
+      expect(
+        selectEntryModule({ NotAModule, RootModule }, "NotAModule", "app.js", "/"),
+      ).toEqual({ name: "NotAModule", module: NotAModule });
+    });
+
+    it("passes over an AppModule that is not a Nest module for the one that is", () => {
+      expect(
+        selectEntryModule(
+          { AppModule: NotAModule, RootModule },
+          undefined,
+          "app.js",
+          "/",
+        ),
+      ).toEqual({ name: "RootModule", module: RootModule });
+    });
+
+    it("still picks an AppModule whose @Module() is empty, with no other module to take", () => {
+      // `@Module({})` defines no metadata, so it cannot be told from any
+      // other class; with nothing else to choose, it is taken by its name.
+      @Module({})
+      class EmptyAppModule {}
+
+      expect(
+        selectEntryModule(
+          { AppModule: EmptyAppModule, NotAModule },
+          undefined,
+          "app.js",
+          "/",
+        ),
+      ).toEqual({ name: "AppModule", module: EmptyAppModule });
     });
 
     it("picks the only exported module when there is no AppModule", () => {
