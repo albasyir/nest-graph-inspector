@@ -7,9 +7,12 @@ import type { GraphFileSource } from './graph-file-session.ts'
  *
  * The demo's `build:nodepod` script ends by running `nest-graph-inspector
  * export` against the demo's build, writing `graph.json` beside the nodepod
- * payload. The landing page draws that file — a static graph, byte for byte
- * what the running demo would serve — and boots nothing until the visitor
- * presses "Load Example", which starts the live demo exactly as before.
+ * payload: the graph the demo serves when Node runs it. The landing page draws
+ * that file and boots nothing until the visitor presses "Load Example", which
+ * starts the live demo exactly as before. The live graph is not quite the same:
+ * the payload build keeps the in-browser demo to what its own `src/` declares
+ * (`DISCOVERY_PATCHES` in `demo/scripts/build-nodepod-payload.ts`), so the
+ * third-party modules in the static graph are not in the live one.
  */
 
 /** Where the static graph is published, relative to the site's base URL. */
@@ -101,6 +104,8 @@ export function describePreviewDirectRun(liveDemo: DemoPreviewView['liveDemo']):
       return undefined
     case 'starting':
       return 'The demo application is starting in this tab. Its methods can run as soon as it is up.'
+    case 'failed':
+      return 'Direct Run calls the demo application, which did not start. Press Try Again below the graph to start it in this tab, then run this method.'
     default:
       return 'Direct Run calls the demo application, which is not running. Press Load Example below the graph to start it in this tab, then run this method.'
   }

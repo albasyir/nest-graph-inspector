@@ -294,8 +294,10 @@ export const AI_CHAT_GRAPH_FILE_REASON
  * A restricted device — a phone, a tablet, or a window narrower than the
  * chat's breakpoint, as `isMobileDevice` decides — is refused whatever graph
  * it has loaded: the model would run on that device's GPU. A graph file is
- * refused on any device: the chat reads the Markdown summary only an endpoint
- * serves. Only `available` ever opens the chat.
+ * refused on any device — the chat reads the Markdown summary only an endpoint
+ * serves — so that is the reason given for one, a restricted device's
+ * included: a wider window would not help. Only `available` ever opens the
+ * chat.
  */
 export function resolveAiChatAvailability({
   hasGraphEndpoint,
@@ -306,12 +308,12 @@ export function resolveAiChatAvailability({
   isGraphFile?: boolean
   isRestricted: boolean
 }): AiChatAvailability {
-  if (isRestricted) {
-    return 'restricted'
-  }
-
   if (isGraphFile) {
     return 'graph-file'
+  }
+
+  if (isRestricted) {
+    return 'restricted'
   }
 
   return hasGraphEndpoint ? 'available' : 'no-graph'

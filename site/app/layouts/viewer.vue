@@ -160,6 +160,9 @@ const graphFileMenuItems = computed(() => [
     {
       label: 'Open Another…',
       icon: 'i-lucide-folder-open',
+      // A second pick while the first is still being read could finish first
+      // and then be replaced by the older one.
+      disabled: fileOpener.isReading.value,
       onSelect: () => {
         fileOpener.clearError()
         graphFileInput.value?.click()
@@ -551,6 +554,7 @@ const viewerMenuItems = computed(() => [
       class="sr-only"
       tabindex="-1"
       aria-hidden="true"
+      :disabled="fileOpener.isReading.value"
       @change="handleGraphFileChosen"
     >
   </UDashboardGroup>

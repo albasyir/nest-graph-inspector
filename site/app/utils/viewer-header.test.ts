@@ -374,6 +374,11 @@ describe('the AI chat', () => {
       resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: false }),
       'graph-file'
     )
+    // A wider window would not help, so a restricted device is told the same.
+    assert.equal(
+      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
+      'graph-file'
+    )
     assert.match(AI_CHAT_GRAPH_FILE_REASON, /Markdown summary/)
   })
 

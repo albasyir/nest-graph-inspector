@@ -44,7 +44,9 @@ describe('a preview mounting', () => {
     }
   })
 
-  test('never starts the demo, whatever state the static graph is in', () => {
+  // The decision only: the mount itself is `useNodepodDemoGraph`, which acts
+  // on this and on nothing else.
+  test('decides nothing but the static graph, whatever state it is in', () => {
     for (const status of EXAMPLE_STATUSES) {
       assert.ok(
         ['load-example-graph', 'none'].includes(resolveDemoPreviewMountAction(status)),
@@ -135,7 +137,8 @@ describe('Direct Run in a preview', () => {
   test('runs only against the live demo, and says what would start it', () => {
     assert.equal(describePreviewDirectRun('running'), undefined)
     assert.match(describePreviewDirectRun('off') ?? '', /Load Example/)
-    assert.match(describePreviewDirectRun('failed') ?? '', /Load Example/)
+    // What is below the graph after a failure is Try Again.
+    assert.match(describePreviewDirectRun('failed') ?? '', /Try Again/)
     assert.match(describePreviewDirectRun('starting') ?? '', /starting/)
   })
 })

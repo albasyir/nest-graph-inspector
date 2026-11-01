@@ -81,8 +81,16 @@ export function useNodepodDemoGraph() {
     graph,
     /** Why the static graph could not be loaded. */
     staticGraphError: computed(() => example.errorMessage),
-    /** What the live demo is doing, or why it failed. */
-    statusLabel: computed(() => demo.statusLabel),
+    /**
+     * What the live demo is doing, or why it failed. A pod that is up but has
+     * not handed over its graph yet is still on its way, whatever the pod's
+     * own status says: the preview is not live until the graph arrives.
+     */
+    statusLabel: computed(() =>
+      demo.isRunning && !demo.graphOutput
+        ? 'Loading the demo application\'s graph…'
+        : demo.statusLabel
+    ),
     loadExample,
     retryExample,
     reloadStaticGraph
