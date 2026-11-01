@@ -13,9 +13,10 @@ import { describeFailedRequest, readStatusCode } from '~/utils/http-error'
  * demo's build exports with `nest-graph-inspector export` and the site
  * publishes beside the demo's payload.
  *
- * `/view?preview=true` opens it in the viewer as a graph file when no demo
- * is running. It is fetched from the site itself, at most once per document,
- * and checked like any graph file a visitor opens.
+ * The landing page's previews draw it without booting anything, and
+ * `/view?preview=true` opens it in the viewer as a graph file. It is fetched
+ * from the site itself, at most once per document, and checked like any graph
+ * file a visitor opens.
  */
 export const useExampleGraphStore = defineStore('example-graph', () => {
   const config = useRuntimeConfig()

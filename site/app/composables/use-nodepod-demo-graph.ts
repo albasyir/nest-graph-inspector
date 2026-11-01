@@ -1,66 +1,90 @@
 import type { GraphOutput } from 'nest-graph-inspector'
-
-export interface UseNodepodDemoGraphOptions {
-  /**
-   * Start the demo as soon as the component using it mounts, rather than
-   * waiting for the visitor to ask. Defaults to `true`.
-   */
-  autoload?: boolean
-}
+import {
+  resolveDemoPreviewMountAction,
+  resolveDemoPreviewView
+} from '~/utils/demo-graph-preview'
 
 /**
- * Runs the demo application inside the browser and hands back the graph it
- * reports about itself.
+ * The demo application's graph, as the site's previews draw it.
  *
- * By default it starts on its own once mounted. The NestJS runtime packages
- * arrive as a prebuilt vendor snapshot (3.05 MB gzipped) restored straight into
- * the pod instead of being installed from npm, so a page can afford to show
- * the real graph without asking first. Only the
- * mount starts it — never server rendering — so the surrounding text renders
- * without waiting on it, and a demo that already failed in this tab is not
- * started again until the visitor retries. Pass `autoload: false` to wait for
- * {@link start} instead. One pod serves every preview on the page either way.
+ * A preview draws the demo's static graph — `nodepod-demo/graph.json`, which
+ * the demo's build exports with `nest-graph-inspector export` — and boots
+ * nothing to do it: opening a page downloads no application and starts no
+ * runtime. "Load Example" starts the demo itself in this tab, exactly as it
+ * always started, and from then on every preview draws the live graph the
+ * running demo reports about itself. One pod serves every preview on the page.
  */
-export function useNodepodDemoGraph(options: UseNodepodDemoGraphOptions = {}) {
-  const { autoload = true } = options
+export function useNodepodDemoGraph() {
   const demo = useNodepodDemoStore()
+  const example = useExampleGraphStore()
 
-  const graph = computed<GraphOutput | null>(() => demo.graphOutput)
-  const isReady = computed(() => Boolean(graph.value))
-  /** The startup failed, or the graph could not be read from it. */
-  const hasError = computed(() => demo.status === 'error')
-  /** Waiting to be asked: never started, stopped, or a failure dismissed. */
-  const isIdle = computed(
-    () => !isReady.value && !demo.isBusy && !demo.isLoadingGraph && !hasError.value
-  )
+  /** What the preview shows: which graph, or what stands in for one. */
+  const view = computed(() => resolveDemoPreviewView({
+    hasLiveGraph: Boolean(demo.graphOutput),
+    hasExampleGraph: Boolean(example.graph),
+    exampleStatus: example.status,
+    demoStatus: demo.status
+  }))
 
-  /** Asks for the demo, booting it if this is the first preview to ask. */
-  function start() {
+  const graph = computed<GraphOutput | null>(() => {
+    switch (view.value.source) {
+      case 'live':
+        return demo.graphOutput
+      case 'static':
+        return example.graph
+      default:
+        return null
+    }
+  })
+
+  /** Starts the demo in this tab — the visitor's "Load Example". */
+  function loadExample() {
     void demo.loadGraphOutput()
   }
 
   /** Boots the demo again from nothing after a failure. */
-  function retry() {
+  function retryExample() {
     demo.stop()
-    start()
+    loadExample()
   }
 
-  if (import.meta.client && autoload) {
+  /** Fetches the static graph again, after it failed to load. */
+  function reloadStaticGraph() {
+    void example.load()
+  }
+
+  // Only the mount fetches anything — never server rendering — so the
+  // surrounding text renders without waiting on it.
+  if (import.meta.client) {
     onMounted(() => {
-      if (!isReady.value && !demo.isBusy && demo.status !== 'error') {
-        start()
+      if (resolveDemoPreviewMountAction(example.status) === 'load-example-graph') {
+        void example.load()
       }
+
+      // A demo this tab is already running — loaded from `/view`, or by
+      // another preview — is drawn live. Reading its graph boots nothing.
+      watch(
+        () => demo.isRunning && !demo.graphOutput,
+        (needsLiveGraph) => {
+          if (needsLiveGraph) {
+            void demo.loadGraphOutput()
+          }
+        },
+        { immediate: true }
+      )
     })
   }
 
   return {
     demo,
+    view,
     graph,
-    isReady,
-    isIdle,
-    hasError,
+    /** Why the static graph could not be loaded. */
+    staticGraphError: computed(() => example.errorMessage),
+    /** What the live demo is doing, or why it failed. */
     statusLabel: computed(() => demo.statusLabel),
-    start,
-    retry
+    loadExample,
+    retryExample,
+    reloadStaticGraph
   }
 }

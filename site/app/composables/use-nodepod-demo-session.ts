@@ -7,10 +7,12 @@ import { resolveDemoSessionAction } from '~/utils/nodepod-demo-session'
  * it and by nothing else, so a session restored in a new document — a reload, a
  * restored tab — names an address nothing will answer; and a tab left open long
  * enough holds a token that address has stopped accepting. A viewer page does
- * not boot the demo to recover either one: only the landing page starts it
- * unasked, and `/view` when the visitor asks. So a dead session is forgotten
- * and the page sends the visitor to the `/view` landing card, while a demo this
- * tab is already running — or starting — is reused as it is.
+ * not boot the demo to recover either one: only "Load Example" starts it, on
+ * the landing page's previews or the `/view` landing card. So a dead session is
+ * forgotten and the page sends the visitor to the `/view` landing card, while a
+ * demo this tab is already running — or starting — is reused as it is. A graph
+ * file never comes here: it has no endpoint, and `useGraphViewerPage` passes it
+ * straight through.
  */
 export function useNodepodDemoSession() {
   const demo = useNodepodDemoStore()
