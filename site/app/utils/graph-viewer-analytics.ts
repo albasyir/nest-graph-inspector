@@ -59,7 +59,7 @@ export function describeGraphEndpoint(graphUrl: string) {
  * before a page is created, but deciding here rather than at each call site
  * means a caller passing `route.fullPath` cannot reintroduce the leak.
  */
-function describeViewerRoute(viewerRoute: string) {
+export function describeViewerRoute(viewerRoute: string) {
   const path = (viewerRoute.split(/[?#]/)[0] ?? '').replace(/\/+$/, '')
   const [, root, page = '', ...rest] = path.split('/')
   const isOwnPage = root === 'view' && (!page || isViewerPage(page))

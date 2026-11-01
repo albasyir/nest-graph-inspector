@@ -32,6 +32,13 @@ const { isBusy: isDemoStarting } = storeToRefs(useNodepodDemoStore())
 const aiChatOpen = ref(false)
 const { isMobile } = useMobileDevice()
 
+// The viewer shows the graph — module and provider names — and none of it may
+// reach analytics. `ph-no-capture` keeps PostHog's click capture and
+// session replay off everything under it: the layout itself as it renders, and
+// the body for what the viewer teleports out of it — drawers, popovers,
+// tooltips. Route names are rewritten out of events by `posthog-privacy`.
+useHead({ bodyAttrs: { class: 'ph-no-capture' } })
+
 // The graph being viewed is no longer in the URL, so these paths are fixed and
 // the endpoint shown in the header comes from the store.
 const NAVIGATOR_PATH = '/view/navigator'
@@ -170,7 +177,7 @@ const viewerMenuItems = computed(() => [
 <template>
   <UDashboardGroup
     storage-key="graph-view"
-    class="relative min-h-screen"
+    class="ph-no-capture relative min-h-screen"
   >
     <UDashboardPanel
       id="graph-viewer"
