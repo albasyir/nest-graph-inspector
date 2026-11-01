@@ -56,7 +56,25 @@ describe('a graph file', () => {
     const value = graph()
     const result = readGraphFileText(JSON.stringify(value), FILE)
 
-    assert.deepEqual(result, { ok: true, graph: value })
+    assert.equal(result.ok, true)
+    assert.equal('notice' in result, false)
+    assert.deepEqual(JSON.parse(JSON.stringify(result.ok && result.graph)), value)
+  })
+
+  // Module names are the file's to choose. A lookup of one that names nothing
+  // has to miss, even when it is the name of something every object inherits.
+  test('has modules no inherited name can look up', () => {
+    const value = graph()
+    value.modules.AppModule.imports = ['toString', 'constructor', '__proto__', 'UserModule']
+    const result = readGraphOutput(JSON.parse(JSON.stringify(value)), FILE)
+
+    assert.equal(result.ok, true)
+    const { modules } = (result as Extract<GraphFileResult, { ok: true }>).graph
+    assert.equal(Object.getPrototypeOf(modules), null)
+    for (const name of ['toString', 'constructor', 'hasOwnProperty']) {
+      assert.equal((modules as Record<string, unknown>)[name], undefined, name)
+    }
+    assert.deepEqual(Object.keys(modules), ['AppModule', 'UserModule'])
   })
 
   test('opens with cycles of every kind', () => {
@@ -125,7 +143,7 @@ describe('a graph file', () => {
 
   // A layout file, or the inspector's information.json, opened by mistake.
   test('without a format version is not a graph', () => {
-    for (const value of [{ for: 'nest-graph-inspector' }, { version: 'latest', root: 'AppModule' }]) {
+    for (const value of [{ for: 'nest-graph-inspector' }, { version: null, root: 'AppModule' }]) {
       const result = failure(readGraphOutput(value, 'layout.json'))
 
       assert.equal(result.problem, 'not-a-graph')
@@ -133,6 +151,16 @@ describe('a graph file', () => {
         result.message,
         'layout.json is not a Nest Graph Inspector graph: it has no format `version`. Export it again with npx nest-graph-inspector export.'
       )
+    }
+  })
+
+  // The contract writes a whole number. Its leading digits are not a version.
+  test('with a format version that is not a whole number is not a graph', () => {
+    for (const version of ['latest', '3garbage', '3.9', ' 3', '', '-3', 3.5, -3, true, ['3']]) {
+      const result = failure(readGraphOutput(graph({ version }), FILE))
+
+      assert.equal(result.problem, 'not-a-graph', JSON.stringify(version))
+      assert.match(result.message, /its format `version` is not a whole number/)
     }
   })
 
@@ -159,6 +187,18 @@ describe('a graph file', () => {
       'This graph is in format 4, newer than the format 3 this viewer was built for. If anything looks missing, reload the page for the newest viewer.'
     )
     assert.equal('notice' in readGraphOutput(graph(), FILE), false)
+  })
+
+  // Its shape may have changed with its format, so the advice is a newer
+  // viewer rather than another export.
+  test('in a newer format the viewer cannot draw asks for a newer viewer', () => {
+    const result = failure(readGraphOutput(graph({ version: '4', modules: [] }), 'next.json'))
+
+    assert.equal(result.problem, 'unsupported-version')
+    assert.equal(
+      result.message,
+      'next.json is in format 4, newer than the format 3 this viewer reads, and this viewer cannot draw it: `modules` is not an object of modules. Reload the page for the newest viewer.'
+    )
   })
 
   test('names the first field the viewer could not read', () => {

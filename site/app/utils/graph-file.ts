@@ -119,9 +119,17 @@ export function readGraphOutput(value: unknown, fileName: string): GraphFileResu
     return notAGraph('it holds no JSON object')
   }
 
-  const version = parseGraphOutputVersion(value.version)
-  if (version === null) {
+  if (value.version === undefined || value.version === null) {
     return notAGraph('it has no format `version`')
+  }
+
+  // A whole number, as the contract writes it: `parseGraphOutputVersion`
+  // reads the leading digits of anything, `"3garbage"` included.
+  const version = isWholeNumber(value.version)
+    ? parseGraphOutputVersion(value.version)
+    : null
+  if (version === null) {
+    return notAGraph('its format `version` is not a whole number')
   }
 
   if (version < MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION) {
@@ -134,10 +142,24 @@ export function readGraphOutput(value: unknown, fileName: string): GraphFileResu
 
   const problem = findGraphOutputProblem(value)
   if (problem) {
-    return notAGraph(problem)
+    // A newer format may have changed the very shape checked here: what
+    // helps is a newer viewer, not another export.
+    return version > NEWEST_KNOWN_GRAPH_OUTPUT_VERSION
+      ? {
+          ok: false,
+          problem: 'unsupported-version',
+          message: `${fileName} is in format ${version}, newer than the format ${NEWEST_KNOWN_GRAPH_OUTPUT_VERSION} this viewer reads, and this viewer cannot draw it: ${problem}. Reload the page for the newest viewer.`
+        }
+      : notAGraph(problem)
   }
 
-  const graph = value as GraphOutput
+  // Module names come from the file, and every lookup of one has to miss
+  // when it names nothing: without a prototype, `modules.toString` is not a
+  // module the viewer would go on to read the imports of.
+  const graph = {
+    ...value,
+    modules: Object.assign(Object.create(null), value.modules)
+  } as GraphOutput
 
   return version > NEWEST_KNOWN_GRAPH_OUTPUT_VERSION
     ? {
@@ -290,6 +312,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string'
+}
+
+function isWholeNumber(value: unknown): boolean {
+  return typeof value === 'number'
+    ? Number.isInteger(value) && value >= 0
+    : typeof value === 'string' && /^\d+$/.test(value)
 }
 
 function isStringList(value: unknown): value is string[] {
