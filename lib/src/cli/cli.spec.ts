@@ -107,6 +107,10 @@ describe(runCli.name, () => {
 
   it("points at dotenv where Node.js cannot load an --env-file", async () => {
     writeFileSync(join(cwd, "app.env"), "SOME_VARIABLE=1\n");
+    // Whatever the shell running the tests set is put back afterwards, and
+    // kept out of the way of the assertion that the file was not loaded.
+    const inherited = process.env.SOME_VARIABLE;
+    delete process.env.SOME_VARIABLE;
     // Node.js before 20.12 has no process.loadEnvFile.
     const loadEnvFile = Object.getOwnPropertyDescriptor(process, "loadEnvFile");
     Object.defineProperty(process, "loadEnvFile", {
@@ -117,18 +121,24 @@ describe(runCli.name, () => {
 
     try {
       await expect(run("export", "--env-file", "app.env")).resolves.toBe(1);
+      expect(process.env.SOME_VARIABLE).toBeUndefined();
     } finally {
       if (loadEnvFile) {
         Object.defineProperty(process, "loadEnvFile", loadEnvFile);
       } else {
         delete (process as { loadEnvFile?: unknown }).loadEnvFile;
       }
+
+      if (inherited === undefined) {
+        delete process.env.SOME_VARIABLE;
+      } else {
+        process.env.SOME_VARIABLE = inherited;
+      }
     }
 
     expect(stderr).toBe(
       `nest-graph-inspector: --env-file needs Node.js 20.12 or later, which has process.loadEnvFile(); this is Node.js ${process.versions.node}. Use --require dotenv/config instead.\n`,
     );
-    expect(process.env.SOME_VARIABLE).toBeUndefined();
   });
 
   it("asks for a loader before loading a TypeScript entry", async () => {

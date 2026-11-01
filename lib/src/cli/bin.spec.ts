@@ -404,6 +404,26 @@ describe("nest-graph-inspector bin", () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
+  /**
+   * The graph a plain `export` of the application writes, for the tests that
+   * check another way of exporting against it. Exported the first time one of
+   * them asks, and only once, so each also runs on its own.
+   */
+  let baseline: Promise<GraphOutput> | undefined;
+  function baselineGraph(): Promise<GraphOutput> {
+    const out = join(workDir, "baseline.json");
+
+    baseline ??= run(bin, ["export", "--out", out]).then((result) => {
+      if (result.status !== 0) {
+        throw new Error(`The baseline export failed:\n${result.stderr}`);
+      }
+
+      return readGraph(out);
+    });
+
+    return baseline;
+  }
+
   it("exports the application's graph without running any of it", async () => {
     const result = await run(bin, ["export"]);
 
@@ -455,12 +475,13 @@ describe("nest-graph-inspector bin", () => {
   }, SPAWN_TIMEOUT_MS);
 
   it("writes only the graph to stdout with --out -", async () => {
-    const result = await run(bin, ["export", "--out", "-", "--compact"]);
+    const [result, expected] = await Promise.all([
+      run(bin, ["export", "--out", "-", "--compact"]),
+      baselineGraph(),
+    ]);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe(
-      JSON.stringify(readGraph(join(projectDir, "nest-graph.json"))),
-    );
+    expect(result.stdout).toBe(JSON.stringify(expected));
     expect(result.stderr).toContain("app.module loaded\n");
     expect(result.stderr).toContain(" to stdout (");
   }, SPAWN_TIMEOUT_MS);
@@ -469,12 +490,13 @@ describe("nest-graph-inspector bin", () => {
     "loads the ES module entry %s with import()",
     async (entry) => {
       const out = join(workDir, "esm.json");
-      const result = await run(bin, ["export", "--entry", entry, "--out", out]);
+      const [result, expected] = await Promise.all([
+        run(bin, ["export", "--entry", entry, "--out", out]),
+        baselineGraph(),
+      ]);
 
       expect(result.status).toBe(0);
-      expect(readGraph(out)).toEqual(
-        readGraph(join(projectDir, "nest-graph.json")),
-      );
+      expect(readGraph(out)).toEqual(expected);
     },
     SPAWN_TIMEOUT_MS,
   );
@@ -509,19 +531,20 @@ describe("nest-graph-inspector bin", () => {
     async (_copy, copyBin) => {
       const out = join(workDir, "delegated.json");
 
-      const result = await run(
-        copyBin(),
-        ["export", "--project", projectDir, "--out", out],
-        workDir,
-      );
+      const [result, expected] = await Promise.all([
+        run(
+          copyBin(),
+          ["export", "--project", projectDir, "--out", out],
+          workDir,
+        ),
+        baselineGraph(),
+      ]);
 
       expect(result.status).toBe(0);
       expect(result.stderr).toContain(
         `nest-graph-inspector: using the project's own nest-graph-inspector@`,
       );
-      expect(readGraph(out)).toEqual(
-        readGraph(join(projectDir, "nest-graph.json")),
-      );
+      expect(readGraph(out)).toEqual(expected);
     },
     SPAWN_TIMEOUT_MS,
   );
