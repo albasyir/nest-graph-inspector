@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "build:nodepod": "nest build && node dist/scripts/build-nodepod-payload.js",
+    "build:nodepod": "nest build && node dist/scripts/build-nodepod-payload.js && pnpm run export:graph",
+    "build:graph": "nest build && pnpm run export:graph",
+    "export:graph": "node node_modules/nest-graph-inspector/dist/cli/bin.js export --compact --out ../site/public/nodepod-demo/graph.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"libs/**/*.ts\"",
     "start": "nest start",
     "dev": "____DEV_VIEWER_BASE_URL=http://localhost:3000 nest start --watch",
@@ -17,7 +19,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
