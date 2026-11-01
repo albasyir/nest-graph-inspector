@@ -614,7 +614,7 @@ export class DiscoveryAdapter {
     }
 
     return matchesAny(this.pathIgnoreMatchers, [
-      this.classFilePath(this.wrapperClassName(wrapper)),
+      this.classFilePath(this.memberClassName(wrapper)),
     ]);
   }
 
@@ -637,7 +637,7 @@ export class DiscoveryAdapter {
         this.controllerRoutePaths(wrapper, moduleRef),
       ) ||
       matchesAny(this.pathIgnoreMatchers, [
-        this.classFilePath(this.wrapperClassName(wrapper)),
+        this.classFilePath(this.memberClassName(wrapper)),
       ])
     );
   }
@@ -748,7 +748,7 @@ export class DiscoveryAdapter {
       // provider ignored by its class name is not still exported by token.
       const wrapper = moduleRef.providers.get(exportedItem);
       if (wrapper) {
-        const providerName = this.wrapperClassName(wrapper) || exportName;
+        const providerName = this.memberClassName(wrapper) || exportName;
         return this.shouldIgnoreProvider(providerName, wrapper)
           ? []
           : [exportName];
@@ -790,8 +790,7 @@ export class DiscoveryAdapter {
     const providerInstances = new Map<string, unknown>();
 
     for (const wrapper of moduleRef.providers.values()) {
-      const name =
-        this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+      const name = this.memberName(wrapper);
       if (name && providerNames.has(name)) {
         providerInstances.set(name, wrapper.instance);
       }
@@ -824,8 +823,7 @@ export class DiscoveryAdapter {
     const controllerInstances = new Map<string, unknown>();
 
     for (const wrapper of moduleRef.controllers.values()) {
-      const name =
-        this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+      const name = this.memberName(wrapper);
       if (name && controllerNames.has(name)) {
         controllerInstances.set(name, wrapper.instance);
       }
@@ -861,8 +859,7 @@ export class DiscoveryAdapter {
     shouldIgnore?: (name: string, wrapper: InstanceWrapper<object>) => boolean;
   }): ModuleProvider | null {
     const { wrapper, moduleRef, shouldIgnore = () => false } = param;
-    const name =
-      this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+    const name = this.memberName(wrapper);
 
     if (!name || shouldIgnore(name, wrapper)) {
       return null;
@@ -886,7 +883,7 @@ export class DiscoveryAdapter {
   private extractClassJsDoc(
     wrapper: InstanceWrapper<unknown>,
   ): string | undefined {
-    const className = this.wrapperClassName(wrapper);
+    const className = this.memberClassName(wrapper);
 
     return className ? this.extractClassJsDocByName(className) : undefined;
   }
@@ -895,6 +892,45 @@ export class DiscoveryAdapter {
     return this.sourceMetadata.getClassJsDoc(className);
   }
 
+  /**
+   * The name a provider or controller has in the graph: its class's — a
+   * factory provider's is its factory function's — or else its injection
+   * token's.
+   */
+  private memberName(wrapper: InstanceWrapper<unknown>): string | null {
+    return this.memberClassName(wrapper) || this.tokenName(wrapper.token);
+  }
+
+  /**
+   * The class name a member is known by. A factory provider's is its
+   * factory function's own name, never that of the value the factory
+   * returned: see `isFactoryWrapper`. Anything else is named by its class,
+   * or — a `useValue` provider, whose value is its instance in preview mode
+   * and at runtime alike — by its value's class.
+   */
+  private memberClassName(wrapper: InstanceWrapper<unknown>): string | null {
+    return this.isFactoryWrapper(wrapper)
+      ? wrapper.metatype?.name || null
+      : this.wrapperClassName(wrapper);
+  }
+
+  /**
+   * Whether Nest gets the wrapper's instance by calling a function: a
+   * `useFactory` provider, or a `useExisting` alias, which Nest registers as
+   * a factory injecting the provider it aliases. Nest marks both with an
+   * `inject` list, which is what its own `InstanceWrapper#isFactory` reads.
+   * Their instance is whatever that call returned — and preview mode never
+   * makes the call — so it neither names the provider nor matches it to an
+   * injection token.
+   */
+  private isFactoryWrapper(wrapper: InstanceWrapper<unknown>): boolean {
+    return wrapper.inject !== undefined && wrapper.inject !== null;
+  }
+
+  /**
+   * A class name for runtime tracing, which instruments the instance a
+   * provider actually has — a factory's return value included.
+   */
   private wrapperClassName(wrapper: InstanceWrapper<unknown>): string | null {
     if (wrapper.metatype?.name) {
       return wrapper.metatype.name;
@@ -1023,16 +1059,7 @@ export class DiscoveryAdapter {
         continue;
       }
 
-      const providerInstance =
-        wrapper.instance &&
-        (typeof wrapper.instance === "object" ||
-          typeof wrapper.instance === "function")
-          ? (wrapper.instance as { constructor?: { name?: string } })
-          : null;
-      const providerName =
-        wrapper.metatype?.name ||
-        providerInstance?.constructor?.name ||
-        this.tokenName(wrapper.token);
+      const providerName = this.memberName(wrapper);
 
       if (!providerName) {
         return null;
@@ -1060,7 +1087,10 @@ export class DiscoveryAdapter {
       return true;
     }
 
+    // A factory's instance is whatever it returned, so its class says
+    // nothing about which token the provider answers to.
     if (
+      !this.isFactoryWrapper(wrapper) &&
       wrapper.instance &&
       typeof wrapper.instance === "object" &&
       wrapper.instance.constructor === token

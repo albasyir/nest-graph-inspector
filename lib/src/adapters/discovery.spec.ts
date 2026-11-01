@@ -77,6 +77,60 @@ describe(DiscoveryAdapter.name, () => {
     expect(discovery.tree).toBe(firstTree);
   });
 
+  it("names a factory provider by its factory or token, and matches it by token, never by its instance", () => {
+    class ConfigValue {}
+    class RealService {}
+    const realService = new RealService();
+    // Shaped as Nest registers them: a factory passed as an argument has no
+    // name, and Nest's useExisting alias is `metatype: (instance => instance)`.
+    const anonymousFactory = (() => () => new ConfigValue())();
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    function loadConfiguration(): object {
+      return {};
+    }
+
+    const tree = scanIgnoring(
+      undefined,
+      moduleFixture(TestRootModule, {
+        providers: [
+          {
+            token: "CONFIGURATION(database)",
+            metatype: anonymousFactory,
+            inject: [],
+            instance: new ConfigValue(),
+          },
+          // Registered before the provider it aliases, whose instance it has.
+          {
+            token: "ALIAS",
+            metatype: aliasFactory,
+            inject: [RealService],
+            instance: realService,
+          },
+          classWrapper(RealService, realService),
+          { token: "VALUE", metatype: null, instance: new ConfigValue() },
+          {
+            token: "LOADER",
+            metatype: loadConfiguration,
+            inject: [RealService, "CONFIGURATION(database)"],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      tree.providers.map((provider) => [provider.name, provider.dependencies]),
+    ).toEqual([
+      ["CONFIGURATION(database)", []],
+      ["metatype", ["RealService"]],
+      ["RealService", []],
+      // A value is its instance in every mode, so it is still named by it.
+      ["ConfigValue", []],
+      ["loadConfiguration", ["RealService", "CONFIGURATION(database)"]],
+    ]);
+  });
+
   it("captures controller instances alongside provider instances", () => {
     class TestController {}
     const controllerInstance = new TestController();
@@ -381,6 +435,7 @@ type WrapperFixture = {
   token: unknown;
   metatype?: unknown;
   instance?: unknown;
+  inject?: unknown[];
 };
 
 type ModuleFixture = {

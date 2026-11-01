@@ -299,12 +299,11 @@ copy is not the one running, the command runs the project's copy instead, if
 it ships this bin. `NEST_GRAPH_INSPECTOR_CLI_DELEGATED` marks the hand-over;
 it is internal and not meant to be set by hand.
 
-**Differences from a running inspector's graph**, all of them where a running
-inspector reads a provider's instance: Direct Run metadata of `useFactory` and
-`useExisting` providers is absent; a factory provider whose function has no
-name is named after its token rather than its instance's class; and a
-`useExisting` alias registered before the provider it aliases does not take
-that provider's place in other providers' `dependencies`.
+**Differences from a running inspector's graph**: Direct Run metadata of
+`useFactory` and `useExisting` providers is absent, since a running inspector
+reads it off the value the factory returned or the provider the alias points
+at, which preview mode never creates. Provider names and dependencies do not
+differ; see [provider names](./graph-contract.md#provider-names).
 
 ---
 

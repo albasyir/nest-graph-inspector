@@ -83,10 +83,34 @@ type GraphOutputProvider = {
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | Yes | The token string used to register the provider |
+| `name` | Yes | Derived from how the provider was registered; see [Provider names](#provider-names) |
 | `jsdoc` | No | Class-level JSDoc; absent when source unavailable |
 | `dependencies` | Yes | May be empty `[]` |
 | `directRun` | No | See Direct Run section below |
+
+### Provider names
+
+A provider's `name` — and the `token` of every dependency that resolves to
+it — comes from how the provider was registered, never from the value a
+factory returned:
+
+| Registered as | `name` |
+|---|---|
+| A class: `UserService`, or `{ provide, useClass }` | The class name |
+| `{ provide, useFactory }` | The factory function's own name, or the token when it has none. A function written inline, as in `useFactory: () => …`, takes the name `useFactory` from JavaScript itself; one passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it, has no name |
+| `{ provide, useExisting }` | `metatype`: the name of the function Nest implements an alias with |
+| `{ provide, useValue }` | The value's class name — `Object` for a plain object — or the token for a primitive value |
+
+A token's name is the string itself, a class token's its class name, and a
+symbol token's `Symbol(description)`. A factory provider is also matched to the
+tokens that depend on it by its token alone. Neither rule reads an instance, so
+a running inspector's graph and an exported one name every provider the same
+way. Until this was fixed, a running inspector named an unnamed factory after
+the class of what it returned (`@nestjs/config`'s `registerAs()` providers all
+appeared as `Object`) and let a `useExisting` alias registered before the
+provider it aliases stand in for that provider among other providers'
+`dependencies`; the shape of the document did not change, and neither did its
+version.
 
 ---
 
@@ -137,18 +161,14 @@ Both `providedBy` and `token` are required.
 
 - **Module identifiers** — the class name string as registered in
   `ModulesContainer` (e.g. `"UserModule"`).
-- **Provider identifiers** — the injection token string (e.g. `"UserService"`,
-  `"UserRepository"`).  Symbol tokens are not represented; only string-based
-  tokens appear in the output.
+- **Provider identifiers** — the provider's `name`, derived as described in
+  [Provider names](#provider-names) (e.g. `"UserService"`,
+  `"CONFIGURATION(database)"`, `"Symbol(CONFIG_SERVICE)"`).
 - **Cycle node keys** (modules and controllers) — raw names as in the modules
   map.
 - **Cycle node keys** (providers) — `"ModuleName:ProviderName"` composite
   strings in the `from` and `to` fields of provider cycles.
 
-> **Open question:** Non-string injection tokens (e.g. `InjectionToken`,
-> `Symbol`) are not documented.  The library resolves them via
-> `InstanceWrapper`, but how they appear as the `token` string (or whether they
-> are silently dropped) is not explicitly specified.
 
 ---
 
@@ -388,8 +408,9 @@ From `direct-run.type.ts`:
 
 1. `providedBy.type` is always `"module"` today; the allowed value set is
    unspecified for future extension.
-2. Non-string injection tokens (Symbols, classes used as tokens) — unclear
-   whether they surface in the output or are silently filtered.
+2. Non-string injection tokens — answered: a class token appears by its class
+   name and a symbol token as `Symbol(description)`; see
+   [Provider names](#provider-names).
 3. Controller cycles use string paths (like module cycles) while provider
    cycles use structured object paths — this inconsistency has no documented
    rationale.

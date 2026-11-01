@@ -290,7 +290,7 @@ describe("exportGraph", () => {
     expect(JSON.stringify(graph)).toBe(JSON.stringify(served));
   });
 
-  it("names providers by their token where a running inspector names them by their instance", async () => {
+  it("names a factory provider by its factory or token, never by what it returns, in both graphs", async () => {
     @Injectable()
     class FixtureRealService {
       ping(): string {
@@ -301,54 +301,62 @@ describe("exportGraph", () => {
     class FixtureConsumer {
       constructor(
         readonly real: FixtureRealService,
-        @Inject("FIXTURE_ANONYMOUS") readonly anonymous: unknown,
+        @Inject("FIXTURE_CLIENT") readonly client: unknown,
       ) {}
     }
-    const createFactory = () => () => new FixtureRealService();
+    // As @nestjs/config's registerAs() does: a factory passed as an argument
+    // has no name of its own, and its token is all that identifies it.
+    const registerAs = (namespace: string, factory: () => object) => ({
+      provide: `CONFIGURATION(${namespace})`,
+      useFactory: factory,
+    });
+    const createClient = () => () => new FixtureRealService();
     const port = await freePort();
     @Module({
       imports: [inspectorOn(port)],
       providers: [
+        registerAs("database", () => ({ host: "localhost" })),
+        registerAs("mail", () => ({ sender: "noreply" })),
+        {
+          provide: "CONFIGURATION_LOADER",
+          useFactory: (...configurations: object[]) => configurations,
+          inject: ["CONFIGURATION(database)", "CONFIGURATION(mail)"],
+        },
         // An alias registered before the provider it points at.
         { provide: "FIXTURE_ALIAS", useExisting: FixtureRealService },
         FixtureRealService,
         FixtureConsumer,
-        // A factory function with no name.
-        { provide: "FIXTURE_ANONYMOUS", useFactory: createFactory() },
+        // An anonymous factory returning an instance of an application class.
+        { provide: "FIXTURE_CLIENT", useFactory: createClient() },
       ],
     })
-    class FixtureInstanceNamedModule {}
+    class FixtureFactoryNamedModule {}
 
-    const served = JSON.parse(
-      await readServedGraph(FixtureInstanceNamedModule, port),
-    ) as GraphOutput;
-    const { graph } = await exportWith(FixtureInstanceNamedModule);
-    const summarize = (output: GraphOutput) =>
-      output.modules.FixtureInstanceNamedModule.providers
+    const served = await readServedGraph(FixtureFactoryNamedModule, port);
+    const { graph } = await exportWith(FixtureFactoryNamedModule);
+
+    // A running inspector used to name each anonymous factory after the
+    // class of what it returned — both configurations `Object`, the loader
+    // depending on one `Object` — and to let the alias, whose instance is
+    // FixtureRealService's, stand in for FixtureRealService wherever it was
+    // injected. Neither depends on an instance any more, so the served
+    // graph is the exported one.
+    expect(JSON.stringify(graph)).toBe(served);
+    expect(
+      graph.modules.FixtureFactoryNamedModule.providers
         .slice(2) // ModuleRef, ApplicationConfig
         .map((provider) => [
           provider.name,
           provider.dependencies.map((dependency) => dependency.token),
-        ]);
-
-    // A running inspector also matches a dependency to a provider by the
-    // class of the provider's instance: the alias, whose instance is
-    // FixtureRealService's, takes FixtureRealService's place wherever it is
-    // injected — the alias's own dependency included. And it names an
-    // anonymous factory after the class of what the factory returned.
-    expect(summarize(served)).toEqual([
-      ["metatype", ["metatype"]],
-      ["FixtureRealService", []],
-      ["FixtureConsumer", ["metatype", "FixtureRealService"]],
-      ["FixtureRealService", []],
-    ]);
-    // The export has no instances: a dependency resolves to the provider its
-    // token names, and the anonymous factory is named after its token.
-    expect(summarize(graph)).toEqual([
+        ]),
+    ).toEqual([
+      ["CONFIGURATION(database)", []],
+      ["CONFIGURATION(mail)", []],
+      ["useFactory", ["CONFIGURATION(database)", "CONFIGURATION(mail)"]],
       ["metatype", ["FixtureRealService"]],
       ["FixtureRealService", []],
-      ["FixtureConsumer", ["FixtureRealService", "FIXTURE_ANONYMOUS"]],
-      ["FIXTURE_ANONYMOUS", []],
+      ["FixtureConsumer", ["FixtureRealService", "FIXTURE_CLIENT"]],
+      ["FIXTURE_CLIENT", []],
     ]);
   });
 

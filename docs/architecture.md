@@ -306,6 +306,10 @@ inherits — turns it into `GraphOutput`:
 4. **Resolve dependencies.** Constructor parameters *and* property-injected
    `@Inject()` members resolve from injection tokens to a
    `GraphOutputDependencyRef` carrying `token` plus the `providedBy` module.
+   A provider is named, and matched to a token, by its class, its factory
+   function, or its token — never by the instance a `useFactory` or
+   `useExisting` provider holds, which preview mode does not have; see
+   [provider names](./graph-contract.md#provider-names).
 5. **Enrich from source.** `SourceMetadataService` opens the application's own
    `.ts` files with ts-morph to attach JSDoc to modules, providers, and
    controllers, and to render Direct Run parameter types as TypeScript source
@@ -650,16 +654,16 @@ Why each step is the way it is:
   package entry, so `cli/export-graph.ts` imports it before anything else from
   the package — and the CLI loads that file only after the project's own Nest.
 
-**Where an export differs from a running inspector's graph** is wherever a
+**Where an export differs from a running inspector's graph** is where a
 running inspector reads a provider's *instance*, which preview mode never
-creates: the Direct Run methods of `useFactory` and `useExisting` providers;
-the name of a factory provider whose function has no name of its own (live, the
-class of what it returned; exported, its token); and a `useExisting` alias
-registered before the provider it aliases, which a running inspector — matching
-dependencies by the class of an instance — lets stand in for that provider in
-the `dependencies` of whatever injects it, where an export resolves the
-provider itself. `cli/export-graph.spec.ts` pins those three down against a
-live `/output.json`; everything else is byte-identical. Modules and providers
+creates: the Direct Run methods of `useFactory` and `useExisting` providers,
+read off the value a factory returned or the provider an alias points at.
+Nothing else in the graph reads an instance — a factory provider is named by
+its factory function or its token, and matched to dependencies by its token,
+never by the class of what it returned (see
+[provider names](./graph-contract.md#provider-names)) — so
+`cli/export-graph.spec.ts` pins that one difference down against a live
+`/output.json` and finds everything else byte-identical. Modules and providers
 added once the application runs — through `LazyModuleLoader`, for instance —
 exist only in a running application.
 
