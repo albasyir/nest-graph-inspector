@@ -86,6 +86,16 @@ describe('a graph file kept for the tab', () => {
     assert.equal(readGraphFileSession(full.storage), undefined)
   })
 
+  // Even the name-only record refused: the file before must not be left to
+  // come back on a reload in place of this one.
+  test('that storage refuses entirely leaves no other file behind', () => {
+    const { storage, items } = memoryStorage({ quota: 0 })
+    items.set(KEY, JSON.stringify({ name: 'earlier.json', kind: 'file', graph: JSON.stringify(graph) }))
+
+    assert.equal(writeGraphFileSession({ name: 'later.json', kind: 'file' }, graph, storage), false)
+    assert.equal(readGraphFileSession(storage), undefined)
+  })
+
   test('is nothing without storage, or once cleared', () => {
     assert.equal(writeGraphFileSession({ name: 'app.json', kind: 'file' }, graph, undefined), false)
     assert.equal(readGraphFileSession(undefined), undefined)

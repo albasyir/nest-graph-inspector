@@ -95,23 +95,31 @@ export function readStoredLayout(
   }
 }
 
-/** Keeps a layout for an endpoint, for the lifetime of the tab. */
+/**
+ * Keeps a layout for an endpoint, for the lifetime of the tab. Returns whether
+ * it reached the tab's storage: when it did not — full, or unavailable — the
+ * copy in memory still serves this page, and only a reload loses it.
+ */
 export function writeStoredLayout(
   endpointUrl: string,
   layout: GraphLayout,
   storage: GraphLayoutStorage | undefined = sessionLayoutStorage()
-): void {
+): boolean {
   if (!endpointUrl) {
-    return
+    return false
   }
 
   cached.set(endpointUrl, layout)
 
+  if (!storage) {
+    return false
+  }
+
   try {
-    storage?.setItem(STORAGE_KEY_PREFIX + endpointUrl, JSON.stringify(layout))
+    storage.setItem(STORAGE_KEY_PREFIX + endpointUrl, JSON.stringify(layout))
+    return true
   } catch {
-    // A full or unavailable store costs the layout on reload; the copy in
-    // memory still serves this page, and the visitor can download it.
+    return false
   }
 }
 

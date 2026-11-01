@@ -570,11 +570,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       return false
     }
 
+    // The notice is the one this viewer gives the graph now, not the one it
+    // was opened with: the viewer may have been updated since.
+    const { name, kind } = session.source
+    const source: GraphFileSource = result.notice
+      ? { name, kind, notice: result.notice }
+      : { name, kind }
+
     clearGraph()
-    fileSource.value = session.source
+    fileSource.value = source
     fileGraph.value = result.graph
     brightLineChoice.value = null
-    layoutData.value = readStoredLayout(graphFileKey(session.source))
+    layoutData.value = readStoredLayout(graphFileKey(source))
 
     return true
   }
@@ -836,7 +843,16 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
     try {
       if (layoutPersistence.value === 'session') {
-        writeStoredLayout(requestedKey, layout)
+        if (!writeStoredLayout(requestedKey, layout)) {
+          // The tab still draws it, and Download still saves it; only a
+          // reload would lose it, which is what "saved" would have promised.
+          if (isCurrent()) {
+            layoutSaveError.value
+              = 'The layout could not be kept in this tab, whose storage is full or unavailable. Download it to keep it.'
+          }
+
+          return false
+        }
       } else {
         await inspectorFetch(layoutSaveUrl.value, {
           method: 'POST',

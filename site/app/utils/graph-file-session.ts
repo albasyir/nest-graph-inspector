@@ -69,7 +69,12 @@ export function writeGraphFileSession(
     return true
   }
 
-  trySet(storage, source)
+  // Not even the name fits: the record of the file before must not stay, or a
+  // reload would bring back that file in place of this one.
+  if (!trySet(storage, source)) {
+    clearGraphFileSession(storage)
+  }
+
   return false
 }
 

@@ -73,7 +73,7 @@ for (const notALayout of [
   const endpoint = 'http://localhost:53371/__graph-inspector'
 
   assert.equal(readStoredLayout(endpoint, storage), null)
-  writeStoredLayout(endpoint, layout, storage)
+  assert.equal(writeStoredLayout(endpoint, layout, storage), true)
   assert.deepEqual(readStoredLayout(endpoint, storage), layout)
   assert.deepEqual(
     JSON.parse(storage.items.get(`nest-graph-inspector:layout:${endpoint}`)!),
@@ -125,13 +125,15 @@ for (const notALayout of [
   const endpoint = 'http://private.test/graph'
 
   assert.equal(readStoredLayout(endpoint, throwing), null)
-  writeStoredLayout(endpoint, layout, throwing)
+  // Not kept for a reload, so the caller is told; the page keeps its copy.
+  assert.equal(writeStoredLayout(endpoint, layout, throwing), false)
   assert.deepEqual(
     readStoredLayout(endpoint, throwing),
     layout,
     'the in-memory copy still serves this page'
   )
   assert.equal(readStoredLayout('http://no-storage.test', undefined), null)
+  assert.equal(writeStoredLayout('http://no-storage.test', layout, undefined), false)
 }
 
 console.log('graph-layout-persistence.test.ts ok')
