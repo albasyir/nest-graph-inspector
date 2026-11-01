@@ -14,6 +14,7 @@ for the published history.
 
 ### Added
 
+- **`nest-graph-inspector export`: the graph without running the application.** The package now ships a `nest-graph-inspector` bin. `npx nest-graph-inspector export` boots the application's root module in NestJS's official preview mode — which resolves every module and dependency but constructs no provider or controller, calls no factory or lifecycle hook, and never listens — and writes `nest-graph.json`: the same `GraphOutput` a running inspector serves at `/output.json`, built by the same code with the options the application passes to `NestGraphInspectorModule.forRoot()`. The root module file is found from `nest-cli.json` and the tsconfig `outDir`, or named with `--entry`/`--module`; `--out -` writes to stdout, `--compact` writes one line, and `--require ts-node/register` exports TypeScript sources without a build. `forRootAsync()` options, whose factory preview mode never runs, fall back to the defaults with a warning. Providers whose metadata a running inspector reads off their instance — Direct Run methods of `useFactory` and `useExisting` providers, a factory with no function name — can differ; see "Export Without Running" in the documentation. Nothing changes for applications that do not use it, and nothing is added to the package's exports.
 - **`DEFAULT_IGNORE_PATHS` and `DEFAULT_IGNORE_OPTIONS` are exported**, so an application can extend the default `ignore` rather than replace it: `ignore: { paths: [...DEFAULT_IGNORE_PATHS, '**/legacy/**'] }`.
 
 ### Changed

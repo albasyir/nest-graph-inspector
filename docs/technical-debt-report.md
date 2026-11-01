@@ -109,6 +109,15 @@ The file is already substantially larger than any other library source module.
 - `lib/src/nest-graph-inspector.setup.ts`
 - `lib/src/nest-graph-inspector.setup.spec.ts`
 
+**Status (Unreleased)**
+
+Partly addressed. Output defaulting and dispatch (responsibility 8) stay in
+`NestGraphInspectorSetup`; responsibilities 2, 6, and 7 moved, unchanged, into
+its base class `GraphOutputBuilder` (`lib/src/graph-output.builder.ts`), which
+the `nest-graph-inspector export` CLI builds its graph with too. Discovery,
+JSDoc, and trace instrumentation (1, 3–5) were already in `DiscoveryAdapter`
+and `SourceMetadataService`. The builder is still one large class.
+
 ---
 
 ### TD-03 — The site bypasses the package public API and imports library types from internal source paths

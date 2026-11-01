@@ -222,18 +222,48 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 #### `lib/src/nest-graph-inspector.setup.ts`
 
-**Purpose:** The `OnModuleInit` service that drives all graph extraction. The largest single file in the library.
+**Purpose:** The `OnModuleInit` service that publishes the graph when the host application starts. Extends `GraphOutputBuilder`.
 
 Responsibilities:
-- Walk `ModulesContainer` to build an internal `ModuleMap`.
-- Extract JSDoc from source via ts-morph.
-- Extract Direct Run method signatures via ts-morph.
+- Apply output defaults, and the module-wide Direct Run and layout settings.
+- Dispatch `GraphOutput` to all configured output adapters — eagerly, or lazily for `viewer` outputs.
+
+**Belongs here:** Output defaulting and dispatch.
+
+**Does not belong here:** Graph building (that is `graph-output.builder.ts`), HTTP serving or file I/O (those are in adapters).
+
+---
+
+#### `lib/src/graph-output.builder.ts`
+
+**Purpose:** `GraphOutputBuilder`, which turns the `ModuleTree` `DiscoveryAdapter` finds into `GraphOutput`. The largest single file in the library.
+
+Responsibilities:
+- Flatten the module tree into a `ModuleMap`.
 - Enrich `ModuleMap` → `GraphOutput` (dependency refs, cycle detection).
-- Dispatch `GraphOutput` to all configured output adapters.
+- Extract Direct Run method signatures via ts-morph.
 
-**Belongs here:** Graph extraction, enrichment, and cycle detection logic.
+**Belongs here:** Graph enrichment and cycle detection logic. Both the running inspector and the CLI export build with it, so a change here reaches both.
 
-**Does not belong here:** HTTP serving or file I/O (those are in adapters).
+**Does not belong here:** Output dispatch (`nest-graph-inspector.setup.ts`), process-level concerns of the CLI (`cli/`).
+
+---
+
+#### `lib/src/cli/`
+
+**Purpose:** The `nest-graph-inspector export` command (`bin` → `dist/cli/bin.js`): boots an application in Nest's preview mode and writes its `GraphOutput` without running it. See the export CLI section of `docs/architecture.md`.
+
+| File | What it does |
+|---|---|
+| `bin.ts` | The executable: runs the CLI and exits explicitly once output is flushed |
+| `cli.ts` | Argument parsing (`node:util` `parseArgs`), help, version, exit codes |
+| `export-command.ts` | The export: delegation to the project's own copy, load order, the stdout guard, writing the file |
+| `project.ts` | Entry detection, loading the project's own `@nestjs/core`, picking the root module export |
+| `export-graph.ts` | The preview-mode boot, the inspector options read from the container, and the graph build |
+| `stderr-logger.ts` | The logger the application is booted with: warnings and errors to stderr |
+| `__fixtures__/` | The application `export-graph.spec.ts` boots; excluded from the build |
+
+**What does NOT belong here:** Graph building — the export must use `GraphOutputBuilder`, never its own.
 
 ---
 
@@ -270,7 +300,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 **What belongs here:** Implementations of `OutputAdapter<Config>`. Each adapter file must have a co-located `*.spec.ts`.
 
-**What does NOT belong here:** Graph extraction logic (that belongs in `nest-graph-inspector.setup.ts`).
+**What does NOT belong here:** Graph extraction logic (that belongs in `graph-output.builder.ts`).
 
 **Important dependency:** `http-serve.adapter.ts` is an internal class shared by the other adapters; it is **not** exported from `index.ts`.
 
@@ -362,6 +392,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 **Contents:**
 - `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`.
+- `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"` and maps the `nest-graph-inspector/nest-graph-inspector` alias.
 
 **⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `demo/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
@@ -770,6 +801,7 @@ resolves the import graph itself.
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
+| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the running demo serves at `/output.json`. Nothing in `site/app/` reads it yet |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

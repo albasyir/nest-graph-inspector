@@ -26,7 +26,10 @@ more output adapters: a file on disk, a Markdown report, an HTTP endpoint
 inside the host process, or the hosted interactive viewer. The viewer is a
 separate Nuxt application that knows nothing about NestJS — it fetches
 `GraphOutput` over HTTP and renders it. The whole design turns on that one
-seam.
+seam. The same document can also be produced without running the application
+at all: the package's `nest-graph-inspector export` command boots it in Nest's
+preview mode, where the container is built but nothing in it is instantiated,
+and walks that container with the same code.
 
 ---
 
@@ -37,6 +40,7 @@ nest-graph-inspector/        ← monorepo root (pnpm workspace)
 ├── lib/                     ← the published npm package — this is the product
 │   └── src/
 │       ├── adapters/        ← output channels and container discovery
+│       ├── cli/             ← the `nest-graph-inspector export` command
 │       ├── ports/           ← the interfaces adapters implement
 │       └── types/           ← public types + the JSON Schema
 ├── demo/                    ← private NestJS app: development host and showcase
@@ -121,13 +125,22 @@ and the access-token/rate-limiter surface (`AccessTokenService`,
 `AccessAttemptLimiter`, and their constants) so an application can mint its own
 tokens. Keep [`public-api.md`](./public-api.md) in step.
 
-Several classes — `NestGraphInspectorSetup`, `RuntimeTraceRecorder`, the
-adapters, the port interfaces — are reachable by deep import but are *not* in
-`index.ts`. They are internal; treat a deep import in user code as unsupported.
+Several classes — `NestGraphInspectorSetup`, `GraphOutputBuilder`,
+`RuntimeTraceRecorder`, the adapters, the port interfaces, the CLI's modules —
+are reachable by deep import but are *not* in `index.ts`. They are internal;
+treat a deep import in user code as unsupported.
+
+The package has a command line too: `lib/package.json`'s `bin` maps
+`nest-graph-inspector` to `dist/cli/bin.js`. Its command, options, exit codes,
+and output file are public in the same sense as `index.ts` — CI scripts and
+the demo's own build call it — and are documented in
+[`public-api.md`](./public-api.md#command-line--nest-graph-inspector).
 
 ### 2. The graph output JSON — `GraphOutput`
 
-Produced by `lib/`, consumed by the viewer in `site/`. It is versioned:
+Produced by `lib/` — served at `/output.json`, written by the `json` output,
+and written by `nest-graph-inspector export` — and consumed by the viewer in
+`site/`. It is versioned:
 
 | Constant | Location | Value |
 |---|---|---|
@@ -185,7 +198,8 @@ than implementing the port.
 |---|---|---|
 | `NestGraphInspectorModule` | `nest-graph-inspector.module.ts` | `@Module` entry point; owns `defaultOptions` and the default ignore constants; exports `AccessTokenService` |
 | `ConfigurableModuleClass` | `nest-graph-inspector.config.ts` | Nest's `ConfigurableModuleBuilder`, giving `forRoot` / `forRootAsync` |
-| `NestGraphInspectorSetup` | `nest-graph-inspector.setup.ts` | `OnModuleInit`; orchestrates extraction, enrichment, and dispatch |
+| `NestGraphInspectorSetup` | `nest-graph-inspector.setup.ts` | `OnModuleInit`; dispatches the graph to the configured outputs; extends `GraphOutputBuilder` |
+| `GraphOutputBuilder` | `graph-output.builder.ts` | Turns the `ModuleTree` into `GraphOutput`: dependency references, Direct Run metadata, cycles. The running inspector and the CLI export both build with it |
 | `DiscoveryAdapter` | `adapters/discovery.ts` | Walks `ModulesContainer` into a `ModuleTree`; instruments providers for tracing |
 | `SourceMetadataService` | `source-metadata.service.ts` | ts-morph project; JSDoc and parameter-type lookup by class name |
 | `RuntimeTraceRecorder` | `runtime-trace.recorder.ts` | Records call spans via `AsyncLocalStorage` |
@@ -198,6 +212,7 @@ than implementing the port.
 | `JsonOutputAdapter` | `adapters/json-output.adapter.ts` | Writes raw `GraphOutput` JSON |
 | `DirectRunOutputAdapter` | `adapters/direct-run-output.adapter.ts` | Builds the routes that invoke provider and controller methods |
 | `createInspectorEndpointInfo` | `inspector-endpoint-info.ts` | Builds the `information.json` handshake payload |
+| The export CLI | `cli/` | `nest-graph-inspector export`: boots the application in Nest's preview mode and writes its `GraphOutput`; see [the export CLI](#the-export-cli--nest-graph-inspector-export) |
 
 Intermediate types under `types/` — `ModuleMap`, `Modules`, `ModuleProvider`,
 `ModuleController` — are the *pre-enrichment* representation. They are not the
@@ -257,7 +272,8 @@ broken output is a log line, not a crash, and easy to miss.
 ### Discovery and enrichment
 
 `DiscoveryAdapter.scan()` produces a `ModuleTree`, and
-`NestGraphInspectorSetup.enrichModuleMap()` turns it into `GraphOutput`:
+`GraphOutputBuilder.enrichModuleMap()` — which `NestGraphInspectorSetup`
+inherits — turns it into `GraphOutput`:
 
 1. **Find the root.** Either `options.rootModule`, or inferred by locating the
    module that imported the inspector.
@@ -533,6 +549,119 @@ controller there. It never offers to re-run a controller span: re-sent as a
 provider, that would be refused with a `404` — or, when the module also has a
 provider of the same name, run that provider's method instead.
 
+### The export CLI — `nest-graph-inspector export`
+
+A running inspector reads the container its host application built while
+starting. `nest-graph-inspector export` builds that container without starting
+anything, in Nest's own preview mode
+([CI/CD integration](https://docs.nestjs.com/devtools/ci-cd-integration)), and
+writes the `GraphOutput` a running inspector would serve. The user-facing
+documentation, limitations included, is
+`site/content/1.getting-started/5.export-graph.md`.
+
+**What preview mode guarantees**, as read in `@nestjs/core` 11 rather than taken
+on trust:
+
+- `Injector.instantiateClass` returns before calling a constructor or a factory
+  when `preview` is set and the provider's module is not `initOnPreview`.
+  Dependencies are still resolved first, so a missing provider fails an export
+  exactly as it fails the application. A class provider or controller keeps the
+  prototype-only instance `InstanceLoader.createPrototypes` made for it, a
+  `useValue` provider keeps its value, and a `useFactory` or `useExisting`
+  provider has no instance at all.
+- `getModulesToTriggerHooksOn()` keeps only `initOnPreview` modules in preview
+  mode, so `init()` — which `createApplicationContext()` calls — and `close()`
+  run no hook anywhere else. `initOnPreview` comes from
+  `InitializeOnPreviewAllowlist`, which Nest itself fills with
+  `InternalCoreModule` alone.
+- `listen()` refuses to run in preview mode. The export calls neither it nor
+  `NestApplication.init()`, which is what calls a module's `configure()`.
+
+```
+1. Parse argv with node:util parseArgs; --help and --version load neither
+   Nest nor TypeScript
+2. Delegate: when the project resolves its own nest-graph-inspector, and that
+   copy is not this one and ships the bin, spawn it with the same argv
+   (NEST_GRAPH_INSPECTOR_CLI_DELEGATED stops a second hop); a copy without the
+   bin gets a warning, and the export carries on
+3. Find the entry: --entry, or from nest-cli.json's sourceRoot and the outDir
+   of the tsconfig `nest build` compiles with — <outDir>/app.module.js,
+   <outDir>/<sourceRoot>/app.module.js, or the only app.module.js under
+   <outDir>. Never main.js, which would start the application
+4. chdir to the project, so .env files and tsconfig.json resolve as they do
+   when the application starts there
+5. With process.stdout diverted to stderr: load the --require modules, the
+   project's own reflect-metadata and @nestjs/core, then the entry — require(),
+   falling back to import() for an ES module — and pick the root module export
+6. Boot: NestFactory.create(root, { preview: true, snapshot: true,
+   abortOnError: false, logger }), or createApplicationContext() when
+   @nestjs/platform-express does not resolve from @nestjs/core
+7. Read the options: the MODULE_OPTIONS_TOKEN value NestGraphInspectorModule
+   registered, through forRoot() or a plain import. forRootAsync() registers a
+   factory preview mode never runs: defaults, the entry module as root, and a
+   warning. A NestGraphInspectorModule from another copy: the same, with that
+   module ignored by name. No inspector at all: defaults, the entry as root
+8. Build: GraphOutputBuilder over a DiscoveryAdapter subclass that skips
+   runtime-trace instrumentation, with a fresh SourceMetadataService
+9. close() the application, write the JSON, print a summary to stderr, and
+   exit explicitly, since a module file may have left a handle open
+```
+
+Why each step is the way it is:
+
+- **Nest from the project, never from beside the CLI.** Under `npx` the CLI can
+  live in a temporary directory holding its own copy of the peers. A second
+  `@nestjs/core` would build a second, empty container, and the application's
+  classes are decorated against the project's `reflect-metadata`. Both are
+  loaded through `createRequire(<project>/package.json)` before the entry, and
+  the library's graph code only after them.
+- **Delegation.** `DiscoveryAdapter` recognises the inspector's module by class
+  identity (`metatype === NestGraphInspectorModule`), and the options by
+  `MODULE_OPTIONS_TOKEN`, which `ConfigurableModuleBuilder` generates afresh in
+  every copy of the package. Only the copy the application imports can match
+  them.
+- **`abortOnError: false`.** Otherwise Nest answers a failed bootstrap with
+  `process.abort()`; with it, the error is thrown, and the CLI reports it and
+  exits `1`.
+- **The platform check.** `NestFactory.create()` without
+  `@nestjs/platform-express` logs an error and calls `process.exit(1)` from
+  inside Nest. An application context builds the same container without any
+  HTTP platform — nothing that differs between the two is part of the graph —
+  so a standalone or Fastify-only application is booted that way.
+- **Standard output.** `--out -` must carry the graph and nothing else, so
+  whatever the application writes while it loads and boots, `console.log` and
+  Nest's logger included, goes to stderr.
+- **Load order.** `nest-graph-inspector.module` imports
+  `nest-graph-inspector.setup`, which extends `GraphOutputBuilder`, which
+  imports `adapters/discovery`, which imports the module back. That cycle
+  resolves only when the module file loads first, as it does through the
+  package entry, so `cli/export-graph.ts` imports it before anything else from
+  the package — and the CLI loads that file only after the project's own Nest.
+
+**Where an export differs from a running inspector's graph** is wherever a
+running inspector reads a provider's *instance*, which preview mode never
+creates: the Direct Run methods of `useFactory` and `useExisting` providers;
+the name of a factory provider whose function has no name of its own (live, the
+class of what it returned; exported, its token); and a `useExisting` alias
+registered before the provider it aliases, which a running inspector — matching
+dependencies by the class of an instance — lets stand in for that provider in
+the `dependencies` of whatever injects it, where an export resolves the
+provider itself. `cli/export-graph.spec.ts` pins those three down against a
+live `/output.json`; everything else is byte-identical. Modules and providers
+added once the application runs — through `LazyModuleLoader`, for instance —
+exist only in a running application.
+
+**What checks it.** `cli/export-graph.spec.ts` boots a fixture application
+(`cli/__fixtures__/`) in which every constructor, factory, lifecycle hook, and
+`configure()` records itself, and requires an export to record nothing, listen
+on nothing, and still produce every module, provider, controller, route, and
+cycle; it then compares the export with the `/output.json` the same application
+serves when booted normally. `cli/bin.spec.ts` compiles the package into a
+temporary project, as npm would install it, and runs the bin there with `node`:
+entry detection, standard output, ES module entries, delegation, a project copy
+too old for the CLI, and failures. `demo/test/graph-export.e2e-spec.ts` requires
+the demo's export to equal the running demo's `/output.json` byte for byte.
+
 ---
 
 ## `demo/` — development host and showcase
@@ -554,16 +683,21 @@ worth graphing:
 - **A third-party module**: `ConfigModule.forRoot()` inside `MobileModule`, so
   the graph contains something the repository does not own.
 
-`demo/test/` holds two e2e suites: an application-level one exercising the
+`demo/test/` holds three e2e suites: an application-level one exercising the
 demo's own REST routes *and* then reading the token-gated graph endpoint over
-TCP, and the network-level security suite described above, which boots the real
-module and probes it over real sockets.
+TCP; the network-level security suite described above, which boots the real
+module and probes it over real sockets; and the export suite, which requires
+`nest-graph-inspector export` of the demo's `nest build` output — and of its
+TypeScript sources, through `ts-node` — to equal the `/output.json` the running
+demo serves, byte for byte.
 
-**Neither runs by default.** They live behind `pnpm --filter
+**None runs by default.** They live behind `pnpm --filter
 nest-graph-inspector-demo run test:e2e` with their own Jest config, while the
 demo's plain `test` script is scoped to `src/` and passes with no tests. Root
 `pnpm run test` — and therefore CI — does not reach them. Change anything in
 the security surface and you must run `test:e2e` yourself; nothing else will.
+They run in band: the application-level and export suites both boot the
+demo's `AppModule`, whose inspector binds fixed ports.
 
 The application knows nothing about the documentation site, deliberately: it is
 a NestJS project you could copy elsewhere and run unchanged. Everything the
@@ -680,6 +814,16 @@ into `site/public/nodepod-demo/`:
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still finds JSDoc and Direct Run parameter types |
 | `manifest.json` | Revision, working directory, entry file, and the environment the application is started with |
 | `vendor-snapshot.json.gz` | The NestJS runtime packages exactly as installed — source maps, type definitions and all, so an error inside the pod can be traced to its cause — as a prebuilt virtual `node_modules` (~3.05 MB gzipped), copied from `site/assets/nodepod-demo/` and restored into the pod instead of being installed; required by the build, which fails without it, and always listed in `manifest.json` |
+
+`graph.json` lands beside them, but is not part of the payload: the demo's
+`build:nodepod` script runs the built CLI as its last step (`export:graph`,
+`nest-graph-inspector export --compact`), after the payload build has emptied
+the directory, and writes the demo's graph there — byte for byte what the
+running demo serves at `/output.json`, without anything having been booted.
+`manifest.json` does not list it and `test:demo-payload` does not read it; it
+is a static copy of the demo's graph for the site to show without starting the
+demo, and nothing in `site/app/` reads it yet. Generated with the payload and
+gitignored with it, it cannot go stale. `build:graph` regenerates it alone.
 
 **Two constraints shape this design.**
 
@@ -885,16 +1029,19 @@ load-bearing:
 | Script | What it does |
 |---|---|
 | `verify` | build library → lint → typecheck → test → build. **Run this before opening a PR.** |
-| `build` | library, then the demo payload |
-| `build:site` | library, demo payload, then the Nuxt build |
-| `dev` | library and payload, then demo and site in parallel |
+| `build` | library, then the demo payload and the demo's exported `graph.json` |
+| `build:site` | library, demo payload and graph, then the Nuxt build |
+| `dev` | library, payload and graph, then demo and site in parallel |
 | `test` / `lint` / `typecheck` | recursive, `--if-present` |
 
 The library must be built first every time
 ([why](#the-three-packages-and-the-direction-of-dependency)).
 
 Test runners differ per package, on purpose: `lib/` uses Jest with specs beside
-the code (`*.spec.ts`); `site/` uses `node --test` with
+the code (`*.spec.ts`) — `cli/bin.spec.ts` among them compiles the package into
+a temporary project and runs its bin with `node`, so the CLI is tested as
+installed rather than through `lib/dist`, which can be stale and, in the
+library matrix job that tests before it builds, is absent; `site/` uses `node --test` with
 `--experimental-strip-types` over `app/**/*.test.ts`, no framework. The demo's
 e2e suites sit outside all of it under `test:e2e`, so the library's own specs
 are what CI actually gates the security behaviour on.
@@ -932,7 +1079,7 @@ Landing in four places is known debt
 `graph-output.type.ts` and `graph-output.schema.ts` together, deciding whether
 the change is additive or breaking (if breaking, follow
 [the version rules](#2-the-graph-output-json--graphoutput)). Then extraction in
-`discovery.ts` / `setup.ts`, the demo, the payload rebuild, the viewer, and
+`discovery.ts` / `graph-output.builder.ts`, the demo, the payload rebuild, the viewer, and
 [`graph-contract.md`](./graph-contract.md).
 
 **Adding a viewer page.** Add the route under `site/app/pages/view/`, register
@@ -981,6 +1128,19 @@ that is never the default.
    it.
 10. **`lib/` and `demo/` compile under `strict`, spec files included.** Do not
     weaken `tsconfig.base.json` to make a change compile.
+11. **An export runs nothing.** `nest-graph-inspector export` boots in preview
+    mode and never calls `init()` or `listen()`. `lib/src/cli/export-graph.spec.ts`
+    requires that no constructor, factory, lifecycle hook, or `configure()` of
+    the application runs and that nothing listens.
+12. **There is one graph builder.** The running inspector and the export both
+    build `GraphOutput` with `GraphOutputBuilder` over a `DiscoveryAdapter`;
+    never give the export its own. `export-graph.spec.ts` and
+    `demo/test/graph-export.e2e-spec.ts` compare an export with a live
+    `/output.json`.
+13. **An export boots the project's own Nest.** `@nestjs/core` and
+    `reflect-metadata` load from the project, never from beside the CLI, and a
+    copy of the package the project installed that ships the CLI runs the
+    export instead.
 
 ---
 
@@ -997,6 +1157,7 @@ without knowing what it buys.
 | Direct Run invokes real methods | The trace is only honest if the call is real | In the default permissive mode, an authenticated caller can run any callable method on a provider, and any direct method of a controller, including ones TypeScript marks `private`; set `directRun.allowUnsafeMethods: false` to restrict calls to the public methods advertised in that provider's or controller's Direct Run metadata. It remains a development tool, not a production one |
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
+| The export loads the application's module files | Preview mode is Nest's own resolution: dynamic modules, `forwardRef`, global modules, and missing providers come out exactly as they do at runtime, which parsing the sources would only approximate | Code at the top level of those files runs — `.env` reads, `forRoot()` calls — and `--entry` pointed at `main.js` would start the application |
 
 ---
 
@@ -1023,6 +1184,16 @@ Facts a code change can invalidate, and the file to check:
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
 - Which controller methods permissive Direct Run resolves —
   `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`
+- The CLI's options and defaults (`nest-graph.json`, `AppModule`, the entry
+  candidates, exit codes) — `lib/src/cli/cli.ts`, `export-command.ts`, and
+  `project.ts`
+- That Nest's preview allowlist holds only `InternalCoreModule`, and what
+  preview mode skips — `InitializeOnPreviewAllowlist` and
+  `Injector.instantiateClass` in the installed `@nestjs/core`
+- Where an export differs from a running inspector's graph —
+  `lib/src/cli/export-graph.spec.ts`
+- The demo graph's path, `site/public/nodepod-demo/graph.json` — `export:graph`
+  in `demo/package.json`
 - Demo bundle size `~13.9 MB`, `~2.2 MB` gzipped —
   `site/public/nodepod-demo/main.js`, written by
   `demo/scripts/build-nodepod-payload.ts`

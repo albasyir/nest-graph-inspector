@@ -57,6 +57,15 @@ export class RootModule {}
 
 Start your app — the viewer URL will be printed in your console.
 
+### Or export it without running
+
+```bash
+nest build
+npx nest-graph-inspector export
+```
+
+Writes `nest-graph.json` — the same graph `/output.json` serves — by booting your app in NestJS's preview mode, which wires every module and dependency but constructs nothing and runs no hook. See [Export Without Running](https://albasyir.github.io/nest-graph-inspector/getting-started/export-graph) for the options and what preview mode cannot see.
+
 > For full configuration options and output types, see the **[documentation →](https://albasyir.github.io/nest-graph-inspector/getting-started)**
 
 ## Documentation

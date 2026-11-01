@@ -9,6 +9,14 @@ The normative source of truth is the JSON Schema published at:
 
 The viewer enforces `version >= 3`.  Older payloads trigger an upgrade prompt.
 
+The document has three producers, all built by the same code
+(`GraphOutputBuilder`) and all following this contract: a running inspector's
+`/output.json`, the `json` output's file, and `nest-graph-inspector export`,
+which builds it without running the application (see the export CLI in
+[`architecture.md`](./architecture.md#the-export-cli--nest-graph-inspector-export)).
+An export lacks only what a running inspector reads off live instances, such
+as `directRun` on `useFactory` and `useExisting` providers.
+
 ---
 
 ## Top-level structure
