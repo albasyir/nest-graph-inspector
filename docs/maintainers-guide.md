@@ -521,7 +521,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Component | Role |
 |---|---|
 | `PackageManagerCommand.vue` | Renders install/start commands for selected package manager |
-| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs; render the graph of the demo application running in the browser, started when the visitor selects "Run the demo application" |
+| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs. They draw the demo's static graph (`nodepod-demo/graph.json`, exported at build time) and boot nothing; "Load Example" — on the hero preview (`show-load-example`) and the Direct Run preview — starts the demo in the browser, and every preview then draws its live graph |
 | `RuntimeAIChatPreview.vue` | AI chat preview in docs |
 | `HeroBackground.vue` / `StarsBg.vue` | Visual elements for landing page |
 
@@ -537,11 +537,12 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Composable | What it does |
 |---|---|
-| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
+| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events. A graph file is already loaded: it fetches nothing for one |
+| `useGraphFileOpener.ts` | Opens a graph file — picked, dropped, or the demo's static graph — with `File.text()` and `utils/graph-file.ts`, hands it to the store, and goes to the navigator. Its error is shared state, so the viewer header's "Open Another…" can send a failure to `/view` |
 | `useWebLlmEngine.ts` | The only surface a chat model talks to: WebGPU support check, curated model catalog and cache state, model download progress, streaming generation, interrupt, and teardown. Imports `@mlc-ai/web-llm` lazily inside function bodies, since the module touches browser globals and the site is prerendered. Never sends `tools` on a request — see `web-llm-langchain.ts` for why that allowlist is not worth paying for |
 | `useMobileDevice.ts` | Whether the AI chat treats this tab as mobile, kept current as the window changes. The device class is `useDevice()` from `@nuxtjs/device`, called once in setup; it adds an iPad posing as a Mac and a window narrower than 768px, and answers `false` until mounted so a hydrated page agrees with its server render |
 | `useGraphAgent.ts` | Agent mode as the panel sees it: the `isRunning` flag and the dynamic `import()` that keeps `langchain` out of the prerendered server bundle. The loop itself is `~/utils/graph-agent-run`, which is testable without a browser |
-| `use-nodepod-demo-graph.ts` | Starts the in-browser demo when a docs preview asks for it, and exposes the graph, status label, and idle state that preview needs |
+| `use-nodepod-demo-graph.ts` | What a docs preview draws: the static graph on mount, the live one once the demo runs. `loadExample()` — "Load Example" — is the only thing in it that starts the demo |
 | `use-nodepod-demo-session.ts` | Reuses the in-browser demo the tab is running (or starting) behind a restored session; a session nothing answers any more — its endpoint is only answerable by the tab that started it — is forgotten and the visitor sent to `/view`. A viewer page never starts the demo |
 
 **What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
@@ -570,7 +571,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|---|
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
-| `view/index.vue` | `/view` | Graph viewer entry; shows the landing card and polls for a live endpoint, and starts the in-browser demo only when "Open Demo" is clicked (with a Cancel). `?preview=true` joins a demo already running in the tab and never boots one; a tab with a usable session returns to its graph unless `?autoload=false` |
+| `view/index.vue` | `/view` | Graph viewer entry; shows the landing card — with the Open Graph File drop zone, which takes a drop anywhere on the page — and polls for a live endpoint, and starts the in-browser demo only when "Load Example" is clicked (with a Cancel). `?preview=true` joins a demo already running in the tab and never boots one, opening the demo's static graph as a graph file when there is none; a tab with a usable session, or a graph file, returns to its graph unless `?autoload=false` |
 | `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
 | `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
@@ -635,7 +636,8 @@ fallback.
 
 | Store | Purpose |
 |---|---|
-| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags |
+| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags — or, instead of an endpoint, a graph file (`openGraphFile`, `closeGraphFile`, `restoreGraphSource`) |
+| `example-graph.ts` | The demo's static graph, `nodepod-demo/graph.json`: fetched once per document from the site, checked like a graph file |
 | `nodepod-demo.ts` | Runs the demo application in the browser: downloads the payload, boots nodepod headless, spawns `node main.js`, installs the fetch bridge, and reads the graph endpoint out of the application's startup log |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
 
@@ -699,7 +701,11 @@ that cannot reach into a Pinia setup store.
 | `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
 | `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at the root of the application's own server, Direct Run |
 | `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
-| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
+| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, the newest format it knows, and recognising a graph served by an older library |
+| `graph-file.ts` | Reads a graph file: the size cap, JSON syntax, the `GraphOutput` shape down to each dependency, and the version — each failure in words that name the field |
+| `graph-file-session.ts` | The tab's copy of a graph file for a reload, in `sessionStorage` when it fits, its name alone when it does not |
+| `demo-graph-preview.ts` | Where the static demo graph is published, and what a preview shows given it and the live demo — the decision that the landing page boots nothing |
+| `analytics-privacy.ts` | PostHog's `before_send`: every viewer route in every event reduced to its shape, wherever PostHog put it |
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
 | `graph-layout-placement.ts` | Incremental layout: `resolveIncrementalLayout` keeps every saved module and item exactly where the layout says, places items the layout has not seen in the first free slot of their module (growing it to fit), and places new modules beside a module they import or are imported by, else in the nearest free slot — never displacing anything saved. `LAYOUT_GEOMETRY` mirrors the sizes `GraphViewer.vue` draws with; item keys are the viewer's node ids (`provider-<Module>-<Name>`) |
 | `graph-layout-placement.test.ts` | Assert-based test for `graph-layout-placement.ts` |

@@ -9,6 +9,14 @@ The normative source of truth is the JSON Schema published at:
 
 The viewer enforces `version >= 3`.  Older payloads trigger an upgrade prompt.
 
+The viewer reads the document two ways: fetched from an endpoint, or opened as
+a graph file at `/view`, where `site/app/utils/graph-file.ts` checks it before
+drawing it — every field listed below that the viewer reads, down to each
+dependency, must have the type this document gives it. A file in a format older
+than 3 is refused; one newer than the viewer knows opens with a notice. A
+field added to this contract that the viewer must read is a change to that
+check too.
+
 The document has three producers, all built by the same code
 (`GraphOutputBuilder`) and all following this contract: a running inspector's
 `/output.json`, the `json` output's file, and `nest-graph-inspector export`,

@@ -799,6 +799,52 @@ viewports with dependencies at the top and dependents below). `nuxt.config.ts` r
 neither the tab's session nor the developer's local endpoint exists on a server
 — while `/view` itself keeps SSR so it still unfurls as a link.
 
+**The graph file source.** The viewer has a second kind of graph besides an
+endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the
+`json` output, or a saved `/output.json`. The `/view` landing card opens one
+from **Open Graph File** or a drop anywhere on the page;
+`useGraphFileOpener` (`app/composables/`) reads it with `File.text()` and
+`app/utils/graph-file.ts` checks it — a 20 MB cap before reading, JSON syntax,
+every field the viewer reads down to each dependency, and the format version
+against `MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION`. Older is refused with a
+message naming the field or the version; newer than
+`NEWEST_KNOWN_GRAPH_OUTPUT_VERSION` opens with a notice, as an endpoint's
+newer graph renders. The graph store's `openGraphFile` then forgets the
+endpoint, its token and its session, and holds the graph as `fileSource` +
+`fileGraph`; `graphData` is the file's graph or the fetched one, never both.
+Nothing is uploaded, nothing is fetched or probed on the file's behalf, and the
+demo is not booted. A file is static: Direct Run says why it cannot run (and
+offers no trace, which a file has none of), the trace page says the same, the
+layout is kept for the tab under the file's `kind:name` and can be downloaded,
+the header's reload gives way to a File menu (Open Another…, Close Graph), and
+the AI chat is off with its reason — it reads `/output.md`, which only the
+library writes, and the site will not rebuild the library's Markdown. The demo's
+static graph opens the same way, as the `example` kind, for `/view?preview=true`
+when no demo is running. For a reload the tab keeps the graph in
+`sessionStorage` (`nest-graph-inspector:graph-file`, `graph-file-session.ts`)
+when it is at most 1.5 million characters of compact JSON; a larger one keeps
+only its name, and a reload lands on `/view` asking for that file again. The
+bootstrap middleware and `useGraphViewerPage` restore a file through
+`restoreGraphSource` and pass it straight through — no token check, no demo
+session, no fetch.
+
+**Analytics never carry the graph.** The site's own events name a viewer route
+by its shape (`describeViewerRoute`) and a graph file only by its kind
+(`graph_source`: `file` or `example`, on the `graph_viewer_load_*` events, plus
+`graph_file_opened` and `graph_file_rejected` with the problem's kind) — never
+its name or contents. PostHog's own properties are handled by
+`plugins/posthog-privacy.client.ts`, whose `before_send`
+(`app/utils/analytics-privacy.ts`) rewrites every viewer route in every event —
+`$current_url`, `$pathname`, session and person URLs, heatmap keys — to that
+shape and drops the page title on viewer pages, since a deep dive's path names
+a module and the navigator's query can name one too. The viewer layout marks
+itself and the body `ph-no-capture`, which keeps PostHog's click capture and
+session replay off everything it draws, teleported drawers and popovers
+included; so does the `/view` file drop zone. The one part of a viewer page
+outside the body is its `<title>`, so no viewer page names the graph there —
+the deep dive is "Module Deep Dive" — and `session_recording.maskTextSelector`
+in `nuxt.config.ts` masks titles in replays besides.
+
 Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
 for JSON editing, ApexCharts for timings, and LangChain over `@mlc-ai/web-llm`
 for the AI chat panel.
@@ -817,10 +863,13 @@ hover" in the graph settings panel turns it off.
 
 ### 3. The in-browser demo
 
-Everything the site shows as a demo — the previews on the landing page, and the
-demo `/view` opens when the visitor asks for it — is the `demo/` application actually running, on
+Every demo the site runs — the previews on the landing page once the visitor
+presses "Load Example", and the demo `/view` opens when the visitor asks for it
+— is the `demo/` application actually running, on
 the [nodepod](https://www.npmjs.com/package/@scelar/nodepod) browser-native
-Node.js runtime, in the visitor's own tab. Nothing is captured ahead of time:
+Node.js runtime, in the visitor's own tab. Until then the previews draw the
+demo's static graph, exported from the same build (see the boot sequence
+below). Nothing a running demo shows is captured ahead of time:
 Direct Run really invokes provider and controller methods, runtime traces
 really accumulate, and the JSDoc and parameter types in the graph come from
 the sources of the application that is answering.
@@ -878,10 +927,10 @@ generates the site runs it right after building the payload.
 **Boot sequence.**
 
 ```
-1. A preview on the landing page (/) mounts and starts it on its own, or the
-   visitor asks for it: "Run the demo application" in a preview with autoload
-   off, or "Open Demo" on the /view landing card. /view and the pages under it
-   never start it on arrival (see below)
+1. The visitor asks for it: "Load Example" on the landing page's hero or
+   Direct Run preview, or on the /view landing card. Nothing else starts it —
+   not the landing page (/) opening, and not /view or the pages under it on
+   arrival (see below)
 2. nodepod-demo store downloads manifest.json, main.js, sources.json, and the
    vendor snapshot
 3. Nodepod.boot({ workdir, env, headless: true }) boots a pod with no files;
@@ -897,52 +946,70 @@ generates the site runs it right after building the payload.
    the graph through the same HTTP contract as any other endpoint
 ```
 
-The landing page's previews start the demo on their own, and they are the only
-thing that does. Downloading an application and booting a Node runtime used to
-be too heavy for a page to do because it was scrolled past, but the NestJS
-runtime packages now arrive as the prebuilt vendor snapshot restored straight
-into the pod rather than installed from npm — and the landing page (`/`) opens
-on the live graph instead of a button.
-Measured on a local static build in Chromium: pod boot and snapshot restore
-take ~1.0 s, the runtime is ready to spawn ~2.2 s after navigation, and the
-live graph arrives at ~11.6 s, most of it the NestJS application starting from
-`main.js`. `useNodepodDemoGraph` (`app/composables/`) starts it from
-`onMounted`, never during server rendering, so the page's text renders and
-stays readable while the preview shows a spinner and the store's status over a
-skeleton; a demo that already failed in the tab is not started again until the
-visitor retries, from the preview's inline error or the dialog. A preview
-given `autoload: false` (`RuntimeGraphPreview`'s `autoload` prop) waits for a
-click instead. `/view` never starts the demo on arrival: it opens on the
-landing card and its local-inspector polling, and starts the demo when the
-visitor clicks "Open Demo" — behind a loading card with a Cancel that stops the
-pod and falls back to the landing card. Two things move on without a click,
-decided by `resolveViewerLandingAction` (`app/utils/viewer-landing.ts`):
+Nothing starts the demo on its own. The landing page (`/`) opens on the demo's
+**static graph**: `site/public/nodepod-demo/graph.json`, which the demo's
+`build:nodepod` (and `build:graph`) script exports with `nest-graph-inspector
+export` from the same build the payload is made of, and the site publishes
+beside the payload — the one file under `nodepod-demo/` the site fetches on its
+own. Every preview draws it, fetched once per document, relative to the site's
+base URL (`useExampleGraphStore`, `app/stores/example-graph.ts`), and checked
+like any graph file a visitor opens. Opening `/` downloads nothing else from
+`nodepod-demo/` — no `manifest.json`, `main.js`, `sources.json` or vendor
+snapshot — and boots nothing; the caption says the graph is static, exported
+with `nest-graph-inspector export` from the demo project. A missing
+`graph.json` is an inline error in each preview, with "Load Example" still
+offered.
+
+"Load Example" — on the hero preview, the Direct Run preview, and the `/view`
+landing card — is the only thing that runs the demo, and it boots it exactly as
+step 2 onwards describes. Once it is running, every preview on the page draws
+the live graph instead (`useNodepodDemoGraph`, `app/composables/`; the
+decision itself is `resolveDemoPreviewView` in
+`app/utils/demo-graph-preview.ts`), and the Direct Run preview runs methods
+against it; until then its drawer says Direct Run needs the example loaded. A
+demo already running in the tab — started from `/view` — is drawn live as soon
+as a preview mounts: reading its graph boots nothing.
+Measured on a local static build in Chromium before the landing page stopped
+starting it: pod boot and snapshot restore take ~1.0 s, the runtime is ready to
+spawn ~2.2 s after navigation, and the live graph arrives at ~11.6 s, most of
+it the NestJS application starting from `main.js`. Only the mount fetches
+anything — never server rendering — so the page's text renders and stays
+readable while a preview shows a skeleton; a demo that failed in the tab is
+started again only when the visitor retries, from the preview's inline error or
+the dialog. `/view` never starts the demo on arrival: it opens on the landing
+card — Learn Why, Install It, Load Example, and the Open Graph File drop zone —
+and its local-inspector polling, and starts the demo when the visitor clicks
+"Load Example" — behind a loading card with a Cancel that stops the pod and
+falls back to the landing card. Three things move on without a click, decided
+by `resolveViewerLandingAction` (`app/utils/viewer-landing.ts`):
 `?preview=true` — a preview's "Open full-screen demo" link — joins the demo that
 preview is already running or starting in the tab and opens the viewer on it,
-and shows the landing card when there is no demo to join; and a tab whose
-session names the visitor's own application, with a token the viewer would
-accept, goes straight back to `/view/navigator` (`/view/trace` with
-`?trace=true` or `?execution-sequence=true`) unless `?autoload=false` holds it
-back — the viewer's "Try Another URL" links there. A restored *demo* session is
-never redirected. `/view` always hands off with a history replace, so Back from
-the viewer does not return to a page that would only send the visitor forward
-again. One pod then serves every preview on the page and the viewer, so the
-payload is downloaded and the application booted once for as long as it keeps
-running. A failure opens one dialog, wherever it was started from, saying what
-went wrong in the store's own words — the application's output is never shown;
-the retry it offers boots another one.
+and with no demo to join opens the static graph as a graph file (see "The graph
+file source", below) rather than booting one; a tab on a graph file goes back
+to `/view/navigator`; and a tab whose session names the visitor's own
+application, with a token the viewer would accept, goes straight back to
+`/view/navigator` (`/view/trace` with `?trace=true` or
+`?execution-sequence=true`). `?autoload=false` holds either session back — the
+viewer's "Try Another URL" and the file menu link there. A restored *demo*
+session is never redirected. `/view` always hands off with a history replace,
+so Back from the viewer does not return to a page that would only send the
+visitor forward again. One pod then serves every preview on the page and the
+viewer, so the payload is downloaded and the application booted once for as
+long as it keeps running. A failure opens one dialog, wherever it was started
+from, saying what went wrong in the store's own words — the application's
+output is never shown; the retry it offers boots another one.
 
 A reload restores the endpoint from the tab's session (a viewer page names a
 view, not a graph) — and for the demo that endpoint is answerable only by the
 tab that started it. `use-nodepod-demo-session.ts` recognises such an endpoint
 and never starts the demo to answer it: it forgets the session and sends the
-visitor to the `/view` landing card, where "Open Demo" boots a fresh demo with
-a fresh token. A demo still running or starting in the tab is reused instead. A
+visitor to the `/view` landing card, where "Load Example" boots a fresh demo
+with a fresh token. A demo still running or starting in the tab is reused instead. A
 token the endpoint has begun refusing — the demo's expires on the library's own
 schedule, and a tab left open outlives it — is handled the same way, except
 that the application behind it is still running, so it is stopped as well:
-"Open Demo" would otherwise join it and hand back the credential that was just
-refused.
+"Load Example" would otherwise join it and hand back the credential that was
+just refused.
 
 **What the payload build accommodates.** The bundle is prepended with a few
 lines the application never sees, because the browser runtime differs from Node
@@ -969,9 +1036,8 @@ Known limitations, accepted deliberately:
 
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
-- The payload is a few megabytes, downloaded once per visit — and, since the
-  landing page's previews start the demo on mount, on every visit to `/`,
-  whether or not the visitor scrolls to a preview.
+- The payload is a few megabytes, downloaded once per visit that presses "Load
+  Example". The static graph the landing page draws until then is about 8 KB.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
@@ -1157,7 +1223,15 @@ that is never the default.
     never give the export its own. `export-graph.spec.ts` and
     `demo/test/graph-export.e2e-spec.ts` compare an export with a live
     `/output.json`.
-13. **An export boots the project's own Nest.** The `@nestjs/core` that boots
+13. **A graph file goes nowhere.** The viewer reads it in the tab: no upload,
+    no request made for it, no demo booted, and neither its name nor its
+    contents in an analytics event. `graph-file.test.ts`,
+    `graph-file-session.test.ts` and `analytics-privacy.test.ts` cover the
+    pieces.
+14. **The landing page boots nothing.** Its previews draw the static
+    `nodepod-demo/graph.json`; only "Load Example" downloads the payload and
+    starts the demo. `demo-graph-preview.test.ts` covers the decision.
+15. **An export boots the project's own Nest.** The `@nestjs/core` that boots
     the application, and the `reflect-metadata` it is decorated against, load
     from the project before the entry, never from beside the CLI; and a copy of
     the package the project installed that ships the CLI runs the export
@@ -1214,12 +1288,22 @@ Facts a code change can invalidate, and the file to check:
 - Where an export differs from a running inspector's graph —
   `lib/src/cli/export-graph.spec.ts`
 - The demo graph's path, `site/public/nodepod-demo/graph.json` — `export:graph`
-  in `demo/package.json`
+  in `demo/package.json`, and `EXAMPLE_GRAPH_FILE` in
+  `site/app/utils/demo-graph-preview.ts`, which the landing page's previews
+  fetch
+- The newest graph format the viewer knows, `3` —
+  `NEWEST_KNOWN_GRAPH_OUTPUT_VERSION` in `site/app/utils/graph-output-support.ts`
+  (checked against the library's by `graph-output-support.test.ts`)
+- The graph file limits: 20 MB to open, 1.5 million characters kept for a
+  reload — `MAX_GRAPH_FILE_BYTES` in `site/app/utils/graph-file.ts` and
+  `MAX_STORED_GRAPH_CHARS` in `site/app/utils/graph-file-session.ts`
+- Which properties PostHog stamps with the page's URL, and that `ph-no-capture`
+  still blocks click capture and replay — `posthog-js`, which
+  `site/app/utils/analytics-privacy.ts` and `layouts/viewer.vue` rely on
 - Demo bundle size `~13.9 MB`, `~2.2 MB` gzipped —
   `site/public/nodepod-demo/main.js`, written by
   `demo/scripts/build-nodepod-payload.ts`
 - Vendor snapshot size `~3.05 MB` gzipped —
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
-  `demo/scripts/build-nodepod-payload.ts` and
-  `site/app/composables/use-nodepod-demo-graph.ts`
+  `demo/scripts/build-nodepod-payload.ts`
