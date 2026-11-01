@@ -31,7 +31,8 @@ export class FixtureMetricsService {
 }
 
 /**
- * Serves documents over HTTP.
+ * Serves documents over HTTP. Each handler answers with JSON, never with the
+ * request's own text.
  */
 @Controller("documents")
 export class FixtureDocumentController {
@@ -40,13 +41,15 @@ export class FixtureDocumentController {
   }
 
   @Get(":name")
-  find(@Param("name") name: string): string {
-    return name;
+  find(@Param("name") name: string): { name: string } {
+    return { name };
   }
 
   @Post()
-  create(@Body() body: { name: string; content: string }): string {
-    return this.documents.save(body.name, body.content);
+  create(@Body() body: { name: string; content: string }): {
+    location: string;
+  } {
+    return { location: this.documents.save(body.name, body.content) };
   }
 }
 

@@ -72,8 +72,8 @@ export class GreetingController {
   }
 
   @Get(":name")
-  greet(@Param("name") name: string): string {
-    return this.greetings.greet(name);
+  greet(@Param("name") name: string): { greeting: string } {
+    return { greeting: this.greetings.greet(name) };
   }
 }
 `,
