@@ -48,14 +48,28 @@ Options:
 --entry, --out and --project are relative to the current directory.
 `;
 
-/** Runs the CLI with `argv` (without `node` and the script) and returns its exit code. */
+/**
+ * The process's own output streams, with their `write` captured now — before
+ * an application's module files get the chance to replace it — so the graph,
+ * the CLI's messages, and the final flush never pass through code the
+ * application installed.
+ */
+export function processIo(): CliIo {
+  return {
+    stdout: { write: process.stdout.write.bind(process.stdout) },
+    stderr: { write: process.stderr.write.bind(process.stderr) },
+    cwd: process.cwd(),
+  };
+}
+
+/**
+ * Runs the CLI with `argv` (without `node` and the script) and returns its
+ * exit code. `export` diverts `process.stdout` to stderr for the rest of the
+ * process, so it belongs in a process of its own, as `bin.ts` runs it.
+ */
 export async function runCli(
   argv: readonly string[],
-  io: CliIo = {
-    stdout: process.stdout,
-    stderr: process.stderr,
-    cwd: process.cwd(),
-  },
+  io: CliIo = processIo(),
 ): Promise<number> {
   let parsed: ReturnType<typeof parseCliArgs>;
   try {

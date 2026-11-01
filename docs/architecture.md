@@ -590,9 +590,11 @@ on trust:
    <outDir>. Never main.js, which would start the application
 4. chdir to the project, so .env files and tsconfig.json resolve as they do
    when the application starts there
-5. With process.stdout diverted to stderr: load the --require modules, the
-   project's own reflect-metadata and @nestjs/core, then the entry — require(),
-   falling back to import() for an ES module — and pick the root module export
+5. Divert process.stdout to stderr for the rest of the process, then load the
+   --require modules, the project's own reflect-metadata and @nestjs/core, and
+   the entry — import() when Node treats it as an ES module (.mjs, or .js
+   under "type": "module"), require() otherwise — and pick the root module
+   export
 6. Boot: NestFactory.create(root, { preview: true, snapshot: true,
    abortOnError: false, logger }), or createApplicationContext() when
    @nestjs/platform-express does not resolve from @nestjs/core
@@ -614,7 +616,12 @@ Why each step is the way it is:
   `@nestjs/core` would build a second, empty container, and the application's
   classes are decorated against the project's `reflect-metadata`. Both are
   loaded through `createRequire(<project>/package.json)` before the entry, and
-  the library's graph code only after them.
+  the library's graph code only after them. That code still resolves its own
+  `@nestjs/common` and `@nestjs/core` from wherever the package is installed —
+  for decorators and constants, never to boot anything — and once the
+  project's own copy runs the export, those are the project's too. Nothing the
+  CLI loads before delegating needs a Nest package beside it, so delegation
+  works from a copy installed without its peers.
 - **Delegation.** `DiscoveryAdapter` recognises the inspector's module by class
   identity (`metatype === NestGraphInspectorModule`), and the options by
   `MODULE_OPTIONS_TOKEN`, which `ConfigurableModuleBuilder` generates afresh in
@@ -629,8 +636,13 @@ Why each step is the way it is:
   HTTP platform — nothing that differs between the two is part of the graph —
   so a standalone or Fastify-only application is booted that way.
 - **Standard output.** `--out -` must carry the graph and nothing else, so
-  whatever the application writes while it loads and boots, `console.log` and
-  Nest's logger included, goes to stderr.
+  from the moment the application's code can first run until the process
+  exits, `process.stdout.write` sends it to stderr — `console.log`, Nest's
+  logger, and a timer the application set that fires after the export
+  included. The graph, the CLI's messages, and the final flush go through the
+  streams' own `write`, captured before any application code ran, so neither a
+  late write nor a replaced `process.stderr.write` can corrupt or stall them.
+  A write straight to file descriptor 1 is beyond this.
 - **Load order.** `nest-graph-inspector.module` imports
   `nest-graph-inspector.setup`, which extends `GraphOutputBuilder`, which
   imports `adapters/discovery`, which imports the module back. That cycle
@@ -1137,10 +1149,11 @@ that is never the default.
     never give the export its own. `export-graph.spec.ts` and
     `demo/test/graph-export.e2e-spec.ts` compare an export with a live
     `/output.json`.
-13. **An export boots the project's own Nest.** `@nestjs/core` and
-    `reflect-metadata` load from the project, never from beside the CLI, and a
-    copy of the package the project installed that ships the CLI runs the
-    export instead.
+13. **An export boots the project's own Nest.** The `@nestjs/core` that boots
+    the application, and the `reflect-metadata` it is decorated against, load
+    from the project before the entry, never from beside the CLI; and a copy of
+    the package the project installed that ships the CLI runs the export
+    instead.
 
 ---
 

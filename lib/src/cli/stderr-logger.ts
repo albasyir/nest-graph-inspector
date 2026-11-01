@@ -20,13 +20,15 @@ type Level = "WARN" | "ERROR" | "FATAL";
  * for the graph itself, which `--out -` writes there.
  *
  * Nest passes the context last (`Logger#warn(message, context)`,
- * `Logger#error(message, stack, context)`), so a trailing string is read as
- * the context and anything before it is printed after the message.
+ * `Logger#error(message, stack, context)`), so a trailing one-line string is
+ * read as the context, and anything else is printed after the message — a
+ * stack passed without a context included.
  */
 export function createStderrLogger(write: (text: string) => void): LoggerService {
   const print = (level: Level, message: unknown, params: unknown[]): void => {
     const last = params.at(-1);
-    const context = typeof last === "string" ? last : undefined;
+    const context =
+      typeof last === "string" && !last.includes("\n") ? last : undefined;
     const details = (context === undefined ? params : params.slice(0, -1))
       .filter((param) => param !== undefined)
       .map(format);

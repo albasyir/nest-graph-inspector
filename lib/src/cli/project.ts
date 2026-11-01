@@ -1,9 +1,16 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Type } from "@nestjs/common";
-import { MODULE_METADATA } from "@nestjs/common/constants";
 import { ts } from "ts-morph";
 import { CliError, describeError } from "./cli-error";
 import type { GraphExportBoot, NestCore } from "./export-graph";
@@ -21,8 +28,24 @@ const MAX_ENTRY_SEARCH_DEPTH = 6;
 
 const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".tsx"]);
 
-/** The metadata keys `@Module()` writes, which is what makes a class a module. */
-const MODULE_METADATA_KEYS = new Set<unknown>(Object.values(MODULE_METADATA));
+/**
+ * The metadata keys `@Module()` writes — the values of `MODULE_METADATA` in
+ * `@nestjs/common/constants` — which is what makes a class a module. Spelled
+ * out, rather than imported, so nothing here needs a Nest package beside the
+ * CLI: delegating to the project's own copy has to work without one.
+ */
+const MODULE_METADATA_KEYS = new Set<unknown>([
+  "imports",
+  "providers",
+  "controllers",
+  "exports",
+]);
+
+/**
+ * TS18003, "No inputs were found in config file": expected, since the
+ * tsconfig is parsed with a host that lists no files.
+ */
+const NO_INPUTS_FOUND = 18003;
 
 type NestCliConfig = {
   sourceRoot?: unknown;
@@ -117,7 +140,8 @@ export function detectEntry(projectDir: string, cwd: string): string {
   const nestConfig = readNestCliConfig(projectDir);
   const sourceRoot =
     typeof nestConfig.sourceRoot === "string" ? nestConfig.sourceRoot : "src";
-  const outDir = readOutDir(projectDir, nestConfig) ?? join(projectDir, "dist");
+  const outDir =
+    readOutDir(projectDir, nestConfig, cwd) ?? join(projectDir, "dist");
   const candidates = [
     ...new Set([
       join(outDir, ROOT_MODULE_FILE),
@@ -180,6 +204,7 @@ function readNestCliConfig(projectDir: string): NestCliConfig {
 function readOutDir(
   projectDir: string,
   nestConfig: NestCliConfig,
+  cwd: string,
 ): string | undefined {
   const configured =
     nestConfig.compilerOptions?.builder?.options?.configPath ??
@@ -192,11 +217,19 @@ function readOutDir(
     return undefined;
   }
 
+  const unreadable = (diagnostics: readonly ts.Diagnostic[]) =>
+    new CliError(
+      `Cannot read ${displayPath(configPath, cwd)}: ${diagnostics
+        .map((diagnostic) =>
+          ts.flattenDiagnosticMessageText(diagnostic.messageText, " "),
+        )
+        .join("; ")}. Fix it, or pass --entry <file>.`,
+    );
   const configFile = ts.readConfigFile(configPath, (path) =>
     ts.sys.readFile(path),
   );
   if (configFile.error) {
-    return undefined;
+    throw unreadable([configFile.error]);
   }
 
   const parsed = ts.parseJsonConfigFileContent(
@@ -212,6 +245,12 @@ function readOutDir(
     undefined,
     configPath,
   );
+  const errors = parsed.errors.filter(
+    (diagnostic) => diagnostic.code !== NO_INPUTS_FOUND,
+  );
+  if (errors.length) {
+    throw unreadable(errors);
+  }
 
   return parsed.options.outDir;
 }
@@ -241,26 +280,54 @@ export function isTypeScriptFile(path: string): boolean {
 }
 
 /**
- * Loads a module the way Node would from the project: `require()`, falling
- * back to `import()` for an ES module `require()` cannot load.
+ * Loads a module the way Node would from the project: `import()` for an ES
+ * module, which `require()` cannot load on every supported Node version, and
+ * `require()` — through any `--require` hooks — for everything else. Decided
+ * before loading rather than by retrying, so a module file is never run twice.
  */
 export async function loadModule(
   path: string,
   projectRequire: NodeJS.Require,
 ): Promise<unknown> {
-  if (extname(path) === ".mjs") {
-    return importModule(pathToFileURL(path).href);
+  if (isEsModule(path)) {
+    return await importModule(pathToFileURL(path).href);
   }
 
-  try {
-    return projectRequire(path) as unknown;
-  } catch (error) {
-    const code = (error as { code?: unknown } | undefined)?.code;
-    if (code === "ERR_REQUIRE_ESM" || code === "ERR_REQUIRE_ASYNC_MODULE") {
-      return importModule(pathToFileURL(path).href);
+  return projectRequire(path) as unknown;
+}
+
+/**
+ * Whether Node treats a file as an ES module: `.mjs` and `.mts` always,
+ * `.cjs` and `.cts` never, and `.js` when its nearest package.json says
+ * `"type": "module"`. Other extensions — `.ts` with a `--require` loader —
+ * are left to `require()`.
+ */
+export function isEsModule(path: string): boolean {
+  const extension = extname(path);
+  if (extension === ".mjs" || extension === ".mts") {
+    return true;
+  }
+
+  if (extension !== ".js") {
+    return false;
+  }
+
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    const packageJsonPath = join(dir, "package.json");
+    if (isFile(packageJsonPath)) {
+      try {
+        const { type } = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+          type?: unknown;
+        };
+        return type === "module";
+      } catch {
+        return false;
+      }
     }
 
-    throw error;
+    if (dirname(dir) === dir) {
+      return false;
+    }
   }
 }
 
@@ -334,11 +401,14 @@ export function loadNestCore(
   projectDir: string,
   cwd: string,
 ): { nestCore: NestCore; boot: GraphExportBoot } {
+  let reflectMetadata: string | undefined;
   try {
-    projectRequire.resolve("reflect-metadata");
-    projectRequire("reflect-metadata");
+    reflectMetadata = projectRequire.resolve("reflect-metadata");
   } catch {
     // Not a direct dependency: @nestjs/core loads its own below.
+  }
+  if (reflectMetadata) {
+    projectRequire(reflectMetadata);
   }
 
   let entry: string;
@@ -372,11 +442,12 @@ function canLoadHttpPlatform(nestCoreEntry: string): boolean {
 /** A path relative to `cwd` when it lies inside it, else absolute. */
 export function displayPath(path: string, cwd: string): string {
   const relativePath = relative(cwd, path);
-  return relativePath &&
-    !relativePath.startsWith("..") &&
-    !isAbsolute(relativePath)
-    ? relativePath
-    : path;
+  const outside =
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath);
+
+  return relativePath && !outside ? relativePath : path;
 }
 
 export function isFile(path: string): boolean {

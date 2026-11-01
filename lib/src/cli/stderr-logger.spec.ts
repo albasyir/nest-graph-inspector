@@ -30,6 +30,14 @@ describe(createStderrLogger.name, () => {
     );
   });
 
+  it("prints a stack passed without a context after the message", () => {
+    logger.error("It broke", "Error: It broke\n    at somewhere");
+
+    expect(written).toBe(
+      "[Nest] ERROR It broke\nError: It broke\n    at somewhere\n",
+    );
+  });
+
   it("prints an error object by its stack", () => {
     const error = new Error("Nest can't resolve dependencies");
 

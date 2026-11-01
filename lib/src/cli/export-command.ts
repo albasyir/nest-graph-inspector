@@ -62,8 +62,9 @@ export async function runExportCommand(
   // .env files, tsconfig.json for JSDoc — is read from the project, exactly
   // as when it is started from there.
   process.chdir(projectDir);
+  divertStdoutToStderr();
 
-  const { result, entryName } = await withStdoutOnStderr(async () => {
+  const { result, entryName } = await (async () => {
     for (const request of options.require ?? []) {
       try {
         projectRequire(request);
@@ -95,9 +96,17 @@ export async function runExportCommand(
       io.cwd,
     );
     // Loaded only now, after the project's own reflect-metadata.
-    const { exportGraph, PreviewBootstrapError } = await import(
-      "./export-graph"
-    );
+    let exportGraphModule: typeof import("./export-graph");
+    try {
+      exportGraphModule = await import("./export-graph");
+    } catch (error) {
+      throw new CliError(
+        `Cannot load nest-graph-inspector's own modules from ${readOwnPackage().root}: ${
+          describeError(error).split("\n")[0]
+        }. Install nest-graph-inspector in the project and run the export there.`,
+      );
+    }
+    const { exportGraph, PreviewBootstrapError } = exportGraphModule;
 
     try {
       return {
@@ -124,7 +133,7 @@ export async function runExportCommand(
         { cause: error },
       );
     }
-  });
+  })();
 
   for (const warning of result.warnings) {
     io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
@@ -166,13 +175,18 @@ function delegateToProjectPackage(
   projectRequire: NodeJS.Require,
   io: CliIo,
 ): number | undefined {
+  // The copy that started this one already chose it.
+  if (process.env[DELEGATED_ENV]) {
+    return undefined;
+  }
+
   const projectPackage = findProjectPackage(projectRequire);
   const ownPackage = readOwnPackage();
   if (!projectPackage || projectPackage.root === ownPackage.root) {
     return undefined;
   }
 
-  if (projectPackage.bin && isFile(projectPackage.bin) && !process.env[DELEGATED_ENV]) {
+  if (projectPackage.bin && isFile(projectPackage.bin)) {
     io.stderr.write(
       `nest-graph-inspector: using the project's own nest-graph-inspector@${projectPackage.version} (${projectPackage.root})\n`,
     );
@@ -191,7 +205,13 @@ function delegateToProjectPackage(
       );
     }
 
-    return child.status ?? 1;
+    if (child.status === null) {
+      throw new CliError(
+        `The project's nest-graph-inspector was stopped by ${child.signal ?? "a signal"}.`,
+      );
+    }
+
+    return child.status;
   }
 
   const cannotRun = projectPackage.bin
@@ -230,24 +250,17 @@ function resolveEntry(
 }
 
 /**
- * While `run` executes, whatever the application writes to stdout — a
- * `console.log` in a module file, Nest's own logger — goes to stderr instead,
- * so standard output carries the graph and nothing else.
+ * From here until the process exits, whatever the application writes through
+ * `process.stdout` — a `console.log` in a module file, Nest's logger, a timer
+ * that fires after the export is done — goes to stderr instead, so standard
+ * output carries the graph and nothing else. Never undone: output an
+ * application schedules can arrive at any point until the process exits. The
+ * graph itself goes through `io.stdout`, which holds the stream's own
+ * `write`. A write straight to file descriptor 1 is beyond its reach.
  */
-async function withStdoutOnStderr<T>(run: () => Promise<T>): Promise<T> {
-  const stdout = process.stdout as Partial<Pick<NodeJS.WriteStream, "write">>;
-  const ownWrite = Object.getOwnPropertyDescriptor(stdout, "write");
+function divertStdoutToStderr(): void {
+  const stdout = process.stdout as Pick<NodeJS.WriteStream, "write">;
   stdout.write = process.stderr.write.bind(process.stderr);
-
-  try {
-    return await run();
-  } finally {
-    if (ownWrite) {
-      Object.defineProperty(stdout, "write", ownWrite);
-    } else {
-      delete stdout.write;
-    }
-  }
 }
 
 /** `AppModule (7 modules, 15 providers, 4 controllers, 3 cycles)`. */

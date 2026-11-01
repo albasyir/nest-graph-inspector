@@ -6,7 +6,9 @@ import { Injectable, Module } from "@nestjs/common";
 import { CliError } from "./cli-error";
 import {
   detectEntry,
+  displayPath,
   findProjectPackage,
+  isEsModule,
   loadModule,
   readOwnPackage,
   selectEntryModule,
@@ -92,6 +94,15 @@ describe("project", () => {
         new CliError(
           "No compiled application found: dist does not exist. Build your project first (nest build), or pass --entry <file>.",
         ),
+      );
+    });
+
+    it("reports a tsconfig it cannot read, rather than looking in the wrong place", () => {
+      write("tsconfig.json", JSON.stringify({ extends: "./missing.json" }));
+      write("dist/app.module.js");
+
+      expect(() => detectEntry(projectDir, projectDir)).toThrow(
+        /^Cannot read tsconfig\.json: .*missing\.json.*\. Fix it, or pass --entry <file>\.$/,
       );
     });
 
@@ -207,6 +218,29 @@ describe("project", () => {
 
       expect(findProjectPackage(resolvesNothing)).toBeUndefined();
     });
+  });
+
+  it("tells ES modules from CommonJS the way Node does", () => {
+    write("package.json", JSON.stringify({ type: "commonjs" }));
+    write("esm/package.json", JSON.stringify({ type: "module" }));
+
+    expect(isEsModule(join(projectDir, "dist/app.module.js"))).toBe(false);
+    expect(isEsModule(join(projectDir, "esm/dist/app.module.js"))).toBe(true);
+    expect(isEsModule(join(projectDir, "esm/dist/app.module.cjs"))).toBe(false);
+    expect(isEsModule(join(projectDir, "dist/app.module.mjs"))).toBe(true);
+    // A loader registered with --require decides for TypeScript.
+    expect(isEsModule(join(projectDir, "esm/src/app.module.ts"))).toBe(false);
+  });
+
+  it("shows paths inside the current directory relative to it", () => {
+    expect(displayPath("/project/dist/app.js", "/project")).toBe("dist/app.js");
+    expect(displayPath("/project/..cache/app.js", "/project")).toBe(
+      "..cache/app.js",
+    );
+    expect(displayPath("/elsewhere/app.js", "/project")).toBe(
+      "/elsewhere/app.js",
+    );
+    expect(displayPath("/project", "/project")).toBe("/project");
   });
 
   it("knows its own package", () => {

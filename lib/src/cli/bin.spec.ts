@@ -116,6 +116,25 @@ export class AppModule {
   }
 }
 `,
+  "src/noisy.module.ts": `
+import { Module } from "@nestjs/common";
+
+// Writes after it has loaded, holds a handle open, and replaces
+// process.stderr.write with one that never calls back.
+setTimeout(() => console.log("late output from a timer"), 0);
+setImmediate(() => console.log("late output from setImmediate"));
+setInterval(() => undefined, 60_000);
+process.stderr.write = () => true;
+
+// Enough providers for a graph larger than a pipe's 64 KiB buffer.
+@Module({
+  providers: Array.from({ length: 3_000 }, (_, index) => ({
+    provide: "NOISY_TOKEN_" + index,
+    useValue: index,
+  })),
+})
+export class NoisyModule {}
+`,
   "src/broken.module.ts": `
 import { Inject, Injectable, Module } from "@nestjs/common";
 
@@ -153,24 +172,43 @@ const APPLICATION_COMPILER_OPTIONS: ts.CompilerOptions = {
   types: ["node"],
 };
 
-type Run = { status: number | null; stdout: string; stderr: string };
+type Run = { status: number | string | null; stdout: string; stderr: string };
+
+/** Generous: a busy CI runner may boot two Node processes for one export. */
+const SPAWN_TIMEOUT_MS = 60_000;
 
 let workDir: string;
 let projectDir: string;
 let bin: string;
+/** Another installed copy of the package, as npx or a global install has. */
+let otherBin: string;
+/** A copy with ts-morph beside it but none of its Nest peers. */
+let bareBin: string;
+/** The application, installed with a version of the package without the CLI. */
+let olderProjectDir: string;
 
 function run(binPath: string, args: string[], cwd = projectDir): Promise<Run> {
   const env = { ...process.env };
   delete env.NEST_GRAPH_INSPECTOR_CLI_DELEGATED;
+  // pnpm's bin shims export a NODE_PATH into its whole store, which would let
+  // the CLI find packages a user's installation would not have beside it.
+  delete env.NODE_PATH;
 
   return new Promise((done, fail) => {
-    const child = spawn(process.execPath, [binPath, ...args], { cwd, env });
+    // A CLI that does not exit by itself is a failure, not a hung suite.
+    const child = spawn(process.execPath, [binPath, ...args], {
+      cwd,
+      env,
+      timeout: SPAWN_TIMEOUT_MS - 5_000,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     child.on("error", fail);
-    child.on("close", (status) => done({ status, stdout, stderr }));
+    child.on("close", (status, signal) =>
+      done({ status: signal ? `killed by ${signal}` : status, stdout, stderr }),
+    );
   });
 }
 
@@ -282,10 +320,54 @@ describe("nest-graph-inspector bin", () => {
         outDir: join(projectDir, "dist"),
       },
     );
-    // An ES module entry, which require() cannot load on every Node version.
+    // ES module entries, which require() cannot load on every Node version.
     writeFileSync(
       join(projectDir, "dist/app.module.mjs"),
       'export { AppModule } from "./app.module.js";\n',
+    );
+    mkdirSync(join(projectDir, "dist-esm"));
+    writeFileSync(
+      join(projectDir, "dist-esm/package.json"),
+      JSON.stringify({ type: "module" }),
+    );
+    writeFileSync(
+      join(projectDir, "dist-esm/app.module.js"),
+      'export { AppModule } from "../dist/app.module.js";\n',
+    );
+
+    const otherNodeModules = join(workDir, "elsewhere/node_modules");
+    linkDependencies(otherNodeModules);
+    cpSync(packageDir, join(otherNodeModules, "nest-graph-inspector"), {
+      recursive: true,
+    });
+    otherBin = join(otherNodeModules, "nest-graph-inspector/dist/cli/bin.js");
+
+    const bareNodeModules = join(workDir, "bare/node_modules");
+    cpSync(packageDir, join(bareNodeModules, "nest-graph-inspector"), {
+      recursive: true,
+    });
+    symlinkSync(
+      realpathSync(join(LIB_DIR, "node_modules/ts-morph")),
+      join(bareNodeModules, "ts-morph"),
+      "junction",
+    );
+    bareBin = join(bareNodeModules, "nest-graph-inspector/dist/cli/bin.js");
+
+    olderProjectDir = join(workDir, "older-project");
+    cpSync(projectDir, olderProjectDir, {
+      recursive: true,
+      verbatimSymlinks: true,
+    });
+    const olderPackageJson = join(
+      olderProjectDir,
+      "node_modules/nest-graph-inspector/package.json",
+    );
+    const { bin: _bin, ...withoutBin } = JSON.parse(
+      readFileSync(olderPackageJson, "utf8"),
+    ) as Record<string, unknown>;
+    writeFileSync(
+      olderPackageJson,
+      JSON.stringify({ ...withoutBin, version: "0.3.0" }),
     );
   }, 120_000);
 
@@ -341,7 +423,7 @@ describe("nest-graph-inspector bin", () => {
     expect(readFileSync(join(projectDir, "nest-graph.json"), "utf8")).toBe(
       JSON.stringify(graph, null, 2),
     );
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("writes only the graph to stdout with --out -", async () => {
     const result = await run(bin, ["export", "--out", "-", "--compact"]);
@@ -352,69 +434,70 @@ describe("nest-graph-inspector bin", () => {
     );
     expect(result.stderr).toContain("app.module loaded\n");
     expect(result.stderr).toContain(" to stdout (");
-  });
+  }, SPAWN_TIMEOUT_MS);
 
-  it("loads an ES module entry with import()", async () => {
-    const out = join(workDir, "esm.json");
+  it.each(["dist/app.module.mjs", "dist-esm/app.module.js"])(
+    "loads the ES module entry %s with import()",
+    async (entry) => {
+      const out = join(workDir, "esm.json");
+      const result = await run(bin, ["export", "--entry", entry, "--out", out]);
+
+      expect(result.status).toBe(0);
+      expect(readGraph(out)).toEqual(
+        readGraph(join(projectDir, "nest-graph.json")),
+      );
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  it("keeps late application output off stdout, and exits though the application holds a handle open", async () => {
     const result = await run(bin, [
       "export",
       "--entry",
-      "dist/app.module.mjs",
+      "dist/noisy.module.js",
       "--out",
-      out,
+      "-",
+      "--compact",
     ]);
 
     expect(result.status).toBe(0);
-    expect(readGraph(out)).toEqual(
-      readGraph(join(projectDir, "nest-graph.json")),
-    );
-  });
-
-  it("hands the export to the project's own copy of the package", async () => {
-    // Another copy of the same package, as npx or a global install would have.
-    const otherNodeModules = join(workDir, "elsewhere/node_modules");
-    linkDependencies(otherNodeModules);
-    cpSync(
-      join(projectDir, "node_modules/nest-graph-inspector"),
-      join(otherNodeModules, "nest-graph-inspector"),
-      { recursive: true },
-    );
-    const out = join(workDir, "delegated.json");
-
-    const result = await run(
-      join(otherNodeModules, "nest-graph-inspector/dist/cli/bin.js"),
-      ["export", "--project", projectDir, "--out", out],
-      workDir,
-    );
-
-    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("late output");
+    const graph = JSON.parse(result.stdout) as GraphOutput;
+    expect(result.stdout.length).toBeGreaterThan(64 * 1024);
+    expect(graph.modules.NoisyModule.providers.length).toBeGreaterThan(3_000);
+    // Printed through the stream's own write, which the application's
+    // replacement of process.stderr.write does not reach.
     expect(result.stderr).toContain(
-      `nest-graph-inspector: using the project's own nest-graph-inspector@`,
+      "nest-graph-inspector: exported NoisyModule (",
     );
-    expect(readGraph(out)).toEqual(
-      readGraph(join(projectDir, "nest-graph.json")),
-    );
-  });
+  }, SPAWN_TIMEOUT_MS);
+
+  it.each([
+    ["another copy", () => otherBin],
+    ["a copy without its Nest peers beside it", () => bareBin],
+  ])(
+    "hands the export from %s to the project's own copy",
+    async (_copy, copyBin) => {
+      const out = join(workDir, "delegated.json");
+
+      const result = await run(
+        copyBin(),
+        ["export", "--project", projectDir, "--out", out],
+        workDir,
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain(
+        `nest-graph-inspector: using the project's own nest-graph-inspector@`,
+      );
+      expect(readGraph(out)).toEqual(
+        readGraph(join(projectDir, "nest-graph.json")),
+      );
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
   it("falls back to the defaults when the project's copy cannot run the export", async () => {
-    // The same application, installed with a version of the package that
-    // shipped no CLI.
-    const olderProjectDir = join(workDir, "older-project");
-    cpSync(projectDir, olderProjectDir, {
-      recursive: true,
-      verbatimSymlinks: true,
-    });
-    const olderPackageJson = join(
-      olderProjectDir,
-      "node_modules/nest-graph-inspector/package.json",
-    );
-    const { bin: _bin, ...withoutBin } = JSON.parse(
-      readFileSync(olderPackageJson, "utf8"),
-    ) as Record<string, unknown>;
-    writeFileSync(
-      olderPackageJson,
-      JSON.stringify({ ...withoutBin, version: "0.3.0" }),
-    );
     const out = join(workDir, "older.json");
 
     const result = await run(
@@ -435,7 +518,24 @@ describe("nest-graph-inspector bin", () => {
     expect(graph.modules).not.toHaveProperty("NestGraphInspectorModule");
     expect(graph.modules.AppModule.imports).toEqual(["InternalCoreModule"]);
     expect(existsSync(join(olderProjectDir, "ran.log"))).toBe(false);
-  });
+  }, SPAWN_TIMEOUT_MS);
+
+  it("explains, rather than crashes, when it can neither hand over nor load its own Nest peers", async () => {
+    const result = await run(
+      bareBin,
+      ["export", "--project", olderProjectDir, "--out", join(workDir, "bare.json")],
+      workDir,
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: Cannot load nest-graph-inspector's own modules from ",
+    );
+    expect(result.stderr).toContain("Cannot find module '@nestjs/");
+    expect(result.stderr).toContain(
+      "Install nest-graph-inspector in the project and run the export there.",
+    );
+  }, SPAWN_TIMEOUT_MS);
 
   it("fails with Nest's reason when the application cannot bootstrap", async () => {
     const result = await run(bin, [
@@ -451,7 +551,7 @@ describe("nest-graph-inspector bin", () => {
       "nest-graph-inspector: Nest could not bootstrap BrokenModule in preview mode:",
     );
     expect(result.stderr).toContain("MISSING_TOKEN");
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("fails when the entry file does not exist", async () => {
     const result = await run(bin, ["export", "--entry", "dist/missing.js"]);
@@ -460,12 +560,12 @@ describe("nest-graph-inspector bin", () => {
     expect(result.stderr).toBe(
       "nest-graph-inspector: Entry file not found: dist/missing.js. Check the --entry path, and build your project first (nest build) if it points at compiled output.\n",
     );
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("prints its help", async () => {
     const result = await run(bin, ["--help"]);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/^Usage: nest-graph-inspector export \[options\]/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 });

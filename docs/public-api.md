@@ -274,8 +274,11 @@ the inspector builds from that container. Nothing is added to `index.ts`.
 
 `--entry`, `--out`, and `--project` resolve against the current directory.
 The output carries no trailing newline. Everything else the command prints —
-the summary, warnings, Nest's errors, and anything the application writes to
-stdout while it loads — goes to stderr.
+the summary, warnings, Nest's errors, and anything the application writes
+through `process.stdout` — goes to stderr; a write straight to file
+descriptor 1 is not diverted. An entry Node treats as an ES module (`.mjs`,
+or `.js` under `"type": "module"`) is loaded with `import()`, anything else
+with `require()`.
 
 | Exit code | Meaning |
 |---|---|
