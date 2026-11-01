@@ -24,6 +24,12 @@ import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
 import { SourceMetadataService } from "../source-metadata.service";
 import { BUILTIN_PROTOTYPES } from "../direct-run.constants";
 
+/**
+ * The name JavaScript infers for a factory written in place in a provider,
+ * `{ provide, useFactory: () => … }`: the key it was written under.
+ */
+const INFERRED_FACTORY_NAME = "useFactory";
+
 export type ModuleTree = {
   name: string;
   jsdoc?: string;
@@ -904,14 +910,31 @@ export class DiscoveryAdapter {
   /**
    * The class name a member is known by. A factory provider's is its
    * factory function's own name, never that of the value the factory
-   * returned: see `isFactoryWrapper`. Anything else is named by its class,
-   * or — a `useValue` provider, whose value is its instance in preview mode
-   * and at runtime alike — by its value's class.
+   * returned: see `isFactoryWrapper` and `factoryName`. Anything else is
+   * named by its class, or — a `useValue` provider, whose value is its
+   * instance in preview mode and at runtime alike — by its value's class.
    */
   private memberClassName(wrapper: InstanceWrapper<unknown>): string | null {
     return this.isFactoryWrapper(wrapper)
-      ? wrapper.metatype?.name || null
+      ? this.factoryName(wrapper)
       : this.wrapperClassName(wrapper);
+  }
+
+  /**
+   * A factory provider's own name, when it has one that tells it apart. A
+   * factory passed as an argument — what `registerAs()` registers — has
+   * none. One written in place, `useFactory: () => …`, has only the name
+   * JavaScript gives it from that key, which every such factory shares, so
+   * two in one module would be one node. A `useExisting` alias is Nest's own
+   * `instance => instance`, called `metatype` in every application. Each of
+   * these goes by its injection token instead.
+   */
+  private factoryName(wrapper: InstanceWrapper<unknown>): string | null {
+    const name = wrapper.metatype?.name;
+
+    return wrapper.isAlias || !name || name === INFERRED_FACTORY_NAME
+      ? null
+      : name;
   }
 
   /**

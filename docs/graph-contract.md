@@ -105,13 +105,15 @@ factory returned:
 | Registered as | `name` |
 |---|---|
 | A class: `UserService`, or `{ provide, useClass }` | The class name |
-| `{ provide, useFactory }` | The factory function's own name, or the token when it has none. A function written inline, as in `useFactory: () => …`, takes the name `useFactory` from JavaScript itself; one passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it, has no name |
-| `{ provide, useExisting }` | `metatype`: the name of the function Nest implements an alias with |
+| `{ provide, useFactory }` | The factory function's own name — `useFactory: createPool` is `createPool` — or else the token. A function written in place, as in `useFactory: () => …`, counts as having none: the only name it has is `useFactory`, which JavaScript gives it from the key it was written under and which every such factory shares. Nor does one passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it |
+| `{ provide, useExisting }` | The token. Nest implements every alias with the same function of its own, so the function names none of them |
 | `{ provide, useValue }` | The value's class name — `Object` for a plain object — or the token for a primitive value |
 
 A token's name is the string itself, a class token's its class name, and a
-symbol token's `Symbol(description)`. A factory provider is also matched to the
-tokens that depend on it by its token alone. Neither rule reads an instance, so
+symbol token's `Symbol(description)`. Two providers in one module whose tokens
+print alike — two symbols with one description — share a name, and the graph
+does not tell them apart. A factory provider is also matched to the tokens
+that depend on it by its token alone. Neither rule reads an instance, so
 a running inspector's graph and an exported one name every provider the same
 way. Until this was fixed, a running inspector named an unnamed factory after
 the class of what it returned (`@nestjs/config`'s `registerAs()` providers all

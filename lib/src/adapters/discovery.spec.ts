@@ -82,8 +82,12 @@ describe(DiscoveryAdapter.name, () => {
     class RealService {}
     const realService = new RealService();
     // Shaped as Nest registers them: a factory passed as an argument has no
-    // name, and Nest's useExisting alias is `metatype: (instance => instance)`.
+    // name, one written in place is named after the `useFactory` key, and
+    // Nest's useExisting alias is `metatype: (instance => instance)`.
     const anonymousFactory = (() => () => new ConfigValue())();
+    const { useFactory: inlineFactory } = {
+      useFactory: () => new ConfigValue(),
+    };
     const { metatype: aliasFactory } = {
       metatype: (instance: unknown) => instance,
     };
@@ -101,12 +105,19 @@ describe(DiscoveryAdapter.name, () => {
             inject: [],
             instance: new ConfigValue(),
           },
+          {
+            token: "INLINE",
+            metatype: inlineFactory,
+            inject: [],
+            instance: new ConfigValue(),
+          },
           // Registered before the provider it aliases, whose instance it has.
           {
             token: "ALIAS",
             metatype: aliasFactory,
             inject: [RealService],
             instance: realService,
+            isAlias: true,
           },
           classWrapper(RealService, realService),
           { token: "VALUE", metatype: null, instance: new ConfigValue() },
@@ -123,7 +134,8 @@ describe(DiscoveryAdapter.name, () => {
       tree.providers.map((provider) => [provider.name, provider.dependencies]),
     ).toEqual([
       ["CONFIGURATION(database)", []],
-      ["metatype", ["RealService"]],
+      ["INLINE", []],
+      ["ALIAS", ["RealService"]],
       ["RealService", []],
       // A value is its instance in every mode, so it is still named by it.
       ["ConfigValue", []],
@@ -436,6 +448,7 @@ type WrapperFixture = {
   metatype?: unknown;
   instance?: unknown;
   inject?: unknown[];
+  isAlias?: boolean;
 };
 
 type ModuleFixture = {

@@ -275,7 +275,11 @@ describe("exportGraph", () => {
       "FixtureStorageModule",
       "connectFixtureDatabase",
     );
-    const aliasProvider = findProvider(served, "FixtureStorageModule", "metatype");
+    const aliasProvider = findProvider(
+      served,
+      "FixtureStorageModule",
+      "FIXTURE_STORAGE_ALIAS",
+    );
     expect(factoryProvider.directRun).toEqual({
       methods: [{ name: "query", parameterTypes: "[sql: string]" }],
     });
@@ -352,8 +356,10 @@ describe("exportGraph", () => {
     ).toEqual([
       ["CONFIGURATION(database)", []],
       ["CONFIGURATION(mail)", []],
-      ["useFactory", ["CONFIGURATION(database)", "CONFIGURATION(mail)"]],
-      ["metatype", ["FixtureRealService"]],
+      // Written in place, so named only by JavaScript after the useFactory
+      // key, and Nest's own alias function: each goes by its token.
+      ["CONFIGURATION_LOADER", ["CONFIGURATION(database)", "CONFIGURATION(mail)"]],
+      ["FIXTURE_ALIAS", ["FixtureRealService"]],
       ["FixtureRealService", []],
       ["FixtureConsumer", ["FixtureRealService", "FIXTURE_CLIENT"]],
       ["FIXTURE_CLIENT", []],
@@ -366,7 +372,11 @@ describe("exportGraph", () => {
     // running inspector reads off their instances.
     const ignore = {
       ...FIXTURE_IGNORE,
-      providers: ["FixtureMetricsService", "connectFixtureDatabase", "metatype"],
+      providers: [
+        "FixtureMetricsService",
+        "connectFixtureDatabase",
+        "FIXTURE_STORAGE_ALIAS",
+      ],
     };
     const entryModule = createApplicationModule(inspectorOn(port, ignore));
 

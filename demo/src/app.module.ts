@@ -23,13 +23,7 @@ import { UserModule } from './user/user.module';
       ],
       ignore: {
         modules: ['InternalCoreModule'],
-        providers: [
-          'ModuleRef',
-          'ApplicationConfig',
-          'Reflector',
-          'noop',
-          'useFactory',
-        ],
+        providers: ['ModuleRef', 'ApplicationConfig', 'Reflector', 'noop'],
       },
     }),
 

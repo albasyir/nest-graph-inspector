@@ -452,7 +452,8 @@ describe("nest-graph-inspector bin", () => {
           methods: [{ name: "greet", parameterTypes: "[name: string]" }],
         },
       }),
-      expect.objectContaining({ name: "useFactory" }),
+      // Written in place, so it goes by its token.
+      expect.objectContaining({ name: "DATABASE" }),
     ]);
     expect(graph.modules.AppModule.controllers).toEqual([
       expect.objectContaining({
