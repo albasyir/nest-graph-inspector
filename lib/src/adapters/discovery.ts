@@ -387,7 +387,12 @@ export class DiscoveryAdapter {
     });
   }
 
-  private instrumentRuntimeTrace(moduleTree: ModuleTree): void {
+  /**
+   * Protected so the CLI export (`cli/export-graph.ts`) can skip it: an
+   * export calls no method, so it has nothing to trace, and it should leave
+   * the application's prototypes as it found them.
+   */
+  protected instrumentRuntimeTrace(moduleTree: ModuleTree): void {
     this.walkModuleTree(moduleTree, (node) => {
       if (!node.moduleRef) {
         return;
