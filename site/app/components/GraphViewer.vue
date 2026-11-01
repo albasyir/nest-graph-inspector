@@ -202,6 +202,8 @@ const props = withDefaults(
     directRunUrl?: string
     directRunHeaders?: Record<string, string>
     directRunDisabled?: boolean
+    /** Why Direct Run is off, for a graph with no trace history either. */
+    directRunDisabledReason?: string
     /** Node id of the provider or controller whose Direct Run drawer is open. */
     directRunOn?: string
     showControls?: boolean
@@ -250,6 +252,7 @@ const props = withDefaults(
     directRunUrl: undefined,
     directRunHeaders: undefined,
     directRunDisabled: false,
+    directRunDisabledReason: undefined,
     directRunOn: undefined,
     showControls: true,
     showMiniMap: true,
@@ -3261,6 +3264,7 @@ defineExpose({ centerGraph, focusModule })
       :direct-run-url="props.directRunUrl"
       :direct-run-headers="props.directRunHeaders"
       :direct-run-disabled="props.directRunDisabled"
+      :direct-run-disabled-reason="props.directRunDisabledReason"
       @close="closeDirectRunDrawer"
       @trace-open="emit('traceOpen')"
     />

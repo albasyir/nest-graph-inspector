@@ -66,6 +66,8 @@ const props = withDefaults(
     directRunHeaders?: Record<string, string>
     /** A graph read from a file has no application behind it to call. */
     directRunDisabled?: boolean
+    /** Why Direct Run is off, for a graph with no trace history either. */
+    directRunDisabledReason?: string
     /** Node id of the provider or controller whose Direct Run drawer is open. */
     directRunOn?: string
   }>(),
@@ -73,6 +75,7 @@ const props = withDefaults(
     directRunUrl: undefined,
     directRunHeaders: undefined,
     directRunDisabled: false,
+    directRunDisabledReason: undefined,
     directRunOn: undefined
   }
 )
@@ -809,6 +812,7 @@ function handlePaneClick(): void {
       :direct-run-url="props.directRunUrl"
       :direct-run-headers="props.directRunHeaders"
       :direct-run-disabled="props.directRunDisabled"
+      :direct-run-disabled-reason="props.directRunDisabledReason"
       @close="selectNode(null)"
       @trace-open="emit('traceOpen')"
     />

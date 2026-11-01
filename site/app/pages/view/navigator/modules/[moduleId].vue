@@ -11,6 +11,7 @@ const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   directRunUrl,
+  directRunDisabledReason,
   requestHeaders,
   graphData,
   graphIsStatic,
@@ -104,6 +105,7 @@ function handleTraceOpen() {
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"
       :direct-run-disabled="graphIsStatic"
+      :direct-run-disabled-reason="directRunDisabledReason"
       :direct-run-on="directRunOn"
       @direct-run-drawer-open="handleDirectRunDrawerOpen"
       @direct-run-drawer-close="handleDirectRunDrawerClose"

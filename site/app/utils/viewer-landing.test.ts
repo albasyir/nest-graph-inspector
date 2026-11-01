@@ -48,20 +48,22 @@ assert.deepEqual(
   { kind: 'join-demo' }
 )
 
-// …but never boots one: with no demo in the tab it is the landing card, even
-// when the tab could go back to the visitor's own graph instead.
+// …but never boots one: with no demo in the tab it opens the demo's static
+// graph — what a preview that has not loaded the example draws — even when the
+// tab could go back to the visitor's own graph, or file, instead.
 assert.deepEqual(
   resolveViewerLandingAction({ ...fresh, query: { preview: 'true' } }),
-  { kind: 'manual' }
+  { kind: 'open-example' }
 )
 assert.deepEqual(
   resolveViewerLandingAction({
     ...fresh,
     query: { preview: 'true', trace: 'true' },
     restoredEndpointUrl: OWN_ENDPOINT,
-    canOpenRestoredSession: true
+    canOpenRestoredSession: true,
+    hasRestoredGraphFile: true
   }),
-  { kind: 'manual' }
+  { kind: 'open-example' }
 )
 for (const preview of ['false', '1', '', ['true']]) {
   assert.deepEqual(
@@ -109,6 +111,23 @@ assert.deepEqual(
     ...fresh,
     restoredEndpointUrl: OWN_ENDPOINT,
     canOpenRestoredSession: false
+  }),
+  { kind: 'manual' }
+)
+
+// A tab on a graph file goes back to it, in the navigator — a file has no
+// trace history — and the opt-out holds it back like any session.
+for (const query of [{}, { trace: 'true' }]) {
+  assert.deepEqual(
+    resolveViewerLandingAction({ ...fresh, query, hasRestoredGraphFile: true }),
+    { kind: 'open-session', path: '/view/navigator' }
+  )
+}
+assert.deepEqual(
+  resolveViewerLandingAction({
+    ...fresh,
+    query: { autoload: 'false' },
+    hasRestoredGraphFile: true
   }),
   { kind: 'manual' }
 )

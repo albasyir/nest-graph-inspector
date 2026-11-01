@@ -10,12 +10,14 @@ const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   directRunUrl,
+  directRunDisabledReason,
   requestHeaders,
   graphData,
   graphIsStatic,
   errorStatus,
   endpointRequiresAccessToken,
   hasLoadError,
+  graphRevision,
   showCircularDependencies,
   showBrightLine,
   openModuleDetail,
@@ -116,13 +118,17 @@ onBeforeUnmount(() => {
   />
 
   <ClientOnly v-else-if="graphData">
+    <!-- Keyed on the graph, so opening another one starts the canvas over
+         instead of carrying the last one's unsaved arrangement onto it. -->
     <GraphViewer
+      :key="graphRevision"
       ref="graphViewerRef"
       v-model:show-circular-dependencies="showCircularDependencies"
       v-model:show-bright-line="showBrightLine"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
       :direct-run-disabled="graphIsStatic"
+      :direct-run-disabled-reason="directRunDisabledReason"
       :direct-run-on="directRunOn"
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"
