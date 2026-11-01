@@ -807,7 +807,7 @@ resolves the import graph itself.
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
-| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the running demo serves at `/output.json`. Nothing in `site/app/` reads it yet |
+| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps the third-party `ConfigModule` too |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

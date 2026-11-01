@@ -887,12 +887,22 @@ into `site/public/nodepod-demo/`:
 `graph.json` lands beside them, but is not part of the payload: the demo's
 `build:nodepod` script runs the built CLI as its last step (`export:graph`,
 `nest-graph-inspector export --compact`), after the payload build has emptied
-the directory, and writes the demo's graph there — byte for byte what the
-running demo serves at `/output.json`, without anything having been booted.
-`manifest.json` does not list it and `test:demo-payload` does not read it; it
-is a static copy of the demo's graph for the site to show without starting the
-demo, and nothing in `site/app/` reads it yet. Generated with the payload and
-gitignored with it, it cannot go stale. `build:graph` regenerates it alone.
+the directory, and writes the demo's graph there — byte for byte what the demo
+serves at `/output.json` when Node runs it (`graph-export.e2e-spec.ts` holds
+the two together), without anything having been booted. `manifest.json` does
+not list it. The site does read it: `useExampleGraphStore`
+(`app/stores/example-graph.ts`) fetches it for the landing page's previews and
+for `/view?preview=true`, so every site build has to publish it, and
+`test:demo-payload` checks that it is there, that the viewer opens it, and that
+it holds every module the payload serves. It holds more than that: the payload
+build patches the bundled discovery adapter so the in-browser demo shows only
+what is declared under the demo's own `src/` (`DISCOVERY_PATCHES` in
+`demo/scripts/build-nodepod-payload.ts`), while `export:graph` runs the
+library as it is published. The static graph therefore also has
+`ConfigModule`, `ConfigHostModule` and `NestJSCoreModule`, and the providers
+they declare — the third-party module the demo imports on purpose — and the
+landing previews show them until "Load Example" swaps in the live graph. Generated with the payload and gitignored
+with it, it cannot go stale. `build:graph` regenerates it alone.
 
 **Two constraints shape this design.**
 
@@ -1291,6 +1301,9 @@ Facts a code change can invalidate, and the file to check:
   in `demo/package.json`, and `EXAMPLE_GRAPH_FILE` in
   `site/app/utils/demo-graph-preview.ts`, which the landing page's previews
   fetch
+- That the static demo graph holds more than the in-browser demo serves — the
+  `src/`-only filter in `DISCOVERY_PATCHES`
+  (`demo/scripts/build-nodepod-payload.ts`), which the export does not apply
 - The newest graph format the viewer knows, `3` —
   `NEWEST_KNOWN_GRAPH_OUTPUT_VERSION` in `site/app/utils/graph-output-support.ts`
   (checked against the library's by `graph-output-support.test.ts`)
