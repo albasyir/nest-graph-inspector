@@ -688,9 +688,9 @@ that cannot reach into a Pinia setup store.
 
 | File | What it contains |
 |---|---|
-| `graph-viewer-analytics.ts` | PostHog event property builders and `resolveGraphViewerLoadSource`. Every property is built from parts known to be safe rather than redacted — an endpoint's origin, and its path only when it is the library's own (`describeGraphEndpoint`); the viewer's own pages, every other route by its shape; a failure's status, or its kind when it got none — never its message |
+| `graph-viewer-analytics.ts` | PostHog event property builders and `resolveGraphViewerLoadSource`. Every property is built from parts known to be safe rather than redacted — an endpoint's origin, and its path only when it is the library's own (`describeGraphEndpoint`); the viewer's own pages, every other route by its shape; a failure's status, or its kind when it got none — never its message. Also `captureBestEffort`, which sends an event without ever letting the client's failure, thrown or a rejected promise, reach the caller: the demo store reports `graph_demo_started` through it once the demo is already up |
 | `graph-viewer-load-source.test.ts` | Assert-based test for `graph-viewer-analytics.ts` (no framework) |
-| `graph-viewer-analytics.test.ts` | Assert-based test for `graph-viewer-analytics.ts`: synthetic secrets — user info, encoded token names, fragments, configured paths, printed links — through every property it builds |
+| `graph-viewer-analytics.test.ts` | Assert-based test for `graph-viewer-analytics.ts`: synthetic secrets — user info, encoded token names, fragments, configured paths, printed links — through every property it builds; and `captureBestEffort` against a client that throws, one that is missing, and one whose promise rejects, with no unhandled rejection |
 | `inspector-access-token.ts` | The token contract shared with the library: parameter and header names, reading a token out of a printed link, and redacting it out of a URL under any spelling of its name while leaving the URL usable |
 | `inspector-access-token.test.ts` | Assert-based test for `inspector-access-token.ts`, including the analytics payload as a leak sink |
 | `viewer-bootstrap-link.ts` | Decodes the printed `/view/<base64url endpoint>` link and says which viewer page it should land on — and where anything else standing in its place lands (`resolveViewerLink`) |
