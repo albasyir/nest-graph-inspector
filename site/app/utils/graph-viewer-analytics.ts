@@ -150,15 +150,16 @@ export function createGraphViewerEventProperties(options: {
   return properties
 }
 
-/** The one call this site makes of an analytics client. */
+/** The one call this helper needs of an analytics client. */
 export type AnalyticsClient = {
   capture(event: string, properties?: Record<string, unknown>): unknown
 }
 
 /**
  * Sends an event when there is a client to send it with, and never lets the
- * attempt throw: what it reports on has already happened, and a failing
- * analytics client must not undo it.
+ * attempt fail the caller: what it reports on has already happened, and a
+ * failing analytics client must not undo it — whether it throws, or hands back
+ * a promise that rejects later.
  */
 export function captureBestEffort(
   client: AnalyticsClient | null | undefined,
@@ -166,7 +167,9 @@ export function captureBestEffort(
   properties: Record<string, unknown>
 ): void {
   try {
-    client?.capture(event, properties)
+    // A promise the client hands back is settled here too: left unwatched, its
+    // rejection would surface as an unhandled one.
+    void Promise.resolve(client?.capture(event, properties)).catch(() => {})
   } catch {
     // The event is lost; nothing else is.
   }
