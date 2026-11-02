@@ -190,6 +190,50 @@ describe(DiscoveryAdapter.name, () => {
     ]);
   });
 
+  it("still ignores a global enhancer by the token Nest wrote, UUID and all, without renaming it", () => {
+    class AuthGuard {}
+    const authGuard = new AuthGuard();
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    const { useFactory: inlineFactory } = { useFactory: () => ({}) };
+    const enhancedModule = () =>
+      moduleFixture(TestRootModule, {
+        providers: [
+          classWrapper(AuthGuard, authGuard),
+          {
+            token: "APP_GUARD (UUID: 2f9c1d6a0b8e4f7a91c3d)",
+            metatype: aliasFactory,
+            inject: [AuthGuard],
+            instance: authGuard,
+            isAlias: true,
+          },
+          {
+            token: "APP_INTERCEPTOR (UUID: -1468213475)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+        ],
+      });
+    const names = (tree: ModuleTree) =>
+      tree.providers.map((provider) => provider.name);
+
+    expect(names(scanIgnoring(undefined, enhancedModule()))).toEqual([
+      "AuthGuard",
+      "APP_GUARD",
+      "APP_INTERCEPTOR",
+    ]);
+
+    // Written against the raw token, before the graph left its UUID out: a
+    // glob and a regular expression.
+    for (const pattern of ["APP_GUARD (UUID: *)", /^APP_GUARD \(UUID: /]) {
+      expect(
+        names(scanIgnoring({ providers: [pattern] }, enhancedModule())),
+      ).toEqual(["AuthGuard", "APP_INTERCEPTOR"]);
+    }
+  });
+
   it("captures controller instances alongside provider instances", () => {
     class TestController {}
     const controllerInstance = new TestController();

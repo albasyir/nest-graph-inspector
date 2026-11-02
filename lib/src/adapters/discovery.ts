@@ -718,15 +718,24 @@ export class DiscoveryAdapter {
   }
 
   /** A symbol token answers to both `Symbol(NAME)` and `NAME`. */
+  /**
+   * Every name an `ignore` pattern may know a token by. A symbol is also
+   * known by its bare description. A global enhancer is also known by the
+   * token Nest wrote, UUID and all, which patterns written before its name in
+   * the graph left the UUID out still match. Only matching reads these: the
+   * graph names the token by `tokenName` alone.
+   */
   private tokenNames(token: InjectionToken | null | undefined): string[] {
     const name = this.tokenName(token);
     if (!name) {
       return [];
     }
 
-    return typeof token === "symbol" && token.description
-      ? [name, token.description]
-      : [name];
+    if (typeof token === "symbol" && token.description) {
+      return [name, token.description];
+    }
+
+    return typeof token === "string" && token !== name ? [name, token] : [name];
   }
 
   private extractNestCoreProviderName(dependencyName: string): string | null {
