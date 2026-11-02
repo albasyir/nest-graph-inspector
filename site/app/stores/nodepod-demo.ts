@@ -4,7 +4,8 @@ import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
-  readViewerLinkEndpoint
+  readViewerLinkEndpoint,
+  resolveSiteBaseUrl
 } from '~/utils/nodepod-demo-endpoint'
 import {
   accessTokenHeaders,
@@ -151,15 +152,11 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   /**
    * Absolute URL the site itself is served from, with a trailing slash so it
    * can be used as a base. GitHub Pages serves this site from a subpath, so
-   * the origin alone would resolve the payload against the wrong root.
+   * the origin alone would resolve the payload against the wrong root. The
+   * demo's endpoint is built under it, and recognised by it elsewhere.
    */
   function siteBaseUrl() {
-    const base = config.app.baseURL || '/'
-
-    return new URL(
-      base.endsWith('/') ? base : `${base}/`,
-      window.location.origin
-    ).toString()
+    return resolveSiteBaseUrl(config.app.baseURL, window.location.origin)
   }
 
   /**
@@ -852,6 +849,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     downloadedBytes,
     totalBytes,
     downloadProgress,
+    siteBaseUrl,
     start,
     join,
     loadGraphOutput,

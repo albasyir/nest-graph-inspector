@@ -19,17 +19,18 @@ export type TabGraphSource = 'none' | 'example' | 'file' | 'demo' | 'application
  * Names the graph a tab is on. A graph file and an endpoint never coexist in
  * the store; were they to, the file is what the viewer draws.
  *
- * An endpoint is the demo only on the viewer's own origin. The runtime's
- * segment in a path proves nothing elsewhere: somebody's own application can
- * be served under a path that happens to hold it, and is still theirs.
+ * An endpoint is the demo only directly under the site's base URL. The
+ * runtime's segment in a path proves nothing elsewhere: somebody's own
+ * application can be served under a path that happens to hold it, and is
+ * still theirs.
  */
 export function resolveTabGraphSource(tab: {
   /** The kind of graph file the tab is on, if it is on one. */
   graphFile?: GraphFileSource['kind'] | null
   /** The endpoint the tab is on, empty when it is on none. */
   endpointUrl: string
-  /** The viewer's own origin, the only one the demo is served from. */
-  viewerOrigin: string
+  /** The site's base URL, the only place the demo is served from. */
+  siteBaseUrl: string
 }): TabGraphSource {
   if (tab.graphFile) {
     return tab.graphFile
@@ -39,7 +40,7 @@ export function resolveTabGraphSource(tab: {
     return 'none'
   }
 
-  return isDemoEndpoint(tab.endpointUrl, tab.viewerOrigin) ? 'demo' : 'application'
+  return isDemoEndpoint(tab.endpointUrl, tab.siteBaseUrl) ? 'demo' : 'application'
 }
 
 /**

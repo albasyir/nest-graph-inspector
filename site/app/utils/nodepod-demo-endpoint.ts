@@ -142,22 +142,50 @@ export function resolveInspectorMountBase(endpointUrl: string): string {
 }
 
 /**
- * Whether an endpoint is the in-browser demo's: the runtime's segment, on the
- * viewer's own origin. That is the only origin the demo is served from —
- * {@link buildDemoEndpointUrl} puts it under the site's base URL — so the
- * segment in a path on any other origin is somebody's own application, served
- * under a path that happens to hold it.
+ * The absolute URL the site is served from — the app's `baseURL` on the page's
+ * origin — with a trailing slash so it can be used as a base. GitHub Pages
+ * serves the site from a subpath, so the origin alone is the wrong root. The
+ * demo's endpoints are built under it, and recognised by it.
  */
-export function isDemoEndpoint(endpointUrl: string, viewerOrigin: string): boolean {
-  if (!viewerOrigin || !resolveInspectorMountBase(endpointUrl)) {
-    return false
-  }
+export function resolveSiteBaseUrl(baseURL: string, origin: string): string {
+  const base = baseURL || '/'
+
+  return new URL(base.endsWith('/') ? base : `${base}/`, origin).toString()
+}
+
+/**
+ * Whether an endpoint is the in-browser demo's: the runtime's segment directly
+ * under the site's base URL, on its origin — exactly where
+ * {@link buildDemoEndpointUrl} puts the demo, and what
+ * {@link readDemoRequestTarget} answers. The segment anywhere else, on another
+ * origin or under another path of this one, is somebody's own application,
+ * served under a path that happens to hold it.
+ */
+export function isDemoEndpoint(endpointUrl: string, siteBaseUrl: string): boolean {
+  let endpoint: URL
+  let base: URL
 
   try {
-    return new URL(endpointUrl).origin === viewerOrigin
+    endpoint = new URL(endpointUrl)
+    base = new URL(siteBaseUrl)
   } catch {
     return false
   }
+
+  if (endpoint.origin !== base.origin) {
+    return false
+  }
+
+  const prefix = `${withoutTrailingSlash(base.pathname)}/${NODEPOD_ROUTE_SEGMENT}/`
+  const mountBase = resolveInspectorMountBase(endpointUrl)
+
+  if (!mountBase.startsWith(prefix)) {
+    return false
+  }
+
+  const port = Number(mountBase.slice(prefix.length))
+
+  return Number.isInteger(port) && port > 0
 }
 
 /**

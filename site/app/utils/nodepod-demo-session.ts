@@ -29,13 +29,13 @@ export type DemoSessionAction = 'pass-through' | 'reuse' | 'join' | 'release' | 
  */
 export function resolveDemoSessionAction(session: {
   endpointUrl: string
-  /** The viewer's own origin, the only one the demo is served from. */
-  viewerOrigin: string
+  /** The site's base URL, the only place the demo is served from. */
+  siteBaseUrl: string
   isDemoRunning: boolean
   isDemoStarting: boolean
   endpointRefusedToken: boolean
 }): DemoSessionAction {
-  if (!isDemoEndpoint(session.endpointUrl, session.viewerOrigin)) {
+  if (!isDemoEndpoint(session.endpointUrl, session.siteBaseUrl)) {
     return 'pass-through'
   }
 

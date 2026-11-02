@@ -45,7 +45,7 @@ import {
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
-import { isDemoEndpoint } from '~/utils/nodepod-demo-endpoint'
+import { isDemoEndpoint, resolveSiteBaseUrl } from '~/utils/nodepod-demo-endpoint'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -66,6 +66,8 @@ export type EndpointProbe
 export type RestoredGraphSource = 'endpoint' | 'file' | 'none'
 
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
+  const config = useRuntimeConfig()
+
   /**
    * The graph endpoint being viewed, never carrying an access token.
    *
@@ -320,14 +322,16 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    * Whether the graph being viewed is this site's own demo, running in this tab.
    *
    * Its address is the only one the viewer invents for itself — the segment the
-   * in-browser runtime's servers are reachable under, on this site's own
-   * origin — so it is worth naming as a demo rather than showing an address
-   * that means nothing outside this tab. Every other endpoint is somebody's
-   * application, where the address is the most useful thing the header can
-   * say. A server render knows no origin to tell the demo by, and draws none.
+   * in-browser runtime's servers are reachable under, directly under this
+   * site's base URL — so it is worth naming as a demo rather than showing an
+   * address that means nothing outside this tab. Every other endpoint is
+   * somebody's application, where the address is the most useful thing the
+   * header can say. A server render knows no origin to tell the demo by, and
+   * draws none.
    */
   const isDemo = computed(() =>
-    import.meta.client && isDemoEndpoint(endpoint.value, window.location.origin)
+    import.meta.client
+      && isDemoEndpoint(endpoint.value, resolveSiteBaseUrl(config.app.baseURL, window.location.origin))
   )
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)

@@ -96,7 +96,7 @@ export default defineNuxtRouteMiddleware((to, from) => {
     graphFile: graphStore.fileSource?.kind,
     endpointUrl: graphStore.endpointUrl,
     hasAccessToken: graphStore.hasAccessToken,
-    viewerOrigin: window.location.origin,
+    siteBaseUrl: demo.siteBaseUrl(),
     isDemoRunning: demo.isRunning,
     isDemoStarting: demo.isBusy
   })

@@ -8,7 +8,8 @@ import {
   readDemoRequestTarget,
   readViewerLinkEndpoint,
   redactViewerLinks,
-  resolveInspectorMountBase
+  resolveInspectorMountBase,
+  resolveSiteBaseUrl
 } from './nodepod-demo-endpoint.ts'
 
 const TOKEN = 'ngi1.eyJpYXQiOjEsImV4cCI6Mn0.s1gn-atur_e'
@@ -85,22 +86,45 @@ assert.equal(resolveInspectorMountBase(DEMO_ENDPOINT), '')
 assert.equal(resolveInspectorMountBase('not a url'), '')
 assert.equal(resolveInspectorMountBase(''), '')
 
-// The demo's endpoint is the segment on the viewer's own origin, which is where
-// buildDemoEndpointUrl puts it...
+// The site's base URL is the app's baseURL on the page's origin, ready to
+// resolve against, whichever way the baseURL is written.
 const SITE_ORIGIN = new URL(SITE_BASE).origin
-assert.equal(isDemoEndpoint(demoEndpoint, SITE_ORIGIN), true)
-// ...and the segment anywhere else is somebody's own application, mounted
-// under a path that happens to hold it.
+assert.equal(resolveSiteBaseUrl('/nest-graph-inspector/', SITE_ORIGIN), SITE_BASE)
+assert.equal(resolveSiteBaseUrl('/nest-graph-inspector', SITE_ORIGIN), SITE_BASE)
+assert.equal(resolveSiteBaseUrl('/', SITE_ORIGIN), `${SITE_ORIGIN}/`)
+assert.equal(resolveSiteBaseUrl('', SITE_ORIGIN), `${SITE_ORIGIN}/`)
+
+// The demo's endpoint is the segment directly under the site's base URL, which
+// is where buildDemoEndpointUrl puts it...
+assert.equal(isDemoEndpoint(demoEndpoint, SITE_BASE), true)
+// ...however the base URL is spelled...
+assert.equal(isDemoEndpoint(demoEndpoint, SITE_BASE.replace(/\/$/, '')), true)
+// ...and on a site served from the root of its origin too.
+const ROOT_SITE_BASE = 'https://graph.example.dev/'
+const rootDemoEndpoint = buildDemoEndpointUrl({
+  endpointUrl: 'http://localhost:3000/__graph-inspector',
+  siteBaseUrl: ROOT_SITE_BASE
+})
+assert.equal(rootDemoEndpoint, `https://graph.example.dev/${NODEPOD_ROUTE_SEGMENT}/3000/__graph-inspector`)
+assert.equal(isDemoEndpoint(rootDemoEndpoint, ROOT_SITE_BASE), true)
+assert.equal(isDemoEndpoint(demoEndpoint, 'https://albasyir.github.io/'), false)
+// The segment anywhere else is somebody's own application, mounted under a
+// path that happens to hold it: on another origin...
 assert.equal(
-  isDemoEndpoint(`https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`, SITE_ORIGIN),
+  isDemoEndpoint(`https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`, SITE_BASE),
   false
 )
-assert.equal(isDemoEndpoint(demoEndpoint, 'https://other.example'), false)
+assert.equal(isDemoEndpoint(demoEndpoint, 'https://other.example/nest-graph-inspector/'), false)
+// ...or on this origin, under another path than the site's.
+assert.equal(
+  isDemoEndpoint(`${SITE_ORIGIN}/myapp/${NODEPOD_ROUTE_SEGMENT}/3000/__graph-inspector`, SITE_BASE),
+  false
+)
+// The site's own origin and path alone are not enough: the demo has the segment.
+assert.equal(isDemoEndpoint(`${SITE_BASE}__graph-inspector`, SITE_BASE), false)
 assert.equal(isDemoEndpoint(demoEndpoint, ''), false)
-// The viewer's own origin alone is not enough either: the demo has the segment.
-assert.equal(isDemoEndpoint(`${SITE_ORIGIN}/__graph-inspector`, SITE_ORIGIN), false)
-assert.equal(isDemoEndpoint('not a url', SITE_ORIGIN), false)
-assert.equal(isDemoEndpoint('', SITE_ORIGIN), false)
+assert.equal(isDemoEndpoint('not a url', SITE_BASE), false)
+assert.equal(isDemoEndpoint('', SITE_BASE), false)
 
 // Requests the viewer makes are routed back to the virtual server they name.
 assert.deepEqual(

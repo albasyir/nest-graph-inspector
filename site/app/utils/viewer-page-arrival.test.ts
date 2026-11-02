@@ -26,7 +26,7 @@ const arriving = {
   graphFile: null,
   endpointUrl: '',
   hasAccessToken: false,
-  viewerOrigin: SITE_ORIGIN,
+  siteBaseUrl: `${SITE_ORIGIN}/nest-graph-inspector/`,
   isDemoRunning: false,
   isDemoStarting: false
 }

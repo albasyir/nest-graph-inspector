@@ -7,7 +7,7 @@ const SITE_BASE = `${SITE_ORIGIN}/nest-graph-inspector`
 const DEMO_ENDPOINT = `${SITE_BASE}/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 
 const noDemo = {
-  viewerOrigin: SITE_ORIGIN,
+  siteBaseUrl: `${SITE_BASE}/`,
   isDemoRunning: false,
   isDemoStarting: false,
   endpointRefusedToken: false
@@ -28,7 +28,7 @@ for (const endpointUrl of [
   assert.equal(
     resolveDemoSessionAction({
       endpointUrl,
-      viewerOrigin: SITE_ORIGIN,
+      siteBaseUrl: `${SITE_BASE}/`,
       isDemoRunning: true,
       isDemoStarting: false,
       endpointRefusedToken: true
@@ -49,7 +49,7 @@ for (const demo of [
   { isDemoRunning: false, isDemoStarting: true, endpointRefusedToken: false }
 ]) {
   assert.equal(
-    resolveDemoSessionAction({ ...demo, endpointUrl: OWN_ENDPOINT_UNDER_SEGMENT, viewerOrigin: SITE_ORIGIN }),
+    resolveDemoSessionAction({ ...demo, endpointUrl: OWN_ENDPOINT_UNDER_SEGMENT, siteBaseUrl: `${SITE_BASE}/` }),
     'pass-through',
     JSON.stringify(demo)
   )
@@ -79,7 +79,7 @@ for (const endpointRefusedToken of [false, true]) {
   assert.equal(
     resolveDemoSessionAction({
       endpointUrl: DEMO_ENDPOINT,
-      viewerOrigin: SITE_ORIGIN,
+      siteBaseUrl: `${SITE_BASE}/`,
       isDemoRunning: false,
       isDemoStarting: true,
       endpointRefusedToken
@@ -95,7 +95,7 @@ for (const endpointRefusedToken of [false, true]) {
 assert.equal(
   resolveDemoSessionAction({
     endpointUrl: DEMO_ENDPOINT,
-    viewerOrigin: SITE_ORIGIN,
+    siteBaseUrl: `${SITE_BASE}/`,
     isDemoRunning: true,
     isDemoStarting: false,
     endpointRefusedToken: true

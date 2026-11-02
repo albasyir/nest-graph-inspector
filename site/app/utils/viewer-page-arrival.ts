@@ -46,15 +46,18 @@ export function resolveViewerPageArrival(input: {
   endpointUrl: string
   /** The tab holds a token for that endpoint. */
   hasAccessToken: boolean
-  /** The viewer's own origin: the demo's, and the one an endpoint needs no token on. */
-  viewerOrigin: string
+  /**
+   * The site's base URL: the demo's endpoints sit directly under it, and an
+   * endpoint on its origin needs no token.
+   */
+  siteBaseUrl: string
   isDemoRunning: boolean
   isDemoStarting: boolean
 }): ViewerPageArrival {
   const source = resolveTabGraphSource({
     graphFile: input.graphFile,
     endpointUrl: input.endpointUrl,
-    viewerOrigin: input.viewerOrigin
+    siteBaseUrl: input.siteBaseUrl
   })
   const takeover = resolveViewerPageTakeover({
     source,
@@ -79,7 +82,16 @@ export function resolveViewerPageArrival(input: {
     return 'no-graph'
   }
 
-  return input.hasAccessToken || canOpenWithoutAccessToken(input.endpointUrl, input.viewerOrigin)
+  return input.hasAccessToken || canOpenWithoutAccessToken(input.endpointUrl, originOf(input.siteBaseUrl))
     ? 'open'
     : 'no-credential'
+}
+
+/** The origin of a URL, or nothing for one that does not parse. */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
 }

@@ -64,7 +64,7 @@ const isAutoOpening = ref(
         || canOpenWithoutAccessToken(graphStore.endpointUrl, window.location.origin),
       restoredGraphFile: graphStore.fileSource?.kind,
       isDemoActive: isDemoActive.value,
-      viewerOrigin: window.location.origin
+      siteBaseUrl: demoStore.siteBaseUrl()
     }).kind !== 'manual'
 )
 /** Why the demo's static graph could not be opened for `?preview=true`. */
@@ -178,7 +178,7 @@ function openOnArrival() {
       || canOpenWithoutAccessToken(restoredEndpointUrl, window.location.origin),
     restoredGraphFile: graphStore.fileSource?.kind,
     isDemoActive: isDemoActive.value,
-    viewerOrigin: window.location.origin
+    siteBaseUrl: demoStore.siteBaseUrl()
   })
 
   if (action.kind === 'join-demo') {
