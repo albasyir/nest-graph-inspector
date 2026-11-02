@@ -1169,6 +1169,12 @@ async function handleSubmit(event: Event) {
       await (refresh === 'json' ? graphStore.fetchJson() : graphStore.fetchMarkdown())
     }
 
+    // The graph this question was asked about, held for the whole answer:
+    // getting the model ready can take minutes, and the visitor may open
+    // another graph from the header meanwhile, or while the answer streams.
+    const askedGraph = graphStore.graphData
+    const askedSystemPrompt = systemPrompt.value
+
     const modelId = selectedModel.value
 
     // `streamChat` would load the model itself, but going through the panel's
@@ -1253,8 +1259,8 @@ async function handleSubmit(event: Event) {
       const history = budgetChatHistory(
         getConversationTurns(),
         useAgent
-          ? estimateGraphAgentPromptChars(graphStore.graphData)
-          : systemPrompt.value.length
+          ? estimateGraphAgentPromptChars(askedGraph)
+          : askedSystemPrompt.length
       )
 
       droppedHistoryCount.value = history.droppedMessageCount
@@ -1266,7 +1272,7 @@ async function handleSubmit(event: Event) {
       const modelMessages: WebLlmChatMessage[] = [
         {
           role: 'system',
-          content: systemPrompt.value
+          content: askedSystemPrompt
         },
         ...budgetTurns()
       ]
@@ -1288,7 +1294,7 @@ async function handleSubmit(event: Event) {
         {
           engine: { streamChat, interrupt },
           modelId,
-          graph: graphStore.graphData,
+          graph: askedGraph,
           messages: budgetTurns(),
           temperature: CHAT_TEMPERATURE,
           enableThinking,
