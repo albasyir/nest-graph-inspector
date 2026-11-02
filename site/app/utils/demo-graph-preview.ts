@@ -1,5 +1,6 @@
 import type { NodepodDemoStatus } from '../stores/nodepod-demo.ts'
 import type { GraphFileSource } from './graph-file-session.ts'
+import { resolveSiteBaseUrl } from './nodepod-demo-endpoint.ts'
 
 /**
  * The demo application's graph, as the site shows it before anyone asks for
@@ -26,9 +27,7 @@ export const EXAMPLE_GRAPH_SOURCE: GraphFileSource = {
 
 /** The static graph's absolute URL, under the base path the site is served from. */
 export function resolveExampleGraphUrl(baseURL: string, origin: string): string {
-  const base = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
-
-  return new URL(EXAMPLE_GRAPH_FILE, new URL(base, origin)).toString()
+  return new URL(EXAMPLE_GRAPH_FILE, resolveSiteBaseUrl(baseURL, origin)).toString()
 }
 
 export type ExampleGraphStatus = 'idle' | 'loading' | 'ready' | 'error'

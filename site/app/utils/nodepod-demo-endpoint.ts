@@ -150,42 +150,36 @@ export function resolveInspectorMountBase(endpointUrl: string): string {
 export function resolveSiteBaseUrl(baseURL: string, origin: string): string {
   const base = baseURL || '/'
 
-  return new URL(base.endsWith('/') ? base : `${base}/`, origin).toString()
+  try {
+    return new URL(base.endsWith('/') ? base : `${base}/`, origin).toString()
+  } catch {
+    // An opaque origin — `null`, in a sandboxed frame or a file — has nothing
+    // to build on, and nothing of this site is served from it.
+    return ''
+  }
 }
 
 /**
- * Whether an endpoint is the in-browser demo's: the runtime's segment directly
- * under the site's base URL, on its origin — exactly where
- * {@link buildDemoEndpointUrl} puts the demo, and what
- * {@link readDemoRequestTarget} answers. The segment anywhere else, on another
- * origin or under another path of this one, is somebody's own application,
- * served under a path that happens to hold it.
+ * Whether an endpoint is the in-browser demo's: an absolute URL the fetch bridge
+ * answers ({@link readDemoRequestTarget}) — the runtime's segment and a port
+ * directly under the site's base URL, on its origin, which is where
+ * {@link buildDemoEndpointUrl} puts the demo. Built on the bridge's own matcher,
+ * so the two cannot disagree about what the demo is. The segment anywhere else,
+ * on another origin or under another path of this one, is somebody's own
+ * application, served under a path that happens to hold it.
  */
 export function isDemoEndpoint(endpointUrl: string, siteBaseUrl: string): boolean {
-  let endpoint: URL
-  let base: URL
+  // The bridge also reads a request relative to the site; an endpoint is
+  // absolute, and a bare path would name the demo by where the tab happens to be.
+  return isAbsoluteUrl(endpointUrl) && readDemoRequestTarget(endpointUrl, siteBaseUrl) !== null
+}
 
+function isAbsoluteUrl(value: string): boolean {
   try {
-    endpoint = new URL(endpointUrl)
-    base = new URL(siteBaseUrl)
+    return Boolean(new URL(value))
   } catch {
     return false
   }
-
-  if (endpoint.origin !== base.origin) {
-    return false
-  }
-
-  const prefix = `${withoutTrailingSlash(base.pathname)}/${NODEPOD_ROUTE_SEGMENT}/`
-  const mountBase = resolveInspectorMountBase(endpointUrl)
-
-  if (!mountBase.startsWith(prefix)) {
-    return false
-  }
-
-  const port = Number(mountBase.slice(prefix.length))
-
-  return Number.isInteger(port) && port > 0
 }
 
 /**
@@ -216,7 +210,13 @@ export function readDemoRequestTarget(
     return null
   }
 
-  const [portSegment, ...rest] = url.pathname.slice(prefix.length).split('/')
+  const [portSegment = '', ...rest] = url.pathname.slice(prefix.length).split('/')
+
+  // Digits and nothing else: `Number` alone would also take `1e3` or `0x1f`.
+  if (!/^\d+$/.test(portSegment)) {
+    return null
+  }
+
   const port = Number(portSegment)
 
   if (!Number.isInteger(port) || port <= 0) {

@@ -126,6 +126,36 @@ assert.equal(isDemoEndpoint(demoEndpoint, ''), false)
 assert.equal(isDemoEndpoint('not a url', SITE_BASE), false)
 assert.equal(isDemoEndpoint('', SITE_BASE), false)
 
+// An opaque origin — a sandboxed frame, a file — has no base URL to build on.
+assert.equal(resolveSiteBaseUrl('/nest-graph-inspector/', 'null'), '')
+assert.equal(resolveSiteBaseUrl('/', ''), '')
+
+// The boundaries of the demo's address. isDemoEndpoint is the fetch bridge's
+// own matcher, so the bridge answers exactly what the viewer calls the demo.
+const SEGMENT = NODEPOD_ROUTE_SEGMENT
+const DEMO_ADDRESS_BOUNDARIES: Array<[label: string, endpointUrl: string, siteBaseUrl: string, isDemo: boolean]> = [
+  ['the demo, directly under the base', `${SITE_BASE}${SEGMENT}/53371/__graph-inspector`, SITE_BASE, true],
+  ['a lookalike of the base path', `${SITE_ORIGIN}/nest-graph-inspector-evil/${SEGMENT}/1/x`, SITE_BASE, false],
+  ['the segment outside a subpath base', `${SITE_ORIGIN}/${SEGMENT}/53371/__graph-inspector`, SITE_BASE, false],
+  ['the segment further down the base', `${SITE_BASE}x/${SEGMENT}/53371/__graph-inspector`, SITE_BASE, false],
+  ['a site served from the root', `https://graph.example.dev/${SEGMENT}/3000/__graph-inspector`, 'https://graph.example.dev/', true],
+  ['the same base on another origin', `https://staging.example.com/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE, false],
+  ['the segment again, further down the demo', `${SITE_BASE}${SEGMENT}/53371/x/${SEGMENT}/1/y`, SITE_BASE, true],
+  ['an exponent for a port', `${SITE_BASE}${SEGMENT}/1e3/__graph-inspector`, SITE_BASE, false],
+  ['a hexadecimal port', `${SITE_BASE}${SEGMENT}/0x1f/__graph-inspector`, SITE_BASE, false],
+  ['port zero', `${SITE_BASE}${SEGMENT}/0/__graph-inspector`, SITE_BASE, false],
+  ['no port at all', `${SITE_BASE}${SEGMENT}//__graph-inspector`, SITE_BASE, false],
+  ['no base URL to go by', `${SITE_BASE}${SEGMENT}/53371/__graph-inspector`, '', false]
+]
+for (const [label, endpointUrl, siteBaseUrl, isDemo] of DEMO_ADDRESS_BOUNDARIES) {
+  assert.equal(isDemoEndpoint(endpointUrl, siteBaseUrl), isDemo, label)
+  assert.equal(readDemoRequestTarget(endpointUrl, siteBaseUrl) !== null, isDemo, `${label}: the bridge agrees`)
+}
+// The bridge reads a request relative to the site too; an endpoint is
+// absolute, so the same address as a bare path is not the demo.
+assert.notEqual(readDemoRequestTarget(`/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE), null)
+assert.equal(isDemoEndpoint(`/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE), false)
+
 // Requests the viewer makes are routed back to the virtual server they name.
 assert.deepEqual(
   readDemoRequestTarget(`${demoEndpoint}/output.json`, SITE_BASE),

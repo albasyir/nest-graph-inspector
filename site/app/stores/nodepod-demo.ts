@@ -156,6 +156,12 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * demo's endpoint is built under it, and recognised by it elsewhere.
    */
   function siteBaseUrl() {
+    // A server render has no page origin, and the demo only ever runs in the
+    // browser: there is no base to name there.
+    if (!import.meta.client) {
+      return ''
+    }
+
     return resolveSiteBaseUrl(config.app.baseURL, window.location.origin)
   }
 

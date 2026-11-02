@@ -8,8 +8,8 @@ import { isDemoEndpoint } from './nodepod-demo-endpoint.ts'
  * - `example` — the demo's static graph, opened as a graph file: what the site
  *   shows of the demo before anyone has started it.
  * - `file` — a graph file the visitor opened.
- * - `demo` — the in-browser demo's endpoint, which this site serves from its
- *   own origin, under the runtime's segment (`buildDemoEndpointUrl`).
+ * - `demo` — the in-browser demo's endpoint: the runtime's segment and a port
+ *   directly under this site's base URL, where `buildDemoEndpointUrl` puts it.
  * - `application` — somebody's own application, reached through the link it
  *   printed.
  */
