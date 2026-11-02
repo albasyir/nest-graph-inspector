@@ -6,6 +6,8 @@ import { resolveViewerPageArrival } from './viewer-page-arrival.ts'
 const SITE_ORIGIN = 'https://albasyir.github.io'
 const DEMO_ENDPOINT = `${SITE_ORIGIN}/nest-graph-inspector/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 const OWN_ENDPOINT = 'http://localhost:53371/__graph-inspector'
+/** Somebody's own application, served under a path that holds the runtime's segment. */
+const OWN_ENDPOINT_UNDER_SEGMENT = `https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 
 const VIEWER_PAGES = [
   '/view/navigator',
@@ -86,14 +88,18 @@ describe('a viewer page arrived at once the visitor has started the demo', () =>
   })
 
   test('keeps the visitor\'s own application, with its credential, and refuses it without', () => {
-    assert.equal(
-      resolveViewerPageArrival({ ...arriving, endpointUrl: OWN_ENDPOINT, hasAccessToken: true, ...RUNNING }),
-      'open'
-    )
-    assert.equal(
-      resolveViewerPageArrival({ ...arriving, endpointUrl: OWN_ENDPOINT, hasAccessToken: false, ...RUNNING }),
-      'no-credential'
-    )
+    for (const endpointUrl of [OWN_ENDPOINT, OWN_ENDPOINT_UNDER_SEGMENT]) {
+      assert.equal(
+        resolveViewerPageArrival({ ...arriving, endpointUrl, hasAccessToken: true, ...RUNNING }),
+        'open',
+        endpointUrl
+      )
+      assert.equal(
+        resolveViewerPageArrival({ ...arriving, endpointUrl, hasAccessToken: false, ...RUNNING }),
+        'no-credential',
+        endpointUrl
+      )
+    }
   })
 
   // A query or hash change keeps the page on screen, which loaded its graph as

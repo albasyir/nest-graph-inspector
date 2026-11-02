@@ -73,6 +73,8 @@ export function resolveViewerLandingAction(input: {
   restoredGraphFile?: GraphFileSource['kind']
   /** The tab's demo is running, or on its way up. */
   isDemoActive: boolean
+  /** The viewer's own origin, which tells the demo's endpoint from others. */
+  viewerOrigin: string
 }): ViewerLandingAction {
   if (input.query.preview === 'true') {
     return input.isDemoActive ? { kind: 'join-demo' } : { kind: 'open-example' }
@@ -84,7 +86,8 @@ export function resolveViewerLandingAction(input: {
 
   const source = resolveTabGraphSource({
     graphFile: input.restoredGraphFile,
-    endpointUrl: input.restoredEndpointUrl
+    endpointUrl: input.restoredEndpointUrl,
+    viewerOrigin: input.viewerOrigin
   })
 
   if (liveDemoTakesOver({ source, isDemoActive: input.isDemoActive })) {

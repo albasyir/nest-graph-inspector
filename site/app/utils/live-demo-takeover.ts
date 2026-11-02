@@ -8,7 +8,8 @@ import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
  * - `example` — the demo's static graph, opened as a graph file: what the site
  *   shows of the demo before anyone has started it.
  * - `file` — a graph file the visitor opened.
- * - `demo` — the in-browser demo's endpoint.
+ * - `demo` — the in-browser demo's endpoint, which this site serves from its
+ *   own origin, under the runtime's segment (`buildDemoEndpointUrl`).
  * - `application` — somebody's own application, reached through the link it
  *   printed.
  */
@@ -17,12 +18,18 @@ export type TabGraphSource = 'none' | 'example' | 'file' | 'demo' | 'application
 /**
  * Names the graph a tab is on. A graph file and an endpoint never coexist in
  * the store; were they to, the file is what the viewer draws.
+ *
+ * An endpoint is the demo only on the viewer's own origin. The runtime's
+ * segment in a path proves nothing elsewhere: somebody's own application can
+ * be served under a path that happens to hold it, and is still theirs.
  */
 export function resolveTabGraphSource(tab: {
   /** The kind of graph file the tab is on, if it is on one. */
   graphFile?: GraphFileSource['kind'] | null
   /** The endpoint the tab is on, empty when it is on none. */
   endpointUrl: string
+  /** The viewer's own origin, the only one the demo is served from. */
+  viewerOrigin: string
 }): TabGraphSource {
   if (tab.graphFile) {
     return tab.graphFile
@@ -32,7 +39,17 @@ export function resolveTabGraphSource(tab: {
     return 'none'
   }
 
-  return resolveInspectorMountBase(tab.endpointUrl) ? 'demo' : 'application'
+  return resolveInspectorMountBase(tab.endpointUrl) && isOnOrigin(tab.endpointUrl, tab.viewerOrigin)
+    ? 'demo'
+    : 'application'
+}
+
+function isOnOrigin(url: string, origin: string): boolean {
+  try {
+    return Boolean(origin) && new URL(url).origin === origin
+  } catch {
+    return false
+  }
 }
 
 /**

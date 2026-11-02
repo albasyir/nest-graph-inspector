@@ -9,9 +9,12 @@ import {
 import { NODEPOD_ROUTE_SEGMENT } from './nodepod-demo-endpoint.ts'
 import { resolveViewerLandingAction } from './viewer-landing.ts'
 
-const SITE_BASE = 'https://albasyir.github.io/nest-graph-inspector'
+const SITE_ORIGIN = 'https://albasyir.github.io'
+const SITE_BASE = `${SITE_ORIGIN}/nest-graph-inspector`
 const DEMO_ENDPOINT = `${SITE_BASE}/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 const OWN_ENDPOINT = 'http://localhost:53371/__graph-inspector'
+/** Somebody's own application, served under a path that holds the runtime's segment. */
+const OWN_ENDPOINT_UNDER_SEGMENT = `https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 
 const SOURCES: TabGraphSource[] = ['none', 'example', 'file', 'demo', 'application']
 
@@ -27,24 +30,35 @@ const fresh = {
   query: {},
   restoredEndpointUrl: '',
   canOpenRestoredSession: false,
-  isDemoActive: false
+  isDemoActive: false,
+  viewerOrigin: SITE_ORIGIN
 }
 
 describe('which graph a tab is on', () => {
+  const viewerOrigin = SITE_ORIGIN
+
   test('a graph file is the visitor\'s own or the demo\'s static graph, by its kind', () => {
-    assert.equal(resolveTabGraphSource({ graphFile: 'file', endpointUrl: '' }), 'file')
-    assert.equal(resolveTabGraphSource({ graphFile: 'example', endpointUrl: '' }), 'example')
+    assert.equal(resolveTabGraphSource({ graphFile: 'file', endpointUrl: '', viewerOrigin }), 'file')
+    assert.equal(resolveTabGraphSource({ graphFile: 'example', endpointUrl: '', viewerOrigin }), 'example')
   })
 
   test('an endpoint is the in-browser demo\'s or somebody\'s own application, by its address', () => {
-    assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT }), 'demo')
-    assert.equal(resolveTabGraphSource({ graphFile: null, endpointUrl: OWN_ENDPOINT }), 'application')
-    assert.equal(resolveTabGraphSource({ endpointUrl: 'https://staging.example.com/__graph-inspector' }), 'application')
+    assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT, viewerOrigin }), 'demo')
+    assert.equal(resolveTabGraphSource({ graphFile: null, endpointUrl: OWN_ENDPOINT, viewerOrigin }), 'application')
+    assert.equal(resolveTabGraphSource({ endpointUrl: 'https://staging.example.com/__graph-inspector', viewerOrigin }), 'application')
+  })
+
+  // The demo is only ever served from this site's own origin. The runtime's
+  // segment in somebody else's path is a coincidence, not the demo.
+  test('the runtime\'s segment on another origin is somebody\'s own application', () => {
+    assert.equal(resolveTabGraphSource({ endpointUrl: OWN_ENDPOINT_UNDER_SEGMENT, viewerOrigin }), 'application')
+    assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT, viewerOrigin: 'https://other.example' }), 'application')
+    assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT, viewerOrigin: '' }), 'application')
   })
 
   test('a tab on neither is on none', () => {
-    assert.equal(resolveTabGraphSource({ endpointUrl: '' }), 'none')
-    assert.equal(resolveTabGraphSource({ graphFile: null, endpointUrl: '' }), 'none')
+    assert.equal(resolveTabGraphSource({ endpointUrl: '', viewerOrigin }), 'none')
+    assert.equal(resolveTabGraphSource({ graphFile: null, endpointUrl: '', viewerOrigin }), 'none')
   })
 })
 
@@ -115,6 +129,16 @@ describe('/view, once the visitor has started the demo', () => {
       resolveViewerLandingAction({
         ...fresh,
         restoredEndpointUrl: OWN_ENDPOINT,
+        canOpenRestoredSession: true,
+        isDemoActive: true
+      }),
+      { kind: 'open-session', path: '/view/navigator' }
+    )
+    // Even served under a path that holds the runtime's segment.
+    assert.deepEqual(
+      resolveViewerLandingAction({
+        ...fresh,
+        restoredEndpointUrl: OWN_ENDPOINT_UNDER_SEGMENT,
         canOpenRestoredSession: true,
         isDemoActive: true
       }),

@@ -46,14 +46,15 @@ export function resolveViewerPageArrival(input: {
   endpointUrl: string
   /** The tab holds a token for that endpoint. */
   hasAccessToken: boolean
-  /** The viewer's own origin. */
+  /** The viewer's own origin: the demo's, and the one an endpoint needs no token on. */
   viewerOrigin: string
   isDemoRunning: boolean
   isDemoStarting: boolean
 }): ViewerPageArrival {
   const source = resolveTabGraphSource({
     graphFile: input.graphFile,
-    endpointUrl: input.endpointUrl
+    endpointUrl: input.endpointUrl,
+    viewerOrigin: input.viewerOrigin
   })
   const takeover = resolveViewerPageTakeover({
     source,

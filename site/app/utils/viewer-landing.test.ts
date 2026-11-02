@@ -13,7 +13,8 @@ const fresh = {
   query: {},
   restoredEndpointUrl: '',
   canOpenRestoredSession: false,
-  isDemoActive: false
+  isDemoActive: false,
+  viewerOrigin: 'https://albasyir.github.io'
 }
 
 // A fresh tab opening the viewer gets the landing card: the demo is the
@@ -44,7 +45,8 @@ assert.deepEqual(
     query: { preview: 'true', autoload: 'false' },
     restoredEndpointUrl: OWN_ENDPOINT,
     canOpenRestoredSession: true,
-    isDemoActive: true
+    isDemoActive: true,
+    viewerOrigin: 'https://albasyir.github.io'
   }),
   { kind: 'join-demo' }
 )
