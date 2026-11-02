@@ -1042,12 +1042,12 @@ session where it was — on no graph, or on the static graph "Open full-screen
 demo" opened — so the viewer settles the matter as the visitor arrives, by one
 rule (`liveDemoTakesOver`): for as long as the document lives, the running
 demo takes the place of no graph, of the demo's static graph, and of a demo
-session — the runtime's segment on this site's own origin, the only one the
-demo is served from (`isDemoEndpoint` in `app/utils/nodepod-demo-endpoint.ts`,
-which the takeover, a viewer page's session check and the header's Demo badge
-all go by) — and never of what the visitor chose — a graph file they opened,
-or their own application's session, under whatever path — unless they ask for
-the demo outright: a
+session — the runtime's segment and a port directly under this site's base
+URL, the one place the demo is served from (`isDemoEndpoint` in
+`app/utils/nodepod-demo-endpoint.ts`, which the takeover, a viewer page's
+session check and the header's Demo badge all go by) — and never of what the
+visitor chose — a graph file they opened, or their own application's session,
+under whatever path — unless they ask for the demo outright: a
 preview's "Open full-screen demo" (`/view?preview=true`) joins it over any
 graph, theirs included. `/view` joins it, as above. The bootstrap middleware
 applies the same rule to the viewer's own pages, carrying out what
@@ -1398,8 +1398,9 @@ Facts a code change can invalidate, and the file to check:
   `resolveViewerPageTakeover` in `site/app/utils/live-demo-takeover.ts`, and
   what the bootstrap middleware does on arriving at a viewer page —
   `resolveViewerPageArrival` in `site/app/utils/viewer-page-arrival.ts`
-- What counts as the demo's endpoint — the runtime's segment on the viewer's
-  own origin — `isDemoEndpoint` in `site/app/utils/nodepod-demo-endpoint.ts`
+- What counts as the demo's endpoint — the runtime's segment and a port
+  directly under the site's base URL — `isDemoEndpoint`, and that base URL,
+  `resolveSiteBaseUrl`, in `site/app/utils/nodepod-demo-endpoint.ts`
 - That the AI chat answers a graph file in agent mode only —
   `resolveAiChatAnswerMode` in `site/app/utils/ai-chat-mode.ts`
 - Which properties PostHog stamps with the page's URL, and that `ph-no-capture`
