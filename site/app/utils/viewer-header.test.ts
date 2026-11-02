@@ -6,6 +6,7 @@ import {
   describeViewerGraphStatus,
   resolveAiChatAvailability,
   resolveEndpointHost,
+  resolveViewerGraphControls,
   resolveViewerHeaderPage,
   type ViewerGraphState,
   type ViewerGraphStatusInput
@@ -417,4 +418,35 @@ describe('the AI chat', () => {
       }
     })
   }
+})
+
+describe('the header\'s graph controls', () => {
+  // The visitor's own choice, wherever they are: a graph file can take the
+  // place of the demo running in this tab, or of their own application, without
+  // a reload, and the endpoint can still be fetched again.
+  test('an endpoint offers a graph file in its place, and keeps its reload', () => {
+    assert.deepEqual(
+      resolveViewerGraphControls({ hasGraphEndpoint: true, isGraphFile: false }),
+      { fileMenu: ['open-file'], canUseFileMenu: true, showReload: true }
+    )
+  })
+
+  test('a graph file offers another in its place, or closing it, and has nothing to reload', () => {
+    assert.deepEqual(
+      resolveViewerGraphControls({ hasGraphEndpoint: false, isGraphFile: true }),
+      { fileMenu: ['open-another', 'close-graph'], canUseFileMenu: true, showReload: false }
+    )
+  })
+
+  // A demo session waiting for the demo to start again has let its endpoint
+  // go, and puts the demo back in the session once it is up — over a file
+  // opened meanwhile. The controls keep their place, so nothing shifts when
+  // the endpoint comes back.
+  test('a tab between graphs keeps the menu in place, out of use', () => {
+    const controls = resolveViewerGraphControls({ hasGraphEndpoint: false, isGraphFile: false })
+
+    assert.equal(controls.canUseFileMenu, false)
+    assert.deepEqual(controls.fileMenu, ['open-file'])
+    assert.equal(controls.showReload, true)
+  })
 })

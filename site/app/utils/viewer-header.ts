@@ -305,3 +305,39 @@ export function resolveAiChatAvailability({
 
   return hasGraphEndpoint || isGraphFile ? 'available' : 'no-graph'
 }
+
+/** What the viewer header's File menu can do. */
+export type ViewerFileMenuAction = 'open-file' | 'open-another' | 'close-graph'
+
+/** The header's controls for the graph a tab is on, beside its status. */
+export type ViewerGraphControls = {
+  /** The File menu's actions, in the order the menu lists them. */
+  fileMenu: ViewerFileMenuAction[]
+  /** Whether the File menu can be opened yet. */
+  canUseFileMenu: boolean
+  /** Whether the reload button is shown: an endpoint can be fetched again. */
+  showReload: boolean
+}
+
+/**
+ * What the viewer header offers for the graph a tab is on.
+ *
+ * Every graph gets the File menu, so the visitor can put a graph file of their
+ * own in its place without leaving the viewer — over the demo running in this
+ * tab too, which the takeover rule then leaves alone (`live-demo-takeover.ts`).
+ * An endpoint keeps its reload beside the menu. A graph file was read whole,
+ * so it has nothing to reload and is closed from the menu instead. A tab on
+ * neither yet — a demo session waiting for the demo to start again, its old
+ * endpoint already let go — keeps both controls in place but out of use: once
+ * up, the demo is put back in the session, over any file opened meanwhile.
+ */
+export function resolveViewerGraphControls(input: {
+  hasGraphEndpoint: boolean
+  isGraphFile: boolean
+}): ViewerGraphControls {
+  if (input.isGraphFile) {
+    return { fileMenu: ['open-another', 'close-graph'], canUseFileMenu: true, showReload: false }
+  }
+
+  return { fileMenu: ['open-file'], canUseFileMenu: input.hasGraphEndpoint, showReload: true }
+}
