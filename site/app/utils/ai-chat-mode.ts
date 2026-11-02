@@ -38,3 +38,22 @@ export function resolveAiChatAnswerMode(input: {
 
   return { agent: input.override ?? input.prefersAgent }
 }
+
+/**
+ * What the chat fetches from the graph's endpoint. As the panel opens, the
+ * Markdown summary: what an excerpt is cut from, and what says whether the
+ * graph outgrows the model's window. Before an answer, what that answer's mode
+ * reads — the JSON the tools look things up in, or the Markdown again. A graph
+ * file was read whole as it opened and has no endpoint to ask, so nothing.
+ */
+export function resolveAiChatFetch(input: {
+  isGraphFile: boolean
+  /** The answer about to be given looks things up; absent as the panel opens. */
+  agent?: boolean
+}): 'markdown' | 'json' | null {
+  if (input.isGraphFile) {
+    return null
+  }
+
+  return input.agent ? 'json' : 'markdown'
+}

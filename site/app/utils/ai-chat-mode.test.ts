@@ -2,7 +2,8 @@ import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import {
   AI_CHAT_GRAPH_FILE_MODE_REASON,
-  resolveAiChatAnswerMode
+  resolveAiChatAnswerMode,
+  resolveAiChatFetch
 } from './ai-chat-mode.ts'
 
 describe('how the AI chat answers', () => {
@@ -38,5 +39,21 @@ describe('how the AI chat answers', () => {
       resolveAiChatAnswerMode({ isGraphFile: false, override: true, prefersAgent: false }),
       { agent: true }
     )
+  })
+})
+
+describe('what the AI chat fetches', () => {
+  // A graph file has no endpoint: nothing may be fetched on its behalf, from
+  // an address that is empty or, worse, left over from another graph.
+  test('nothing for a graph file, as the panel opens or before an answer', () => {
+    for (const agent of [undefined, false, true]) {
+      assert.equal(resolveAiChatFetch({ isGraphFile: true, agent }), null, String(agent))
+    }
+  })
+
+  test('an endpoint\'s Markdown as the panel opens, and what the answer reads before it', () => {
+    assert.equal(resolveAiChatFetch({ isGraphFile: false }), 'markdown')
+    assert.equal(resolveAiChatFetch({ isGraphFile: false, agent: false }), 'markdown')
+    assert.equal(resolveAiChatFetch({ isGraphFile: false, agent: true }), 'json')
   })
 })

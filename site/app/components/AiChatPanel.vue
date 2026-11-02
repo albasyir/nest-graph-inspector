@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
-import { resolveAiChatAnswerMode } from '~/utils/ai-chat-mode'
+import { resolveAiChatAnswerMode, resolveAiChatFetch } from '~/utils/ai-chat-mode'
 import {
   MOBILE_BREAKPOINT_PX,
   MOBILE_DISCLAIMER_MESSAGE,
@@ -857,7 +857,7 @@ function handleRefreshModels() {
 watch(() => props.active, (value) => {
   if (value && !props.preview) {
     // A graph file has no Markdown beside it, nor an endpoint to ask for one.
-    if (!graphStore.isFileSource) {
+    if (resolveAiChatFetch({ isGraphFile: graphStore.isFileSource }) === 'markdown') {
       graphStore.fetchMarkdown()
     }
 
@@ -1164,8 +1164,9 @@ async function handleSubmit(event: Event) {
     // Only what the chosen mode reads. The plain path answers from the Markdown
     // excerpt; agent mode never sees it, because its tools query the JSON. A
     // graph file was read whole as it opened, and has no endpoint to ask.
-    if (!graphStore.isFileSource) {
-      await (useAgent ? graphStore.fetchJson() : graphStore.fetchMarkdown())
+    const refresh = resolveAiChatFetch({ isGraphFile: graphStore.isFileSource, agent: useAgent })
+    if (refresh) {
+      await (refresh === 'json' ? graphStore.fetchJson() : graphStore.fetchMarkdown())
     }
 
     const modelId = selectedModel.value
