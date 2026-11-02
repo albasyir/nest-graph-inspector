@@ -39,15 +39,22 @@ export function resolveTabGraphSource(tab: {
  * Whether the demo this document is running, or starting, takes the tab's
  * graph over.
  *
- * TODO(t_f2e5c392): stub reproducing today's behaviour — the running demo takes
- * nothing over.
+ * Once the visitor has pressed "Load Example", the application running in this
+ * tab is the demo, on every preview and every viewer page alike: the static
+ * graph and the landing card only ever stood in for it. So it takes over a tab
+ * with no graph, a tab on the demo's static graph, and a tab on a demo session,
+ * whichever pod that session was opened on. It never takes over what the
+ * visitor chose: a graph file they opened, or their own application, reached
+ * through the link it printed. Nothing is taken over before the demo is
+ * started, and a reload ends it.
  */
-export function liveDemoTakesOver(_input: {
+export function liveDemoTakesOver(input: {
   source: TabGraphSource
   /** The demo is running in this document, or on its way up. */
   isDemoActive: boolean
 }): boolean {
-  return false
+  return input.isDemoActive
+    && (input.source === 'none' || input.source === 'example' || input.source === 'demo')
 }
 
 /**
@@ -60,15 +67,38 @@ export function liveDemoTakesOver(_input: {
 export type ViewerPageTakeover = 'adopt' | 'join' | 'keep'
 
 /**
- * TODO(t_f2e5c392): stub reproducing today's behaviour — a viewer page always
- * keeps the tab's own graph.
+ * What a viewer page — `/view/<page>`, or a module's deep dive — does about the
+ * demo as the visitor arrives at it, where {@link liveDemoTakesOver} says the
+ * demo takes the tab over. It never boots the demo: only "Load Example" does.
+ *
+ * A running demo is adopted on the spot, and the page loads it like any other
+ * endpoint. One still starting has no endpoint to adopt yet, so a tab with no
+ * graph, or on the static graph, waits for it on `/view`, which shows how far
+ * the start has got and opens the viewer once it is up. A demo session waits
+ * on the page itself instead: the page's own session check already waits for
+ * a start in flight (`resolveDemoSessionAction`'s `join`), and keeps the
+ * visitor on the page they asked for.
+ *
+ * A navigation that only changes the query or hash of the page on screen keeps
+ * whatever that page shows: the page loaded its graph as it mounted, and would
+ * be left with none to draw if the store moved to another graph under it.
  */
-export function resolveViewerPageTakeover(_input: {
+export function resolveViewerPageTakeover(input: {
   source: TabGraphSource
   isDemoRunning: boolean
   isDemoStarting: boolean
   /** The navigation only changes the query or hash of the page on screen. */
   isSamePage: boolean
 }): ViewerPageTakeover {
-  return 'keep'
+  const isDemoActive = input.isDemoRunning || input.isDemoStarting
+
+  if (input.isSamePage || !liveDemoTakesOver({ source: input.source, isDemoActive })) {
+    return 'keep'
+  }
+
+  if (input.isDemoRunning) {
+    return 'adopt'
+  }
+
+  return input.source === 'demo' ? 'keep' : 'join'
 }

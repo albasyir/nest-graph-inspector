@@ -12,7 +12,9 @@ import {
  * nothing to do it: opening a page downloads no application and starts no
  * runtime. "Load Example" starts the demo itself in this tab, exactly as it
  * always started, and from then on every preview draws the live graph the
- * running demo reports about itself. One pod serves every preview on the page.
+ * running demo reports about itself — and every viewer page shows the demo
+ * too, unless the visitor has a graph of their own open there
+ * (`live-demo-takeover.ts`). One pod serves every preview on the page.
  */
 export function useNodepodDemoGraph() {
   const demo = useNodepodDemoStore()

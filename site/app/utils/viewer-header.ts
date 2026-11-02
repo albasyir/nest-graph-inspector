@@ -278,26 +278,17 @@ function describeGraphFileStatus(file: GraphFileSource): ViewerGraphStatus {
 }
 
 /** Whether the AI Chat button may open the chat, and if not, why not. */
-export type AiChatAvailability = 'available' | 'no-graph' | 'restricted' | 'graph-file'
-
-/**
- * Why the AI Chat is off for a graph file: what it reads is not in one, and
- * the site does not rebuild it, because only the library can say what its
- * Markdown says.
- */
-export const AI_CHAT_GRAPH_FILE_REASON
-  = 'AI Chat reads the Markdown summary a running inspector serves beside its graph, and a graph file does not include it. Open your application\'s Graph Viewer link to chat about its graph.'
+export type AiChatAvailability = 'available' | 'no-graph' | 'restricted'
 
 /**
  * Whether the header's AI Chat button may open the chat.
  *
  * A restricted device — a phone, a tablet, or a window narrower than the
  * chat's breakpoint, as `isMobileDevice` decides — is refused whatever graph
- * it has loaded: the model would run on that device's GPU. A graph file is
- * refused on any device — the chat reads the Markdown summary only an endpoint
- * serves — so that is the reason given for one, a restricted device's
- * included: a wider window would not help. Only `available` ever opens the
- * chat.
+ * it has loaded: the model would run on that device's GPU. Anywhere else any
+ * graph opens it, an endpoint's or a graph file's: a file carries no Markdown
+ * summary to answer from, so on one the chat looks things up in the graph
+ * instead (`resolveAiChatAnswerMode`). Only `available` ever opens the chat.
  */
 export function resolveAiChatAvailability({
   hasGraphEndpoint,
@@ -308,13 +299,9 @@ export function resolveAiChatAvailability({
   isGraphFile?: boolean
   isRestricted: boolean
 }): AiChatAvailability {
-  if (isGraphFile) {
-    return 'graph-file'
-  }
-
   if (isRestricted) {
     return 'restricted'
   }
 
-  return hasGraphEndpoint ? 'available' : 'no-graph'
+  return hasGraphEndpoint || isGraphFile ? 'available' : 'no-graph'
 }

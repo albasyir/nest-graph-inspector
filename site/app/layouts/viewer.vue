@@ -9,7 +9,6 @@ import {
 } from '~/utils/device-detection'
 import type { ViewerPage } from '~/utils/viewer-bootstrap-link'
 import {
-  AI_CHAT_GRAPH_FILE_REASON,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
   resolveViewerHeaderPage,
@@ -83,21 +82,6 @@ const aiChatAvailability = computed(() => resolveAiChatAvailability({
   isGraphFile: isFileSource.value,
   isRestricted: isMobile.value
 }))
-
-/** What the disabled AI Chat button says when it is asked why. */
-const aiChatNotice = computed(() =>
-  aiChatAvailability.value === 'graph-file'
-    ? {
-        label: AI_CHAT_GRAPH_FILE_REASON,
-        title: 'Not available for a graph file',
-        message: AI_CHAT_GRAPH_FILE_REASON
-      }
-    : {
-        label: MOBILE_DISCLAIMER_MESSAGE,
-        title: MOBILE_DRAWER_BANNER_TITLE,
-        message: MOBILE_DRAWER_BANNER_MESSAGE
-      }
-)
 
 /** The viewer is on a graph: an endpoint's, or a graph file's. */
 const hasGraphSource = computed(() => Boolean(endpointUrl.value) || isFileSource.value)
@@ -480,14 +464,14 @@ const viewerMenuItems = computed(() => [
                    than a breakpoint: `sm` is in rem and moves with the browser's
                    font size while the restriction's 768px does not, and a tablet
                    is wider than `sm` and still cannot run the chat. Where it is
-                   restricted — or the graph is a file, which carries none of the
-                   Markdown the chat reads — the button stays disabled and never
-                   opens the chat, but it is `aria-disabled` rather than
-                   `disabled`: a disabled button can be neither focused nor
-                   tapped, so it could never say why, and a tooltip does not open
-                   on touch. -->
+                   restricted the button stays disabled and never opens the chat,
+                   but it is `aria-disabled` rather than `disabled`: a disabled
+                   button can be neither focused nor tapped, so it could never
+                   say why, and a tooltip does not open on touch. A graph file
+                   opens the chat like an endpoint: the chat looks things up in
+                   the file's graph, having no Markdown summary to answer from. -->
               <UButton
-                v-if="aiChatAvailability === 'available' || aiChatAvailability === 'no-graph'"
+                v-if="aiChatAvailability !== 'restricted'"
                 icon="i-lucide-bot"
                 label="AI Chat"
                 color="neutral"
@@ -508,7 +492,7 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-disabled="true"
-                  :aria-label="`AI Chat — ${aiChatNotice.label}`"
+                  :aria-label="`AI Chat — ${MOBILE_DISCLAIMER_MESSAGE}`"
                   class="max-lg:h-10 max-md:w-10 max-md:justify-center"
                   :ui="{ label: 'max-md:sr-only' }"
                 />
@@ -523,10 +507,10 @@ const viewerMenuItems = computed(() => [
                       AI Chat
                     </p>
                     <p class="font-medium text-highlighted">
-                      {{ aiChatNotice.title }}
+                      {{ MOBILE_DRAWER_BANNER_TITLE }}
                     </p>
                     <p class="text-muted">
-                      {{ aiChatNotice.message }}
+                      {{ MOBILE_DRAWER_BANNER_MESSAGE }}
                     </p>
                   </div>
                 </template>

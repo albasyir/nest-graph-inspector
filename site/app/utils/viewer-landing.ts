@@ -1,5 +1,5 @@
 import type { GraphFileSource } from './graph-file-session.ts'
-import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
+import { liveDemoTakesOver, resolveTabGraphSource } from './live-demo-takeover.ts'
 
 /** The viewer page `/view` sends a visitor on to. */
 export type ViewerLandingPath = '/view/navigator' | '/view/trace'
@@ -8,7 +8,7 @@ export type ViewerLandingPath = '/view/navigator' | '/view/trace'
  * What `/view` does when it is opened.
  *
  * - `join-demo` — open the viewer on the demo already running, or starting, in
- *   this tab. It never boots one.
+ *   this document. It never boots one.
  * - `open-example` — open the viewer on the demo's static graph, as a graph
  *   file: the one the landing page's previews draw. It boots nothing.
  * - `open-session` — the tab is already on a graph; go back to it.
@@ -48,15 +48,22 @@ export function resolveViewerLandingPath(
  *    tab's session names another graph. With no demo to join it opens the
  *    demo's static graph, the one a preview that has not loaded the example
  *    is drawing, rather than booting the demo.
- * 2. A restored graph file goes back to the navigator — a file has no trace
- *    history — unless `?autoload=false` holds it back.
- * 3. A restored session for somebody's own application goes straight back to
- *    the viewer, unless `?autoload=false` holds it back — what "Try Another
- *    URL" links to, since bouncing back to the graph that just failed would
- *    leave no way out. Only a session the viewer would accept goes: the
- *    bootstrap middleware sends one without a usable token back here, and
- *    redirecting it again would loop. A restored *demo* session never does —
- *    nothing in a new document answers it.
+ * 2. Once the visitor has started the demo in this document — from a preview,
+ *    or from here — it is joined whenever the tab is on no graph of the
+ *    visitor's own choosing: no graph, the demo's static graph, or a demo
+ *    session (`liveDemoTakesOver`). Joining waits for a demo still starting.
+ * 3. A restored graph file goes back to the navigator — a file has no trace
+ *    history.
+ * 4. A restored session for somebody's own application goes straight back to
+ *    the viewer. Only a session the viewer would accept goes: the bootstrap
+ *    middleware sends one without a usable token back here, and redirecting it
+ *    again would loop. A restored *demo* session with no demo behind it — a
+ *    reload, a restored tab — stays here: nothing in this document answers it,
+ *    and the landing card is where the visitor starts the demo again.
+ *
+ * `?autoload=false` holds back all but the first — it is what "Try Another
+ * URL" and Close Graph link to, since bouncing back to the graph that was just
+ * left, or into the demo, would leave no way out.
  */
 export function resolveViewerLandingAction(input: {
   query: Record<string, unknown>
@@ -71,16 +78,24 @@ export function resolveViewerLandingAction(input: {
     return input.isDemoActive ? { kind: 'join-demo' } : { kind: 'open-example' }
   }
 
-  if (input.query.autoload !== 'false' && input.restoredGraphFile) {
+  if (input.query.autoload === 'false') {
+    return { kind: 'manual' }
+  }
+
+  const source = resolveTabGraphSource({
+    graphFile: input.restoredGraphFile,
+    endpointUrl: input.restoredEndpointUrl
+  })
+
+  if (liveDemoTakesOver({ source, isDemoActive: input.isDemoActive })) {
+    return { kind: 'join-demo' }
+  }
+
+  if (source === 'file' || source === 'example') {
     return { kind: 'open-session', path: '/view/navigator' }
   }
 
-  if (
-    input.query.autoload !== 'false'
-    && input.restoredEndpointUrl
-    && input.canOpenRestoredSession
-    && !resolveInspectorMountBase(input.restoredEndpointUrl)
-  ) {
+  if (source === 'application' && input.canOpenRestoredSession) {
     return {
       kind: 'open-session',
       path: resolveViewerLandingPath(input.query)

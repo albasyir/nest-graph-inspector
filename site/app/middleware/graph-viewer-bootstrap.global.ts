@@ -1,5 +1,9 @@
 import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
 import {
+  resolveTabGraphSource,
+  resolveViewerPageTakeover
+} from '~/utils/live-demo-takeover'
+import {
   resolveViewerLink,
   resolveViewerPage
 } from '~/utils/viewer-bootstrap-link'
@@ -28,8 +32,13 @@ import {
  *    this site's own origin — the bundled demo, which gates nothing — and a
  *    graph file, which has no endpoint to authenticate with and is never
  *    fetched from anywhere.
+ *
+ *    Once the visitor has started the demo in this document, though, a tab on
+ *    no graph of their own choosing — none, the demo's static graph, or a demo
+ *    session — shows the demo that is running (`resolveViewerPageTakeover`).
+ *    This never starts the demo: only "Load Example" does that.
  */
-export default defineNuxtRouteMiddleware((to) => {
+export default defineNuxtRouteMiddleware((to, from) => {
   // Server rendering must not spend the link: redirecting there would drop the
   // token before the browser ever saw it, and keeping it would write a live
   // credential into the SSR payload. The client repeats this on hydration.
@@ -80,6 +89,31 @@ export default defineNuxtRouteMiddleware((to) => {
   }
 
   const source = graphStore.restoreGraphSource()
+  const demo = useNodepodDemoStore()
+  const takeover = resolveViewerPageTakeover({
+    source: resolveTabGraphSource({
+      graphFile: graphStore.fileSource?.kind,
+      endpointUrl: graphStore.endpointUrl
+    }),
+    isDemoRunning: demo.isRunning,
+    isDemoStarting: demo.isBusy,
+    isSamePage: to.path === from.path
+  })
+
+  // A demo still starting has no endpoint to show yet: `/view` waits for it
+  // behind its progress, and opens the viewer on it once it is up.
+  if (takeover === 'join') {
+    return navigateTo('/view', { replace: true })
+  }
+
+  // The demo is a graph like any other: put it in the session, and the page
+  // loads it. It is built from the same commit as this site, so the version
+  // acknowledgement the viewer asks of other endpoints has nothing to add.
+  if (takeover === 'adopt') {
+    graphStore.setSession(demo.endpointUrl, demo.accessToken)
+    graphStore.trustEndpointVersion(demo.endpointUrl)
+    return
+  }
 
   if (source === 'file') {
     return
