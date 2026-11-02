@@ -66,6 +66,8 @@ const props = withDefaults(
     directRunHeaders?: Record<string, string>
     /** A graph read from a file has no application behind it to call. */
     directRunDisabled?: boolean
+    /** Why Direct Run is off, for a graph with no trace history either. */
+    directRunDisabledReason?: string
     /** Node id of the provider or controller whose Direct Run drawer is open. */
     directRunOn?: string
   }>(),
@@ -73,6 +75,7 @@ const props = withDefaults(
     directRunUrl: undefined,
     directRunHeaders: undefined,
     directRunDisabled: false,
+    directRunDisabledReason: undefined,
     directRunOn: undefined
   }
 )
@@ -83,6 +86,11 @@ const emit = defineEmits<{
   directRunDrawerClose: []
   traceOpen: []
 }>()
+
+/** Direct Run cannot run anything on this graph: a static or file graph. */
+const isDirectRunOff = computed(() =>
+  props.directRunDisabled || Boolean(props.directRunDisabledReason)
+)
 
 type FlowNode
   = | Node<ModuleDeepDiveItemNode, Record<string, never>, 'item'>
@@ -689,8 +697,10 @@ function handlePaneClick(): void {
             <span class="module-graph-node__label">
               {{ itemProps.data.label }}
             </span>
+            <!-- The item still opens its drawer, which says why Direct Run
+                 is off; only the promise that it can run goes. -->
             <UIcon
-              v-if="itemProps.data.isRunnable"
+              v-if="itemProps.data.isRunnable && !isDirectRunOff"
               name="i-lucide-play"
               class="module-graph-node__run"
               aria-label="Direct Run available"
@@ -809,6 +819,7 @@ function handlePaneClick(): void {
       :direct-run-url="props.directRunUrl"
       :direct-run-headers="props.directRunHeaders"
       :direct-run-disabled="props.directRunDisabled"
+      :direct-run-disabled-reason="props.directRunDisabledReason"
       @close="selectNode(null)"
       @trace-open="emit('traceOpen')"
     />

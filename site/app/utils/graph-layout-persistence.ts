@@ -16,7 +16,11 @@ const STORAGE_KEY_PREFIX = 'nest-graph-inspector:layout:'
 /** The slice of `Storage` this module needs, so tests can supply a fake. */
 export type GraphLayoutStorage = Pick<Storage, 'getItem' | 'setItem'>
 
-/** The file name the library saves to by default, so a download drops in. */
+/**
+ * The name a downloaded layout is saved under. A running inspector reads its
+ * layout from the file `.muse` in the project's root, so that is what a
+ * download is renamed to.
+ */
 export const GRAPH_LAYOUT_FILE_NAME = 'nest-graph-layout.json'
 
 const cached = new Map<string, GraphLayout>()
@@ -95,23 +99,31 @@ export function readStoredLayout(
   }
 }
 
-/** Keeps a layout for an endpoint, for the lifetime of the tab. */
+/**
+ * Keeps a layout for an endpoint, for the lifetime of the tab. Returns whether
+ * it reached the tab's storage: when it did not — full, or unavailable — the
+ * copy in memory still serves this page, and only a reload loses it.
+ */
 export function writeStoredLayout(
   endpointUrl: string,
   layout: GraphLayout,
   storage: GraphLayoutStorage | undefined = sessionLayoutStorage()
-): void {
+): boolean {
   if (!endpointUrl) {
-    return
+    return false
   }
 
   cached.set(endpointUrl, layout)
 
+  if (!storage) {
+    return false
+  }
+
   try {
-    storage?.setItem(STORAGE_KEY_PREFIX + endpointUrl, JSON.stringify(layout))
+    storage.setItem(STORAGE_KEY_PREFIX + endpointUrl, JSON.stringify(layout))
+    return true
   } catch {
-    // A full or unavailable store costs the layout on reload; the copy in
-    // memory still serves this page, and the visitor can download it.
+    return false
   }
 }
 

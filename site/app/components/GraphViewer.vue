@@ -202,6 +202,8 @@ const props = withDefaults(
     directRunUrl?: string
     directRunHeaders?: Record<string, string>
     directRunDisabled?: boolean
+    /** Why Direct Run is off, for a graph with no trace history either. */
+    directRunDisabledReason?: string
     /** Node id of the provider or controller whose Direct Run drawer is open. */
     directRunOn?: string
     showControls?: boolean
@@ -250,6 +252,7 @@ const props = withDefaults(
     directRunUrl: undefined,
     directRunHeaders: undefined,
     directRunDisabled: false,
+    directRunDisabledReason: undefined,
     directRunOn: undefined,
     showControls: true,
     showMiniMap: true,
@@ -2428,7 +2431,7 @@ const layoutSaveButton = computed(() => {
 
 const layoutSaveTitle = computed(() =>
   props.layoutPersistence === 'session'
-    ? 'Kept in this tab only — download it to commit beside the application'
+    ? 'Kept in this tab only — download it, and rename it to .muse in the project root to keep it'
     : 'Save to the application\'s layout file'
 )
 
@@ -2706,7 +2709,7 @@ defineExpose({ centerGraph, focusModule })
         size="sm"
         square
         aria-label="Download layout"
-        title="Download nest-graph-layout.json to commit beside the application"
+        title="Download nest-graph-layout.json — rename it to .muse in the project root for a running inspector to read"
         @click="downloadCurrentLayout"
       />
       <UButton
@@ -3261,6 +3264,7 @@ defineExpose({ centerGraph, focusModule })
       :direct-run-url="props.directRunUrl"
       :direct-run-headers="props.directRunHeaders"
       :direct-run-disabled="props.directRunDisabled"
+      :direct-run-disabled-reason="props.directRunDisabledReason"
       @close="closeDirectRunDrawer"
       @trace-open="emit('traceOpen')"
     />

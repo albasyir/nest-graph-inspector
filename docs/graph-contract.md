@@ -9,6 +9,22 @@ The normative source of truth is the JSON Schema published at:
 
 The viewer enforces `version >= 3`.  Older payloads trigger an upgrade prompt.
 
+The viewer reads the document two ways: fetched from an endpoint, or opened as
+a graph file at `/view`, where `site/app/utils/graph-file.ts` checks it before
+drawing it — every field listed below that the viewer reads, down to each
+dependency, must have the type this document gives it. A file in a format older
+than 3 is refused; one newer than the viewer knows opens with a notice. A
+field added to this contract that the viewer must read is a change to that
+check too.
+
+The document has three producers, all built by the same code
+(`GraphOutputBuilder`) and all following this contract: a running inspector's
+`/output.json`, the `json` output's file, and `nest-graph-inspector export`,
+which builds it without running the application (see the export CLI in
+[`architecture.md`](./architecture.md#the-export-cli--nest-graph-inspector-export)).
+An export lacks only what a running inspector reads off live instances, such
+as `directRun` on `useFactory` and `useExisting` providers.
+
 ---
 
 ## Top-level structure
@@ -75,10 +91,44 @@ type GraphOutputProvider = {
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | Yes | The token string used to register the provider |
+| `name` | Yes | Derived from how the provider was registered; see [Provider names](#provider-names) |
 | `jsdoc` | No | Class-level JSDoc; absent when source unavailable |
 | `dependencies` | Yes | May be empty `[]` |
 | `directRun` | No | See Direct Run section below |
+
+### Provider names
+
+A provider's `name` — and the `token` of every dependency that resolves to
+it — comes from how the provider was registered, never from the value a
+factory returned:
+
+| Registered as | `name` |
+|---|---|
+| A class: `UserService`, or `{ provide, useClass }` | The class name |
+| `{ provide, useFactory }` | The factory function's own name — `useFactory: createPool` is `createPool` — or else the token. Any function named `useFactory` goes by the token: one written in place, `useFactory: () => …`, gets that name from JavaScript, after the key it is written under, so every such factory has it, and a declared `function useFactory()` is treated the same way. A function passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it, has no name and goes by the token as well |
+| `{ provide, useExisting }` | The token. Nest implements every alias with the same function of its own, so the function names none of them |
+| `{ provide, useValue }` | The value's class name — `Object` for a plain object — or the token for a primitive value |
+
+A token's name is the string itself, a class token's its class name, and a
+symbol token's `Symbol(description)`. Two providers in one module whose tokens
+print alike — two symbols with one description — share a name, and the graph
+does not tell them apart. A global enhancer — a provider for `APP_GUARD`,
+`APP_INTERCEPTOR`, `APP_PIPE` or `APP_FILTER` — has its token rewritten by
+Nest as it scans it, to `APP_GUARD (UUID: …)`, with a UUID that is random on
+every start and a hash under `snapshot: true`; its name leaves the UUID out, so
+an alias or a factory written in place for `APP_GUARD` is named `APP_GUARD`,
+the same on every start and in an export. Several of them for one token in a
+module share that name, as tokens that print alike do. One registered with
+`useClass` or `useValue` is named by its class, as any class or value
+provider is. A factory provider is also matched to the tokens
+that depend on it by its token alone. Neither rule reads an instance, so
+a running inspector's graph and an exported one name every provider the same
+way. Until this was fixed, a running inspector named an unnamed factory after
+the class of what it returned (`@nestjs/config`'s `registerAs()` providers all
+appeared as `Object`) and let a `useExisting` alias registered before the
+provider it aliases stand in for that provider among other providers'
+`dependencies`; the shape of the document did not change, and neither did its
+version.
 
 ---
 
@@ -129,18 +179,14 @@ Both `providedBy` and `token` are required.
 
 - **Module identifiers** — the class name string as registered in
   `ModulesContainer` (e.g. `"UserModule"`).
-- **Provider identifiers** — the injection token string (e.g. `"UserService"`,
-  `"UserRepository"`).  Symbol tokens are not represented; only string-based
-  tokens appear in the output.
+- **Provider identifiers** — the provider's `name`, derived as described in
+  [Provider names](#provider-names) (e.g. `"UserService"`,
+  `"CONFIGURATION(database)"`, `"Symbol(CONFIG_SERVICE)"`).
 - **Cycle node keys** (modules and controllers) — raw names as in the modules
   map.
 - **Cycle node keys** (providers) — `"ModuleName:ProviderName"` composite
   strings in the `from` and `to` fields of provider cycles.
 
-> **Open question:** Non-string injection tokens (e.g. `InjectionToken`,
-> `Symbol`) are not documented.  The library resolves them via
-> `InstanceWrapper`, but how they appear as the `token` string (or whether they
-> are silently dropped) is not explicitly specified.
 
 ---
 
@@ -380,8 +426,9 @@ From `direct-run.type.ts`:
 
 1. `providedBy.type` is always `"module"` today; the allowed value set is
    unspecified for future extension.
-2. Non-string injection tokens (Symbols, classes used as tokens) — unclear
-   whether they surface in the output or are silently filtered.
+2. Non-string injection tokens — answered: a class token appears by its class
+   name and a symbol token as `Symbol(description)`; see
+   [Provider names](#provider-names).
 3. Controller cycles use string paths (like module cycles) while provider
    cycles use structured object paths — this inconsistency has no documented
    rationale.

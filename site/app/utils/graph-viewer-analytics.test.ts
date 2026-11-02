@@ -246,3 +246,27 @@ test('an event carries no secret, whatever it was handed', () => {
     error_message: 'No HTTP response'
   })
 })
+
+// A graph file has no endpoint to name: an event says which kind of file it
+// was and nothing more — never its name, which only the visitor's header shows.
+describe('an event about a graph file', () => {
+  test('says which kind of file, and names no endpoint', () => {
+    for (const graphSource of ['file', 'example'] as const) {
+      assert.deepEqual(
+        eventProperties({ graphUrl: '', graphSource, viewerRoute: '/view/navigator/modules/LedgerModule' }),
+        {
+          graph_url: '',
+          graph_url_host: '',
+          graph_url_path: '',
+          graph_source: graphSource,
+          viewer_route: '/view/navigator/modules/[module]',
+          load_source: 'initial_mount'
+        }
+      )
+    }
+  })
+
+  test('about an endpoint says nothing of files', () => {
+    assert.equal('graph_source' in eventProperties(), false)
+  })
+})

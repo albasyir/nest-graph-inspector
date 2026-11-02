@@ -236,7 +236,13 @@ export default defineNuxtConfig({
     clientConfig: {
       api_host: 'https://integrity.nest-graph-inspector.albasyir.net',
       ui_host: 'https://us.posthog.com',
-      capture_exceptions: true
+      capture_exceptions: true,
+      // A replay records the document's <title>, which `ph-no-capture` on the
+      // body cannot reach; no page may put the graph there, and this keeps
+      // one that does out of the recording too.
+      session_recording: {
+        maskTextSelector: 'title'
+      }
     },
     serverConfig: {
       enableExceptionAutocapture: true

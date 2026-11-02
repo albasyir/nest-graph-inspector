@@ -77,6 +77,163 @@ describe(DiscoveryAdapter.name, () => {
     expect(discovery.tree).toBe(firstTree);
   });
 
+  it("names a factory provider by its factory or token, and matches it by token, never by its instance", () => {
+    class ConfigValue {}
+    class RealService {}
+    const realService = new RealService();
+    // Shaped as Nest registers them: a factory passed as an argument has no
+    // name, one written in place is named after the `useFactory` key, and
+    // Nest's useExisting alias is `metatype: (instance => instance)`.
+    const anonymousFactory = (() => () => new ConfigValue())();
+    const { useFactory: inlineFactory } = {
+      useFactory: () => new ConfigValue(),
+    };
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    function loadConfiguration(): object {
+      return {};
+    }
+
+    const tree = scanIgnoring(
+      undefined,
+      moduleFixture(TestRootModule, {
+        providers: [
+          {
+            token: "CONFIGURATION(database)",
+            metatype: anonymousFactory,
+            inject: [],
+            instance: new ConfigValue(),
+          },
+          {
+            token: "INLINE",
+            metatype: inlineFactory,
+            inject: [],
+            instance: new ConfigValue(),
+          },
+          // Registered before the provider it aliases, whose instance it has.
+          {
+            token: "ALIAS",
+            metatype: aliasFactory,
+            inject: [RealService],
+            instance: realService,
+            isAlias: true,
+          },
+          classWrapper(RealService, realService),
+          { token: "VALUE", metatype: null, instance: new ConfigValue() },
+          {
+            token: "LOADER",
+            metatype: loadConfiguration,
+            inject: [RealService, "CONFIGURATION(database)"],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      tree.providers.map((provider) => [provider.name, provider.dependencies]),
+    ).toEqual([
+      ["CONFIGURATION(database)", []],
+      ["INLINE", []],
+      ["ALIAS", ["RealService"]],
+      ["RealService", []],
+      // A value is its instance in every mode, so it is still named by it.
+      ["ConfigValue", []],
+      ["loadConfiguration", ["RealService", "CONFIGURATION(database)"]],
+    ]);
+  });
+
+  it("names a global enhancer by its token, without the UUID Nest gives it", () => {
+    class AuthGuard {}
+    const authGuard = new AuthGuard();
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    const { useFactory: inlineFactory } = { useFactory: () => ({}) };
+
+    const tree = scanIgnoring(
+      undefined,
+      moduleFixture(TestRootModule, {
+        providers: [
+          classWrapper(AuthGuard, authGuard),
+          // A random UUID on a normal start; under snapshot: true, a hash,
+          // which can be negative.
+          {
+            token: "APP_GUARD (UUID: 2f9c1d6a0b8e4f7a91c3d)",
+            metatype: aliasFactory,
+            inject: [AuthGuard],
+            instance: authGuard,
+            isAlias: true,
+          },
+          {
+            token: "APP_INTERCEPTOR (UUID: -1468213475)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+          // The same words in a token Nest did not write are the token's own.
+          {
+            token: "MY_GUARD (UUID: 1)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+        ],
+      }),
+    );
+
+    expect(tree.providers.map((provider) => provider.name)).toEqual([
+      "AuthGuard",
+      "APP_GUARD",
+      "APP_INTERCEPTOR",
+      "MY_GUARD (UUID: 1)",
+    ]);
+  });
+
+  it("still ignores a global enhancer by the token Nest wrote, UUID and all, without renaming it", () => {
+    class AuthGuard {}
+    const authGuard = new AuthGuard();
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    const { useFactory: inlineFactory } = { useFactory: () => ({}) };
+    const enhancedModule = () =>
+      moduleFixture(TestRootModule, {
+        providers: [
+          classWrapper(AuthGuard, authGuard),
+          {
+            token: "APP_GUARD (UUID: 2f9c1d6a0b8e4f7a91c3d)",
+            metatype: aliasFactory,
+            inject: [AuthGuard],
+            instance: authGuard,
+            isAlias: true,
+          },
+          {
+            token: "APP_INTERCEPTOR (UUID: -1468213475)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+        ],
+      });
+    const names = (tree: ModuleTree) =>
+      tree.providers.map((provider) => provider.name);
+
+    expect(names(scanIgnoring(undefined, enhancedModule()))).toEqual([
+      "AuthGuard",
+      "APP_GUARD",
+      "APP_INTERCEPTOR",
+    ]);
+
+    // Written against the raw token, before the graph left its UUID out: a
+    // glob and a regular expression.
+    for (const pattern of ["APP_GUARD (UUID: *)", /^APP_GUARD \(UUID: /]) {
+      expect(
+        names(scanIgnoring({ providers: [pattern] }, enhancedModule())),
+      ).toEqual(["AuthGuard", "APP_INTERCEPTOR"]);
+    }
+  });
+
   it("captures controller instances alongside provider instances", () => {
     class TestController {}
     const controllerInstance = new TestController();
@@ -381,6 +538,8 @@ type WrapperFixture = {
   token: unknown;
   metatype?: unknown;
   instance?: unknown;
+  inject?: unknown[];
+  isAlias?: boolean;
 };
 
 type ModuleFixture = {

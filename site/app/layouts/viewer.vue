@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 import { useMediaQuery } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import {
@@ -9,6 +9,7 @@ import {
 } from '~/utils/device-detection'
 import type { ViewerPage } from '~/utils/viewer-bootstrap-link'
 import {
+  AI_CHAT_GRAPH_FILE_REASON,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
   resolveViewerHeaderPage,
@@ -22,15 +23,25 @@ const {
   endpointUrl,
   endpointRequiresAccessToken,
   endpointUnreachable,
+  fileSource,
   graphData,
   graphIsStatic,
   hasLoadError,
   isDemo,
+  isFileSource,
   isLoading
 } = storeToRefs(graphStore)
 const { isBusy: isDemoStarting } = storeToRefs(useNodepodDemoStore())
 const aiChatOpen = ref(false)
 const { isMobile } = useMobileDevice()
+const fileOpener = useGraphFileOpener()
+
+// The viewer shows the graph — module names, a graph file's name — and none of
+// it may reach analytics. `ph-no-capture` keeps PostHog's click capture and
+// session replay off everything under it: the layout itself as it renders, and
+// the body for what the viewer teleports out of it — drawers, popovers,
+// tooltips. Route names are rewritten out of events by `posthog-privacy`.
+useHead({ bodyAttrs: { class: 'ph-no-capture' } })
 
 // The graph being viewed is no longer in the URL, so these paths are fixed and
 // the endpoint shown in the header comes from the store.
@@ -47,6 +58,7 @@ const currentPage = computed(() => resolveViewerHeaderPage(route.path))
 /** What the compact header shows in place of the endpoint's full address. */
 const graphStatus = computed(() => describeViewerGraphStatus({
   endpointUrl: endpointUrl.value,
+  graphFile: fileSource.value,
   isDemo: isDemo.value,
   isDemoStarting: isDemoStarting.value,
   isLoading: isLoading.value,
@@ -68,8 +80,27 @@ const GRAPH_STATUS_TONE_CLASS: Record<ViewerGraphStatusTone, string> = {
 
 const aiChatAvailability = computed(() => resolveAiChatAvailability({
   hasGraphEndpoint: Boolean(endpointUrl.value),
+  isGraphFile: isFileSource.value,
   isRestricted: isMobile.value
 }))
+
+/** What the disabled AI Chat button says when it is asked why. */
+const aiChatNotice = computed(() =>
+  aiChatAvailability.value === 'graph-file'
+    ? {
+        label: AI_CHAT_GRAPH_FILE_REASON,
+        title: 'Not available for a graph file',
+        message: AI_CHAT_GRAPH_FILE_REASON
+      }
+    : {
+        label: MOBILE_DISCLAIMER_MESSAGE,
+        title: MOBILE_DRAWER_BANNER_TITLE,
+        message: MOBILE_DRAWER_BANNER_MESSAGE
+      }
+)
+
+/** The viewer is on a graph: an endpoint's, or a graph file's. */
+const hasGraphSource = computed(() => Boolean(endpointUrl.value) || isFileSource.value)
 
 // The header stays put while the pages under it change, and both popovers
 // hang off controls that can go away: the status one is the compact header's
@@ -93,6 +124,59 @@ function handleRefresh(event?: Event) {
   event?.preventDefault()
   graphStore.fetchGraph()
 }
+
+const graphFileInput = useTemplateRef<HTMLInputElement>('graphFileInput')
+
+/**
+ * Opens another graph file in place of this one. One that cannot be opened
+ * leaves this one where it is, and the visitor on `/view`, where the drop zone
+ * says why.
+ */
+async function handleGraphFileChosen(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+
+  input.value = ''
+
+  if (!file || await fileOpener.openFile(file)) {
+    return
+  }
+
+  await navigateTo({ path: '/view', query: { autoload: 'false' } })
+}
+
+/**
+ * Closes the graph file and goes back to `/view`. The page is left first, so
+ * the viewer never draws the moment it has no graph; `autoload=false` keeps
+ * `/view` from sending the visitor straight back to a file still closing.
+ */
+async function handleCloseGraphFile() {
+  await navigateTo({ path: '/view', query: { autoload: 'false' } })
+  graphStore.closeGraphFile()
+}
+
+const graphFileMenuItems = computed(() => [
+  [
+    {
+      label: 'Open Another…',
+      icon: 'i-lucide-folder-open',
+      // A second pick while the first is still being read could finish first
+      // and then be replaced by the older one.
+      disabled: fileOpener.isReading.value,
+      onSelect: () => {
+        fileOpener.clearError()
+        graphFileInput.value?.click()
+      }
+    },
+    {
+      label: 'Close Graph',
+      icon: 'i-lucide-x',
+      onSelect: () => {
+        void handleCloseGraphFile()
+      }
+    }
+  ]
+] satisfies DropdownMenuItem[][])
 
 function handleAskAi(event?: Event) {
   event?.preventDefault()
@@ -144,7 +228,7 @@ const viewerMenuItems = computed(() => [
     to: NAVIGATOR_PATH,
     // A module deep dive (`/view/navigator/modules/<id>`) is still the navigator.
     active: currentPage.value === 'navigator',
-    disabled: !endpointUrl.value,
+    disabled: !hasGraphSource.value,
     ui: pageLinkUi('navigator')
   },
   {
@@ -152,7 +236,7 @@ const viewerMenuItems = computed(() => [
     icon: 'i-lucide-bug',
     to: ISSUES_PATH,
     active: currentPage.value === 'issues',
-    disabled: !endpointUrl.value,
+    disabled: !hasGraphSource.value,
     ui: pageLinkUi('issues')
   },
   {
@@ -161,7 +245,7 @@ const viewerMenuItems = computed(() => [
     to: TRACE_PATH,
     // Its address before the rename, `/view/execution-sequence`, is still it.
     active: currentPage.value === 'trace',
-    disabled: !endpointUrl.value,
+    disabled: !hasGraphSource.value,
     ui: pageLinkUi('trace')
   }
 ] satisfies NavigationMenuItem[])
@@ -170,7 +254,7 @@ const viewerMenuItems = computed(() => [
 <template>
   <UDashboardGroup
     storage-key="graph-view"
-    class="relative min-h-screen"
+    class="ph-no-capture relative min-h-screen"
   >
     <UDashboardPanel
       id="graph-viewer"
@@ -227,6 +311,14 @@ const viewerMenuItems = computed(() => [
                     size="xs"
                     class="shrink-0"
                   />
+                  <UBadge
+                    v-else-if="fileSource"
+                    :label="fileSource.kind === 'example' ? 'Example' : 'File'"
+                    color="neutral"
+                    variant="subtle"
+                    size="xs"
+                    class="shrink-0"
+                  />
                 </div>
 
                 <!-- The second line keeps the header's shape either way: a host
@@ -241,12 +333,27 @@ const viewerMenuItems = computed(() => [
                 >
                   Running in this browser
                 </p>
-                <p
+                <div
                   v-else
-                  class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl"
+                  class="flex min-w-0 items-center gap-1"
                 >
-                  {{ graphStatus.title }}
-                </p>
+                  <p class="max-w-full truncate font-mono text-xs text-muted sm:max-w-xl">
+                    {{ graphStatus.title }}
+                  </p>
+                  <UTooltip
+                    v-if="graphStatus.notice"
+                    :text="graphStatus.notice"
+                  >
+                    <UButton
+                      icon="i-lucide-triangle-alert"
+                      color="warning"
+                      variant="ghost"
+                      size="xs"
+                      :aria-label="graphStatus.notice"
+                      class="shrink-0"
+                    />
+                  </UTooltip>
+                </div>
               </div>
 
               <!-- An address cut to fit a phone says less than the state of the
@@ -299,6 +406,12 @@ const viewerMenuItems = computed(() => [
                         <p class="text-muted">
                           {{ graphStatus.description }}
                         </p>
+                        <p
+                          v-if="graphStatus.notice"
+                          class="text-warning"
+                        >
+                          {{ graphStatus.notice }}
+                        </p>
                       </div>
                     </div>
 
@@ -329,7 +442,27 @@ const viewerMenuItems = computed(() => [
             <div class="flex min-w-0 items-center justify-end gap-1">
               <UColorModeButton class="max-lg:size-10 max-lg:justify-center" />
 
-              <UTooltip text="Reload graph">
+              <!-- A graph file was read whole, so there is nothing to reload:
+                   its place holds what can be done with a file instead. -->
+              <UDropdownMenu
+                v-if="isFileSource"
+                :items="graphFileMenuItems"
+                :content="{ align: 'end' }"
+                :ui="{ content: 'z-[100]' }"
+              >
+                <UButton
+                  icon="i-lucide-file-json"
+                  label="File"
+                  color="neutral"
+                  variant="ghost"
+                  class="max-lg:h-10 max-md:w-10 max-md:justify-center"
+                  :ui="{ label: 'max-md:sr-only' }"
+                />
+              </UDropdownMenu>
+              <UTooltip
+                v-else
+                text="Reload graph"
+              >
                 <UButton
                   icon="i-lucide-refresh-cw"
                   color="neutral"
@@ -347,12 +480,14 @@ const viewerMenuItems = computed(() => [
                    than a breakpoint: `sm` is in rem and moves with the browser's
                    font size while the restriction's 768px does not, and a tablet
                    is wider than `sm` and still cannot run the chat. Where it is
-                   restricted the button stays disabled and never opens the chat,
-                   but it is `aria-disabled` rather than `disabled`: a disabled
-                   button can be neither focused nor tapped, so it could never
-                   say why, and a tooltip does not open on touch. -->
+                   restricted — or the graph is a file, which carries none of the
+                   Markdown the chat reads — the button stays disabled and never
+                   opens the chat, but it is `aria-disabled` rather than
+                   `disabled`: a disabled button can be neither focused nor
+                   tapped, so it could never say why, and a tooltip does not open
+                   on touch. -->
               <UButton
-                v-if="aiChatAvailability !== 'restricted'"
+                v-if="aiChatAvailability === 'available' || aiChatAvailability === 'no-graph'"
                 icon="i-lucide-bot"
                 label="AI Chat"
                 color="neutral"
@@ -373,7 +508,7 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-disabled="true"
-                  :aria-label="`AI Chat — ${MOBILE_DISCLAIMER_MESSAGE}`"
+                  :aria-label="`AI Chat — ${aiChatNotice.label}`"
                   class="max-lg:h-10 max-md:w-10 max-md:justify-center"
                   :ui="{ label: 'max-md:sr-only' }"
                 />
@@ -388,10 +523,10 @@ const viewerMenuItems = computed(() => [
                       AI Chat
                     </p>
                     <p class="font-medium text-highlighted">
-                      {{ MOBILE_DRAWER_BANNER_TITLE }}
+                      {{ aiChatNotice.title }}
                     </p>
                     <p class="text-muted">
-                      {{ MOBILE_DRAWER_BANNER_MESSAGE }}
+                      {{ aiChatNotice.message }}
                     </p>
                   </div>
                 </template>
@@ -411,5 +546,16 @@ const viewerMenuItems = computed(() => [
     </UDashboardPanel>
 
     <AiChatDrawer v-model:open="aiChatOpen" />
+
+    <input
+      ref="graphFileInput"
+      type="file"
+      accept=".json,application/json"
+      class="sr-only"
+      tabindex="-1"
+      aria-hidden="true"
+      :disabled="fileOpener.isReading.value"
+      @change="handleGraphFileChosen"
+    >
   </UDashboardGroup>
 </template>

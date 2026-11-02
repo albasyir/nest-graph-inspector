@@ -2,6 +2,8 @@ import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import { MOBILE_BREAKPOINT_PX, isMobileDevice } from './device-detection.ts'
 import {
+  AI_CHAT_GRAPH_FILE_REASON,
+  EXAMPLE_GRAPH_TITLE,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
   resolveEndpointHost,
@@ -231,6 +233,48 @@ describe('the graph status', () => {
   })
 })
 
+// A graph file is read whole before the tab is put on it, so the header has no
+// load or failure to report for it — only which file it is.
+describe('a graph file', () => {
+  const FILE_STATUS = loaded({ endpointUrl: '', graphFile: { name: 'payments-api.graph.json', kind: 'file' } })
+
+  test('is named by its file name, as a static snapshot', () => {
+    const status = describeViewerGraphStatus(FILE_STATUS)
+
+    assert.equal(status.state, 'file')
+    assert.equal(status.title, 'payments-api.graph.json')
+    assert.equal(status.host, undefined)
+    assert.equal(status.label, 'Static snapshot')
+    assert.equal(status.busy, false)
+    assert.match(status.description, /never uploaded/)
+    assert.equal(status.notice, undefined)
+  })
+
+  test('that is the example is named for what it is', () => {
+    const status = describeViewerGraphStatus(loaded({ endpointUrl: '', graphFile: { name: 'graph.json', kind: 'example' } }))
+
+    assert.equal(status.title, EXAMPLE_GRAPH_TITLE)
+    assert.match(status.description, /exported with nest-graph-inspector export/)
+  })
+
+  test('in a newer format carries its notice, as a warning', () => {
+    const notice = 'This graph is in format 4, newer than the format 3 this viewer was built for.'
+    const status = describeViewerGraphStatus(loaded({
+      endpointUrl: '',
+      graphFile: { name: 'next.json', kind: 'file', notice }
+    }))
+
+    assert.equal(status.notice, notice)
+    assert.equal(status.tone, 'warning')
+  })
+
+  test('is what the header says, whatever an endpoint\'s state would have been', () => {
+    for (const state of [{ isLoading: true }, { hasLoadError: true }, { requiresAccessToken: true }, { isDemoStarting: true }]) {
+      assert.equal(describeViewerGraphStatus({ ...FILE_STATUS, ...state }).state, 'file', JSON.stringify(state))
+    }
+  })
+})
+
 // Both headers name the endpoint by its title — the compact one on its status
 // button, the desktop one under "Graph Viewer" — so the title is all of an
 // address either of them ever shows.
@@ -321,6 +365,21 @@ describe('the AI chat', () => {
 
   test('waits for a graph on a desktop that has none', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: false }), 'no-graph')
+  })
+
+  // The chat reads the Markdown summary an endpoint serves beside its graph,
+  // which a graph file does not carry.
+  test('is off for a graph file, and says why', () => {
+    assert.equal(
+      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: false }),
+      'graph-file'
+    )
+    // A wider window would not help, so a restricted device is told the same.
+    assert.equal(
+      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
+      'graph-file'
+    )
+    assert.match(AI_CHAT_GRAPH_FILE_REASON, /Markdown summary/)
   })
 
   test('is refused on a restricted device whatever graph it has', () => {

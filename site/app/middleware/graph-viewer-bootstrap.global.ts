@@ -24,8 +24,10 @@ import {
  *    has to come back from the tab's session. When there is no session — a fresh
  *    tab, or a link someone else was sent — there is nothing to show. When there
  *    is a session but no token, there is nothing to authenticate with. Either
- *    way the visitor belongs on `/view`. The one exception is a graph served
- *    from this site's own origin: the bundled demo, which gates nothing.
+ *    way the visitor belongs on `/view`. The exceptions are a graph served from
+ *    this site's own origin — the bundled demo, which gates nothing — and a
+ *    graph file, which has no endpoint to authenticate with and is never
+ *    fetched from anywhere.
  */
 export default defineNuxtRouteMiddleware((to) => {
   // Server rendering must not spend the link: redirecting there would drop the
@@ -77,9 +79,15 @@ export default defineNuxtRouteMiddleware((to) => {
     return navigateTo('/view', { replace: true })
   }
 
-  const endpointUrl = graphStore.restoreSession()
+  const source = graphStore.restoreGraphSource()
 
-  if (!endpointUrl) {
+  if (source === 'file') {
+    return
+  }
+
+  const endpointUrl = graphStore.endpointUrl
+
+  if (source === 'none' || !endpointUrl) {
     return navigateTo('/view', { replace: true })
   }
 

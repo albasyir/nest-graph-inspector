@@ -59,7 +59,7 @@ export function describeGraphEndpoint(graphUrl: string) {
  * before a page is created, but deciding here rather than at each call site
  * means a caller passing `route.fullPath` cannot reintroduce the leak.
  */
-function describeViewerRoute(viewerRoute: string) {
+export function describeViewerRoute(viewerRoute: string) {
   const path = (viewerRoute.split(/[?#]/)[0] ?? '').replace(/\/+$/, '')
   const [, root, page = '', ...rest] = path.split('/')
   const isOwnPage = root === 'view' && (!page || isViewerPage(page))
@@ -94,6 +94,11 @@ export type GraphLoadFailure = {
 
 export function createGraphViewerEventProperties(options: {
   graphUrl: string
+  /**
+   * Set when the graph was read from a file rather than an endpoint: which
+   * kind of file. The file's name, like its contents, is never reported.
+   */
+  graphSource?: 'file' | 'example'
   viewerRoute: string
   loadSource: LoadSource
   isRetry?: boolean
@@ -107,11 +112,16 @@ export function createGraphViewerEventProperties(options: {
     graph_url: string
     graph_url_host: string
     graph_url_path: string
+    graph_source?: 'file' | 'example'
     viewer_route: string
     load_source: LoadSource
     is_retry?: boolean
     error_status?: number
     error_message?: string
+  }
+
+  if (options.graphSource) {
+    properties.graph_source = options.graphSource
   }
 
   if (typeof options.isRetry === 'boolean') {

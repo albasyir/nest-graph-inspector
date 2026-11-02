@@ -1,3 +1,4 @@
+import type { GraphFileSource } from './graph-file-session.ts'
 import { isSupportedGraphOutputVersion } from './graph-output-support.ts'
 import { resolveViewerPage, type ViewerPage } from './viewer-bootstrap-link.ts'
 
@@ -45,6 +46,7 @@ export type ViewerGraphState
     | 'failed'
     | 'unsupported'
     | 'ready'
+    | 'file'
     | 'not-loaded'
 
 export type ViewerGraphStatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'error'
@@ -53,6 +55,8 @@ export type ViewerGraphStatusTone = 'neutral' | 'info' | 'success' | 'warning' |
 export type ViewerGraphStatusInput = {
   /** The endpoint the tab is on, empty when it is on none. Only its host is ever shown. */
   endpointUrl: string
+  /** The graph file the tab is on instead of an endpoint, if it is on one. */
+  graphFile?: GraphFileSource | null
   /** The endpoint is this site's own demo, running in this tab. */
   isDemo: boolean
   /** The demo is starting, which is when a tab that had one has no endpoint. */
@@ -88,9 +92,14 @@ export type ViewerGraphStatus = {
   label: string
   /** The state in a sentence, for the details the header opens. */
   description: string
+  /** Something to know about this graph beyond its state: a format newer than the viewer's. */
+  notice?: string
 }
 
 const DEMO_TITLE = 'In-browser demo'
+
+/** What the header calls the demo's static graph, whose file name says nothing. */
+export const EXAMPLE_GRAPH_TITLE = 'Example graph'
 
 /** What the header calls an endpoint it can read no host from. */
 const UNNAMED_ENDPOINT_TITLE = 'Graph endpoint'
@@ -128,6 +137,12 @@ export function resolveEndpointHost(endpointUrl: string): string | undefined {
  * loaded.
  */
 export function describeViewerGraphStatus(input: ViewerGraphStatusInput): ViewerGraphStatus {
+  // A graph file is read whole before the tab is put on it, so it has no
+  // loading or failure of its own to report.
+  if (input.graphFile) {
+    return describeGraphFileStatus(input.graphFile)
+  }
+
   if (!input.endpointUrl) {
     // The demo drops its endpoint while it starts again, because the one the
     // tab had died with the document that started it.
@@ -240,24 +255,63 @@ export function describeViewerGraphStatus(input: ViewerGraphStatusInput): Viewer
   }
 }
 
+/**
+ * What the header says about a graph file. The visitor's own is named by its
+ * file name, which the header shows and nothing ever reports; the demo's
+ * static graph is named for what it is.
+ */
+function describeGraphFileStatus(file: GraphFileSource): ViewerGraphStatus {
+  const isExample = file.kind === 'example'
+  const status: ViewerGraphStatus = {
+    state: 'file',
+    tone: file.notice ? 'warning' : 'neutral',
+    icon: file.notice ? 'i-lucide-triangle-alert' : 'i-lucide-file-json',
+    busy: false,
+    title: isExample ? EXAMPLE_GRAPH_TITLE : file.name,
+    label: 'Static snapshot',
+    description: isExample
+      ? 'The demo application\'s graph, exported with nest-graph-inspector export when this site was built. Nothing can be run against it.'
+      : 'Read in this browser from a file you opened, and never uploaded. Nothing can be run against it.'
+  }
+
+  return file.notice ? { ...status, notice: file.notice } : status
+}
+
 /** Whether the AI Chat button may open the chat, and if not, why not. */
-export type AiChatAvailability = 'available' | 'no-graph' | 'restricted'
+export type AiChatAvailability = 'available' | 'no-graph' | 'restricted' | 'graph-file'
+
+/**
+ * Why the AI Chat is off for a graph file: what it reads is not in one, and
+ * the site does not rebuild it, because only the library can say what its
+ * Markdown says.
+ */
+export const AI_CHAT_GRAPH_FILE_REASON
+  = 'AI Chat reads the Markdown summary a running inspector serves beside its graph, and a graph file does not include it. Open your application\'s Graph Viewer link to chat about its graph.'
 
 /**
  * Whether the header's AI Chat button may open the chat.
  *
  * A restricted device — a phone, a tablet, or a window narrower than the
  * chat's breakpoint, as `isMobileDevice` decides — is refused whatever graph
- * it has loaded: the model would run on that device's GPU. Only `available`
- * ever opens the chat.
+ * it has loaded: the model would run on that device's GPU. A graph file is
+ * refused on any device — the chat reads the Markdown summary only an endpoint
+ * serves — so that is the reason given for one, a restricted device's
+ * included: a wider window would not help. Only `available` ever opens the
+ * chat.
  */
 export function resolveAiChatAvailability({
   hasGraphEndpoint,
+  isGraphFile = false,
   isRestricted
 }: {
   hasGraphEndpoint: boolean
+  isGraphFile?: boolean
   isRestricted: boolean
 }): AiChatAvailability {
+  if (isGraphFile) {
+    return 'graph-file'
+  }
+
   if (isRestricted) {
     return 'restricted'
   }

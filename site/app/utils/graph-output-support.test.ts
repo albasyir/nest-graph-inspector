@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
 import {
   MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION,
+  NEWEST_KNOWN_GRAPH_OUTPUT_VERSION,
   isLegacyGraphOutput,
   isSupportedGraphOutputVersion
 } from './graph-output-support.ts'
@@ -58,3 +60,16 @@ for (const notAnObject of [undefined, null, '', 'graph', 0, false]) {
 }
 
 console.log('graph-output-support.test.ts ok')
+
+// The newest format the viewer knows is the one the library in this repository
+// writes. Read from the library's source rather than imported: the site only
+// ever takes types from `nest-graph-inspector`.
+const librarySchema = readFileSync(
+  new URL('../../../lib/src/types/graph-output.schema.ts', import.meta.url),
+  'utf8'
+)
+assert.equal(
+  NEWEST_KNOWN_GRAPH_OUTPUT_VERSION,
+  Number(/GRAPH_OUTPUT_SCHEMA_VERSION = '(\d+)'/.exec(librarySchema)?.[1])
+)
+assert.ok(NEWEST_KNOWN_GRAPH_OUTPUT_VERSION >= MINIMUM_SUPPORTED_GRAPH_OUTPUT_VERSION)

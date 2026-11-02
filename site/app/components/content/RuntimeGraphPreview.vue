@@ -12,7 +12,8 @@ const props = withDefaults(defineProps<{
   collapsedModules?: ModuleListProp
   caption?: string
   interactive?: BooleanProp
-  autoload?: BooleanProp
+  /** Offer "Load Example", which starts the demo itself and draws it live. */
+  showLoadExample?: BooleanProp
   showControls?: BooleanProp
   showMiniMap?: BooleanProp
 }>(), {
@@ -23,9 +24,9 @@ const props = withDefaults(defineProps<{
   showCircularDependencies: true,
   showBrightLine: true,
   collapsedModules: () => [],
-  caption: 'Live graph of the demo application running in your browser.',
+  caption: undefined,
   interactive: true,
-  autoload: true,
+  showLoadExample: false,
   showControls: false,
   showMiniMap: false
 })
@@ -56,7 +57,7 @@ const shouldShowBrightLine = computed(() =>
 )
 
 const isInteractive = computed(() => parseBooleanProp(props.interactive, true))
-const shouldAutoload = computed(() => parseBooleanProp(props.autoload, true))
+const shouldShowLoadExample = computed(() => parseBooleanProp(props.showLoadExample, false))
 const shouldShowControls = computed(() => parseBooleanProp(props.showControls, false))
 const shouldShowMiniMap = computed(() => parseBooleanProp(props.showMiniMap, false))
 
@@ -82,17 +83,30 @@ const fixedBrightLineLabel = computed(() => {
   return 'UserRepository'
 })
 
-// Read once: whether to start on mount is decided when the preview mounts.
-const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodepodDemoGraph({
-  autoload: shouldAutoload.value
-})
+const {
+  view,
+  graph,
+  staticGraphError,
+  statusLabel,
+  loadExample,
+  retryExample,
+  reloadStaticGraph
+} = useNodepodDemoGraph()
+
+/** Which graph this is, said after the caption. */
+const sourceSentence = computed(() =>
+  view.value.source === 'live'
+    ? 'Live graph of the demo application running in your browser.'
+    : 'Static graph of the demo project, exported with'
+)
 </script>
 
 <template>
   <div class="space-y-3">
     <ClientOnly>
       <GraphViewer
-        v-if="isReady && graph"
+        v-if="graph"
+        :key="view.source ?? undefined"
         :data="graph"
         :flow-id="viewerFlowId"
         :height="props.height"
@@ -112,12 +126,12 @@ const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodep
       >
         <USkeleton
           class="runtime-graph-preview__skeleton w-full rounded-xl"
-          :class="{ 'animate-none': hasError }"
+          :class="{ 'animate-none': view.placeholder === 'error' }"
           :style="{ height: props.height }"
         />
         <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
           <div
-            v-if="hasError"
+            v-if="view.placeholder === 'error'"
             role="alert"
             class="flex max-w-sm flex-col items-center gap-3"
           >
@@ -127,37 +141,33 @@ const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodep
               aria-hidden="true"
             />
             <p class="text-sm text-highlighted">
-              The live demo could not load.
+              The example graph could not be loaded.
             </p>
             <p
-              v-if="statusLabel"
+              v-if="staticGraphError"
               class="text-sm text-muted text-pretty"
             >
-              {{ statusLabel }}
+              {{ staticGraphError }}
             </p>
-            <UButton
-              icon="i-lucide-refresh-cw"
-              label="Try again"
-              color="neutral"
-              variant="subtle"
-              class="cursor-pointer"
-              @click="retry"
-            />
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              <UButton
+                icon="i-lucide-refresh-cw"
+                label="Try Again"
+                color="neutral"
+                variant="subtle"
+                class="cursor-pointer"
+                @click="reloadStaticGraph"
+              />
+              <UButton
+                icon="i-lucide-play"
+                label="Load Example"
+                color="neutral"
+                variant="outline"
+                class="cursor-pointer"
+                @click="loadExample"
+              />
+            </div>
           </div>
-          <template v-else-if="isIdle">
-            <UButton
-              icon="i-lucide-play"
-              label="Run the demo application"
-              color="neutral"
-              variant="subtle"
-              class="cursor-pointer"
-              @click="start"
-            />
-            <p class="max-w-sm text-sm text-muted">
-              Starts this repository's NestJS application in your browser and
-              graphs it live.
-            </p>
-          </template>
           <div
             v-else
             role="status"
@@ -170,7 +180,7 @@ const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodep
               aria-hidden="true"
             />
             <p class="text-sm text-muted tabular-nums">
-              {{ statusLabel }}
+              {{ view.liveDemo === 'starting' ? statusLabel : 'Loading the example graph…' }}
             </p>
           </div>
         </div>
@@ -184,20 +194,68 @@ const { graph, isReady, isIdle, hasError, statusLabel, start, retry } = useNodep
       </template>
     </ClientOnly>
 
-    <p class="text-sm text-muted">
-      <template v-if="fixedBrightLineLabel">
-        This example shows what happens when you hover
-        <span class="font-medium text-highlighted">{{ fixedBrightLineLabel }}</span>.
-      </template>
-      <template v-else>
-        {{ previewCaption }}
-      </template>
-      <NuxtLink
-        to="/view?preview=true"
-        class="text-primary font-medium"
-      >
-        Open full-screen demo
-      </NuxtLink>
-    </p>
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <p class="min-w-0 flex-1 basis-64 text-sm text-muted">
+        <template v-if="fixedBrightLineLabel">
+          This example shows what happens when you hover
+          <span class="font-medium text-highlighted">{{ fixedBrightLineLabel }}</span>.
+        </template>
+        <template v-else-if="previewCaption">
+          {{ previewCaption }}
+        </template>
+        {{ sourceSentence }}
+        <template v-if="view.source !== 'live'">
+          <code class="text-xs">nest-graph-inspector export</code>.
+        </template>
+        <NuxtLink
+          to="/view?preview=true"
+          class="text-primary font-medium"
+        >
+          Open full-screen demo
+        </NuxtLink>
+      </p>
+
+      <ClientOnly v-if="shouldShowLoadExample">
+        <UButton
+          v-if="view.liveDemo === 'off'"
+          icon="i-lucide-play"
+          label="Load Example"
+          size="sm"
+          color="neutral"
+          variant="outline"
+          class="shrink-0 cursor-pointer"
+          @click="loadExample"
+        />
+        <p
+          v-else-if="view.liveDemo === 'starting'"
+          role="status"
+          aria-live="polite"
+          class="flex shrink-0 items-center gap-2 text-sm text-muted tabular-nums"
+        >
+          <UIcon
+            name="i-lucide-loader-2"
+            class="size-4 animate-spin text-primary"
+            aria-hidden="true"
+          />
+          {{ statusLabel }}
+        </p>
+        <div
+          v-else-if="view.liveDemo === 'failed'"
+          role="alert"
+          class="flex shrink-0 flex-wrap items-center gap-2 text-sm"
+        >
+          <span class="text-error">The example could not start.</span>
+          <UButton
+            icon="i-lucide-refresh-cw"
+            label="Try Again"
+            size="sm"
+            color="neutral"
+            variant="outline"
+            class="cursor-pointer"
+            @click="retryExample"
+          />
+        </div>
+      </ClientOnly>
+    </div>
   </div>
 </template>

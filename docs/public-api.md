@@ -30,6 +30,10 @@ reach internal modules via deep imports (e.g. `nest-graph-inspector/src/adapters
 Those deep paths are **not** in the `exports` map and are **not** part of the
 supported public API.
 
+Besides `index.ts`, the package's `bin` is public: the `nest-graph-inspector`
+command, its options, exit codes, and output — see
+[Command line](#command-line--nest-graph-inspector).
+
 **Intended consumers:**
 
 - **NestJS application developers** — import `NestGraphInspectorModule` to add the
@@ -235,6 +239,73 @@ NestGraphInspectorModule.forRoot({
 
 Treat both as read-only. Neither is frozen, and mutating one changes the
 default for every inspector in the process.
+
+---
+
+## Command line — `nest-graph-inspector`
+
+| | |
+|---|---|
+| **Kind** | Executable — `package.json` `bin` |
+| **Source** | `src/cli/bin.ts` → `dist/cli/bin.js` |
+| **Stability** | Experimental — the command is new; its output is the versioned `GraphOutput` |
+| **Documented** | Yes — `--help`, README, the "Export Without Running" documentation page |
+
+```
+nest-graph-inspector export [options]
+nest-graph-inspector --help | --version
+```
+
+`export` boots the application's root module in NestJS's preview mode
+(`NestFactory.create(root, { preview: true, snapshot: true, abortOnError: false })`,
+or `NestFactory.createApplicationContext` when `@nestjs/platform-express` is not
+installed), never calls `init()` or `listen()`, and writes the `GraphOutput`
+the inspector builds from that container. Nothing is added to `index.ts`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--entry <file>` | Detected | File exporting the root module, compiled JavaScript or — with `--require` — TypeScript. Detected as `<outDir>/app.module.js`, `<outDir>/<sourceRoot>/app.module.js`, or the only `app.module.js` under `<outDir>`, from `nest-cli.json`'s `sourceRoot` (default `src`) and the `outDir` (default `dist`) of the tsconfig `nest build` uses |
+| `--module <name>` | `AppModule` | Export name of the root module class. Unset, it is `AppModule` — but when the file exports no `AppModule`, or an `AppModule` with no `@Module()` metadata (an empty `@Module({})` has none), and exactly one other class with that metadata, that class is used |
+| `-o, --out <file>` | `nest-graph.json` | Output file, created with its directories; `-` for stdout |
+| `-p, --project <dir>` | Current directory | Project root: `@nestjs/core`, `reflect-metadata`, and `--require` modules resolve from it, and the export runs with it as the working directory |
+| `--env-file <file>` | — | Loaded into `process.env` with `process.loadEnvFile()` before the entry is located and before anything is required; repeatable. A variable already set in the environment keeps its value, and a later file wins over an earlier one, as with `node --env-file`. Node.js 20.12 or later; otherwise the command fails, suggesting `--require dotenv/config` |
+| `-r, --require <module>` | — | Loaded before anything else, resolved from the project; repeatable |
+| `--compact` | Off | One-line JSON, byte for byte what `/output.json` serves; the default is `JSON.stringify(graph, null, 2)`, byte for byte what the `json` output writes |
+| `-h, --help` / `-v, --version` | | Help or version on stdout |
+
+`--entry`, `--out`, `--project`, and `--env-file` resolve against the current
+directory.
+The output carries no trailing newline. Everything else the command prints —
+the summary, warnings, Nest's errors, and anything the application writes
+through `process.stdout` — goes to stderr; a write straight to file
+descriptor 1 is not diverted. An entry Node treats as an ES module (`.mjs`,
+or `.js` under `"type": "module"`) is loaded with `import()`, anything else
+with `require()`.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The graph was written |
+| `1` | The export failed (missing entry, no root module export, a failed preview bootstrap, an unwritable output) |
+| `2` | Invalid command line |
+
+**Options.** The graph is built with the `NestGraphInspectorModuleOptions` the
+application registered: `forRoot()` or a plain import of the module is read
+from the container, with root-module auto-detection exactly as at runtime.
+`forRootAsync()` cannot be read — preview mode runs no factory — so the
+defaults apply with the entry module as the root, and the command warns. An
+application without the inspector gets the defaults with the entry module as
+the root.
+
+**Copies.** When the project resolves its own `nest-graph-inspector` and that
+copy is not the one running, the command runs the project's copy instead, if
+it ships this bin. `NEST_GRAPH_INSPECTOR_CLI_DELEGATED` marks the hand-over;
+it is internal and not meant to be set by hand.
+
+**Differences from a running inspector's graph**: Direct Run metadata of
+`useFactory` and `useExisting` providers is absent, since a running inspector
+reads it off the value the factory returned or the provider the alias points
+at, which preview mode never creates. Provider names and dependencies do not
+differ; see [provider names](./graph-contract.md#provider-names).
 
 ---
 
@@ -1288,10 +1359,13 @@ the dist tree and reachable at:
 nest-graph-inspector/src/nest-graph-inspector.setup
 ```
 
-It has two public methods — `buildModuleMap()` and `buildModuleMapFromAutoDetect()`
-— that the test suite accesses, and a third (`enrichModuleMap`) that the spec
-accesses only via a private-cast workaround. None of these methods carry JSDoc or
-any indication that they are intended for consumers. The class is not in `index.ts`.
+It inherits three public methods from its base class `GraphOutputBuilder`
+(`nest-graph-inspector/src/graph-output.builder`) — `buildModuleMap()` and
+`buildModuleMapFromAutoDetect()`, which the test suite accesses, and
+`getGraphOutput()`, which the CLI export uses — and a fourth
+(`enrichModuleMap`) that the spec accesses only via a private-cast workaround.
+None of these is intended for consumers. Neither class is in `index.ts`, and
+neither are the CLI's modules under `src/cli/`.
 
 **Assessment:** Internal. The public methods appear to exist to satisfy testing
 needs without full private casting, not to serve external consumers. If

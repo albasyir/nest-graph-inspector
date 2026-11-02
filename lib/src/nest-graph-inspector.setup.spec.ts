@@ -602,12 +602,12 @@ describe(NestGraphInspectorSetup.name, () => {
     class RunnableController {
       @Get(":id")
       getWidget(@Param("id") id: string) {
-        return id;
+        return { id };
       }
 
       @Post()
       createWidget(@Body() body: { name: string }) {
-        return body;
+        return { name: body.name };
       }
 
       helperNotRouted() {

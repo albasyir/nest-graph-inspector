@@ -37,11 +37,18 @@ const props = withDefaults(
     directRunHeaders?: Record<string, string>
     /** A graph read from a file has no application behind it to call. */
     directRunDisabled?: boolean
+    /**
+     * Why Direct Run is off, when the graph has no trace history to point at
+     * either: a graph file opened in the viewer, or a preview whose demo is
+     * not running. Replaces the static-output explanation and its trace link.
+     */
+    directRunDisabledReason?: string
   }>(),
   {
     directRunUrl: undefined,
     directRunHeaders: undefined,
-    directRunDisabled: false
+    directRunDisabled: false,
+    directRunDisabledReason: undefined
   }
 )
 
@@ -98,6 +105,10 @@ const methodTabs = computed(() =>
 )
 
 const unavailableReason = computed(() => {
+  if (props.directRunDisabledReason) {
+    return props.directRunDisabledReason
+  }
+
   if (props.directRunDisabled) {
     return STATIC_GRAPH_REASON
   }
@@ -201,7 +212,13 @@ function isActionDisabled(method: DirectRunAnyMethod): boolean {
 async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promise<void> {
   const current = target.value
   const url = props.directRunUrl
-  if (!current || !url || props.directRunDisabled || pendingByNodeId.value[current.nodeId]) {
+  if (
+    !current
+    || !url
+    || props.directRunDisabled
+    || props.directRunDisabledReason
+    || pendingByNodeId.value[current.nodeId]
+  ) {
     return
   }
 
@@ -308,7 +325,7 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
           title="Direct Run is unavailable"
           :description="unavailableReason"
           :actions="
-            props.directRunDisabled
+            props.directRunDisabled && !props.directRunDisabledReason
               ? [
                 {
                   label: 'Open Trace',

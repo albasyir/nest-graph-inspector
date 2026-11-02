@@ -9,11 +9,11 @@ import {
  * Loads the graph a viewer page is showing.
  *
  * The page's URL says which view to render, not which graph — the graph itself
- * comes from the store, put there by the printed link this tab was opened with
- * and kept across reloads in the tab's session.
- * `middleware/graph-viewer-bootstrap.global.ts` guarantees both are in place
- * before a page is created, so by the time this runs there is an endpoint to
- * load or nothing to show at all.
+ * comes from the store, put there by the printed link this tab was opened with,
+ * or by a graph file opened at `/view`, and kept across reloads in the tab's
+ * session. `middleware/graph-viewer-bootstrap.global.ts` guarantees both are in
+ * place before a page is created, so by the time this runs there is an
+ * endpoint to load, a graph file already read, or nothing to show at all.
  */
 /**
  * Whether this tab has already loaded a viewer page.
@@ -53,7 +53,10 @@ export function useGraphViewerPage() {
     () => isPreparing.value || graphStore.isLoading
   )
 
-  /** Reports a viewer event, stamped with the endpoint and route it came from. */
+  /**
+   * Reports a viewer event, stamped with the endpoint and route it came from —
+   * or, for a graph file, with which kind of file it is. Never the file's name.
+   */
   function trackGraphViewerEvent(
     event: string,
     options: {
@@ -66,6 +69,7 @@ export function useGraphViewerPage() {
       event,
       createGraphViewerEventProperties({
         graphUrl: graphStore.endpointUrl,
+        graphSource: graphStore.fileSource?.kind,
         viewerRoute: route.path,
         loadSource: options.loadSource,
         isRetry: options.isRetry,
@@ -88,9 +92,19 @@ export function useGraphViewerPage() {
       return
     }
 
-    const restored = graphStore.restoreSession()
+    const source = graphStore.restoreGraphSource()
 
-    if (!restored) {
+    // A graph file was read whole when it was opened: there is nothing to
+    // fetch, no demo to wait on, and nowhere to probe.
+    if (source === 'file') {
+      trackGraphViewerEvent('graph_viewer_load_started', { loadSource, isRetry })
+      trackGraphViewerEvent('graph_viewer_load_succeeded', { loadSource, isRetry })
+      return
+    }
+
+    const restored = graphStore.endpointUrl
+
+    if (source === 'none' || !restored) {
       await navigateTo('/view', { replace: true })
       return
     }

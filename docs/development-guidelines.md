@@ -219,7 +219,10 @@ Re-export new types from `index.ts`.
 
 ### 2. Implement extraction in the library
 
-Add or modify logic in `NestGraphInspectorSetup` (`nest-graph-inspector.setup.ts`).
+Add or modify graph building in `GraphOutputBuilder` (`graph-output.builder.ts`).
+Both the running inspector (`NestGraphInspectorSetup`, which extends it) and
+the CLI export build their graph there, so a change lands in both; output
+dispatch stays in `NestGraphInspectorSetup`.
 
 Write a `*.spec.ts` unit test alongside the implementation.  Use
 `@nestjs/testing` + Jest mocks to keep tests isolated.

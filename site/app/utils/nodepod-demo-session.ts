@@ -17,10 +17,9 @@ export type DemoSessionAction = 'pass-through' | 'reuse' | 'join' | 'release' | 
  *
  * The demo's endpoint is answered by the fetch bridge of the tab that started
  * it, so its address says nothing about whether it can still be reached. A
- * viewer page never starts the demo to make it reachable again — only the
- * landing page starts it unasked, and `/view` when the visitor asks — so a
- * session is only kept when this document is running the demo, or starting it,
- * already. The two ways a session dies look alike from the viewer, a document
+ * viewer page never starts the demo to make it reachable again — only "Load
+ * Example" starts it, when the visitor asks — so a session is only kept when
+ * this document is running the demo, or starting it, already. The two ways a session dies look alike from the viewer, a document
  * that no longer has a pod and a pod whose token the endpoint has begun
  * refusing once it expired, but the second leaves an application running that
  * has to be stopped: `/view` would otherwise join it and hand back the

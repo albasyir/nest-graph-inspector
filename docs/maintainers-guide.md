@@ -222,18 +222,48 @@ Donation links (GitHub Sponsors, Saweria). Not a technical file.
 
 #### `lib/src/nest-graph-inspector.setup.ts`
 
-**Purpose:** The `OnModuleInit` service that drives all graph extraction. The largest single file in the library.
+**Purpose:** The `OnModuleInit` service that publishes the graph when the host application starts. Extends `GraphOutputBuilder`.
 
 Responsibilities:
-- Walk `ModulesContainer` to build an internal `ModuleMap`.
-- Extract JSDoc from source via ts-morph.
-- Extract Direct Run method signatures via ts-morph.
+- Apply output defaults, and the module-wide Direct Run and layout settings.
+- Dispatch `GraphOutput` to all configured output adapters — eagerly, or lazily for `viewer` outputs.
+
+**Belongs here:** Output defaulting and dispatch.
+
+**Does not belong here:** Graph building (that is `graph-output.builder.ts`), HTTP serving or file I/O (those are in adapters).
+
+---
+
+#### `lib/src/graph-output.builder.ts`
+
+**Purpose:** `GraphOutputBuilder`, which turns the `ModuleTree` `DiscoveryAdapter` finds into `GraphOutput`. The largest single file in the library.
+
+Responsibilities:
+- Flatten the module tree into a `ModuleMap`.
 - Enrich `ModuleMap` → `GraphOutput` (dependency refs, cycle detection).
-- Dispatch `GraphOutput` to all configured output adapters.
+- Extract Direct Run method signatures via ts-morph.
 
-**Belongs here:** Graph extraction, enrichment, and cycle detection logic.
+**Belongs here:** Graph enrichment and cycle detection logic. Both the running inspector and the CLI export build with it, so a change here reaches both.
 
-**Does not belong here:** HTTP serving or file I/O (those are in adapters).
+**Does not belong here:** Output dispatch (`nest-graph-inspector.setup.ts`), process-level concerns of the CLI (`cli/`).
+
+---
+
+#### `lib/src/cli/`
+
+**Purpose:** The `nest-graph-inspector export` command (`bin` → `dist/cli/bin.js`): boots an application in Nest's preview mode and writes its `GraphOutput` without running it. See the export CLI section of `docs/architecture.md`.
+
+| File | What it does |
+|---|---|
+| `bin.ts` | The executable: runs the CLI and exits explicitly once output is flushed |
+| `cli.ts` | Argument parsing (`node:util` `parseArgs`), help, version, exit codes |
+| `export-command.ts` | The export: delegation to the project's own copy, load order, the stdout guard, writing the file |
+| `project.ts` | Entry detection, loading the project's own `@nestjs/core`, picking the root module export |
+| `export-graph.ts` | The preview-mode boot, the inspector options read from the container, and the graph build |
+| `stderr-logger.ts` | The logger the application is booted with: warnings and errors to stderr |
+| `__fixtures__/` | The application `export-graph.spec.ts` boots; excluded from the build |
+
+**What does NOT belong here:** Graph building — the export must use `GraphOutputBuilder`, never its own.
 
 ---
 
@@ -270,7 +300,7 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 **What belongs here:** Implementations of `OutputAdapter<Config>`. Each adapter file must have a co-located `*.spec.ts`.
 
-**What does NOT belong here:** Graph extraction logic (that belongs in `nest-graph-inspector.setup.ts`).
+**What does NOT belong here:** Graph extraction logic (that belongs in `graph-output.builder.ts`).
 
 **Important dependency:** `http-serve.adapter.ts` is an internal class shared by the other adapters; it is **not** exported from `index.ts`.
 
@@ -362,6 +392,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 
 **Contents:**
 - `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`.
+- `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"` and maps the `nest-graph-inspector/nest-graph-inspector` alias.
 
 **⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `demo/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
@@ -490,7 +521,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Component | Role |
 |---|---|
 | `PackageManagerCommand.vue` | Renders install/start commands for selected package manager |
-| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs; render the graph of the demo application running in the browser, started when the visitor selects "Run the demo application" |
+| `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs. They draw the demo's static graph (`nodepod-demo/graph.json`, exported at build time) and boot nothing; "Load Example" — on the hero preview (`show-load-example`) and the Direct Run preview — starts the demo in the browser, and every preview then draws its live graph |
 | `RuntimeAIChatPreview.vue` | AI chat preview in docs |
 | `HeroBackground.vue` / `StarsBg.vue` | Visual elements for landing page |
 
@@ -506,11 +537,12 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Composable | What it does |
 |---|---|
-| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events |
+| `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events. A graph file is already loaded: it fetches nothing for one |
+| `useGraphFileOpener.ts` | Opens a graph file — picked, dropped, or the demo's static graph — with `File.text()` and `utils/graph-file.ts`, hands it to the store, and goes to the navigator. Its error is shared state, so the viewer header's "Open Another…" can send a failure to `/view` |
 | `useWebLlmEngine.ts` | The only surface a chat model talks to: WebGPU support check, curated model catalog and cache state, model download progress, streaming generation, interrupt, and teardown. Imports `@mlc-ai/web-llm` lazily inside function bodies, since the module touches browser globals and the site is prerendered. Never sends `tools` on a request — see `web-llm-langchain.ts` for why that allowlist is not worth paying for |
 | `useMobileDevice.ts` | Whether the AI chat treats this tab as mobile, kept current as the window changes. The device class is `useDevice()` from `@nuxtjs/device`, called once in setup; it adds an iPad posing as a Mac and a window narrower than 768px, and answers `false` until mounted so a hydrated page agrees with its server render |
 | `useGraphAgent.ts` | Agent mode as the panel sees it: the `isRunning` flag and the dynamic `import()` that keeps `langchain` out of the prerendered server bundle. The loop itself is `~/utils/graph-agent-run`, which is testable without a browser |
-| `use-nodepod-demo-graph.ts` | Starts the in-browser demo when a docs preview asks for it, and exposes the graph, status label, and idle state that preview needs |
+| `use-nodepod-demo-graph.ts` | What a docs preview draws: the static graph on mount, the live one once the demo runs. `loadExample()` — "Load Example" — is the only thing in it that starts the demo |
 | `use-nodepod-demo-session.ts` | Reuses the in-browser demo the tab is running (or starting) behind a restored session; a session nothing answers any more — its endpoint is only answerable by the tab that started it — is forgotten and the visitor sent to `/view`. A viewer page never starts the demo |
 
 **What belongs here:** Shared stateful logic that doesn't fit in a store and needs to be reactive.
@@ -539,7 +571,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|---|
 | `index.vue` | `/` | Landing page; renders `landing` content collection |
 | `[...slug].vue` | `/getting-started`, `/configuration`, etc. | Catch-all for docs pages; renders `docs` collection via `@nuxt/content` |
-| `view/index.vue` | `/view` | Graph viewer entry; shows the landing card and polls for a live endpoint, and starts the in-browser demo only when "Open Demo" is clicked (with a Cancel). `?preview=true` joins a demo already running in the tab and never boots one; a tab with a usable session returns to its graph unless `?autoload=false` |
+| `view/index.vue` | `/view` | Graph viewer entry; shows the landing card — with the Open Graph File drop zone, which takes a drop anywhere on the page — and polls for a live endpoint, and starts the in-browser demo only when "Load Example" is clicked (with a Cancel). `?preview=true` joins a demo already running in the tab and never boots one, opening the demo's static graph as a graph file when there is none; a tab with a usable session, or a graph file, returns to its graph unless `?autoload=false` |
 | `view/navigator/index.vue` | `/view/navigator` | Main graph view; renders the `GraphOutput` the store holds; `?focus-module=<name>` moves the camera onto one module; each module header links to its deep dive |
 | `view/navigator/modules/[moduleId].vue` | `/view/navigator/modules/<id>` | One module's deep dive (`ModuleGraphViewer`): its providers, controllers, and the dependencies it imports. `<id>` is `encodeModuleId(name)` from `utils/module-id.ts`, decoded from `route.path` because `route.params` is already decoded once |
 | `view/issues.vue` | `/view/issues` | Architecture health and diagnostics; lists the issues `utils/architecture-issues.ts` derives from the graph — cycles, duplicate providers, unused imports, dead exports, disconnected modules — each linking to its module in the navigator |
@@ -604,7 +636,8 @@ fallback.
 
 | Store | Purpose |
 |---|---|
-| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags |
+| `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags — or, instead of an endpoint, a graph file (`openGraphFile`, `closeGraphFile`, `restoreGraphSource`) |
+| `example-graph.ts` | The demo's static graph, `nodepod-demo/graph.json`: fetched once per document from the site, checked like a graph file |
 | `nodepod-demo.ts` | Runs the demo application in the browser: downloads the payload, boots nodepod headless, spawns `node main.js`, installs the fetch bridge, and reads the graph endpoint out of the application's startup log |
 | `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
 
@@ -668,7 +701,11 @@ that cannot reach into a Pinia setup store.
 | `graph-inspector-version-gate.test.ts` | Assert-based test for `graph-inspector-version-gate.ts` |
 | `inspector-endpoint-url.ts` | Every URL the viewer derives from one graph endpoint: the typed-input form, files beneath it, sibling services at the root of the application's own server, Direct Run |
 | `inspector-endpoint-url.test.ts` | Assert-based test for `inspector-endpoint-url.ts` |
-| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, and recognising a graph served by an older library |
+| `graph-output-support.ts` | Whether the viewer can show what an endpoint returned: schema version floor, the newest format it knows, and recognising a graph served by an older library |
+| `graph-file.ts` | Reads a graph file: the size cap, JSON syntax, the `GraphOutput` shape down to each dependency, and the version — each failure in words that name the field |
+| `graph-file-session.ts` | The tab's copy of a graph file for a reload, in `sessionStorage` when it fits, its name alone when it does not |
+| `demo-graph-preview.ts` | Where the static demo graph is published, and what a preview shows given it and the live demo — the decision that the landing page boots nothing |
+| `analytics-privacy.ts` | PostHog's `before_send`: every viewer route in every event reduced to its shape, wherever PostHog put it |
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
 | `graph-layout-placement.ts` | Incremental layout: `resolveIncrementalLayout` keeps every saved module and item exactly where the layout says, places items the layout has not seen in the first free slot of their module (growing it to fit), and places new modules beside a module they import or are imported by, else in the nearest free slot — never displacing anything saved. `LAYOUT_GEOMETRY` mirrors the sizes `GraphViewer.vue` draws with; item keys are the viewer's node ids (`provider-<Module>-<Name>`) |
 | `graph-layout-placement.test.ts` | Assert-based test for `graph-layout-placement.ts` |
@@ -761,7 +798,7 @@ resolves the import graph itself.
 
 #### `site/public/nodepod-demo/`
 
-**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews on the landing page and the demo `/view` opens when the visitor asks for it — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
+**Purpose:** The demo application, packaged so the visitor's browser can run it. Every demo the site runs — the previews on the landing page once the visitor presses "Load Example", and the demo `/view` opens when the visitor asks for it — is this application actually running on the nodepod runtime in the visitor's tab. Until then the previews draw the demo's static graph, `graph.json`, exported from the same build.
 
 **Contents:**
 
@@ -770,6 +807,7 @@ resolves the import graph itself.
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
+| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps the third-party `ConfigModule` too |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

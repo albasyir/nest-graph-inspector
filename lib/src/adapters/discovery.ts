@@ -24,6 +24,23 @@ import { RuntimeTraceRecorder } from "../runtime-trace.recorder";
 import { SourceMetadataService } from "../source-metadata.service";
 import { BUILTIN_PROTOTYPES } from "../direct-run.constants";
 
+/**
+ * The token Nest gives a global enhancer — a provider for `APP_GUARD`,
+ * `APP_INTERCEPTOR`, `APP_PIPE` or `APP_FILTER` — when it scans it:
+ * `APP_GUARD (UUID: …)`, the UUID random on every start and a hash under
+ * `snapshot: true`. The first group is the token the application wrote.
+ */
+const NEST_ENHANCER_TOKEN =
+  /^(APP_GUARD|APP_INTERCEPTOR|APP_PIPE|APP_FILTER) \(UUID: [^)]*\)$/;
+
+/**
+ * The name JavaScript infers for a factory written in place in a provider,
+ * `{ provide, useFactory: () => … }`: the key it was written under. Any
+ * factory with this name — a declared `function useFactory()` too — counts as
+ * unnamed.
+ */
+const INFERRED_FACTORY_NAME = "useFactory";
+
 export type ModuleTree = {
   name: string;
   jsdoc?: string;
@@ -387,7 +404,12 @@ export class DiscoveryAdapter {
     });
   }
 
-  private instrumentRuntimeTrace(moduleTree: ModuleTree): void {
+  /**
+   * Protected so the CLI export (`cli/export-graph.ts`) can skip it: an
+   * export calls no method, so it has nothing to trace, and it should leave
+   * the application's prototypes as it found them.
+   */
+  protected instrumentRuntimeTrace(moduleTree: ModuleTree): void {
     this.walkModuleTree(moduleTree, (node) => {
       if (!node.moduleRef) {
         return;
@@ -609,7 +631,7 @@ export class DiscoveryAdapter {
     }
 
     return matchesAny(this.pathIgnoreMatchers, [
-      this.classFilePath(this.wrapperClassName(wrapper)),
+      this.classFilePath(this.memberClassName(wrapper)),
     ]);
   }
 
@@ -632,7 +654,7 @@ export class DiscoveryAdapter {
         this.controllerRoutePaths(wrapper, moduleRef),
       ) ||
       matchesAny(this.pathIgnoreMatchers, [
-        this.classFilePath(this.wrapperClassName(wrapper)),
+        this.classFilePath(this.memberClassName(wrapper)),
       ])
     );
   }
@@ -696,15 +718,24 @@ export class DiscoveryAdapter {
   }
 
   /** A symbol token answers to both `Symbol(NAME)` and `NAME`. */
+  /**
+   * Every name an `ignore` pattern may know a token by. A symbol is also
+   * known by its bare description. A global enhancer is also known by the
+   * token Nest wrote, UUID and all, which patterns written before its name in
+   * the graph left the UUID out still match. Only matching reads these: the
+   * graph names the token by `tokenName` alone.
+   */
   private tokenNames(token: InjectionToken | null | undefined): string[] {
     const name = this.tokenName(token);
     if (!name) {
       return [];
     }
 
-    return typeof token === "symbol" && token.description
-      ? [name, token.description]
-      : [name];
+    if (typeof token === "symbol" && token.description) {
+      return [name, token.description];
+    }
+
+    return typeof token === "string" && token !== name ? [name, token] : [name];
   }
 
   private extractNestCoreProviderName(dependencyName: string): string | null {
@@ -743,7 +774,7 @@ export class DiscoveryAdapter {
       // provider ignored by its class name is not still exported by token.
       const wrapper = moduleRef.providers.get(exportedItem);
       if (wrapper) {
-        const providerName = this.wrapperClassName(wrapper) || exportName;
+        const providerName = this.memberClassName(wrapper) || exportName;
         return this.shouldIgnoreProvider(providerName, wrapper)
           ? []
           : [exportName];
@@ -785,8 +816,7 @@ export class DiscoveryAdapter {
     const providerInstances = new Map<string, unknown>();
 
     for (const wrapper of moduleRef.providers.values()) {
-      const name =
-        this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+      const name = this.memberName(wrapper);
       if (name && providerNames.has(name)) {
         providerInstances.set(name, wrapper.instance);
       }
@@ -819,8 +849,7 @@ export class DiscoveryAdapter {
     const controllerInstances = new Map<string, unknown>();
 
     for (const wrapper of moduleRef.controllers.values()) {
-      const name =
-        this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+      const name = this.memberName(wrapper);
       if (name && controllerNames.has(name)) {
         controllerInstances.set(name, wrapper.instance);
       }
@@ -856,8 +885,7 @@ export class DiscoveryAdapter {
     shouldIgnore?: (name: string, wrapper: InstanceWrapper<object>) => boolean;
   }): ModuleProvider | null {
     const { wrapper, moduleRef, shouldIgnore = () => false } = param;
-    const name =
-      this.wrapperClassName(wrapper) || this.tokenName(wrapper.token);
+    const name = this.memberName(wrapper);
 
     if (!name || shouldIgnore(name, wrapper)) {
       return null;
@@ -881,7 +909,7 @@ export class DiscoveryAdapter {
   private extractClassJsDoc(
     wrapper: InstanceWrapper<unknown>,
   ): string | undefined {
-    const className = this.wrapperClassName(wrapper);
+    const className = this.memberClassName(wrapper);
 
     return className ? this.extractClassJsDocByName(className) : undefined;
   }
@@ -890,6 +918,63 @@ export class DiscoveryAdapter {
     return this.sourceMetadata.getClassJsDoc(className);
   }
 
+  /**
+   * The name a provider or controller has in the graph: its class's — a
+   * factory provider's is its factory function's — or else its injection
+   * token's.
+   */
+  private memberName(wrapper: InstanceWrapper<unknown>): string | null {
+    return this.memberClassName(wrapper) || this.tokenName(wrapper.token);
+  }
+
+  /**
+   * The class name a member is known by. A factory provider's is its
+   * factory function's own name, never that of the value the factory
+   * returned: see `isFactoryWrapper` and `factoryName`. Anything else is
+   * named by its class, or — a `useValue` provider, whose value is its
+   * instance in preview mode and at runtime alike — by its value's class.
+   */
+  private memberClassName(wrapper: InstanceWrapper<unknown>): string | null {
+    return this.isFactoryWrapper(wrapper)
+      ? this.factoryName(wrapper)
+      : this.wrapperClassName(wrapper);
+  }
+
+  /**
+   * A factory provider's own name, when it has one that tells it apart. A
+   * factory passed as an argument — what `registerAs()` registers — has
+   * none. One written in place, `useFactory: () => …`, has only the name
+   * JavaScript gives it from that key, which every such factory shares, so
+   * two in one module would be one node; a function declared under that name
+   * is taken the same way. A `useExisting` alias is Nest's own
+   * `instance => instance`, called `metatype` in every application. Each of
+   * these goes by its injection token instead.
+   */
+  private factoryName(wrapper: InstanceWrapper<unknown>): string | null {
+    const name = wrapper.metatype?.name;
+
+    return wrapper.isAlias || !name || name === INFERRED_FACTORY_NAME
+      ? null
+      : name;
+  }
+
+  /**
+   * Whether Nest gets the wrapper's instance by calling a function: a
+   * `useFactory` provider, or a `useExisting` alias, which Nest registers as
+   * a factory injecting the provider it aliases. Nest marks both with an
+   * `inject` list, which is what its own `InstanceWrapper#isFactory` reads.
+   * Their instance is whatever that call returned — and preview mode never
+   * makes the call — so it neither names the provider nor matches it to an
+   * injection token.
+   */
+  private isFactoryWrapper(wrapper: InstanceWrapper<unknown>): boolean {
+    return wrapper.inject !== undefined && wrapper.inject !== null;
+  }
+
+  /**
+   * A class name for runtime tracing, which instruments the instance a
+   * provider actually has — a factory's return value included.
+   */
   private wrapperClassName(wrapper: InstanceWrapper<unknown>): string | null {
     if (wrapper.metatype?.name) {
       return wrapper.metatype.name;
@@ -1018,16 +1103,7 @@ export class DiscoveryAdapter {
         continue;
       }
 
-      const providerInstance =
-        wrapper.instance &&
-        (typeof wrapper.instance === "object" ||
-          typeof wrapper.instance === "function")
-          ? (wrapper.instance as { constructor?: { name?: string } })
-          : null;
-      const providerName =
-        wrapper.metatype?.name ||
-        providerInstance?.constructor?.name ||
-        this.tokenName(wrapper.token);
+      const providerName = this.memberName(wrapper);
 
       if (!providerName) {
         return null;
@@ -1055,7 +1131,10 @@ export class DiscoveryAdapter {
       return true;
     }
 
+    // A factory's instance is whatever it returned, so its class says
+    // nothing about which token the provider answers to.
     if (
+      !this.isFactoryWrapper(wrapper) &&
       wrapper.instance &&
       typeof wrapper.instance === "object" &&
       wrapper.instance.constructor === token
@@ -1125,9 +1204,16 @@ export class DiscoveryAdapter {
     );
   }
 
+  /**
+   * The name a token has in the graph. A global enhancer's goes without the
+   * UUID Nest gives it, so its name is the same on every start, and in an
+   * export as in a running inspector.
+   */
   private tokenName(token: InjectionToken | null | undefined): string | null {
     if (!token) return null;
-    if (typeof token === "string") return token;
+    if (typeof token === "string") {
+      return NEST_ENHANCER_TOKEN.exec(token)?.[1] ?? token;
+    }
     if (typeof token === "symbol") return token.toString();
     if (typeof token === "function") return token.name;
     return null;

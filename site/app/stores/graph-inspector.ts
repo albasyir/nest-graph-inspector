@@ -26,6 +26,15 @@ import {
   type LegacyGraphOutput
 } from '~/utils/graph-output-support'
 import { describeFailedRequest, readStatusCode } from '~/utils/http-error'
+import { readGraphFileText } from '~/utils/graph-file'
+import {
+  clearGraphFileSession,
+  describeGraphFileDirectRun,
+  graphFileKey,
+  readGraphFileSession,
+  writeGraphFileSession,
+  type GraphFileSource
+} from '~/utils/graph-file-session'
 import {
   appendOutputPath,
   normalizeSourceUrl,
@@ -53,15 +62,39 @@ export type EndpointProbe
     | { status: 'legacy' }
     | { status: 'unreachable' }
 
+/** What {@link useGraphInspectorStore.restoreGraphSource} brought back for a tab. */
+export type RestoredGraphSource = 'endpoint' | 'file' | 'none'
+
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   /**
    * The graph endpoint being viewed, never carrying an access token.
    *
-   * This is the only record of which graph the viewer is on: the URL says which
-   * *view* to show, not which graph. It is recovered from the printed link on
-   * arrival and from the tab's session on a reload.
+   * With {@link fileSource}, this is the only record of which graph the viewer
+   * is on: the URL says which *view* to show, not which graph. It is recovered
+   * from the printed link on arrival and from the tab's session on a reload.
    */
   const endpoint = ref('')
+
+  /**
+   * The graph file being viewed, when the graph was read from a file rather
+   * than fetched from an endpoint: one the visitor opened, or the demo
+   * application's static graph. A file and an endpoint never coexist — opening
+   * either forgets the other — and nothing is ever fetched for a file.
+   */
+  const fileSource = ref<GraphFileSource | null>(null)
+  /** The graph read from {@link fileSource}, already checked by `graph-file.ts`. */
+  const fileGraph = shallowRef<GraphOutput | null>(null)
+  /**
+   * A graph file the tab was on whose graph was too large to keep for a
+   * reload: its name alone, so `/view` can ask for the file again.
+   */
+  const expiredGraphFile = ref<GraphFileSource | null>(null)
+  /**
+   * Changes whenever the viewer is put on another graph — another endpoint,
+   * another file, or the same file opened again — so a view can start over
+   * rather than carry one graph's unsaved state onto the next.
+   */
+  const graphRevision = ref(0)
 
   /**
    * The credential for {@link endpoint}, sent as a request header. Empty when
@@ -90,6 +123,20 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   let resolveVersionAcknowledgement: ((acknowledged: boolean) => void) | undefined
 
   const endpointUrl = computed(() => endpoint.value)
+  const isFileSource = computed(() => Boolean(fileSource.value))
+  /**
+   * What the open graph file's layout is kept under — see `graphFileKey` —
+   * worked out from the graph's text when the file opens or comes back.
+   */
+  const fileLayoutKey = ref('')
+
+  /**
+   * What the graph's layout is kept under: its endpoint, or for a file, its
+   * kind, name and content. Empty while the viewer is on no graph.
+   */
+  const graphKey = computed(() =>
+    fileSource.value ? fileLayoutKey.value : endpoint.value
+  )
 
   const informationUrl = computed(() =>
     appendOutputPath(endpoint.value, 'information.json')
@@ -186,7 +233,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   })
 
   const {
-    data: graphData,
+    data: fetchedGraphData,
     status,
     error,
     execute: executeJson,
@@ -237,7 +284,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       || status.value === 'error'
   )
 
-  const graphIsStatic = computed(() => endpointInfo.value?.['is-static'] === true)
+  /** The graph the viewer draws: the file's, or the one fetched from the endpoint. */
+  const graphData = computed(() => fileGraph.value ?? fetchedGraphData.value)
+
+  /**
+   * Whether the graph was read from files rather than served by a running
+   * process — a library writing static output, or a graph file opened here —
+   * so nothing can be run against it.
+   */
+  const graphIsStatic = computed(() =>
+    isFileSource.value || endpointInfo.value?.['is-static'] === true
+  )
 
   /**
    * Whether the navigator's Bright Line is on: the visitor's choice for this
@@ -272,12 +329,19 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
   )
+  /**
+   * Why Direct Run is off for a graph file, which has neither an application
+   * to call nor a trace history to point at instead. Unset for an endpoint.
+   */
+  const directRunDisabledReason = computed(() =>
+    fileSource.value ? describeGraphFileDirectRun(fileSource.value) : undefined
+  )
 
   /**
    * Where a layout is saved to. A live application writes it to its own file;
-   * a static graph has no server, the demo's file system dies with the tab,
-   * and an older library has no layout route — those keep it in the tab, from
-   * where the visitor can download it.
+   * a static graph — a graph file included — has no server, the demo's file
+   * system dies with the tab, and an older library has no layout route — those
+   * keep it in the tab, from where the visitor can download it.
    */
   const layoutPersistence = computed<'endpoint' | 'session'>(() =>
     graphIsStatic.value || isDemo.value || layoutEndpointMissing.value
@@ -398,7 +462,13 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    * makes a reload survivable.
    */
   function applyEndpoint(nextEndpointUrl: string, token?: string) {
+    // An endpoint replaces a graph file, in memory and in the tab's session —
+    // which the printed-link plugin may have written past without one.
+    forgetGraphFile()
+    expiredGraphFile.value = null
+
     if (endpoint.value !== nextEndpointUrl) {
+      graphRevision.value += 1
       endpoint.value = nextEndpointUrl
       accessToken.value = ''
       // Another graph starts from its own default, or from what the visitor
@@ -431,6 +501,116 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     accessToken.value = ''
     clearGraph()
     clearGraphSession()
+  }
+
+  /** Drops the graph file, if the tab is on one, and its session. */
+  function forgetGraphFile() {
+    if (fileSource.value) {
+      graphRevision.value += 1
+      fileSource.value = null
+      fileGraph.value = null
+      fileLayoutKey.value = ''
+      clearGraph()
+      brightLineChoice.value = null
+    }
+
+    clearGraphFileSession()
+  }
+
+  /**
+   * Opens a graph read from a file — the visitor's own, or the demo's static
+   * graph — in place of whatever the viewer was on.
+   *
+   * Nothing is fetched for it, ever: the endpoint is forgotten with its
+   * credential and its session, so no request can go anywhere on the file's
+   * behalf. The graph is kept for the tab, so a reload shows it again when it
+   * fits in the tab's storage; returns whether it did.
+   */
+  function openGraphFile(graph: GraphOutput, source: GraphFileSource): boolean {
+    if (endpoint.value) {
+      endpoint.value = ''
+      accessToken.value = ''
+      clearGraphSession()
+    }
+
+    clearGraph()
+    graphRevision.value += 1
+    expiredGraphFile.value = null
+    fileSource.value = source
+    fileGraph.value = graph
+    // The text the tab keeps the graph as for a reload, so the key worked out
+    // again then is this one.
+    fileLayoutKey.value = graphFileKey(source, JSON.stringify(graph))
+    // A Bright Line choice is kept for the tab by endpoint; a file's lives in
+    // memory, for as long as the file is open.
+    brightLineChoice.value = null
+    layoutData.value = readStoredLayout(fileLayoutKey.value)
+
+    return writeGraphFileSession(source, graph)
+  }
+
+  /** Closes the graph file: the viewer is on no graph until another opens. */
+  function closeGraphFile() {
+    forgetGraphFile()
+    expiredGraphFile.value = null
+  }
+
+  /**
+   * Brings back the graph file this tab was on, for a reload. A file whose
+   * graph did not fit in the tab's storage comes back as
+   * {@link expiredGraphFile} instead, for `/view` to ask for it again.
+   */
+  function restoreGraphFile(): boolean {
+    const session = readGraphFileSession()
+    if (!session) {
+      return false
+    }
+
+    if (session.graphText === undefined) {
+      expiredGraphFile.value = session.source
+      clearGraphFileSession()
+      return false
+    }
+
+    // Checked again, as on the way in: session storage is the visitor's to edit.
+    const result = readGraphFileText(session.graphText, session.source.name)
+    if (!result.ok) {
+      clearGraphFileSession()
+      return false
+    }
+
+    // The notice is the one this viewer gives the graph now, not the one it
+    // was opened with: the viewer may have been updated since.
+    const { name, kind } = session.source
+    const source: GraphFileSource = result.notice
+      ? { name, kind, notice: result.notice }
+      : { name, kind }
+
+    clearGraph()
+    fileSource.value = source
+    fileGraph.value = result.graph
+    fileLayoutKey.value = graphFileKey(source, session.graphText)
+    brightLineChoice.value = null
+    layoutData.value = readStoredLayout(fileLayoutKey.value)
+
+    return true
+  }
+
+  /**
+   * Recovers whatever graph this tab was on, for a load that arrived without a
+   * printed link — a reload, or a viewer page opened directly: an endpoint, as
+   * {@link restoreSession} does, or a graph file.
+   */
+  function restoreGraphSource(): RestoredGraphSource {
+    if (fileSource.value) {
+      return 'file'
+    }
+
+    if (restoreSession()) {
+      return 'endpoint'
+    }
+
+    return restoreGraphFile() ? 'file' : 'none'
   }
 
   /**
@@ -574,17 +754,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    * worth telling the visitor, says why in `layoutLoadError`.
    */
   async function fetchLayout(): Promise<GraphLayout | null> {
+    const requestedKey = graphKey.value
     const requestedEndpoint = endpoint.value
     layoutLoadError.value = ''
     isLayoutDirty.value = false
 
-    if (!requestedEndpoint) {
+    if (!requestedKey) {
       layoutData.value = null
       return null
     }
 
     if (layoutPersistence.value === 'session') {
-      layoutData.value = readStoredLayout(requestedEndpoint)
+      layoutData.value = readStoredLayout(requestedKey)
       return layoutData.value
     }
 
@@ -641,14 +822,14 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     layoutData.value = layout
     isLayoutDirty.value = true
     const sequence = ++layoutSaveSequence
-    const requestedEndpoint = endpoint.value
+    const requestedKey = graphKey.value
 
     const saving = layoutSaveChain.then(async () => {
       if (sequence !== layoutSaveSequence) {
         return true
       }
 
-      return await persistLayout(layout, sequence, requestedEndpoint)
+      return await persistLayout(layout, sequence, requestedKey)
     })
     layoutSaveChain = saving.catch(() => undefined)
 
@@ -658,12 +839,12 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   async function persistLayout(
     layout: GraphLayout,
     sequence: number,
-    requestedEndpoint: string
+    requestedKey: string
   ): Promise<boolean> {
     const isCurrent = () =>
-      sequence === layoutSaveSequence && endpoint.value === requestedEndpoint
+      sequence === layoutSaveSequence && graphKey.value === requestedKey
 
-    if (!requestedEndpoint) {
+    if (!requestedKey) {
       return false
     }
 
@@ -672,7 +853,16 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
     try {
       if (layoutPersistence.value === 'session') {
-        writeStoredLayout(requestedEndpoint, layout)
+        if (!writeStoredLayout(requestedKey, layout)) {
+          // The tab still draws it, and Download still saves it; only a
+          // reload would lose it, which is what "saved" would have promised.
+          if (isCurrent()) {
+            layoutSaveError.value
+              = 'The layout could not be kept in this tab, whose storage is full or unavailable. Download it to keep it.'
+          }
+
+          return false
+        }
       } else {
         await inspectorFetch(layoutSaveUrl.value, {
           method: 'POST',
@@ -707,9 +897,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   /**
-   * Downloads a layout as the file the library would have written, for a
-   * graph whose layout cannot be saved to the application — commit it beside
-   * the application and it is picked up from there.
+   * Downloads a layout, for a graph whose layout cannot be saved to the
+   * application, as the JSON the library keeps one in. It downloads as
+   * `nest-graph-layout.json`; a running inspector reads its layout from the
+   * one file `.muse` in the application's root, so that is what the download
+   * is renamed to.
    */
   function downloadLayout(layout: GraphLayout) {
     if (!import.meta.client) {
@@ -820,6 +1012,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    * a load is in flight.
    */
   async function fetchGraph() {
+    // A graph file was read whole when it was opened; there is nothing to fetch.
+    if (fileSource.value) {
+      return Boolean(fileGraph.value)
+    }
+
     isLoading.value = true
 
     try {
@@ -852,10 +1049,15 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     hasLoadError,
     hasAccessToken,
     endpointUrl,
+    fileSource,
+    isFileSource,
+    expiredGraphFile,
+    graphRevision,
     informationUrl,
     jsonUrl,
     markdownUrl,
     directRunUrl,
+    directRunDisabledReason,
     graphData,
     graphMarkdown,
     graphIsStatic,
@@ -876,6 +1078,9 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     setSession,
     releaseEndpoint,
     restoreSession,
+    restoreGraphSource,
+    openGraphFile,
+    closeGraphFile,
     toggleDependencyTrace,
     validateEndpoint,
     acknowledgeEndpointVersion,

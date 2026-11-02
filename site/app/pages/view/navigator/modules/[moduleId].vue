@@ -11,6 +11,7 @@ const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
   directRunUrl,
+  directRunDisabledReason,
   requestHeaders,
   graphData,
   graphIsStatic,
@@ -50,8 +51,12 @@ const moduleExists = computed(() =>
   )
 )
 
+// The title names no module: it is the one part of a viewer page outside the
+// `ph-no-capture` the layout puts on the body, so a session replay would carry
+// it, and the module is the visitor's graph.
 useSeoMeta({
-  title: () => `${moduleName.value ?? 'Unknown module'} - Module Deep Dive - Nest Graph Inspector`,
+  title: 'Module Deep Dive',
+  ogTitle: 'Module Deep Dive - Nest Graph Inspector',
   description: 'One NestJS module, its providers, controllers, and dependencies.'
 })
 
@@ -100,6 +105,7 @@ function handleTraceOpen() {
       :direct-run-url="directRunUrl"
       :direct-run-headers="requestHeaders"
       :direct-run-disabled="graphIsStatic"
+      :direct-run-disabled-reason="directRunDisabledReason"
       :direct-run-on="directRunOn"
       @direct-run-drawer-open="handleDirectRunDrawerOpen"
       @direct-run-drawer-close="handleDirectRunDrawerClose"

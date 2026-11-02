@@ -43,7 +43,9 @@ Per-package work:
 pnpm --filter nest-graph-inspector run test
 pnpm --filter nest-graph-inspector run test:cov
 pnpm --filter nest-graph-inspector-demo run dev
-pnpm --filter nest-graph-inspector-demo run build:nodepod   # rebuild the demo the site runs in the browser
+pnpm --filter nest-graph-inspector-demo run build:nodepod   # rebuild the demo the site runs in the browser, and its graph.json
+pnpm --filter nest-graph-inspector-demo run build:graph     # export the demo's graph without running it (nest-graph-inspector export)
+pnpm --filter nest-graph-inspector-demo run test:e2e        # demo e2e suites: security, REST, and export vs. live /output.json
 pnpm --filter nest-graph-inspector-site run test:demo-payload  # boot that payload and check it answers
 pnpm --filter nest-graph-inspector-site run dev
 ```
