@@ -37,22 +37,26 @@ for (const endpointUrl of [
   )
 }
 
-// So is one on another origin whose path happens to hold the runtime's segment:
-// the demo is only ever served from this site's own origin, so whatever the
-// demo in this tab is doing, the page loads that application as it is — it is
-// never let go, stopped, or swapped for the demo.
+// So is one whose path happens to hold the runtime's segment anywhere but
+// directly under this site's base URL — on another origin, or under another
+// path of this one. The demo is only ever served there, so whatever the demo in
+// this tab is doing, the page loads that application as it is: it is never let
+// go, stopped, or swapped for the demo.
 const OWN_ENDPOINT_UNDER_SEGMENT = `https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
-for (const demo of [
-  { isDemoRunning: false, isDemoStarting: false, endpointRefusedToken: false },
-  { isDemoRunning: true, isDemoStarting: false, endpointRefusedToken: false },
-  { isDemoRunning: true, isDemoStarting: false, endpointRefusedToken: true },
-  { isDemoRunning: false, isDemoStarting: true, endpointRefusedToken: false }
-]) {
-  assert.equal(
-    resolveDemoSessionAction({ ...demo, endpointUrl: OWN_ENDPOINT_UNDER_SEGMENT, siteBaseUrl: `${SITE_BASE}/` }),
-    'pass-through',
-    JSON.stringify(demo)
-  )
+const OTHER_PATH_ENDPOINT = `${SITE_ORIGIN}/other-repo/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
+for (const endpointUrl of [OWN_ENDPOINT_UNDER_SEGMENT, OTHER_PATH_ENDPOINT]) {
+  for (const demo of [
+    { isDemoRunning: false, isDemoStarting: false, endpointRefusedToken: false },
+    { isDemoRunning: true, isDemoStarting: false, endpointRefusedToken: false },
+    { isDemoRunning: true, isDemoStarting: false, endpointRefusedToken: true },
+    { isDemoRunning: false, isDemoStarting: true, endpointRefusedToken: false }
+  ]) {
+    assert.equal(
+      resolveDemoSessionAction({ ...demo, endpointUrl, siteBaseUrl: `${SITE_BASE}/` }),
+      'pass-through',
+      `${endpointUrl}, ${JSON.stringify(demo)}`
+    )
+  }
 }
 
 // The demo's address survives a reload; the pod that answered it does not, and

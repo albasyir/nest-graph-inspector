@@ -8,6 +8,8 @@ const DEMO_ENDPOINT = `${SITE_ORIGIN}/nest-graph-inspector/${NODEPOD_ROUTE_SEGME
 const OWN_ENDPOINT = 'http://localhost:53371/__graph-inspector'
 /** Somebody's own application, served under a path that holds the runtime's segment. */
 const OWN_ENDPOINT_UNDER_SEGMENT = `https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
+/** Another site on this origin, with the runtime's segment under its own path. */
+const OTHER_PATH_ENDPOINT = `${SITE_ORIGIN}/other-repo/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 
 const VIEWER_PAGES = [
   '/view/navigator',
@@ -118,6 +120,32 @@ describe('a viewer page arrived at once the visitor has started the demo', () =>
       resolveViewerPageArrival({ ...arriving, fromPath: '/view/navigator', ...RUNNING }),
       'no-graph'
     )
+  })
+})
+
+describe('an endpoint on this site\'s origin, outside the demo\'s address', () => {
+  // Not the demo — the runtime's segment is under another path — so never
+  // taken over; and served from this site's own origin, so no token is asked.
+  test('opens as somebody\'s own application, without a token', () => {
+    for (const demo of [RUNNING, STARTING, { isDemoRunning: false, isDemoStarting: false }]) {
+      assert.equal(
+        resolveViewerPageArrival({ ...arriving, endpointUrl: OTHER_PATH_ENDPOINT, hasAccessToken: false, ...demo }),
+        'open',
+        JSON.stringify(demo)
+      )
+    }
+  })
+
+  // With no base URL to go by, nothing is known to be the site's own, the
+  // demo's address included: it needs the token the printed link hands over.
+  test('needs a token when there is no site base URL to tell it by', () => {
+    for (const endpointUrl of [DEMO_ENDPOINT, OTHER_PATH_ENDPOINT]) {
+      assert.equal(
+        resolveViewerPageArrival({ ...arriving, endpointUrl, hasAccessToken: false, siteBaseUrl: '' }),
+        'no-credential',
+        endpointUrl
+      )
+    }
   })
 })
 

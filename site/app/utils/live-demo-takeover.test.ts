@@ -16,6 +16,8 @@ const DEMO_ENDPOINT = `${SITE_BASE}/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspe
 const OWN_ENDPOINT = 'http://localhost:53371/__graph-inspector'
 /** Somebody's own application, served under a path that holds the runtime's segment. */
 const OWN_ENDPOINT_UNDER_SEGMENT = `https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
+/** Another site on this origin, with the runtime's segment under its own path. */
+const OTHER_PATH_ENDPOINT = `${SITE_ORIGIN}/other-repo/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`
 
 const SOURCES: TabGraphSource[] = ['none', 'example', 'file', 'demo', 'application']
 
@@ -49,10 +51,12 @@ describe('which graph a tab is on', () => {
     assert.equal(resolveTabGraphSource({ endpointUrl: 'https://staging.example.com/__graph-inspector', siteBaseUrl }), 'application')
   })
 
-  // The demo is only ever served from this site's own origin. The runtime's
-  // segment in somebody else's path is a coincidence, not the demo.
-  test('the runtime\'s segment on another origin is somebody\'s own application', () => {
+  // The demo is only ever served directly under this site's base URL. The
+  // runtime's segment anywhere else — on another origin, or under another path
+  // of this one — is a coincidence, not the demo.
+  test('the runtime\'s segment outside the site\'s base URL is somebody\'s own application', () => {
     assert.equal(resolveTabGraphSource({ endpointUrl: OWN_ENDPOINT_UNDER_SEGMENT, siteBaseUrl }), 'application')
+    assert.equal(resolveTabGraphSource({ endpointUrl: OTHER_PATH_ENDPOINT, siteBaseUrl }), 'application')
     assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT, siteBaseUrl: 'https://other.example/nest-graph-inspector/' }), 'application')
     assert.equal(resolveTabGraphSource({ endpointUrl: DEMO_ENDPOINT, siteBaseUrl: '' }), 'application')
   })
