@@ -26,7 +26,9 @@ import { BUILTIN_PROTOTYPES } from "../direct-run.constants";
 
 /**
  * The name JavaScript infers for a factory written in place in a provider,
- * `{ provide, useFactory: () => … }`: the key it was written under.
+ * `{ provide, useFactory: () => … }`: the key it was written under. Any
+ * factory with this name — a declared `function useFactory()` too — counts as
+ * unnamed.
  */
 const INFERRED_FACTORY_NAME = "useFactory";
 
@@ -925,7 +927,8 @@ export class DiscoveryAdapter {
    * factory passed as an argument — what `registerAs()` registers — has
    * none. One written in place, `useFactory: () => …`, has only the name
    * JavaScript gives it from that key, which every such factory shares, so
-   * two in one module would be one node. A `useExisting` alias is Nest's own
+   * two in one module would be one node; a function declared under that name
+   * is taken the same way. A `useExisting` alias is Nest's own
    * `instance => instance`, called `metatype` in every application. Each of
    * these goes by its injection token instead.
    */

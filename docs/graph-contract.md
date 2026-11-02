@@ -105,7 +105,7 @@ factory returned:
 | Registered as | `name` |
 |---|---|
 | A class: `UserService`, or `{ provide, useClass }` | The class name |
-| `{ provide, useFactory }` | The factory function's own name — `useFactory: createPool` is `createPool` — or else the token. A function written in place, as in `useFactory: () => …`, counts as having none: the only name it has is `useFactory`, which JavaScript gives it from the key it was written under and which every such factory shares. Nor does one passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it |
+| `{ provide, useFactory }` | The factory function's own name — `useFactory: createPool` is `createPool` — or else the token. Any function named `useFactory` goes by the token: one written in place, `useFactory: () => …`, gets that name from JavaScript, after the key it is written under, so every such factory has it, and a declared `function useFactory()` is treated the same way. A function passed in from elsewhere, as `@nestjs/config`'s `registerAs()` passes it, has no name and goes by the token as well |
 | `{ provide, useExisting }` | The token. Nest implements every alias with the same function of its own, so the function names none of them |
 | `{ provide, useValue }` | The value's class name — `Object` for a plain object — or the token for a primitive value |
 
