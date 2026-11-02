@@ -124,13 +124,18 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
 
   const endpointUrl = computed(() => endpoint.value)
   const isFileSource = computed(() => Boolean(fileSource.value))
+  /**
+   * What the open graph file's layout is kept under — see `graphFileKey` —
+   * worked out from the graph's text when the file opens or comes back.
+   */
+  const fileLayoutKey = ref('')
 
   /**
    * What the graph's layout is kept under: its endpoint, or for a file, its
-   * kind and name. Empty while the viewer is on no graph.
+   * kind, name and content. Empty while the viewer is on no graph.
    */
   const graphKey = computed(() =>
-    fileSource.value ? graphFileKey(fileSource.value) : endpoint.value
+    fileSource.value ? fileLayoutKey.value : endpoint.value
   )
 
   const informationUrl = computed(() =>
@@ -504,6 +509,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       graphRevision.value += 1
       fileSource.value = null
       fileGraph.value = null
+      fileLayoutKey.value = ''
       clearGraph()
       brightLineChoice.value = null
     }
@@ -532,10 +538,13 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     expiredGraphFile.value = null
     fileSource.value = source
     fileGraph.value = graph
+    // The text the tab keeps the graph as for a reload, so the key worked out
+    // again then is this one.
+    fileLayoutKey.value = graphFileKey(source, JSON.stringify(graph))
     // A Bright Line choice is kept for the tab by endpoint; a file's lives in
     // memory, for as long as the file is open.
     brightLineChoice.value = null
-    layoutData.value = readStoredLayout(graphFileKey(source))
+    layoutData.value = readStoredLayout(fileLayoutKey.value)
 
     return writeGraphFileSession(source, graph)
   }
@@ -580,8 +589,9 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     clearGraph()
     fileSource.value = source
     fileGraph.value = result.graph
+    fileLayoutKey.value = graphFileKey(source, session.graphText)
     brightLineChoice.value = null
-    layoutData.value = readStoredLayout(graphFileKey(source))
+    layoutData.value = readStoredLayout(fileLayoutKey.value)
 
     return true
   }

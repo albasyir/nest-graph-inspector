@@ -127,9 +127,30 @@ export function clearGraphFileSession(
   }
 }
 
-/** The key a graph file's layout is kept under. */
-export function graphFileKey(source: GraphFileSource): string {
-  return `${source.kind}:${source.name}`
+/**
+ * The key a graph file's layout is kept under: its kind and name, and a
+ * fingerprint of the graph itself. Another `graph.json` opened in the same tab
+ * does not inherit this one's arrangement, and this one, read back from the
+ * tab after a reload, finds its own again. `graphText` is the graph as compact
+ * JSON — the text the tab keeps it as, so a reload hands back the same text.
+ */
+export function graphFileKey(source: GraphFileSource, graphText: string): string {
+  return `${source.kind}:${source.name}:${fingerprint(graphText)}`
+}
+
+/**
+ * A cheap fingerprint of a text: its length and its 32-bit FNV-1a hash. It
+ * only tells one graph from another under the same name; it guards nothing.
+ */
+function fingerprint(text: string): string {
+  let hash = 0x811c9dc5
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+
+  return `${text.length.toString(36)}-${(hash >>> 0).toString(36)}`
 }
 
 /**

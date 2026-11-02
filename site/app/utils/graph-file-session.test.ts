@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
-import type { GraphOutput } from 'nest-graph-inspector'
+import type { GraphLayout, GraphOutput } from 'nest-graph-inspector'
+import { readStoredLayout, writeStoredLayout } from './graph-layout-persistence.ts'
 import {
   MAX_STORED_GRAPH_CHARS,
   clearGraphFileSession,
@@ -136,13 +137,62 @@ describe('a graph file kept for the tab', () => {
 })
 
 describe('what a graph file is kept under', () => {
+  const text = JSON.stringify(graph)
+
   test('tells a file from the example, and one file from another', () => {
-    assert.equal(graphFileKey({ name: 'graph.json', kind: 'example' }), 'example:graph.json')
-    assert.equal(graphFileKey({ name: 'graph.json', kind: 'file' }), 'file:graph.json')
+    assert.match(graphFileKey({ name: 'graph.json', kind: 'example' }, text), /^example:graph\.json:/)
+    assert.match(graphFileKey({ name: 'graph.json', kind: 'file' }, text), /^file:graph\.json:/)
     assert.notEqual(
-      graphFileKey({ name: 'a.json', kind: 'file' }),
-      graphFileKey({ name: 'b.json', kind: 'file' })
+      graphFileKey({ name: 'a.json', kind: 'file' }, text),
+      graphFileKey({ name: 'b.json', kind: 'file' }, text)
     )
+  })
+
+  test('tells two graphs under one name apart', () => {
+    const other = JSON.stringify({ ...graph, root: 'OtherModule' })
+
+    assert.notEqual(
+      graphFileKey({ name: 'graph.json', kind: 'file' }, text),
+      graphFileKey({ name: 'graph.json', kind: 'file' }, other)
+    )
+  })
+})
+
+// The layout a graph file was arranged into belongs to that graph: another
+// file with the same name, opened later in the tab, starts from its own
+// layout, while the same graph, back after a reload, gets its arrangement back.
+describe('a graph file\'s layout', () => {
+  const LAYOUT_PREFIX = 'nest-graph-inspector:layout:'
+  const layout: GraphLayout = { version: '1', modules: { AppModule: { position: { x: 120, y: 40 } } } }
+  const source = { name: 'graph.json', kind: 'file' as const }
+
+  test('is not handed to a different graph with the same name', () => {
+    const { storage: layouts } = memoryStorage()
+    writeStoredLayout(graphFileKey(source, JSON.stringify(graph)), layout, layouts)
+
+    const other = { ...graph, root: 'BillingModule' } as unknown as GraphOutput
+    const otherKey = graphFileKey(source, JSON.stringify(other))
+
+    assert.equal(readStoredLayout(otherKey, layouts), null)
+  })
+
+  test('comes back with the same graph after a reload', () => {
+    const { storage: layouts, items } = memoryStorage()
+    const { storage: session } = memoryStorage()
+    const openedKey = graphFileKey(source, JSON.stringify(graph))
+    writeStoredLayout(openedKey, layout, layouts)
+    writeGraphFileSession(source, graph, session)
+
+    // A reload: the graph comes back from the tab as the text it was kept as.
+    const restored = readGraphFileSession(session)
+    assert.ok(restored?.graphText)
+    const restoredKey = graphFileKey(restored.source, restored.graphText)
+
+    assert.equal(restoredKey, openedKey)
+    // Read from the tab's storage itself: a reload starts with nothing in
+    // memory, so that is where the layout has to be found.
+    assert.deepEqual(JSON.parse(items.get(LAYOUT_PREFIX + restoredKey) ?? 'null'), layout)
+    assert.deepEqual(readStoredLayout(restoredKey, layouts), layout)
   })
 })
 
