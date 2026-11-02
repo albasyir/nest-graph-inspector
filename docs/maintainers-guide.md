@@ -709,7 +709,7 @@ that cannot reach into a Pinia setup store.
 | `live-demo-takeover.test.ts` | Assert-based test for `live-demo-takeover.ts`, and for `/view`'s side of the same rule in `viewer-landing.ts`, through the navigations that used to drop the demo |
 | `viewer-page-arrival.ts` | What the bootstrap middleware does for a viewer page once the tab's graph is restored (`resolveViewerPageArrival`): adopt the running demo, wait for it on `/view`, open the tab's own graph, or send the visitor to `/view` for want of a graph or a credential |
 | `viewer-page-arrival.test.ts` | Assert-based test for `viewer-page-arrival.ts`: R1–R3, Back to the static graph, a demo starting, the visitor's own file and application kept, and every case before "Load Example" |
-| `ai-chat-mode.ts` | How the AI chat answers: the reader's choice or the graph's size on an endpoint, the agent alone on a graph file, with the reason the toggle shows |
+| `ai-chat-mode.ts` | How the AI chat answers: the reader's choice or the graph's size on an endpoint, the agent alone on a graph file, with the reason the toggle shows; and what it fetches as it opens and before an answer — nothing for a graph file (`resolveAiChatFetch`) |
 | `ai-chat-mode.test.ts` | Assert-based test for `ai-chat-mode.ts` |
 | `analytics-privacy.ts` | PostHog's `before_send`: every viewer route in every event reduced to its shape, wherever PostHog put it |
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
