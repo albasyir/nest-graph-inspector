@@ -194,11 +194,12 @@ describe('a viewer page arrived at while the demo runs', () => {
   })
 
   // R3: whatever credential the session kept, the running pod's is the one its
-  // endpoint accepts.
-  test('R3: puts a demo session on the demo running', () => {
+  // endpoint accepts — and the page's own session check is what puts it there
+  // (`resolveDemoSessionAction`'s `reuse`), keeping how the demo is drawn.
+  test('R3: leaves a demo session to the page, which puts it on the demo running', () => {
     assert.equal(
       resolveViewerPageTakeover({ source: 'demo', ...RUNNING, isSamePage: false }),
-      'adopt'
+      'keep'
     )
   })
 

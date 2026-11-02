@@ -71,13 +71,15 @@ export type ViewerPageTakeover = 'adopt' | 'join' | 'keep'
  * demo as the visitor arrives at it, where {@link liveDemoTakesOver} says the
  * demo takes the tab over. It never boots the demo: only "Load Example" does.
  *
- * A running demo is adopted on the spot, and the page loads it like any other
- * endpoint. One still starting has no endpoint to adopt yet, so a tab with no
- * graph, or on the static graph, waits for it on `/view`, which shows how far
- * the start has got and opens the viewer once it is up. A demo session waits
- * on the page itself instead: the page's own session check already waits for
- * a start in flight (`resolveDemoSessionAction`'s `join`), and keeps the
- * visitor on the page they asked for.
+ * A running demo is adopted on the spot in place of no graph or the static
+ * graph, and the page loads it like any other endpoint. One still starting has
+ * no endpoint to adopt yet, so such a tab waits for it on `/view`, which shows
+ * how far the start has got and opens the viewer once it is up. A demo session
+ * is the page's own to settle, running or starting: its session check
+ * (`resolveDemoSessionAction`) puts it on the running pod's credential, or
+ * waits for a start in flight, on the page the visitor asked for. Adopting it
+ * here as well would present the demo afresh on every move between pages,
+ * undoing whatever the visitor changed about how it is drawn.
  *
  * A navigation that only changes the query or hash of the page on screen keeps
  * whatever that page shows: the page loaded its graph as it mounted, and would
@@ -92,13 +94,13 @@ export function resolveViewerPageTakeover(input: {
 }): ViewerPageTakeover {
   const isDemoActive = input.isDemoRunning || input.isDemoStarting
 
-  if (input.isSamePage || !liveDemoTakesOver({ source: input.source, isDemoActive })) {
+  if (
+    input.isSamePage
+    || input.source === 'demo'
+    || !liveDemoTakesOver({ source: input.source, isDemoActive })
+  ) {
     return 'keep'
   }
 
-  if (input.isDemoRunning) {
-    return 'adopt'
-  }
-
-  return input.source === 'demo' ? 'keep' : 'join'
+  return input.isDemoRunning ? 'adopt' : 'join'
 }
