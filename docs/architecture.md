@@ -667,7 +667,12 @@ its factory function or its token, and matched to dependencies by its token,
 never by the class of what it returned (see
 [provider names](./graph-contract.md#provider-names)) — so
 `cli/export-graph.spec.ts` pins that one difference down against a live
-`/output.json` and finds everything else byte-identical. Modules and providers
+`/output.json` and finds everything else byte-identical. That includes global
+enhancers: Nest rewrites an `APP_GUARD`, `APP_INTERCEPTOR`, `APP_PIPE` or
+`APP_FILTER` token to `APP_GUARD (UUID: …)`, random on every start and a hash
+under the export's `snapshot: true`, and the graph names it without the UUID,
+so it is the same on every start and in an export; several for one token in a
+module share the name. Modules and providers
 added once the application runs — through `LazyModuleLoader`, for instance —
 exist only in a running application.
 

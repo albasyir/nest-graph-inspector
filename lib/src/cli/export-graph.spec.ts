@@ -8,7 +8,13 @@ import {
   Module,
   Type,
 } from "@nestjs/common";
-import { ModulesContainer, NestApplication, NestFactory } from "@nestjs/core";
+import {
+  APP_GUARD,
+  APP_INTERCEPTOR,
+  ModulesContainer,
+  NestApplication,
+  NestFactory,
+} from "@nestjs/core";
 import {
   DEFAULT_IGNORE_PATHS,
   NestGraphInspectorModule,
@@ -364,6 +370,46 @@ describe("exportGraph", () => {
       ["FixtureConsumer", ["FixtureRealService", "FIXTURE_CLIENT"]],
       ["FIXTURE_CLIENT", []],
     ]);
+  });
+
+  it("names a global enhancer by its token, the same on every start and in an export", async () => {
+    @Injectable()
+    class FixtureGuard {
+      canActivate(): boolean {
+        return true;
+      }
+    }
+    const port = await freePort();
+    @Module({
+      imports: [inspectorOn(port)],
+      providers: [
+        FixtureGuard,
+        // Nest rewrites these tokens to `APP_GUARD (UUID: …)` and
+        // `APP_INTERCEPTOR (UUID: …)` as it scans them: random on every
+        // start, and a hash under snapshot: true, which the export boots with.
+        { provide: APP_GUARD, useExisting: FixtureGuard },
+        {
+          provide: APP_INTERCEPTOR,
+          useFactory: () => ({
+            intercept: (_context: unknown, next: { handle(): unknown }) =>
+              next.handle(),
+          }),
+        },
+      ],
+    })
+    class FixtureEnhancedModule {}
+
+    const served = await readServedGraph(FixtureEnhancedModule, port);
+    const servedAgain = await readServedGraph(FixtureEnhancedModule, port);
+    const { graph } = await exportWith(FixtureEnhancedModule);
+
+    expect(servedAgain).toBe(served);
+    expect(JSON.stringify(graph)).toBe(served);
+    expect(
+      graph.modules.FixtureEnhancedModule.providers
+        .slice(2) // ModuleRef, ApplicationConfig
+        .map((provider) => provider.name),
+    ).toEqual(["FixtureGuard", "APP_GUARD", "APP_INTERCEPTOR"]);
   });
 
   it("is byte-identical to /output.json when no provider's metadata comes from an instance", async () => {

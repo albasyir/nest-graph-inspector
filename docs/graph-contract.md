@@ -112,7 +112,15 @@ factory returned:
 A token's name is the string itself, a class token's its class name, and a
 symbol token's `Symbol(description)`. Two providers in one module whose tokens
 print alike — two symbols with one description — share a name, and the graph
-does not tell them apart. A factory provider is also matched to the tokens
+does not tell them apart. A global enhancer — a provider for `APP_GUARD`,
+`APP_INTERCEPTOR`, `APP_PIPE` or `APP_FILTER` — has its token rewritten by
+Nest as it scans it, to `APP_GUARD (UUID: …)`, with a UUID that is random on
+every start and a hash under `snapshot: true`; its name leaves the UUID out, so
+an alias or a factory written in place for `APP_GUARD` is named `APP_GUARD`,
+the same on every start and in an export. Several of them for one token in a
+module share that name, as tokens that print alike do. One registered with
+`useClass` or `useValue` is named by its class, as any class or value
+provider is. A factory provider is also matched to the tokens
 that depend on it by its token alone. Neither rule reads an instance, so
 a running inspector's graph and an exported one name every provider the same
 way. Until this was fixed, a running inspector named an unnamed factory after

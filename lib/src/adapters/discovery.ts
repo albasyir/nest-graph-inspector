@@ -25,6 +25,15 @@ import { SourceMetadataService } from "../source-metadata.service";
 import { BUILTIN_PROTOTYPES } from "../direct-run.constants";
 
 /**
+ * The token Nest gives a global enhancer — a provider for `APP_GUARD`,
+ * `APP_INTERCEPTOR`, `APP_PIPE` or `APP_FILTER` — when it scans it:
+ * `APP_GUARD (UUID: …)`, the UUID random on every start and a hash under
+ * `snapshot: true`. The first group is the token the application wrote.
+ */
+const NEST_ENHANCER_TOKEN =
+  /^(APP_GUARD|APP_INTERCEPTOR|APP_PIPE|APP_FILTER) \(UUID: [^)]*\)$/;
+
+/**
  * The name JavaScript infers for a factory written in place in a provider,
  * `{ provide, useFactory: () => … }`: the key it was written under. Any
  * factory with this name — a declared `function useFactory()` too — counts as
@@ -1186,9 +1195,16 @@ export class DiscoveryAdapter {
     );
   }
 
+  /**
+   * The name a token has in the graph. A global enhancer's goes without the
+   * UUID Nest gives it, so its name is the same on every start, and in an
+   * export as in a running inspector.
+   */
   private tokenName(token: InjectionToken | null | undefined): string | null {
     if (!token) return null;
-    if (typeof token === "string") return token;
+    if (typeof token === "string") {
+      return NEST_ENHANCER_TOKEN.exec(token)?.[1] ?? token;
+    }
     if (typeof token === "symbol") return token.toString();
     if (typeof token === "function") return token.name;
     return null;

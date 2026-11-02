@@ -143,6 +143,53 @@ describe(DiscoveryAdapter.name, () => {
     ]);
   });
 
+  it("names a global enhancer by its token, without the UUID Nest gives it", () => {
+    class AuthGuard {}
+    const authGuard = new AuthGuard();
+    const { metatype: aliasFactory } = {
+      metatype: (instance: unknown) => instance,
+    };
+    const { useFactory: inlineFactory } = { useFactory: () => ({}) };
+
+    const tree = scanIgnoring(
+      undefined,
+      moduleFixture(TestRootModule, {
+        providers: [
+          classWrapper(AuthGuard, authGuard),
+          // A random UUID on a normal start; under snapshot: true, a hash,
+          // which can be negative.
+          {
+            token: "APP_GUARD (UUID: 2f9c1d6a0b8e4f7a91c3d)",
+            metatype: aliasFactory,
+            inject: [AuthGuard],
+            instance: authGuard,
+            isAlias: true,
+          },
+          {
+            token: "APP_INTERCEPTOR (UUID: -1468213475)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+          // The same words in a token Nest did not write are the token's own.
+          {
+            token: "MY_GUARD (UUID: 1)",
+            metatype: inlineFactory,
+            inject: [],
+            instance: {},
+          },
+        ],
+      }),
+    );
+
+    expect(tree.providers.map((provider) => provider.name)).toEqual([
+      "AuthGuard",
+      "APP_GUARD",
+      "APP_INTERCEPTOR",
+      "MY_GUARD (UUID: 1)",
+    ]);
+  });
+
   it("captures controller instances alongside provider instances", () => {
     class TestController {}
     const controllerInstance = new TestController();
