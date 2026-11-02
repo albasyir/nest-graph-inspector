@@ -56,6 +56,7 @@ type FetchLike = typeof globalThis.fetch
 
 export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const config = useRuntimeConfig()
+  const posthog = usePostHog()
 
   const status = ref<NodepodDemoStatus>('idle')
   const errorMessage = ref('')
@@ -635,6 +636,13 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     })
     accessToken.value = readAccessToken(printedEndpoint) ?? ''
     status.value = 'ready'
+
+    // The one place a demo comes up, whatever asked for it: a preview's "Load
+    // Example", `/view`'s, or the retry after a failure. Joining a demo that is
+    // already running or starting never gets here.
+    posthog?.capture('graph_demo_started', {
+      revision: demoManifest.revision
+    })
 
     return true
   }

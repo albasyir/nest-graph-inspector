@@ -32,12 +32,8 @@ const isRequestRunning = ref(false)
 const isNavigating = ref(false)
 const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
-/**
- * What the visitor asked this page for, retries included, or `null` before
- * they ask: to start the demo — "Load Example" — or to join the demo this
- * document is already running or starting. Only a start is reported as one.
- */
-const demoRequest = ref<'start' | 'join' | null>(null)
+/** Whether the visitor asked this page for the demo, retries included. */
+const wasDemoRequested = ref(false)
 /**
  * The tab's demo is running, or on its way up: what `?preview=true` joins, and
  * what a tab on no graph of the visitor's own choosing joins too.
@@ -102,15 +98,6 @@ async function openDemo() {
   activePollId += 1
   clearPolling()
 
-  // Joining the demo this document is running is not starting it: only the
-  // visitor's "Load Example" here, or the retry that boots it again after it
-  // failed, is.
-  if (demoRequest.value === 'start') {
-    posthog?.capture('graph_demo_started', {
-      revision: demoStore.manifest?.revision
-    })
-  }
-
   // The demo is a graph like any other: put it in the session, then go to a
   // plain viewer page. The middleware puts the demo in place the same way when
   // a viewer page is reached without coming through here.
@@ -132,7 +119,7 @@ async function openDemo() {
  * preview's, or one started here earlier — and never boots one.
  */
 async function requestDemo(how: 'start' | 'join') {
-  demoRequest.value = how
+  wasDemoRequested.value = true
   activePollId += 1
   clearPolling()
 
@@ -154,10 +141,6 @@ async function requestDemo(how: 'start' | 'join') {
     reason: demoStore.errorMessage
   })
 
-  // Whatever brings the demo up for this page from here boots it afresh: the
-  // error dialog's retry, or another "Load Example".
-  demoRequest.value = 'start'
-
   // A demo that would not come up is not a reason to stop looking for the
   // developer's own application, so the page goes back to watching for it.
   startPolling(activeOrigin.value)
@@ -172,7 +155,7 @@ async function requestDemo(how: 'start' | 'join') {
  */
 function cancelDemo() {
   activeDemoRequestId += 1
-  demoRequest.value = null
+  wasDemoRequested.value = false
   isAutoOpening.value = false
   demoStore.stop()
   graphStore.openModuleDetail = false
@@ -266,7 +249,7 @@ async function openExampleOnArrival() {
  */
 function prepareForGraphFile(): true {
   activeDemoRequestId += 1
-  demoRequest.value = null
+  wasDemoRequested.value = false
   activeExampleRequestId += 1
   activePollId += 1
   clearPolling()
@@ -497,7 +480,7 @@ onBeforeUnmount(() => {
 // flow it belongs to, so an application that comes up while this page is the
 // one that asked for it is the visitor still waiting to be taken to the viewer.
 watch(() => demoStore.status, (status) => {
-  if (status === 'ready' && demoRequest.value) {
+  if (status === 'ready' && wasDemoRequested.value) {
     void openDemo()
   }
 })
@@ -505,7 +488,7 @@ watch(() => demoStore.status, (status) => {
 // The viewer's Close Graph comes here first and closes the file after: once it
 // has, the landing card watches for a local inspector like any other.
 watch(() => graphStore.isFileSource, (isFileSource) => {
-  if (!isFileSource && !isAutoOpening.value && !demoRequest.value && !pollingTimer.value) {
+  if (!isFileSource && !isAutoOpening.value && !wasDemoRequested.value && !pollingTimer.value) {
     startPolling(activeOrigin.value)
   }
 })
@@ -547,7 +530,7 @@ watch(shouldShowUpdateModal, (visible) => {
             class="sr-only"
           >{{ openingAnnouncement }}</span>
           <UButton
-            v-if="demoStore.isBusy && demoRequest"
+            v-if="demoStore.isBusy && wasDemoRequested"
             label="Cancel"
             aria-label="Cancel starting the demo"
             size="sm"
