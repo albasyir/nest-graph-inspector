@@ -9,10 +9,11 @@ import {
 } from '~/utils/device-detection'
 import type { ViewerPage } from '~/utils/viewer-bootstrap-link'
 import {
-  AI_CHAT_GRAPH_FILE_REASON,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
+  resolveViewerGraphControls,
   resolveViewerHeaderPage,
+  type ViewerFileMenuAction,
   type ViewerGraphStatusTone
 } from '~/utils/viewer-header'
 
@@ -84,23 +85,14 @@ const aiChatAvailability = computed(() => resolveAiChatAvailability({
   isRestricted: isMobile.value
 }))
 
-/** What the disabled AI Chat button says when it is asked why. */
-const aiChatNotice = computed(() =>
-  aiChatAvailability.value === 'graph-file'
-    ? {
-        label: AI_CHAT_GRAPH_FILE_REASON,
-        title: 'Not available for a graph file',
-        message: AI_CHAT_GRAPH_FILE_REASON
-      }
-    : {
-        label: MOBILE_DISCLAIMER_MESSAGE,
-        title: MOBILE_DRAWER_BANNER_TITLE,
-        message: MOBILE_DRAWER_BANNER_MESSAGE
-      }
-)
-
 /** The viewer is on a graph: an endpoint's, or a graph file's. */
 const hasGraphSource = computed(() => Boolean(endpointUrl.value) || isFileSource.value)
+
+/** The File menu and the reload, for the graph the tab is on. */
+const graphControls = computed(() => resolveViewerGraphControls({
+  hasGraphEndpoint: Boolean(endpointUrl.value),
+  isGraphFile: isFileSource.value
+}))
 
 // The header stays put while the pages under it change, and both popovers
 // hang off controls that can go away: the status one is the compact header's
@@ -127,10 +119,19 @@ function handleRefresh(event?: Event) {
 
 const graphFileInput = useTemplateRef<HTMLInputElement>('graphFileInput')
 
+/** Asks for a graph file with the system file picker. */
+function chooseGraphFile() {
+  fileOpener.clearError()
+  graphFileInput.value?.click()
+}
+
 /**
- * Opens another graph file in place of this one. One that cannot be opened
- * leaves this one where it is, and the visitor on `/view`, where the drop zone
- * says why.
+ * Opens a graph file in place of the graph on screen: another file, the demo
+ * running in this tab — which keeps running for the landing page's previews —
+ * or somebody's own application. A file that cannot be opened leaves the graph
+ * where it is, and the visitor on `/view`, where the drop zone says why;
+ * `autoload=false` keeps `/view` from sending them straight back to the graph
+ * they were leaving, the running demo included.
  */
 async function handleGraphFileChosen(event: Event) {
   const input = event.target as HTMLInputElement
@@ -155,27 +156,30 @@ async function handleCloseGraphFile() {
   graphStore.closeGraphFile()
 }
 
-const graphFileMenuItems = computed(() => [
-  [
-    {
-      label: 'Open Another…',
-      icon: 'i-lucide-folder-open',
-      // A second pick while the first is still being read could finish first
-      // and then be replaced by the older one.
-      disabled: fileOpener.isReading.value,
-      onSelect: () => {
-        fileOpener.clearError()
-        graphFileInput.value?.click()
-      }
-    },
-    {
+/** One File menu item: opening a graph file is the same picker everywhere. */
+function fileMenuItem(action: ViewerFileMenuAction): DropdownMenuItem {
+  if (action === 'close-graph') {
+    return {
       label: 'Close Graph',
       icon: 'i-lucide-x',
       onSelect: () => {
         void handleCloseGraphFile()
       }
     }
-  ]
+  }
+
+  return {
+    label: action === 'open-another' ? 'Open Another…' : 'Open Graph File…',
+    icon: 'i-lucide-folder-open',
+    // A second pick while the first is still being read could finish first
+    // and then be replaced by the older one.
+    disabled: fileOpener.isReading.value,
+    onSelect: chooseGraphFile
+  }
+}
+
+const graphFileMenuItems = computed(() => [
+  graphControls.value.fileMenu.map(fileMenuItem)
 ] satisfies DropdownMenuItem[][])
 
 function handleAskAi(event?: Event) {
@@ -442,11 +446,15 @@ const viewerMenuItems = computed(() => [
             <div class="flex min-w-0 items-center justify-end gap-1">
               <UColorModeButton class="max-lg:size-10 max-lg:justify-center" />
 
-              <!-- A graph file was read whole, so there is nothing to reload:
-                   its place holds what can be done with a file instead. -->
+              <!-- Every graph has the File menu, so a graph file of the
+                   visitor's own can take the place of whatever is on screen,
+                   the demo running in this tab included. An endpoint keeps its
+                   reload beside it; a graph file was read whole, so it has
+                   nothing to reload and its menu closes it instead. Both stay
+                   in place, out of use, while the demo starts again. -->
               <UDropdownMenu
-                v-if="isFileSource"
                 :items="graphFileMenuItems"
+                :disabled="!graphControls.canUseFileMenu"
                 :content="{ align: 'end' }"
                 :ui="{ content: 'z-[100]' }"
               >
@@ -460,7 +468,7 @@ const viewerMenuItems = computed(() => [
                 />
               </UDropdownMenu>
               <UTooltip
-                v-else
+                v-if="graphControls.showReload"
                 text="Reload graph"
               >
                 <UButton
@@ -480,14 +488,14 @@ const viewerMenuItems = computed(() => [
                    than a breakpoint: `sm` is in rem and moves with the browser's
                    font size while the restriction's 768px does not, and a tablet
                    is wider than `sm` and still cannot run the chat. Where it is
-                   restricted — or the graph is a file, which carries none of the
-                   Markdown the chat reads — the button stays disabled and never
-                   opens the chat, but it is `aria-disabled` rather than
-                   `disabled`: a disabled button can be neither focused nor
-                   tapped, so it could never say why, and a tooltip does not open
-                   on touch. -->
+                   restricted the button stays disabled and never opens the chat,
+                   but it is `aria-disabled` rather than `disabled`: a disabled
+                   button can be neither focused nor tapped, so it could never
+                   say why, and a tooltip does not open on touch. A graph file
+                   opens the chat like an endpoint: the chat looks things up in
+                   the file's graph, having no Markdown summary to answer from. -->
               <UButton
-                v-if="aiChatAvailability === 'available' || aiChatAvailability === 'no-graph'"
+                v-if="aiChatAvailability !== 'restricted'"
                 icon="i-lucide-bot"
                 label="AI Chat"
                 color="neutral"
@@ -508,7 +516,7 @@ const viewerMenuItems = computed(() => [
                   color="neutral"
                   variant="ghost"
                   aria-disabled="true"
-                  :aria-label="`AI Chat — ${aiChatNotice.label}`"
+                  :aria-label="`AI Chat — ${MOBILE_DISCLAIMER_MESSAGE}`"
                   class="max-lg:h-10 max-md:w-10 max-md:justify-center"
                   :ui="{ label: 'max-md:sr-only' }"
                 />
@@ -523,10 +531,10 @@ const viewerMenuItems = computed(() => [
                       AI Chat
                     </p>
                     <p class="font-medium text-highlighted">
-                      {{ aiChatNotice.title }}
+                      {{ MOBILE_DRAWER_BANNER_TITLE }}
                     </p>
                     <p class="text-muted">
-                      {{ aiChatNotice.message }}
+                      {{ MOBILE_DRAWER_BANNER_MESSAGE }}
                     </p>
                   </div>
                 </template>

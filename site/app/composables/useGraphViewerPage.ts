@@ -10,10 +10,11 @@ import {
  *
  * The page's URL says which view to render, not which graph — the graph itself
  * comes from the store, put there by the printed link this tab was opened with,
- * or by a graph file opened at `/view`, and kept across reloads in the tab's
- * session. `middleware/graph-viewer-bootstrap.global.ts` guarantees both are in
- * place before a page is created, so by the time this runs there is an
- * endpoint to load, a graph file already read, or nothing to show at all.
+ * by a graph file opened at `/view`, or by the demo this document is running,
+ * and kept across reloads in the tab's session.
+ * `middleware/graph-viewer-bootstrap.global.ts` guarantees both are in place
+ * before a page is created, so by the time this runs there is an endpoint to
+ * load, a graph file already read, or nothing to show at all.
  */
 /**
  * Whether this tab has already loaded a viewer page.

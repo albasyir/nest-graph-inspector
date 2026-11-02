@@ -815,7 +815,11 @@ neither the tab's session nor the developer's local endpoint exists on a server
 **The graph file source.** The viewer has a second kind of graph besides an
 endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the
 `json` output, or a saved `/output.json`. The `/view` landing card opens one
-from **Open Graph File** or a drop anywhere on the page;
+from **Open Graph File** or a drop anywhere on the page, and the viewer
+header's File menu opens one in place of whatever graph is on screen (**Open
+Graph File…** on an endpoint, the in-browser demo's included; **Open
+Another…** on a file) — one that fails leaves that graph where it is and sends
+the visitor to `/view?autoload=false`, where the drop zone says why;
 `useGraphFileOpener` (`app/composables/`) reads it with `File.text()` and
 `app/utils/graph-file.ts` checks it — a 20 MB cap before reading, JSON syntax,
 every field the viewer reads down to each dependency, and the format version
@@ -829,17 +833,20 @@ Nothing is uploaded, nothing is fetched or probed on the file's behalf, and the
 demo is not booted. A file is static: Direct Run says why it cannot run (and
 offers no trace, which a file has none of), the trace page says the same, the
 layout is kept for the tab under the file's `kind:name` and can be downloaded,
-the header's reload gives way to a File menu (Open Another…, Close Graph), and
-the AI chat is off with its reason — it reads `/output.md`, which only the
-library writes, and the site will not rebuild the library's Markdown. The demo's
-static graph opens the same way, as the `example` kind, for `/view?preview=true`
-when no demo is running. For a reload the tab keeps the graph in
-`sessionStorage` (`nest-graph-inspector:graph-file`, `graph-file-session.ts`)
-when it is at most 1.5 million characters of compact JSON; a larger one keeps
-only its name, and a reload lands on `/view` asking for that file again. The
-bootstrap middleware and `useGraphViewerPage` restore a file through
-`restoreGraphSource` and pass it straight through — no token check, no demo
-session, no fetch.
+the header has no reload beside its File menu, which offers Close Graph as
+well, and the AI chat looks things up in the graph and nothing else — its
+excerpt mode reads `/output.md`, which only the library writes, and the site
+will not rebuild the library's Markdown, so on a file the panel's mode toggle
+stays on its lookup mode and says why (see the AI chat, below). The demo's static graph
+opens the same way, as the `example` kind, for `/view?preview=true` when no
+demo is running. For a reload the tab keeps the graph in `sessionStorage`
+(`nest-graph-inspector:graph-file`, `graph-file-session.ts`) when it is at most
+1.5 million characters of compact JSON; a larger one keeps only its name, and a
+reload lands on `/view` asking for that file again. The bootstrap middleware
+and `useGraphViewerPage` restore a file through `restoreGraphSource` and pass
+it straight through — no token check, no demo session, no fetch — except the
+demo's static graph once the visitor has started the demo in the tab, which the
+running demo takes the place of (see the in-browser demo, below).
 
 **Analytics never carry the graph.** The site's own events name a viewer route
 by its shape (`describeViewerRoute`) and a graph file only by its kind
@@ -966,7 +973,8 @@ generates the site runs it right after building the payload.
    path, rewritten onto the bridged address; the access token comes out of the
    URL and goes to the graph store, which sends it as a header from then on
 7. /view puts both in the tab's session and opens /view/navigator, which loads
-   the graph through the same HTTP contract as any other endpoint
+   the graph through the same HTTP contract as any other endpoint — as does
+   any viewer page the visitor reaches while it runs (see below)
 ```
 
 Nothing starts the demo on its own. The landing page (`/`) opens on the demo's
@@ -991,7 +999,9 @@ decision itself is `resolveDemoPreviewView` in
 `app/utils/demo-graph-preview.ts`), and the Direct Run preview runs methods
 against it; until then its drawer says Direct Run needs the example loaded. A
 demo already running in the tab — started from `/view` — is drawn live as soon
-as a preview mounts: reading its graph boots nothing.
+as a preview mounts: reading its graph boots nothing. The viewer keeps the same
+rule the other way round, below: once started, the demo is what `/view` and
+every viewer page show, whichever page started it.
 Measured on a local static build in Chromium before the landing page stopped
 starting it: pod boot and snapshot restore take ~1.0 s, the runtime is ready to
 spawn ~2.2 s after navigation, and the live graph arrives at ~11.6 s, most of
@@ -1003,24 +1013,69 @@ the dialog. `/view` never starts the demo on arrival: it opens on the landing
 card — Learn Why, Install It, Load Example, and the Open Graph File drop zone —
 and its local-inspector polling, and starts the demo when the visitor clicks
 "Load Example" — behind a loading card with a Cancel that stops the pod and
-falls back to the landing card. Three things move on without a click, decided
+falls back to the landing card. Four things move on without a click, decided
 by `resolveViewerLandingAction` (`app/utils/viewer-landing.ts`):
 `?preview=true` — a preview's "Open full-screen demo" link — joins the demo that
 preview is already running or starting in the tab and opens the viewer on it,
 and with no demo to join opens the static graph as a graph file (see "The graph
-file source", below) rather than booting one; a tab on a graph file goes back
-to `/view/navigator`; and a tab whose session names the visitor's own
+file source", above) rather than booting one; a demo this document is running
+or starting is joined whenever the tab is on no graph, on the demo's static
+graph, or on a demo session (`liveDemoTakesOver`,
+`app/utils/live-demo-takeover.ts`); a tab on a graph file goes back to
+`/view/navigator`; and a tab whose session names the visitor's own
 application, with a token the viewer would accept, goes straight back to
 `/view/navigator` (`/view/trace` with `?trace=true` or
-`?execution-sequence=true`). `?autoload=false` holds either session back — the
-viewer's "Try Another URL" and the file menu link there. A restored *demo*
-session is never redirected. `/view` always hands off with a history replace,
-so Back from the viewer does not return to a page that would only send the
-visitor forward again. One pod then serves every preview on the page and the
-viewer, so the payload is downloaded and the application booted once for as
-long as it keeps running. A failure opens one dialog, wherever it was started
-from, saying what went wrong in the store's own words — the application's
-output is never shown; the retry it offers boots another one.
+`?execution-sequence=true`). `?autoload=false` holds back all but the first —
+the viewer's "Try Another URL" and the file menu's Close Graph link there. A
+restored demo session with no demo behind it — a reload, a restored tab — is
+never redirected. `/view` always hands off with a history replace, so Back from
+the viewer does not return to a page that would only send the visitor forward
+again. One pod then serves every preview on the page and the viewer, so the
+payload is downloaded and the application booted once for as long as it keeps
+running. A failure opens one dialog, wherever it was started from, saying what
+went wrong in the store's own words — the application's output is never shown;
+the retry it offers boots another one.
+
+**Once started, the demo is never dropped by navigation.** "Load Example" on
+a preview starts the pod and nothing else: it leaves the tab's graph-viewer
+session where it was — on no graph, or on the static graph "Open full-screen
+demo" opened — so the viewer settles the matter as the visitor arrives, by one
+rule (`liveDemoTakesOver`): for as long as the document lives, the running
+demo takes the place of no graph, of the demo's static graph, and of a demo
+session — the runtime's segment and a port directly under this site's base
+URL, the one place the demo is served from (`isDemoEndpoint` in
+`app/utils/nodepod-demo-endpoint.ts`, which the takeover, a viewer page's
+session check and the header's Demo badge all go by) — and never of what the
+visitor chose — a graph file they opened, or their own application's session,
+under whatever path — unless they ask for the demo outright: a
+preview's "Open full-screen demo" (`/view?preview=true`) joins it over any
+graph, theirs included. `/view` joins it, as above. The bootstrap middleware
+applies the same rule to the viewer's own pages, carrying out what
+`resolveViewerPageArrival` (`app/utils/viewer-page-arrival.ts`, over
+`resolveViewerPageTakeover`) decides: arriving at one — through a header tab,
+or Back to a page that showed the static graph — with the demo running puts
+it in the tab's session with the graph store's `setDemoSession`, the call
+`/view` makes, so the demo is drawn the same way whichever way the visitor
+reached it, and the page loads it like any endpoint; with the demo still
+starting, a tab on no graph or the static graph is sent to `/view`, which
+waits for it behind its progress. A demo session is the page's own to settle,
+running or starting, through `use-nodepod-demo-session.ts`: it is put on the
+running pod's credential, or waits on the page for a start in flight. A
+navigation that only changes a page's query or hash keeps the graph the page
+shows, which it loaded as it mounted. Neither ever starts the demo, so before
+"Load Example" nothing changes: `/` draws the static graph, `/view` waits on
+the landing card, and `?preview=true` opens the static graph. Only the
+visitor's own choice puts anything else on screen: a graph file they open —
+from the landing card, or from the File menu in every viewer page's header,
+over the demo as over anything else (`resolveViewerGraphControls` in
+`app/utils/viewer-header.ts`) — their own application's printed link, or Close
+Graph and Try Another URL, which go to `/view?autoload=false`; and a reload,
+which ends the pod. A file opened over the demo takes the tab, which the rule
+above then leaves alone, while the demo keeps running in the background for the
+landing page's previews and for "Load Example" to rejoin. The File menu stays
+in place but out of use only while a demo session waits for the demo to start
+again: its endpoint is let go meanwhile, and the start puts the demo back in
+the session when it is up.
 
 A reload restores the endpoint from the tab's session (a viewer page names a
 view, not a graph) — and for the demo that endpoint is answerable only by the
@@ -1072,8 +1127,9 @@ Known limitations, accepted deliberately:
 The assistant has no server side. `@mlc-ai/web-llm` downloads model weights from
 HuggingFace into the browser's Cache API and runs inference on the visitor's GPU
 through WebGPU, inside a web worker. The library's only contribution is the graph
-Markdown the viewer already fetches from `/output.md`, which the site budgets
-down to fit the model's context window before using it as the system prompt. The
+it already serves: the Markdown at `/output.md`, which the plain path budgets
+down to fit the model's context window and uses as the system prompt, and the
+`GraphOutput` JSON, which agent mode's tools query (below). The
 graph, the question, and the answer never leave the machine, and nothing has to
 be installed for the feature to work — at the cost of requiring a WebGPU-capable
 browser on a desktop, in a window at least `MOBILE_BREAKPOINT_PX` wide
@@ -1118,7 +1174,12 @@ that excerpt is most of the window and still not most of the graph. The agent
 inverts it: almost no graph in the prompt, and six read-only tools the model
 queries for the part the question needs. It is the better answer for a large
 graph and the worse one for a small one, so the panel defaults by graph size and
-lets the reader switch.
+lets the reader switch — except on a graph file, which is the JSON and nothing
+else: the Markdown the plain path reads is the library's to write, and the site
+does not rebuild it. So the header opens the chat on a file as on an endpoint
+(`resolveAiChatAvailability`, with the same device restriction), the panel
+answers it in agent mode alone and fetches nothing for it, and the mode toggle
+stays on and says why (`resolveAiChatAnswerMode`, `app/utils/ai-chat-mode.ts`).
 
 This replaced an HTTP proxy inside the library that forwarded chat requests from
 the viewer origin to a local Ollama daemon. Deleting it removed a
@@ -1259,6 +1320,14 @@ that is never the default.
     from the project before the entry, never from beside the CLI; and a copy of
     the package the project installed that ships the CLI runs the export
     instead.
+16. **Once started, the demo is never dropped by navigation.** For the life of
+    the document that ran "Load Example", `/view` and every viewer page show
+    the running demo in place of no graph, the demo's static graph, or a demo
+    session — never in place of a graph file the visitor opened or their own
+    application, unless they ask for the demo outright with a preview's "Open
+    full-screen demo" (`/view?preview=true`) — and nothing but "Load Example"
+    starts it. `live-demo-takeover.test.ts` and `viewer-page-arrival.test.ts`
+    cover the decision, the bootstrap middleware's included.
 
 ---
 
@@ -1324,6 +1393,16 @@ Facts a code change can invalidate, and the file to check:
 - The graph file limits: 20 MB to open, 1.5 million characters kept for a
   reload — `MAX_GRAPH_FILE_BYTES` in `site/app/utils/graph-file.ts` and
   `MAX_STORED_GRAPH_CHARS` in `site/app/utils/graph-file-session.ts`
+- Which graphs the running demo takes the place of, and what a viewer page does
+  while it is still starting — `liveDemoTakesOver` and
+  `resolveViewerPageTakeover` in `site/app/utils/live-demo-takeover.ts`, and
+  what the bootstrap middleware does on arriving at a viewer page —
+  `resolveViewerPageArrival` in `site/app/utils/viewer-page-arrival.ts`
+- What counts as the demo's endpoint — the runtime's segment and a port
+  directly under the site's base URL — `isDemoEndpoint`, and that base URL,
+  `resolveSiteBaseUrl`, in `site/app/utils/nodepod-demo-endpoint.ts`
+- That the AI chat answers a graph file in agent mode only —
+  `resolveAiChatAnswerMode` in `site/app/utils/ai-chat-mode.ts`
 - Which properties PostHog stamps with the page's URL, and that `ph-no-capture`
   still blocks click capture and replay — `posthog-js`, which
   `site/app/utils/analytics-privacy.ts` and `layouts/viewer.vue` rely on

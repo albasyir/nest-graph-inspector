@@ -45,7 +45,7 @@ import {
   readGraphSession,
   writeGraphSession
 } from '~/utils/inspector-graph-session'
-import { resolveInspectorMountBase } from '~/utils/nodepod-demo-endpoint'
+import { isDemoEndpoint, resolveSiteBaseUrl } from '~/utils/nodepod-demo-endpoint'
 
 type InspectorEndpointInfo = {
   'for'?: string
@@ -66,6 +66,8 @@ export type EndpointProbe
 export type RestoredGraphSource = 'endpoint' | 'file' | 'none'
 
 export const useGraphInspectorStore = defineStore('graph-inspector', () => {
+  const config = useRuntimeConfig()
+
   /**
    * The graph endpoint being viewed, never carrying an access token.
    *
@@ -320,12 +322,17 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    * Whether the graph being viewed is this site's own demo, running in this tab.
    *
    * Its address is the only one the viewer invents for itself — the segment the
-   * in-browser runtime's servers are reachable under — so it is worth naming as
-   * a demo rather than showing an address that means nothing outside this tab.
-   * Every other endpoint is somebody's application, where the address is the
-   * most useful thing the header can say.
+   * in-browser runtime's servers are reachable under, directly under this
+   * site's base URL — so it is worth naming as a demo rather than showing an
+   * address that means nothing outside this tab. Every other endpoint is
+   * somebody's application, where the address is the most useful thing the
+   * header can say. A server render knows no origin to tell the demo by, and
+   * draws none.
    */
-  const isDemo = computed(() => Boolean(resolveInspectorMountBase(endpoint.value)))
+  const isDemo = computed(() =>
+    import.meta.client
+      && isDemoEndpoint(endpoint.value, resolveSiteBaseUrl(config.app.baseURL, window.location.origin))
+  )
   const directRunUrl = computed(() =>
     resolveDirectRunUrl(endpoint.value, graphIsStatic.value)
   )
@@ -621,6 +628,24 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
    */
   function setSession(nextEndpointUrl: string, token: string) {
     applyEndpoint(nextEndpointUrl, token)
+  }
+
+  /**
+   * Puts the in-browser demo in the session, in place of whatever graph the
+   * tab was on, the way the viewer opens the demo wherever it does: drawn with
+   * its circular dependencies and its modules' details open, and trusted —
+   * the demo and this site are built from the same commit, so the version
+   * acknowledgement asked of other endpoints has nothing to add.
+   *
+   * `/view` calls this as it opens the demo, and the bootstrap middleware as
+   * it adopts the running demo on a viewer page, so the demo looks the same
+   * whichever way the visitor reached it.
+   */
+  function setDemoSession(nextEndpointUrl: string, token: string) {
+    showCircularDependencies.value = true
+    openModuleDetail.value = true
+    applyEndpoint(nextEndpointUrl, token)
+    trustEndpointVersion(nextEndpointUrl)
   }
 
   /**
@@ -1076,6 +1101,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     showBrightLine,
     openModuleDetail,
     setSession,
+    setDemoSession,
     releaseEndpoint,
     restoreSession,
     restoreGraphSource,

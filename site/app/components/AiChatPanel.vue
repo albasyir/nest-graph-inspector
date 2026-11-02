@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
 import {
+  AI_CHAT_GRAPH_CHANGED_NOTICE,
+  isAskedGraphOnScreen,
+  resolveAiChatAnswerMode,
+  resolveAiChatFetch
+} from '~/utils/ai-chat-mode'
+import {
   MOBILE_BREAKPOINT_PX,
   MOBILE_DISCLAIMER_MESSAGE,
   MOBILE_DRAWER_BANNER_MESSAGE,
@@ -291,7 +297,8 @@ const selectedProviderIcon = computed(() => {
  * answering meant reaching the proxy that the inspected application served —
  * which neither of them serves. The model runs in this tab now, and the Markdown
  * it reads is just another file sitting beside `output.json`, so every graph the
- * viewer can show answers like any other.
+ * viewer can show answers like any other — a graph file included, which has no
+ * Markdown beside it and is looked up in instead (see `answerMode`).
  */
 const isChatUnavailable = computed(() => {
   return graphStore.graphData?.version == '1' || graphStore.graphData?.version == '0'
@@ -410,12 +417,41 @@ const prefersAgentMode = computed(() => {
   return graphContext.value.truncated || graphModuleCount.value > AGENT_MODE_MODULE_THRESHOLD
 })
 
+/**
+ * How the chat answers: as the reader chose, else as suits the graph — except on
+ * a graph file, whose missing Markdown summary leaves only looking things up.
+ */
+const answerMode = computed(() => resolveAiChatAnswerMode({
+  isGraphFile: graphStore.isFileSource,
+  override: agentModeOverride.value,
+  prefersAgent: prefersAgentMode.value
+}))
+
 const isAgentMode = computed({
-  get: () => agentModeOverride.value ?? prefersAgentMode.value,
+  get: () => answerMode.value.agent,
   set: (value: boolean) => {
     agentModeOverride.value = value
   }
 })
+
+/** What the answer-mode toggle says about itself: its state, or why it is locked. */
+const answerModeHint = computed(() => {
+  if (answerMode.value.lockedReason) {
+    return answerMode.value.lockedReason
+  }
+
+  return isAgentMode.value
+    ? 'Answering by looking things up in the graph. Click to answer from a graph excerpt instead.'
+    : 'Answering from a graph excerpt. Click to let the model look things up with tools.'
+})
+
+function toggleAgentMode() {
+  if (answerMode.value.lockedReason) {
+    return
+  }
+
+  isAgentMode.value = !isAgentMode.value
+}
 
 /**
  * Whether the chosen model was fine-tuned on a tool-call format.
@@ -825,7 +861,10 @@ function handleRefreshModels() {
 
 watch(() => props.active, (value) => {
   if (value && !props.preview) {
-    graphStore.fetchMarkdown()
+    // A graph file has no Markdown beside it, nor an endpoint to ask for one.
+    if (resolveAiChatFetch({ isGraphFile: graphStore.isFileSource }) === 'markdown') {
+      graphStore.fetchMarkdown()
+    }
 
     posthog?.capture('Graph AI Chat Opened', {
       url: describeGraphEndpoint(graphStore.endpointUrl).graph_url
@@ -1127,9 +1166,36 @@ async function handleSubmit(event: Event) {
   try {
     const useAgent = isAgentMode.value
 
+    // The graph on screen as the question was asked. The refresh below waits
+    // on the network, and the visitor can put another graph on screen
+    // meanwhile; this one is what the question is about.
+    const asked = { revision: graphStore.graphRevision, endpointUrl: graphStore.endpointUrl }
+
     // Only what the chosen mode reads. The plain path answers from the Markdown
-    // excerpt; agent mode never sees it, because its tools query the JSON.
-    await (useAgent ? graphStore.fetchJson() : graphStore.fetchMarkdown())
+    // excerpt; agent mode never sees it, because its tools query the JSON. A
+    // graph file was read whole as it opened, and has no endpoint to ask.
+    const refresh = resolveAiChatFetch({ isGraphFile: graphStore.isFileSource, agent: useAgent })
+    if (refresh) {
+      await (refresh === 'json' ? graphStore.fetchJson() : graphStore.fetchMarkdown())
+    }
+
+    // Another graph went on screen while that was in flight, so what the store
+    // holds now belongs to it. Answering from it would answer a question nobody
+    // asked; saying so lets the visitor ask about the graph they now see.
+    if (!isAskedGraphOnScreen(asked, { revision: graphStore.graphRevision, endpointUrl: graphStore.endpointUrl })) {
+      updateAssistantMessage({
+        reasoning: '',
+        reasoningStreaming: false,
+        notice: AI_CHAT_GRAPH_CHANGED_NOTICE
+      })
+      return
+    }
+
+    // The graph this question was asked about, held for the whole answer:
+    // getting the model ready can take minutes, and the visitor may open
+    // another graph from the header meanwhile, or while the answer streams.
+    const askedGraph = graphStore.graphData
+    const askedSystemPrompt = systemPrompt.value
 
     const modelId = selectedModel.value
 
@@ -1215,8 +1281,8 @@ async function handleSubmit(event: Event) {
       const history = budgetChatHistory(
         getConversationTurns(),
         useAgent
-          ? estimateGraphAgentPromptChars(graphStore.graphData)
-          : systemPrompt.value.length
+          ? estimateGraphAgentPromptChars(askedGraph)
+          : askedSystemPrompt.length
       )
 
       droppedHistoryCount.value = history.droppedMessageCount
@@ -1228,7 +1294,7 @@ async function handleSubmit(event: Event) {
       const modelMessages: WebLlmChatMessage[] = [
         {
           role: 'system',
-          content: systemPrompt.value
+          content: askedSystemPrompt
         },
         ...budgetTurns()
       ]
@@ -1250,7 +1316,7 @@ async function handleSubmit(event: Event) {
         {
           engine: { streamChat, interrupt },
           modelId,
-          graph: graphStore.graphData,
+          graph: askedGraph,
           messages: budgetTurns(),
           temperature: CHAT_TEMPERATURE,
           enableThinking,
@@ -1318,7 +1384,7 @@ async function handleSubmit(event: Event) {
     })
 
     posthog?.capture('Graph AI Answer Completed', {
-      url: describeGraphEndpoint(graphStore.endpointUrl).graph_url,
+      url: describeGraphEndpoint(asked.endpointUrl).graph_url,
       model: modelId,
       mode: useAgent ? 'agent' : 'chat',
       toolCalls: getAssistantMessage()?.toolSteps?.length || 0
@@ -1629,18 +1695,22 @@ async function handleSubmit(event: Event) {
                   2 GB one included, so this is a choice about the question and
                   never about the hardware: looking things up beats reading a
                   truncated excerpt on a large graph, and costs several turns
-                  for a question a small graph answers in one.
+                  for a question a small graph answers in one. A graph file
+                  leaves no choice, having no Markdown to excerpt: the toggle
+                  stays on and says so, `aria-disabled` rather than `disabled`,
+                  which could be neither hovered nor focused to say why.
                 -->
-                <UTooltip :text="isAgentMode ? 'Answering by looking things up in the graph. Click to answer from a graph excerpt instead.' : 'Answering from a graph excerpt. Click to let the model look things up with tools.'">
+                <UTooltip :text="answerModeHint">
                   <UButton
                     type="button"
                     icon="i-lucide-wrench"
                     :color="isAgentMode ? 'primary' : 'neutral'"
                     :variant="isAgentMode ? 'soft' : 'ghost'"
                     :disabled="isChatControlDisabled || isStreaming"
+                    :aria-disabled="answerMode.lockedReason ? true : undefined"
                     :aria-pressed="isAgentMode"
                     aria-label="Look things up with tools"
-                    @click="isAgentMode = !isAgentMode"
+                    @click="toggleAgentMode"
                   />
                 </UTooltip>
                 <UPopover

@@ -2,11 +2,11 @@ import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import { MOBILE_BREAKPOINT_PX, isMobileDevice } from './device-detection.ts'
 import {
-  AI_CHAT_GRAPH_FILE_REASON,
   EXAMPLE_GRAPH_TITLE,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
   resolveEndpointHost,
+  resolveViewerGraphControls,
   resolveViewerHeaderPage,
   type ViewerGraphState,
   type ViewerGraphStatusInput
@@ -367,24 +367,23 @@ describe('the AI chat', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: false }), 'no-graph')
   })
 
-  // The chat reads the Markdown summary an endpoint serves beside its graph,
-  // which a graph file does not carry.
-  test('is off for a graph file, and says why', () => {
+  // A graph file carries no Markdown summary, but the chat's agent mode looks
+  // things up in the graph JSON, which is what the file is.
+  test('opens on a graph file, as on an endpoint', () => {
     assert.equal(
       resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: false }),
-      'graph-file'
+      'available'
     )
-    // A wider window would not help, so a restricted device is told the same.
-    assert.equal(
-      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
-      'graph-file'
-    )
-    assert.match(AI_CHAT_GRAPH_FILE_REASON, /Markdown summary/)
   })
 
   test('is refused on a restricted device whatever graph it has', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: true, isRestricted: true }), 'restricted')
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: true }), 'restricted')
+    // A graph file's chat runs on this device's GPU like any other.
+    assert.equal(
+      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
+      'restricted'
+    )
   })
 
   // The layout asks `isMobileDevice` through `useMobileDevice`, over the flags
@@ -407,12 +406,47 @@ describe('the AI chat', () => {
     ['a desktop', DESKTOP, 1280, true]
   ] as const) {
     test(`${available ? 'opens' : 'never opens'} on ${label}, with a graph loaded`, () => {
-      const availability = resolveAiChatAvailability({
-        hasGraphEndpoint: true,
-        isRestricted: isMobileDevice(device, { viewportWidth })
-      })
+      const isRestricted = isMobileDevice(device, { viewportWidth })
 
-      assert.equal(availability === 'available', available, availability)
+      for (const graph of [
+        { hasGraphEndpoint: true },
+        { hasGraphEndpoint: false, isGraphFile: true }
+      ]) {
+        const availability = resolveAiChatAvailability({ ...graph, isRestricted })
+
+        assert.equal(availability === 'available', available, `${availability} for ${JSON.stringify(graph)}`)
+      }
     })
   }
+})
+
+describe('the header\'s graph controls', () => {
+  // The visitor's own choice, wherever they are: a graph file can take the
+  // place of the demo running in this tab, or of their own application, without
+  // a reload, and the endpoint can still be fetched again.
+  test('an endpoint offers a graph file in its place, and keeps its reload', () => {
+    assert.deepEqual(
+      resolveViewerGraphControls({ hasGraphEndpoint: true, isGraphFile: false }),
+      { fileMenu: ['open-file'], canUseFileMenu: true, showReload: true }
+    )
+  })
+
+  test('a graph file offers another in its place, or closing it, and has nothing to reload', () => {
+    assert.deepEqual(
+      resolveViewerGraphControls({ hasGraphEndpoint: false, isGraphFile: true }),
+      { fileMenu: ['open-another', 'close-graph'], canUseFileMenu: true, showReload: false }
+    )
+  })
+
+  // A demo session waiting for the demo to start again has let its endpoint
+  // go, and puts the demo back in the session once it is up — over a file
+  // opened meanwhile. The controls keep their place, so nothing shifts when
+  // the endpoint comes back.
+  test('a tab between graphs keeps the menu in place, out of use', () => {
+    const controls = resolveViewerGraphControls({ hasGraphEndpoint: false, isGraphFile: false })
+
+    assert.equal(controls.canUseFileMenu, false)
+    assert.deepEqual(controls.fileMenu, ['open-file'])
+    assert.equal(controls.showReload, true)
+  })
 })

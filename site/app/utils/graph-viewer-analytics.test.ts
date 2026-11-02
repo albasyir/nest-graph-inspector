@@ -1,7 +1,10 @@
 import { Buffer } from 'node:buffer'
 import { strict as assert } from 'node:assert'
+import process from 'node:process'
 import { describe, test } from 'node:test'
+import { setImmediate as nextMacrotask } from 'node:timers/promises'
 import {
+  captureBestEffort,
   createGraphViewerEventProperties,
   describeGraphEndpoint,
   type GraphLoadFailure
@@ -268,5 +271,81 @@ describe('an event about a graph file', () => {
 
   test('about an endpoint says nothing of files', () => {
     assert.equal('graph_source' in eventProperties(), false)
+  })
+})
+
+// The demo store reports graph_demo_started once the demo is already up: a
+// client that throws must not fail that start, which would tear the demo down.
+describe('an event sent on a best-effort basis', () => {
+  test('reaches a client that takes it', () => {
+    const sent: unknown[] = []
+    captureBestEffort({ capture: (event, properties) => sent.push([event, properties]) }, 'graph_demo_started', { revision: 'r1' })
+    assert.deepEqual(sent, [['graph_demo_started', { revision: 'r1' }]])
+  })
+
+  test('never throws, whether the client fails or is not there', () => {
+    const failing = {
+      capture: () => {
+        throw new Error('analytics unavailable')
+      }
+    }
+    assert.doesNotThrow(() => captureBestEffort(failing, 'graph_demo_started', { revision: 'r1' }))
+    assert.doesNotThrow(() => captureBestEffort(undefined, 'graph_demo_started', { revision: 'r1' }))
+    assert.doesNotThrow(() => captureBestEffort(null, 'graph_demo_started', { revision: 'r1' }))
+  })
+
+  // A client that sends asynchronously fails after captureBestEffort has
+  // returned: its promise has to be settled for it, or Node reports the
+  // rejection as unhandled once the microtasks drain.
+  test('settles a promise the client hands back, so its rejection is never unhandled', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      captureBestEffort(
+        { capture: () => Promise.reject(new Error('analytics offline')) },
+        'graph_demo_started',
+        { revision: 'r1' }
+      )
+      await nextMacrotask()
+      await nextMacrotask()
+
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  // A thenable that is not a native promise rejects only once something calls
+  // its `then`. Left alone it never rejects at all, so no unhandled rejection
+  // proves nothing: what shows it was settled is that `then` was called.
+  test('settles a thenable that is not a native promise the same way', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    let wasSettled = false
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      captureBestEffort(
+        {
+          capture: () => ({
+            then: (_resolve: unknown, reject: (reason: unknown) => void) => {
+              wasSettled = true
+              reject(new Error('analytics offline'))
+            }
+          })
+        },
+        'graph_demo_started',
+        { revision: 'r1' }
+      )
+      await nextMacrotask()
+      await nextMacrotask()
+
+      assert.equal(wasSettled, true, 'the thenable\'s then was never called')
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })

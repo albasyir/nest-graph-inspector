@@ -34,27 +34,37 @@ const isSiteDetected = ref(false)
 const shouldNavigateOnLoad = ref(false)
 /** Whether the visitor asked this page for the demo, retries included. */
 const wasDemoRequested = ref(false)
-/** The tab's demo is running, or on its way up — what `?preview=true` joins. */
+/**
+ * The tab's demo is running, or on its way up: what `?preview=true` joins, and
+ * what a tab on no graph of the visitor's own choosing joins too.
+ */
 const isDemoActive = computed(() => demoStore.isRunning || demoStore.isBusy)
 /**
  * Whether this page is on its way to the viewer without a click: joining the
- * demo a preview is running, opening the demo's static graph for a preview
- * that has not loaded the example, or returning to the tab's own graph.
+ * demo this document is running or starting, opening the demo's static graph
+ * for a preview that has not loaded the example, or returning to the tab's own
+ * graph.
  *
  * Seeded on the landing card wherever the page is rendered on the server or
  * hydrated over that render — the server cannot read the tab's session, and
  * the prerendered page has no query to read either — so the two agree, and
- * `openOnArrival` moves on once mounted. Reached from a preview in the same
- * document, the page opens straight on the loading card.
+ * `openOnArrival` moves on once mounted. Reached from another page of the same
+ * document, it is seeded from the graph the tab is on in memory, which is what
+ * `openOnArrival` restores, so a page about to join the demo opens straight on
+ * the loading card rather than flashing the landing card first. Only a session
+ * a reload left behind, which nothing in memory holds yet, is read on mount.
  */
 const isAutoOpening = ref(
   import.meta.client
     && !useNuxtApp().isHydrating
     && resolveViewerLandingAction({
       query: route.query,
-      restoredEndpointUrl: '',
-      canOpenRestoredSession: false,
-      isDemoActive: isDemoActive.value
+      restoredEndpointUrl: graphStore.endpointUrl,
+      canOpenRestoredSession: graphStore.hasAccessToken
+        || canOpenWithoutAccessToken(graphStore.endpointUrl, window.location.origin),
+      restoredGraphFile: graphStore.fileSource?.kind,
+      isDemoActive: isDemoActive.value,
+      siteBaseUrl: demoStore.siteBaseUrl()
     }).kind !== 'manual'
 )
 /** Why the demo's static graph could not be opened for `?preview=true`. */
@@ -69,10 +79,10 @@ let activeExampleRequestId = 0
 /**
  * Opens the viewer on the demo application running in this tab.
  *
- * Reached once the demo this page asked for — clicked for, or joined from a
- * preview — is up, and again from the retry in the error dialog, which is
- * mounted for the whole app and can only start the application, so what asking
- * for it was for is this page's to finish.
+ * Reached once the demo this page asked for — clicked for, or joined because
+ * this document is running it — is up, and again from the retry in the error
+ * dialog, which is mounted for the whole app and can only start the
+ * application, so what asking for it was for is this page's to finish.
  */
 async function openDemo() {
   if (isNavigating.value) {
@@ -88,16 +98,10 @@ async function openDemo() {
   activePollId += 1
   clearPolling()
 
-  posthog?.capture('graph_demo_started', {
-    revision: demoStore.manifest?.revision
-  })
-
   // The demo is a graph like any other: put it in the session, then go to a
-  // plain viewer page. The demo and this site are built from the same commit,
-  // so the version acknowledgement the viewer asks for elsewhere has nothing
-  // to add here.
-  graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
-  graphStore.trustEndpointVersion(demoStore.endpointUrl)
+  // plain viewer page. The middleware puts the demo in place the same way when
+  // a viewer page is reached without coming through here.
+  graphStore.setDemoSession(demoStore.endpointUrl, demoStore.accessToken)
   // Replaced rather than pushed, like every hand-off from this page: Back from
   // the viewer should leave it, not return to the card that opened it — which,
   // reached from a preview, would only join the demo and send the visitor
@@ -111,12 +115,10 @@ async function openDemo() {
  * direct-run endpoint, and the history all come from that running application.
  *
  * `start` boots it, and is only ever the visitor's click on "Load Example";
- * `join` waits for the demo a preview is already running or starting, and
- * never boots one.
+ * `join` waits for the demo this document is already running or starting — a
+ * preview's, or one started here earlier — and never boots one.
  */
 async function requestDemo(how: 'start' | 'join') {
-  graphStore.showCircularDependencies = true
-  graphStore.openModuleDetail = true
   wasDemoRequested.value = true
   activePollId += 1
   clearPolling()
@@ -161,8 +163,8 @@ function cancelDemo() {
 }
 
 /**
- * Decides, once the tab's session is readable, whether to join the demo a
- * preview is running, open the demo's static graph, return to the graph the
+ * Decides, once the tab's session is readable, whether to join the demo this
+ * document is running, open the demo's static graph, return to the graph the
  * tab was already on, or wait on the landing card. It never starts the demo:
  * that takes the visitor's click.
  */
@@ -174,8 +176,9 @@ function openOnArrival() {
     restoredEndpointUrl,
     canOpenRestoredSession: graphStore.hasAccessToken
       || canOpenWithoutAccessToken(restoredEndpointUrl, window.location.origin),
-    hasRestoredGraphFile: source === 'file',
-    isDemoActive: isDemoActive.value
+    restoredGraphFile: graphStore.fileSource?.kind,
+    isDemoActive: isDemoActive.value,
+    siteBaseUrl: demoStore.siteBaseUrl()
   })
 
   if (action.kind === 'join-demo') {

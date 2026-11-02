@@ -1,8 +1,8 @@
-import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
 import {
   resolveViewerLink,
   resolveViewerPage
 } from '~/utils/viewer-bootstrap-link'
+import { resolveViewerPageArrival } from '~/utils/viewer-page-arrival'
 
 /**
  * Decides what a `/view/**` navigation actually resolves to.
@@ -28,8 +28,13 @@ import {
  *    this site's own origin — the bundled demo, which gates nothing — and a
  *    graph file, which has no endpoint to authenticate with and is never
  *    fetched from anywhere.
+ *
+ *    Once the visitor has started the demo in this document, though, a tab on
+ *    no graph of their own choosing — none, the demo's static graph, or a demo
+ *    session — shows the demo that is running (`resolveViewerPageTakeover`).
+ *    This never starts the demo: only "Load Example" does that.
  */
-export default defineNuxtRouteMiddleware((to) => {
+export default defineNuxtRouteMiddleware((to, from) => {
   // Server rendering must not spend the link: redirecting there would drop the
   // token before the browser ever saw it, and keeping it would write a live
   // credential into the SSR payload. The client repeats this on hydration.
@@ -79,25 +84,34 @@ export default defineNuxtRouteMiddleware((to) => {
     return navigateTo('/view', { replace: true })
   }
 
-  const source = graphStore.restoreGraphSource()
+  // Everything below is decided by `resolveViewerPageArrival`, from what the
+  // tab's graph turned out to be once restored: whether the demo running in
+  // this document takes its place, and whether the page may open what is
+  // there. The middleware only carries the decision out.
+  graphStore.restoreGraphSource()
+  const demo = useNodepodDemoStore()
+  const arrival = resolveViewerPageArrival({
+    toPath: to.path,
+    fromPath: from.path,
+    graphFile: graphStore.fileSource?.kind,
+    endpointUrl: graphStore.endpointUrl,
+    hasAccessToken: graphStore.hasAccessToken,
+    siteBaseUrl: demo.siteBaseUrl(),
+    isDemoRunning: demo.isRunning,
+    isDemoStarting: demo.isBusy
+  })
 
-  if (source === 'file') {
+  // The demo is a graph like any other: put it in the session, presented as
+  // `/view` presents it, and the page loads it.
+  if (arrival === 'adopt-demo') {
+    graphStore.setDemoSession(demo.endpointUrl, demo.accessToken)
     return
   }
 
-  const endpointUrl = graphStore.endpointUrl
-
-  if (source === 'none' || !endpointUrl) {
-    return navigateTo('/view', { replace: true })
-  }
-
-  // A viewer page is not reachable without the credential for the graph it
-  // would show. The token is not in the URL any more, so the only way to hold
-  // one is to have come through the printed link — which is the point.
-  if (
-    !graphStore.hasAccessToken
-    && !canOpenWithoutAccessToken(endpointUrl, window.location.origin)
-  ) {
+  // A demo still starting, no graph at all, or an endpoint the tab holds no
+  // credential for — the printed link is the only way to one: each is
+  // `/view`'s to deal with.
+  if (arrival !== 'open') {
     return navigateTo('/view', { replace: true })
   }
 })

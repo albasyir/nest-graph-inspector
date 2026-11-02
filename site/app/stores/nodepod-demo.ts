@@ -4,13 +4,15 @@ import { defineStore } from 'pinia'
 import {
   buildDemoEndpointUrl,
   readDemoRequestTarget,
-  readViewerLinkEndpoint
+  readViewerLinkEndpoint,
+  resolveSiteBaseUrl
 } from '~/utils/nodepod-demo-endpoint'
 import {
   accessTokenHeaders,
   readAccessToken,
   redactAccessToken
 } from '~/utils/inspector-access-token'
+import { captureBestEffort } from '~/utils/graph-viewer-analytics'
 import { resolveDirectRunUrl } from '~/utils/inspector-endpoint-url'
 import { createNodepodDemoRunGuard } from '~/utils/nodepod-demo-run-guard'
 import {
@@ -56,6 +58,7 @@ type FetchLike = typeof globalThis.fetch
 
 export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   const config = useRuntimeConfig()
+  const posthog = usePostHog()
 
   const status = ref<NodepodDemoStatus>('idle')
   const errorMessage = ref('')
@@ -149,15 +152,20 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
   /**
    * Absolute URL the site itself is served from, with a trailing slash so it
    * can be used as a base. GitHub Pages serves this site from a subpath, so
-   * the origin alone would resolve the payload against the wrong root.
+   * the origin alone would resolve the payload against the wrong root. The
+   * demo's endpoint is built under it, and recognised by it elsewhere.
+   *
+   * `''` in a server render, which has no page origin, and on an opaque origin
+   * (`resolveSiteBaseUrl`): no endpoint is then taken for the demo.
    */
   function siteBaseUrl() {
-    const base = config.app.baseURL || '/'
+    // A server render has no page origin, and the demo only ever runs in the
+    // browser: there is no base to name there.
+    if (!import.meta.client) {
+      return ''
+    }
 
-    return new URL(
-      base.endsWith('/') ? base : `${base}/`,
-      window.location.origin
-    ).toString()
+    return resolveSiteBaseUrl(config.app.baseURL, window.location.origin)
   }
 
   /**
@@ -636,6 +644,14 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     accessToken.value = readAccessToken(printedEndpoint) ?? ''
     status.value = 'ready'
 
+    // The one place a demo comes up, whatever asked for it: a preview's "Load
+    // Example", `/view`'s, or the retry after a failure. Joining a demo that is
+    // already running or starting never gets here. Best-effort: the demo is up
+    // by now, and an analytics failure must not fail the start and tear it down.
+    captureBestEffort(posthog, 'graph_demo_started', {
+      revision: demoManifest.revision
+    })
+
     return true
   }
 
@@ -842,6 +858,7 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     downloadedBytes,
     totalBytes,
     downloadProgress,
+    siteBaseUrl,
     start,
     join,
     loadGraphOutput,

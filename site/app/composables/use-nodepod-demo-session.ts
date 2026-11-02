@@ -38,6 +38,7 @@ export function useNodepodDemoSession() {
 
     const action = resolveDemoSessionAction({
       endpointUrl,
+      siteBaseUrl: demo.siteBaseUrl(),
       isDemoRunning: demo.isRunning,
       isDemoStarting: demo.isBusy,
       endpointRefusedToken: graphStore.endpointRequiresAccessToken
