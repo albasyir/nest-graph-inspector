@@ -538,7 +538,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 | Composable | What it does |
 |---|---|
 | `useGraphViewerPage.ts` | Shared loader for the three viewer pages: takes the endpoint from the store (restoring the tab's session if needed), loads the graph, and fires the PostHog load events. A graph file is already loaded: it fetches nothing for one |
-| `useGraphFileOpener.ts` | Opens a graph file — picked, dropped, or the demo's static graph — with `File.text()` and `utils/graph-file.ts`, hands it to the store, and goes to the navigator. Its error is shared state, so the viewer header's "Open Another…" can send a failure to `/view` |
+| `useGraphFileOpener.ts` | Opens a graph file — picked, dropped, or the demo's static graph — with `File.text()` and `utils/graph-file.ts`, hands it to the store, and goes to the navigator. Its error is shared state, so the viewer header's File menu — on any graph, the running demo's included — can send a failure to `/view?autoload=false` |
 | `useWebLlmEngine.ts` | The only surface a chat model talks to: WebGPU support check, curated model catalog and cache state, model download progress, streaming generation, interrupt, and teardown. Imports `@mlc-ai/web-llm` lazily inside function bodies, since the module touches browser globals and the site is prerendered. Never sends `tools` on a request — see `web-llm-langchain.ts` for why that allowlist is not worth paying for |
 | `useMobileDevice.ts` | Whether the AI chat treats this tab as mobile, kept current as the window changes. The device class is `useDevice()` from `@nuxtjs/device`, called once in setup; it adds an iPad posing as a Mac and a window narrower than 768px, and answers `false` until mounted so a hydrated page agrees with its server render |
 | `useGraphAgent.ts` | Agent mode as the panel sees it: the `isRunning` flag and the dynamic `import()` that keeps `langchain` out of the prerendered server bundle. The loop itself is `~/utils/graph-agent-run`, which is testable without a browser |
@@ -557,7 +557,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 |---|---|
 | `default.vue` | Marketing / landing pages; wraps with header and CTA banner |
 | `docs.vue` | Documentation pages; adds `AppHeader`, sidebar navigation, ToC |
-| `viewer.vue` | Graph viewer pages (`/view/**`); adds toolbar, AI chat toggle, breadcrumbs |
+| `viewer.vue` | Graph viewer pages (`/view/**`); adds the header: the pages, the graph's status, the File menu (a graph file in place of any graph — `utils/viewer-header.ts` decides its items), the reload for an endpoint, and the AI chat toggle |
 
 **What belongs here:** Layout chrome that wraps pages. No page-specific logic.
 

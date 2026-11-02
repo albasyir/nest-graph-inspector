@@ -815,7 +815,11 @@ neither the tab's session nor the developer's local endpoint exists on a server
 **The graph file source.** The viewer has a second kind of graph besides an
 endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the
 `json` output, or a saved `/output.json`. The `/view` landing card opens one
-from **Open Graph File** or a drop anywhere on the page;
+from **Open Graph File** or a drop anywhere on the page, and the viewer
+header's File menu opens one in place of whatever graph is on screen (**Open
+Graph File…** on an endpoint, the in-browser demo's included; **Open
+Another…** on a file) — one that fails leaves that graph where it is and sends
+the visitor to `/view?autoload=false`, where the drop zone says why;
 `useGraphFileOpener` (`app/composables/`) reads it with `File.text()` and
 `app/utils/graph-file.ts` checks it — a 20 MB cap before reading, JSON syntax,
 every field the viewer reads down to each dependency, and the format version
@@ -829,11 +833,11 @@ Nothing is uploaded, nothing is fetched or probed on the file's behalf, and the
 demo is not booted. A file is static: Direct Run says why it cannot run (and
 offers no trace, which a file has none of), the trace page says the same, the
 layout is kept for the tab under the file's `kind:name` and can be downloaded,
-the header's reload gives way to a File menu (Open Another…, Close Graph), and
-the AI chat looks things up in the graph and nothing else — its excerpt mode
-reads `/output.md`, which only the library writes, and the site will not
-rebuild the library's Markdown, so on a file the panel's mode toggle stays on
-its lookup mode and says why (see the AI chat, below). The demo's static graph
+the header has no reload beside its File menu, which offers Close Graph as
+well, and the AI chat looks things up in the graph and nothing else — its
+excerpt mode reads `/output.md`, which only the library writes, and the site
+will not rebuild the library's Markdown, so on a file the panel's mode toggle
+stays on its lookup mode and says why (see the AI chat, below). The demo's static graph
 opens the same way, as the `example` kind, for `/view?preview=true` when no
 demo is running. For a reload the tab keeps the graph in `sessionStorage`
 (`nest-graph-inspector:graph-file`, `graph-file-session.ts`) when it is at most
@@ -1052,10 +1056,16 @@ hash keeps the graph the page shows, which it loaded as it mounted. Neither
 ever starts the demo, so before "Load Example" nothing changes: `/` draws the
 static graph, `/view` waits on the landing card, and `?preview=true` opens the
 static graph. Only the visitor's own choice puts anything else on screen: a
-graph file they open, their own application's printed link, or Close Graph and
-Try Another URL, which go to `/view?autoload=false` — and a reload, which ends
-the pod. While the demo runs, that is also the one way to the landing card and
-its Open Graph File, since a plain `/view` joins the demo.
+graph file they open — from the landing card, or from the File menu in every
+viewer page's header, over the demo as over anything else
+(`resolveViewerGraphControls` in `app/utils/viewer-header.ts`) — their own
+application's printed link, or Close Graph and Try Another URL, which go to
+`/view?autoload=false`; and a reload, which ends the pod. A file opened over the demo takes the tab, which
+the rule above then leaves alone, while the demo keeps running in the
+background for the landing page's previews and for "Load Example" to rejoin.
+The File menu stays in place but out of use only while a demo session waits
+for the demo to start again: its endpoint is let go meanwhile, and the start
+puts the demo back in the session when it is up.
 
 A reload restores the endpoint from the tab's session (a viewer page names a
 view, not a graph) — and for the demo that endpoint is answerable only by the
