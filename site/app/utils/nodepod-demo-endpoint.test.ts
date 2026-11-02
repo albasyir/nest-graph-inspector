@@ -4,6 +4,7 @@ import { readAccessToken } from './inspector-access-token.ts'
 import {
   NODEPOD_ROUTE_SEGMENT,
   buildDemoEndpointUrl,
+  isDemoEndpoint,
   readDemoRequestTarget,
   readViewerLinkEndpoint,
   redactViewerLinks,
@@ -83,6 +84,23 @@ assert.equal(
 assert.equal(resolveInspectorMountBase(DEMO_ENDPOINT), '')
 assert.equal(resolveInspectorMountBase('not a url'), '')
 assert.equal(resolveInspectorMountBase(''), '')
+
+// The demo's endpoint is the segment on the viewer's own origin, which is where
+// buildDemoEndpointUrl puts it...
+const SITE_ORIGIN = new URL(SITE_BASE).origin
+assert.equal(isDemoEndpoint(demoEndpoint, SITE_ORIGIN), true)
+// ...and the segment anywhere else is somebody's own application, mounted
+// under a path that happens to hold it.
+assert.equal(
+  isDemoEndpoint(`https://staging.example.com/${NODEPOD_ROUTE_SEGMENT}/53371/__graph-inspector`, SITE_ORIGIN),
+  false
+)
+assert.equal(isDemoEndpoint(demoEndpoint, 'https://other.example'), false)
+assert.equal(isDemoEndpoint(demoEndpoint, ''), false)
+// The viewer's own origin alone is not enough either: the demo has the segment.
+assert.equal(isDemoEndpoint(`${SITE_ORIGIN}/__graph-inspector`, SITE_ORIGIN), false)
+assert.equal(isDemoEndpoint('not a url', SITE_ORIGIN), false)
+assert.equal(isDemoEndpoint('', SITE_ORIGIN), false)
 
 // Requests the viewer makes are routed back to the virtual server they name.
 assert.deepEqual(

@@ -142,6 +142,25 @@ export function resolveInspectorMountBase(endpointUrl: string): string {
 }
 
 /**
+ * Whether an endpoint is the in-browser demo's: the runtime's segment, on the
+ * viewer's own origin. That is the only origin the demo is served from —
+ * {@link buildDemoEndpointUrl} puts it under the site's base URL — so the
+ * segment in a path on any other origin is somebody's own application, served
+ * under a path that happens to hold it.
+ */
+export function isDemoEndpoint(endpointUrl: string, viewerOrigin: string): boolean {
+  if (!viewerOrigin || !resolveInspectorMountBase(endpointUrl)) {
+    return false
+  }
+
+  try {
+    return new URL(endpointUrl).origin === viewerOrigin
+  } catch {
+    return false
+  }
+}
+
+/**
  * Resolves a request the site made into the virtual server it belongs to, or
  * `null` when the request is an ordinary one that must go to the network.
  */

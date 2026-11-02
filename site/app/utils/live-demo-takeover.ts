@@ -1,5 +1,5 @@
 import type { GraphFileSource } from './graph-file-session.ts'
-import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
+import { isDemoEndpoint } from './nodepod-demo-endpoint.ts'
 
 /**
  * Which graph a tab is on, told apart by who chose it.
@@ -39,17 +39,7 @@ export function resolveTabGraphSource(tab: {
     return 'none'
   }
 
-  return resolveInspectorMountBase(tab.endpointUrl) && isOnOrigin(tab.endpointUrl, tab.viewerOrigin)
-    ? 'demo'
-    : 'application'
-}
-
-function isOnOrigin(url: string, origin: string): boolean {
-  try {
-    return Boolean(origin) && new URL(url).origin === origin
-  } catch {
-    return false
-  }
+  return isDemoEndpoint(tab.endpointUrl, tab.viewerOrigin) ? 'demo' : 'application'
 }
 
 /**

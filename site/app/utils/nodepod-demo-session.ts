@@ -1,9 +1,10 @@
-import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
+import { isDemoEndpoint } from './nodepod-demo-endpoint.ts'
 
 /**
  * What a viewer page has to do before it can load the endpoint it was given.
  *
- * - `pass-through` — somebody's own application, reached over the network.
+ * - `pass-through` — somebody's own application, reached over the network:
+ *   any endpoint but the demo's, whatever its path.
  * - `reuse` — the demo, answered by a pod this document is running.
  * - `join` — the demo, answered once the start already in flight in this
  *   document comes up.
@@ -28,11 +29,13 @@ export type DemoSessionAction = 'pass-through' | 'reuse' | 'join' | 'release' | 
  */
 export function resolveDemoSessionAction(session: {
   endpointUrl: string
+  /** The viewer's own origin, the only one the demo is served from. */
+  viewerOrigin: string
   isDemoRunning: boolean
   isDemoStarting: boolean
   endpointRefusedToken: boolean
 }): DemoSessionAction {
-  if (!resolveInspectorMountBase(session.endpointUrl)) {
+  if (!isDemoEndpoint(session.endpointUrl, session.viewerOrigin)) {
     return 'pass-through'
   }
 
