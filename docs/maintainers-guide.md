@@ -798,7 +798,7 @@ resolves the import graph itself.
 
 #### `site/public/nodepod-demo/`
 
-**Purpose:** The demo application, packaged so the visitor's browser can run it. Everything the site shows as a demo — the graph previews on the landing page and the demo `/view` opens when the visitor asks for it — is this application actually running on the nodepod runtime in the visitor's tab, not a captured graph.
+**Purpose:** The demo application, packaged so the visitor's browser can run it. Every demo the site runs — the previews on the landing page once the visitor presses "Load Example", and the demo `/view` opens when the visitor asks for it — is this application actually running on the nodepod runtime in the visitor's tab. Until then the previews draw the demo's static graph, `graph.json`, exported from the same build.
 
 **Contents:**
 

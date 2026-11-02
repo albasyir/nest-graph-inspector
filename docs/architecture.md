@@ -708,6 +708,14 @@ worth graphing:
 - **A third-party module**: `ConfigModule.forRoot()` inside `MobileModule`, so
   the graph contains something the repository does not own.
 
+**A known false positive.** For the demo, the Issues page reports
+`ConfigService` as registered in 2 modules. `ConfigModule` registers a
+`ConfigService` provider whose factory returns `ConfigHostModule`'s instance,
+so there is one instance, not two, but the graph does not say that a factory
+hands back another module's instance. The static `graph.json` and the demo run
+by Node show it; the in-browser demo, which keeps to `src/`, does not. Teaching
+the duplicate check about such factories is a follow-up.
+
 `demo/test/` holds three e2e suites: an application-level one exercising the
 demo's own REST routes *and* then reading the token-gated graph endpoint over
 TCP; the network-level security suite described above, which boots the real

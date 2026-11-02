@@ -265,7 +265,7 @@ the inspector builds from that container. Nothing is added to `index.ts`.
 | Option | Default | Meaning |
 |---|---|---|
 | `--entry <file>` | Detected | File exporting the root module, compiled JavaScript or — with `--require` — TypeScript. Detected as `<outDir>/app.module.js`, `<outDir>/<sourceRoot>/app.module.js`, or the only `app.module.js` under `<outDir>`, from `nest-cli.json`'s `sourceRoot` (default `src`) and the `outDir` (default `dist`) of the tsconfig `nest build` uses |
-| `--module <name>` | `AppModule` | Export name of the root module class. Unset, a file without `AppModule` that exports exactly one class with `@Module()` metadata uses that one |
+| `--module <name>` | `AppModule` | Export name of the root module class. Unset, it is `AppModule` — but when the file exports no `AppModule`, or an `AppModule` with no `@Module()` metadata (an empty `@Module({})` has none), and exactly one other class with that metadata, that class is used |
 | `-o, --out <file>` | `nest-graph.json` | Output file, created with its directories; `-` for stdout |
 | `-p, --project <dir>` | Current directory | Project root: `@nestjs/core`, `reflect-metadata`, and `--require` modules resolve from it, and the export runs with it as the working directory |
 | `--env-file <file>` | — | Loaded into `process.env` with `process.loadEnvFile()` before the entry is located and before anything is required; repeatable. A variable already set in the environment keeps its value, and a later file wins over an earlier one, as with `node --env-file`. Node.js 20.12 or later; otherwise the command fails, suggesting `--require dotenv/config` |
