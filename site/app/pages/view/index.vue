@@ -102,11 +102,9 @@ async function openDemo() {
   })
 
   // The demo is a graph like any other: put it in the session, then go to a
-  // plain viewer page. The demo and this site are built from the same commit,
-  // so the version acknowledgement the viewer asks for elsewhere has nothing
-  // to add here.
-  graphStore.setSession(demoStore.endpointUrl, demoStore.accessToken)
-  graphStore.trustEndpointVersion(demoStore.endpointUrl)
+  // plain viewer page. The middleware puts the demo in place the same way when
+  // a viewer page is reached without coming through here.
+  graphStore.setDemoSession(demoStore.endpointUrl, demoStore.accessToken)
   // Replaced rather than pushed, like every hand-off from this page: Back from
   // the viewer should leave it, not return to the card that opened it — which,
   // reached from a preview, would only join the demo and send the visitor
@@ -124,8 +122,6 @@ async function openDemo() {
  * preview's, or one started here earlier — and never boots one.
  */
 async function requestDemo(how: 'start' | 'join') {
-  graphStore.showCircularDependencies = true
-  graphStore.openModuleDetail = true
   wasDemoRequested.value = true
   activePollId += 1
   clearPolling()

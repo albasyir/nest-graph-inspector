@@ -101,12 +101,10 @@ export default defineNuxtRouteMiddleware((to, from) => {
     isDemoStarting: demo.isBusy
   })
 
-  // The demo is a graph like any other: put it in the session, and the page
-  // loads it. It is built from the same commit as this site, so the version
-  // acknowledgement the viewer asks of other endpoints has nothing to add.
+  // The demo is a graph like any other: put it in the session, presented as
+  // `/view` presents it, and the page loads it.
   if (arrival === 'adopt-demo') {
-    graphStore.setSession(demo.endpointUrl, demo.accessToken)
-    graphStore.trustEndpointVersion(demo.endpointUrl)
+    graphStore.setDemoSession(demo.endpointUrl, demo.accessToken)
     return
   }
 

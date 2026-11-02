@@ -624,6 +624,24 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   /**
+   * Puts the in-browser demo in the session, in place of whatever graph the
+   * tab was on, the way the viewer opens the demo wherever it does: drawn with
+   * its circular dependencies and its modules' details open, and trusted —
+   * the demo and this site are built from the same commit, so the version
+   * acknowledgement asked of other endpoints has nothing to add.
+   *
+   * `/view` calls this as it opens the demo, and the bootstrap middleware as
+   * it adopts the running demo on a viewer page, so the demo looks the same
+   * whichever way the visitor reached it.
+   */
+  function setDemoSession(nextEndpointUrl: string, token: string) {
+    showCircularDependencies.value = true
+    openModuleDetail.value = true
+    applyEndpoint(nextEndpointUrl, token)
+    trustEndpointVersion(nextEndpointUrl)
+  }
+
+  /**
    * Recovers the graph this tab was on, for a load that arrived without a
    * printed link — a reload, or a viewer page opened directly.
    *
@@ -1076,6 +1094,7 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     showBrightLine,
     openModuleDetail,
     setSession,
+    setDemoSession,
     releaseEndpoint,
     restoreSession,
     restoreGraphSource,
