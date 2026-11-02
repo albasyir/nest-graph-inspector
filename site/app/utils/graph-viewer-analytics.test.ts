@@ -308,15 +308,41 @@ describe('an event sent on a best-effort basis', () => {
         'graph_demo_started',
         { revision: 'r1' }
       )
+      await nextMacrotask()
+      await nextMacrotask()
+
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  // A thenable that is not a native promise rejects only once something calls
+  // its `then`. Left alone it never rejects at all, so no unhandled rejection
+  // proves nothing: what shows it was settled is that `then` was called.
+  test('settles a thenable that is not a native promise the same way', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    let wasSettled = false
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
       captureBestEffort(
-        // A thenable that is not a native promise, rejecting the same way.
-        { capture: () => ({ then: (_resolve: unknown, reject: (reason: unknown) => void) => reject(new Error('offline')) }) },
+        {
+          capture: () => ({
+            then: (_resolve: unknown, reject: (reason: unknown) => void) => {
+              wasSettled = true
+              reject(new Error('analytics offline'))
+            }
+          })
+        },
         'graph_demo_started',
         { revision: 'r1' }
       )
       await nextMacrotask()
       await nextMacrotask()
 
+      assert.equal(wasSettled, true, 'the thenable\'s then was never called')
       assert.deepEqual(unhandled, [])
     } finally {
       process.off('unhandledRejection', onUnhandled)
