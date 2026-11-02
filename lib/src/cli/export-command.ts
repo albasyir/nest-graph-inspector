@@ -126,7 +126,9 @@ export async function runExportCommand(
         throw new CliError(
           `${error.message}\n` +
             "Preview mode instantiates nothing, but it still loads your module files and evaluates their decorators: " +
-            "an environment variable read at import time, or a forRoot()/register() that throws, fails the export as it would fail your application's start.",
+            "an environment variable read at import time, or a forRoot()/register() that throws, fails the export as it would fail your application's start. " +
+            "The export also boots with snapshot: true, under which Nest serializes each dynamic module's options with JSON.stringify: " +
+            "options holding a circular object or a BigInt fail the export, though your application starts.",
         );
       }
 
