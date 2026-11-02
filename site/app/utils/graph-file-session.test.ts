@@ -199,7 +199,17 @@ describe('a graph file\'s layout', () => {
 describe('Direct Run on a graph file', () => {
   test('says what would run it, for a file and for the example', () => {
     assert.match(describeGraphFileDirectRun({ name: 'app.json', kind: 'file' }), /opened from a file/)
+    assert.match(describeGraphFileDirectRun({ name: 'app.json', kind: 'file' }), /Graph Viewer link your running application prints/)
     assert.match(describeGraphFileDirectRun({ name: 'graph.json', kind: 'example' }), /Load Example/)
+  })
+
+  // `/view` sends a tab on the static graph straight back to it, so its Load
+  // Example is only reached once the File menu has closed the graph.
+  test('leads from the example to Load Example by way of Close Graph', () => {
+    const reason = describeGraphFileDirectRun({ name: 'graph.json', kind: 'example' })
+
+    assert.match(reason, /choose Close Graph in the File menu, then press Load Example/)
+    assert.doesNotMatch(reason, /start page/)
   })
 
   test('never names the file', () => {

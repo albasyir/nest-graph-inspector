@@ -156,10 +156,15 @@ function fingerprint(text: string): string {
 /**
  * Why Direct Run is off for a graph file: there is no application behind it
  * to call, and no trace history either, so the drawer says what would run it.
+ *
+ * For the demo's static graph that is the demo, which only "Load Example"
+ * starts. `/view` sends a tab still on the static graph straight back to it,
+ * so the way there is the File menu's Close Graph, which lands on the start
+ * page without the graph; Load Example then opens the viewer on the demo.
  */
 export function describeGraphFileDirectRun(source: GraphFileSource): string {
   return source.kind === 'example'
-    ? 'This is the demo application\'s static graph, with no application behind it to call. Press Load Example on the Graph Viewer start page to run the demo in this tab, then run its methods.'
+    ? 'This is the demo application\'s static graph, with no application behind it to call. To run its methods, choose Close Graph in the File menu, then press Load Example: the demo starts in this tab and the viewer opens on it.'
     : 'This graph was opened from a file, with no application behind it to call. Open the Graph Viewer link your running application prints to run its methods.'
 }
 
