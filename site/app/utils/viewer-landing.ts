@@ -1,3 +1,4 @@
+import type { GraphFileSource } from './graph-file-session.ts'
 import { resolveInspectorMountBase } from './nodepod-demo-endpoint.ts'
 
 /** The viewer page `/view` sends a visitor on to. */
@@ -61,8 +62,8 @@ export function resolveViewerLandingAction(input: {
   query: Record<string, unknown>
   restoredEndpointUrl: string
   canOpenRestoredSession: boolean
-  /** The tab's session is a graph file, restored with its graph. */
-  hasRestoredGraphFile?: boolean
+  /** The tab's session is a graph file, restored with its graph: which kind. */
+  restoredGraphFile?: GraphFileSource['kind']
   /** The tab's demo is running, or on its way up. */
   isDemoActive: boolean
 }): ViewerLandingAction {
@@ -70,7 +71,7 @@ export function resolveViewerLandingAction(input: {
     return input.isDemoActive ? { kind: 'join-demo' } : { kind: 'open-example' }
   }
 
-  if (input.query.autoload !== 'false' && input.hasRestoredGraphFile) {
+  if (input.query.autoload !== 'false' && input.restoredGraphFile) {
     return { kind: 'open-session', path: '/view/navigator' }
   }
 

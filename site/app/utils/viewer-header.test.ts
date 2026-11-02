@@ -2,7 +2,6 @@ import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import { MOBILE_BREAKPOINT_PX, isMobileDevice } from './device-detection.ts'
 import {
-  AI_CHAT_GRAPH_FILE_REASON,
   EXAMPLE_GRAPH_TITLE,
   describeViewerGraphStatus,
   resolveAiChatAvailability,
@@ -367,24 +366,23 @@ describe('the AI chat', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: false }), 'no-graph')
   })
 
-  // The chat reads the Markdown summary an endpoint serves beside its graph,
-  // which a graph file does not carry.
-  test('is off for a graph file, and says why', () => {
+  // A graph file carries no Markdown summary, but the chat's agent mode looks
+  // things up in the graph JSON, which is what the file is.
+  test('opens on a graph file, as on an endpoint', () => {
     assert.equal(
       resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: false }),
-      'graph-file'
+      'available'
     )
-    // A wider window would not help, so a restricted device is told the same.
-    assert.equal(
-      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
-      'graph-file'
-    )
-    assert.match(AI_CHAT_GRAPH_FILE_REASON, /Markdown summary/)
   })
 
   test('is refused on a restricted device whatever graph it has', () => {
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: true, isRestricted: true }), 'restricted')
     assert.equal(resolveAiChatAvailability({ hasGraphEndpoint: false, isRestricted: true }), 'restricted')
+    // A graph file's chat runs on this device's GPU like any other.
+    assert.equal(
+      resolveAiChatAvailability({ hasGraphEndpoint: false, isGraphFile: true, isRestricted: true }),
+      'restricted'
+    )
   })
 
   // The layout asks `isMobileDevice` through `useMobileDevice`, over the flags
@@ -407,12 +405,16 @@ describe('the AI chat', () => {
     ['a desktop', DESKTOP, 1280, true]
   ] as const) {
     test(`${available ? 'opens' : 'never opens'} on ${label}, with a graph loaded`, () => {
-      const availability = resolveAiChatAvailability({
-        hasGraphEndpoint: true,
-        isRestricted: isMobileDevice(device, { viewportWidth })
-      })
+      const isRestricted = isMobileDevice(device, { viewportWidth })
 
-      assert.equal(availability === 'available', available, availability)
+      for (const graph of [
+        { hasGraphEndpoint: true },
+        { hasGraphEndpoint: false, isGraphFile: true }
+      ]) {
+        const availability = resolveAiChatAvailability({ ...graph, isRestricted })
+
+        assert.equal(availability === 'available', available, `${availability} for ${JSON.stringify(graph)}`)
+      }
     })
   }
 })

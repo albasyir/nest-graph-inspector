@@ -174,7 +174,7 @@ function openOnArrival() {
     restoredEndpointUrl,
     canOpenRestoredSession: graphStore.hasAccessToken
       || canOpenWithoutAccessToken(restoredEndpointUrl, window.location.origin),
-    hasRestoredGraphFile: source === 'file',
+    restoredGraphFile: graphStore.fileSource?.kind,
     isDemoActive: isDemoActive.value
   })
 

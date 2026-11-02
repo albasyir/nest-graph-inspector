@@ -26,10 +26,11 @@ for (const autoload of ['true', 'false', '0', '', null, ['false']]) {
   )
 }
 
-// Nor does a demo already running in the tab pull the plain `/view` into it.
+// Once the visitor has started the demo in this document, though, the plain
+// `/view` joins it: a tab on no graph has nothing of its own to go back to.
 assert.deepEqual(
   resolveViewerLandingAction({ ...fresh, isDemoActive: true }),
-  { kind: 'manual' }
+  { kind: 'join-demo' }
 )
 
 // A preview's "Open full-screen demo" joins the demo that preview is running or
@@ -61,14 +62,25 @@ assert.deepEqual(
     query: { preview: 'true', trace: 'true' },
     restoredEndpointUrl: OWN_ENDPOINT,
     canOpenRestoredSession: true,
-    hasRestoredGraphFile: true
+    restoredGraphFile: 'file'
   }),
   { kind: 'open-example' }
 )
+// Only `preview=true` itself is the preview's link: anything else neither opens
+// the static graph nor joins the demo over the visitor's own file.
 for (const preview of ['false', '1', '', ['true']]) {
   assert.deepEqual(
-    resolveViewerLandingAction({ ...fresh, query: { preview }, isDemoActive: true }),
+    resolveViewerLandingAction({ ...fresh, query: { preview } }),
     { kind: 'manual' }
+  )
+  assert.deepEqual(
+    resolveViewerLandingAction({
+      ...fresh,
+      query: { preview },
+      restoredGraphFile: 'file',
+      isDemoActive: true
+    }),
+    { kind: 'open-session', path: '/view/navigator' }
   )
 }
 
@@ -119,7 +131,7 @@ assert.deepEqual(
 // trace history — and the opt-out holds it back like any session.
 for (const query of [{}, { trace: 'true' }]) {
   assert.deepEqual(
-    resolveViewerLandingAction({ ...fresh, query, hasRestoredGraphFile: true }),
+    resolveViewerLandingAction({ ...fresh, query, restoredGraphFile: 'file' }),
     { kind: 'open-session', path: '/view/navigator' }
   )
 }
@@ -127,24 +139,32 @@ assert.deepEqual(
   resolveViewerLandingAction({
     ...fresh,
     query: { autoload: 'false' },
-    hasRestoredGraphFile: true
+    restoredGraphFile: 'file'
   }),
   { kind: 'manual' }
 )
 
-// A restored demo session is never redirected, with or without a demo running:
-// the landing card is where the visitor starts or opens it.
-for (const isDemoActive of [false, true]) {
-  assert.deepEqual(
-    resolveViewerLandingAction({
-      ...fresh,
-      restoredEndpointUrl: DEMO_ENDPOINT,
-      canOpenRestoredSession: true,
-      isDemoActive
-    }),
-    { kind: 'manual' }
-  )
-}
+// A restored demo session nothing in this document answers any more — a
+// reload, a restored tab — is not redirected: the landing card is where the
+// visitor starts the demo again. One this document is running, or starting,
+// is joined.
+assert.deepEqual(
+  resolveViewerLandingAction({
+    ...fresh,
+    restoredEndpointUrl: DEMO_ENDPOINT,
+    canOpenRestoredSession: true
+  }),
+  { kind: 'manual' }
+)
+assert.deepEqual(
+  resolveViewerLandingAction({
+    ...fresh,
+    restoredEndpointUrl: DEMO_ENDPOINT,
+    canOpenRestoredSession: true,
+    isDemoActive: true
+  }),
+  { kind: 'join-demo' }
+)
 
 assert.equal(resolveViewerLandingPath({}), '/view/navigator')
 assert.equal(resolveViewerLandingPath({ trace: 'true' }), '/view/trace')
