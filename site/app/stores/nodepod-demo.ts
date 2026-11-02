@@ -11,6 +11,7 @@ import {
   readAccessToken,
   redactAccessToken
 } from '~/utils/inspector-access-token'
+import { captureBestEffort } from '~/utils/graph-viewer-analytics'
 import { resolveDirectRunUrl } from '~/utils/inspector-endpoint-url'
 import { createNodepodDemoRunGuard } from '~/utils/nodepod-demo-run-guard'
 import {
@@ -639,8 +640,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
 
     // The one place a demo comes up, whatever asked for it: a preview's "Load
     // Example", `/view`'s, or the retry after a failure. Joining a demo that is
-    // already running or starting never gets here.
-    posthog?.capture('graph_demo_started', {
+    // already running or starting never gets here. Best-effort: the demo is up
+    // by now, and an analytics failure must not fail the start and tear it down.
+    captureBestEffort(posthog, 'graph_demo_started', {
       revision: demoManifest.revision
     })
 

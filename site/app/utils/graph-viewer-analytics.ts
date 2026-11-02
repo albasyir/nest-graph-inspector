@@ -149,3 +149,25 @@ export function createGraphViewerEventProperties(options: {
 
   return properties
 }
+
+/** The one call this site makes of an analytics client. */
+export type AnalyticsClient = {
+  capture(event: string, properties?: Record<string, unknown>): unknown
+}
+
+/**
+ * Sends an event when there is a client to send it with, and never lets the
+ * attempt throw: what it reports on has already happened, and a failing
+ * analytics client must not undo it.
+ */
+export function captureBestEffort(
+  client: AnalyticsClient | null | undefined,
+  event: string,
+  properties: Record<string, unknown>
+): void {
+  try {
+    client?.capture(event, properties)
+  } catch {
+    // The event is lost; nothing else is.
+  }
+}

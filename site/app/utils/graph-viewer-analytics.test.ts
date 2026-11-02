@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import {
+  captureBestEffort,
   createGraphViewerEventProperties,
   describeGraphEndpoint,
   type GraphLoadFailure
@@ -268,5 +269,26 @@ describe('an event about a graph file', () => {
 
   test('about an endpoint says nothing of files', () => {
     assert.equal('graph_source' in eventProperties(), false)
+  })
+})
+
+// The demo store reports graph_demo_started once the demo is already up: a
+// client that throws must not fail that start, which would tear the demo down.
+describe('an event sent on a best-effort basis', () => {
+  test('reaches a client that takes it', () => {
+    const sent: unknown[] = []
+    captureBestEffort({ capture: (event, properties) => sent.push([event, properties]) }, 'graph_demo_started', { revision: 'r1' })
+    assert.deepEqual(sent, [['graph_demo_started', { revision: 'r1' }]])
+  })
+
+  test('never throws, whether the client fails or is not there', () => {
+    const failing = {
+      capture: () => {
+        throw new Error('analytics unavailable')
+      }
+    }
+    assert.doesNotThrow(() => captureBestEffort(failing, 'graph_demo_started', { revision: 'r1' }))
+    assert.doesNotThrow(() => captureBestEffort(undefined, 'graph_demo_started', { revision: 'r1' }))
+    assert.doesNotThrow(() => captureBestEffort(null, 'graph_demo_started', { revision: 'r1' }))
   })
 })
