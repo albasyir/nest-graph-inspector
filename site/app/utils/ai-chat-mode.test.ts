@@ -1,7 +1,9 @@
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import {
+  AI_CHAT_GRAPH_CHANGED_NOTICE,
   AI_CHAT_GRAPH_FILE_MODE_REASON,
+  isAskedGraphOnScreen,
   resolveAiChatAnswerMode,
   resolveAiChatFetch
 } from './ai-chat-mode.ts'
@@ -55,5 +57,32 @@ describe('what the AI chat fetches', () => {
     assert.equal(resolveAiChatFetch({ isGraphFile: false }), 'markdown')
     assert.equal(resolveAiChatFetch({ isGraphFile: false, agent: false }), 'markdown')
     assert.equal(resolveAiChatFetch({ isGraphFile: false, agent: true }), 'json')
+  })
+})
+
+describe('the graph a question was asked about', () => {
+  const ENDPOINT = 'http://localhost:53371/__graph-inspector'
+  const asked = { revision: 4, endpointUrl: ENDPOINT }
+
+  test('is still on screen while the viewer has not moved', () => {
+    assert.equal(isAskedGraphOnScreen(asked, { revision: 4, endpointUrl: ENDPOINT }), true)
+    assert.equal(isAskedGraphOnScreen({ revision: 7, endpointUrl: '' }, { revision: 7, endpointUrl: '' }), true)
+  })
+
+  // Another endpoint, a graph file, or the same file opened again.
+  test('is gone once the viewer is put on another graph', () => {
+    assert.equal(isAskedGraphOnScreen(asked, { revision: 5, endpointUrl: ENDPOINT }), false)
+    assert.equal(isAskedGraphOnScreen(asked, { revision: 5, endpointUrl: '' }), false)
+    assert.equal(isAskedGraphOnScreen({ revision: 7, endpointUrl: '' }, { revision: 8, endpointUrl: '' }), false)
+  })
+
+  // Letting an endpoint go leaves the revision where it was.
+  test('is gone once its endpoint has been let go', () => {
+    assert.equal(isAskedGraphOnScreen(asked, { revision: 4, endpointUrl: '' }), false)
+  })
+
+  test('the notice says why there is no answer, and what to do', () => {
+    assert.match(AI_CHAT_GRAPH_CHANGED_NOTICE, /another graph/)
+    assert.match(AI_CHAT_GRAPH_CHANGED_NOTICE, /Ask again/)
   })
 })

@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { WebLlmError, type WebLlmErrorKind } from '~/composables/useWebLlmEngine'
-import { resolveAiChatAnswerMode, resolveAiChatFetch } from '~/utils/ai-chat-mode'
+import {
+  AI_CHAT_GRAPH_CHANGED_NOTICE,
+  isAskedGraphOnScreen,
+  resolveAiChatAnswerMode,
+  resolveAiChatFetch
+} from '~/utils/ai-chat-mode'
 import {
   MOBILE_BREAKPOINT_PX,
   MOBILE_DISCLAIMER_MESSAGE,
@@ -1161,12 +1166,29 @@ async function handleSubmit(event: Event) {
   try {
     const useAgent = isAgentMode.value
 
+    // The graph on screen as the question was asked. The refresh below waits
+    // on the network, and the visitor can put another graph on screen
+    // meanwhile; this one is what the question is about.
+    const asked = { revision: graphStore.graphRevision, endpointUrl: graphStore.endpointUrl }
+
     // Only what the chosen mode reads. The plain path answers from the Markdown
     // excerpt; agent mode never sees it, because its tools query the JSON. A
     // graph file was read whole as it opened, and has no endpoint to ask.
     const refresh = resolveAiChatFetch({ isGraphFile: graphStore.isFileSource, agent: useAgent })
     if (refresh) {
       await (refresh === 'json' ? graphStore.fetchJson() : graphStore.fetchMarkdown())
+    }
+
+    // Another graph went on screen while that was in flight, so what the store
+    // holds now belongs to it. Answering from it would answer a question nobody
+    // asked; saying so lets the visitor ask about the graph they now see.
+    if (!isAskedGraphOnScreen(asked, { revision: graphStore.graphRevision, endpointUrl: graphStore.endpointUrl })) {
+      updateAssistantMessage({
+        reasoning: '',
+        reasoningStreaming: false,
+        notice: AI_CHAT_GRAPH_CHANGED_NOTICE
+      })
+      return
     }
 
     // The graph this question was asked about, held for the whole answer:
@@ -1362,7 +1384,7 @@ async function handleSubmit(event: Event) {
     })
 
     posthog?.capture('Graph AI Answer Completed', {
-      url: describeGraphEndpoint(graphStore.endpointUrl).graph_url,
+      url: describeGraphEndpoint(asked.endpointUrl).graph_url,
       model: modelId,
       mode: useAgent ? 'agent' : 'chat',
       toolCalls: getAssistantMessage()?.toolSteps?.length || 0

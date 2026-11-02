@@ -57,3 +57,26 @@ export function resolveAiChatFetch(input: {
 
   return input.agent ? 'json' : 'markdown'
 }
+
+/** The graph a question was asked about, as the viewer tells one from another. */
+export type AskedGraph = {
+  /** The graph store's `graphRevision` as the question was asked. */
+  revision: number
+  /** The graph's endpoint, empty for a graph file. */
+  endpointUrl: string
+}
+
+/**
+ * Whether the graph on screen is still the one a question was asked about.
+ *
+ * The revision moves whenever the viewer is put on another graph — another
+ * endpoint, a graph file, the same file opened again. An endpoint let go
+ * leaves the revision where it was, so the endpoint is compared as well.
+ */
+export function isAskedGraphOnScreen(asked: AskedGraph, onScreen: AskedGraph): boolean {
+  return asked.revision === onScreen.revision && asked.endpointUrl === onScreen.endpointUrl
+}
+
+/** What an answer says in its place when another graph went on screen first. */
+export const AI_CHAT_GRAPH_CHANGED_NOTICE
+  = 'Not answered: another graph opened while this question was being prepared. Ask again about the graph on screen.'
