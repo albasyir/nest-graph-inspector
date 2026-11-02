@@ -2431,7 +2431,7 @@ const layoutSaveButton = computed(() => {
 
 const layoutSaveTitle = computed(() =>
   props.layoutPersistence === 'session'
-    ? 'Kept in this tab only — download it to commit beside the application'
+    ? 'Kept in this tab only — download it, and rename it to .muse in the project root to keep it'
     : 'Save to the application\'s layout file'
 )
 
@@ -2709,7 +2709,7 @@ defineExpose({ centerGraph, focusModule })
         size="sm"
         square
         aria-label="Download layout"
-        title="Download nest-graph-layout.json to commit beside the application"
+        title="Download nest-graph-layout.json — rename it to .muse in the project root for a running inspector to read"
         @click="downloadCurrentLayout"
       />
       <UButton

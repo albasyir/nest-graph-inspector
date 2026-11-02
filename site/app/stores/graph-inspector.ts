@@ -897,9 +897,11 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   }
 
   /**
-   * Downloads a layout as the file the library would have written, for a
-   * graph whose layout cannot be saved to the application — commit it beside
-   * the application and it is picked up from there.
+   * Downloads a layout, for a graph whose layout cannot be saved to the
+   * application, as the JSON the library keeps one in. It downloads as
+   * `nest-graph-layout.json`; a running inspector reads its layout from the
+   * one file `.muse` in the application's root, so that is what the download
+   * is renamed to.
    */
   function downloadLayout(layout: GraphLayout) {
     if (!import.meta.client) {
