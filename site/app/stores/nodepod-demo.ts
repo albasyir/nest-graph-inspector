@@ -154,6 +154,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
    * can be used as a base. GitHub Pages serves this site from a subpath, so
    * the origin alone would resolve the payload against the wrong root. The
    * demo's endpoint is built under it, and recognised by it elsewhere.
+   *
+   * `''` in a server render, which has no page origin, and on an opaque origin
+   * (`resolveSiteBaseUrl`): no endpoint is then taken for the demo.
    */
   function siteBaseUrl() {
     // A server render has no page origin, and the demo only ever runs in the

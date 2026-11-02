@@ -145,12 +145,24 @@ const DEMO_ADDRESS_BOUNDARIES: Array<[label: string, endpointUrl: string, siteBa
   ['a hexadecimal port', `${SITE_BASE}${SEGMENT}/0x1f/__graph-inspector`, SITE_BASE, false],
   ['port zero', `${SITE_BASE}${SEGMENT}/0/__graph-inspector`, SITE_BASE, false],
   ['no port at all', `${SITE_BASE}${SEGMENT}//__graph-inspector`, SITE_BASE, false],
-  ['no base URL to go by', `${SITE_BASE}${SEGMENT}/53371/__graph-inspector`, '', false]
+  ['no base URL to go by', `${SITE_BASE}${SEGMENT}/53371/__graph-inspector`, '', false],
+  ['another host, written without the slashes', `https:evil.example.com/../${SEGMENT}/53371/x`, SITE_BASE, false],
+  ['the demo, written without the slashes', `https:albasyir.github.io/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE, true]
 ]
 for (const [label, endpointUrl, siteBaseUrl, isDemo] of DEMO_ADDRESS_BOUNDARIES) {
   assert.equal(isDemoEndpoint(endpointUrl, siteBaseUrl), isDemo, label)
-  assert.equal(readDemoRequestTarget(endpointUrl, siteBaseUrl) !== null, isDemo, `${label}: the bridge agrees`)
+  // The bridge answers the URL the endpoint is the same way.
+  assert.equal(
+    readDemoRequestTarget(new URL(endpointUrl).href, siteBaseUrl) !== null,
+    isDemo,
+    `${label}: the bridge agrees`
+  )
 }
+// Why the endpoint is parsed on its own first: read against the site's base,
+// as the bridge reads a request, `https:` without its slashes is a path
+// relative to that base, and names another host than the URL itself does.
+assert.notEqual(readDemoRequestTarget(`https:evil.example.com/../${SEGMENT}/53371/x`, SITE_BASE), null)
+assert.equal(readDemoRequestTarget(`https:albasyir.github.io/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE), null)
 // The bridge reads a request relative to the site too; an endpoint is
 // absolute, so the same address as a bare path is not the demo.
 assert.notEqual(readDemoRequestTarget(`/nest-graph-inspector/${SEGMENT}/53371/x`, SITE_BASE), null)
