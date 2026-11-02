@@ -723,7 +723,7 @@ that cannot reach into a Pinia setup store.
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building, resolving a provider or controller by its node id, and which trace spans may be re-run) |
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
-| `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, and resolves the mount base its sibling endpoints hang off |
+| `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, resolves the mount base its sibling endpoints hang off, and tells the demo's endpoint from others (`isDemoEndpoint`: the segment, on the viewer's own origin) |
 | `nodepod-demo-endpoint.test.ts` | Assert-based test for `nodepod-demo-endpoint.ts` (no framework) |
 | `nodepod-demo-bridge.ts` | Conversions between the browser's `fetch` types and the ones the in-browser runtime speaks, and the deadline a bridged request is given |
 | `nodepod-demo-bridge.test.ts` | Assert-based test for `nodepod-demo-bridge.ts` (no framework) |
