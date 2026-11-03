@@ -173,13 +173,13 @@ importers:
         version: 2.1.0(@types/node@26.6.2)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(unstorage@1.17.6(db0@0.3.4(better-sqlite3@12.11.1))(ioredis@5.11.1))
       '@nuxt/ui':
         specifier: ^4.11.2
-        version: 4.11.2(d116e1fdee1114e0c46fbf6bdc6adb82)
+        version: 4.11.2(d45ae927ce8cf9b865d359ffd7240d69)
       '@nuxtjs/device':
         specifier: ^4.0.0
         version: 4.0.0
       '@nuxtjs/mcp-toolkit':
         specifier: ^0.21.0
-        version: 0.21.0(@cfworker/json-schema@4.1.1)(@vue/compiler-sfc@3.5.44)(h3@1.15.11)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(rollup@4.67.4)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.6)
+        version: 0.21.0(@cfworker/json-schema@4.1.1)(@vue/compiler-sfc@3.5.44)(h3@1.15.11)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(rollup@4.67.4)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.7)
       '@nuxtjs/mdc':
         specifier: ^0.23.1
         version: 0.23.1(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))
@@ -245,7 +245,7 @@ importers:
         version: 0.2.0(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))
       nuxt-og-image:
         specifier: ^6.4.9
-        version: 6.7.4(82a59808b47325d9853aa47ac0c447e1)
+        version: 6.7.4(0bbd6e6c61bed95b3bffb25709f7f917)
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3))
@@ -271,8 +271,8 @@ importers:
         specifier: ^1.11.1
         version: 1.11.1(apexcharts@5.16.0)(vue@3.5.44(typescript@6.0.3))
       zod:
-        specifier: ^4.6.6
-        version: 4.6.6
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@nuxt/eslint':
         specifier: ^1.17.0
@@ -10095,8 +10095,8 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zod@4.6.6:
-    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -11554,7 +11554,7 @@ snapshots:
       langsmith: 0.9.0(ws@8.22.1)
       mustache: 4.2.0
       p-queue: 6.6.2
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@opentelemetry/api'
       - '@opentelemetry/exporter-trace-otlp-proto'
@@ -11576,14 +11576,14 @@ snapshots:
     optionalDependencies:
       vue: 3.5.44(typescript@6.0.3)
 
-  '@langchain/langgraph@1.4.12(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.6)':
+  '@langchain/langgraph@1.4.12(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.7)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.22.1)
       '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.9(ws@8.22.1))
       '@langchain/langgraph-sdk': 1.9.30(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))
       '@langchain/protocol': 0.0.18
       '@standard-schema/spec': 1.1.0
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - react
       - react-dom
@@ -11623,13 +11623,13 @@ snapshots:
       eventsource-parser: 3.1.1
       jose: 6.2.12
       pkce-challenge: 5.0.1
-      zod: 4.6.6
+      zod: 4.6.7
 
   '@modelcontextprotocol/core@2.1.0':
     dependencies:
-      zod: 4.6.6
+      zod: 4.6.7
 
-  '@modelcontextprotocol/sdk@1.30.1(@cfworker/json-schema@4.1.1)(zod@4.6.6)':
+  '@modelcontextprotocol/sdk@1.30.1(@cfworker/json-schema@4.1.1)(zod@4.6.7)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.9)
       ajv: 8.20.0
@@ -11646,8 +11646,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.6.6
-      zod-to-json-schema: 3.25.2(zod@4.6.6)
+      zod: 4.6.7
+      zod-to-json-schema: 3.25.2(zod@4.6.7)
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
@@ -11656,7 +11656,7 @@ snapshots:
   '@modelcontextprotocol/server@2.1.0':
     dependencies:
       '@modelcontextprotocol/core': 2.1.0
-      zod: 4.6.6
+      zod: 4.6.7
 
   '@monaco-editor/loader@1.7.0':
     dependencies:
@@ -12677,7 +12677,7 @@ snapshots:
       rc9: 3.1.0
       std-env: 4.3.0
 
-  '@nuxt/ui@4.11.2(d116e1fdee1114e0c46fbf6bdc6adb82)':
+  '@nuxt/ui@4.11.2(d45ae927ce8cf9b865d359ffd7240d69)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@iconify/vue': 5.0.3(vue@3.5.44(typescript@6.0.3))
@@ -12749,7 +12749,7 @@ snapshots:
       '@nuxt/content': 3.16.1(@nuxt/schema@4.6.3)(@oxc-project/types@0.156.0)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@6.0.3)))(better-sqlite3@12.11.1)(confbox@0.3.2)(dotenv@17.4.2)(esbuild@0.28.2)(giget@3.3.1)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(rollup@4.67.4)(valibot@1.4.2(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32))
       valibot: 1.4.2(typescript@6.0.3)
       vue-router: 5.4.0(@vue/compiler-sfc@3.5.44)(esbuild@0.28.2)(pinia@3.0.4(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3)))(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32))
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -12923,15 +12923,15 @@ snapshots:
     dependencies:
       defu: 6.1.7
 
-  '@nuxtjs/mcp-toolkit@0.21.0(@cfworker/json-schema@4.1.1)(@vue/compiler-sfc@3.5.44)(h3@1.15.11)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(rollup@4.67.4)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.6)':
+  '@nuxtjs/mcp-toolkit@0.21.0(@cfworker/json-schema@4.1.1)(@vue/compiler-sfc@3.5.44)(h3@1.15.11)(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(rollup@4.67.4)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.7)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.1(@cfworker/json-schema@4.1.1)(zod@4.6.6)
+      '@modelcontextprotocol/sdk': 1.30.1(@cfworker/json-schema@4.1.1)(zod@4.6.7)
       '@nuxt/kit': 4.5.2(magic-string@1.1.0)(magicast@0.5.5)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))
       '@vitejs/plugin-vue': 6.0.9(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.44(typescript@6.0.3))
       h3: 1.15.11
       tinyglobby: 0.2.17
       vite-plugin-singlefile: 2.3.3(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
-      zod: 4.6.6
+      zod: 4.6.7
     optionalDependencies:
       '@vue/compiler-sfc': 3.5.44
       vite: 8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
@@ -17918,10 +17918,10 @@ snapshots:
   langchain@1.5.10(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))(ws@8.22.1):
     dependencies:
       '@langchain/core': 1.2.9(ws@8.22.1)
-      '@langchain/langgraph': 1.4.12(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.6)
+      '@langchain/langgraph': 1.4.12(@langchain/core@1.2.9(ws@8.22.1))(vue@3.5.44(typescript@6.0.3))(zod@4.6.7)
       '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.9(ws@8.22.1))
       langsmith: 0.9.0(ws@8.22.1)
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@opentelemetry/api'
       - '@opentelemetry/exporter-trace-otlp-proto'
@@ -18936,7 +18936,7 @@ snapshots:
       - rolldown
       - unplugin
 
-  nuxt-og-image@6.7.4(82a59808b47325d9853aa47ac0c447e1):
+  nuxt-og-image@6.7.4(0bbd6e6c61bed95b3bffb25709f7f917):
     dependencies:
       '@clack/prompts': 1.7.0
       '@nuxt/kit': 4.5.1(magic-string@1.1.0)(magicast@0.5.3)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))
@@ -18955,8 +18955,8 @@ snapshots:
       magic-string: 1.1.0
       magicast: 0.5.3
       mocked-exports: 0.1.1
-      nuxt-site-config: 4.1.2(4b13e722682cb3dd21cab85bf4ba14ac)
-      nuxtseo-shared: 5.3.6(1a64fbfb455413684a4d1e5c9024a4d9)
+      nuxt-site-config: 4.1.2(e381619fc70fcb303472a60c11f6a938)
+      nuxtseo-shared: 5.3.6(902da98d04fd15f46b9f90bbe9454992)
       nypm: 0.6.8
       object-identity: 0.2.3
       ofetch: 1.5.1
@@ -18981,7 +18981,7 @@ snapshots:
       sharp: 0.34.5
       tailwindcss: 4.3.3
       unifont: 0.7.5
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@farmfe/core'
       - '@nuxt/schema'
@@ -19022,13 +19022,13 @@ snapshots:
       - unplugin
       - vue
 
-  nuxt-site-config@4.1.2(4b13e722682cb3dd21cab85bf4ba14ac):
+  nuxt-site-config@4.1.2(e381619fc70fcb303472a60c11f6a938):
     dependencies:
       '@nuxt/devalue': 2.0.2
       '@nuxt/kit': 4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.2)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.7.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))
       h3: 1.15.11
       nuxt-site-config-kit: 4.1.2(@nuxt/schema@4.6.3)(confbox@0.3.2)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.1.0)(mlly@1.8.2)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vue@3.5.44(typescript@6.0.3))
-      nuxtseo-shared: 5.3.6(1a64fbfb455413684a4d1e5c9024a4d9)
+      nuxtseo-shared: 5.3.6(902da98d04fd15f46b9f90bbe9454992)
       pathe: 2.0.3
       pkg-types: 2.4.0
       site-config-stack: 4.1.2(vue@3.5.44(typescript@6.0.3))
@@ -19202,7 +19202,7 @@ snapshots:
       - xml2js
       - yaml
 
-  nuxtseo-shared@5.3.6(1a64fbfb455413684a4d1e5c9024a4d9):
+  nuxtseo-shared@5.3.6(902da98d04fd15f46b9f90bbe9454992):
     dependencies:
       '@clack/prompts': 1.7.0
       '@nuxt/devtools-kit': 4.0.0-alpha.7(@nuxt/schema@4.6.3)(confbox@0.3.2)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.1.0)(mlly@1.8.2)(oxc-parser@0.140.0)(rolldown@1.2.16)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.67.4)(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(webpack@5.106.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.32)))(vite@8.3.5(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
@@ -19222,8 +19222,8 @@ snapshots:
       ufo: 1.6.4
       vue: 3.5.44(typescript@6.0.3)
     optionalDependencies:
-      nuxt-site-config: 4.1.2(4b13e722682cb3dd21cab85bf4ba14ac)
-      zod: 4.6.6
+      nuxt-site-config: 4.1.2(e381619fc70fcb303472a60c11f6a938)
+      zod: 4.6.7
     transitivePeerDependencies:
       - confbox
       - dotenv
@@ -21886,12 +21886,12 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  zod-to-json-schema@3.25.2(zod@4.6.6):
+  zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
-      zod: 4.6.6
+      zod: 4.6.7
 
   zod@3.25.76: {}
 
-  zod@4.6.6: {}
+  zod@4.6.7: {}
 
   zwitch@2.0.4: {}
