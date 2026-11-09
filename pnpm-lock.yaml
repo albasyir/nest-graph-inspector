@@ -234,8 +234,8 @@ importers:
         specifier: ^14.3.0
         version: 14.3.0(vue@3.5.44(typescript@6.0.3))
       apexcharts:
-        specifier: ^5.16.0
-        version: 5.16.0
+        specifier: ^8.7.0
+        version: 8.7.0
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -289,7 +289,7 @@ importers:
         version: 5.1.0
       vue3-apexcharts:
         specifier: ^1.11.1
-        version: 1.11.1(apexcharts@5.16.0)(vue@3.5.44(typescript@6.0.3))
+        version: 1.11.1(apexcharts@8.7.0)(vue@3.5.44(typescript@6.0.3))
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -4210,8 +4210,12 @@ packages:
     resolution: {integrity: sha512-KMReFUr0B4t+D+OBkjR3KYqvocp2XaSzO55UcB6mgQMd3KbcE+mWTyvVV7D/zsdEbNnV6acZUutkiHQXvTr1Rw==}
     engines: {node: '>= 8'}
 
-  apexcharts@5.16.0:
-    resolution: {integrity: sha512-ULO3Gqrm0/26uwBcYz49u181uIp8Fy6BQQgg9QUDajs+JAs/EbXxiAmdc6BLy1JY29/JXroM7P0j0t2JPDApdg==}
+  apex-commons@0.8.4:
+    resolution: {integrity: sha512-RRv31MAzpSW3Dmjx/hLuuOZFCstFnBnhkIoQ7iodaZY3WSZKCXzQ41ypBhMcvy+6LxENt/rTANvTqt5NR+trTA==}
+
+  apexcharts@8.7.0:
+    resolution: {integrity: sha512-HHpMlM4QvLXFLL6hyn1iivF+3IyoCrBEXYcV9elJuT+Dc4At9P5+RAaSYA1onOrcXg59+VTAsnyUDdm4GRhUfA==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
   append-field@1.0.0:
     resolution: {integrity: sha512-klpgFSWLW1ZEs8svjfb7g4qWY0YS5imI82dTg+QahUvJ8YqAY0P10Uk8tTyh9ZGuYEZEMaeJYCF5BFuX552hsw==}
@@ -7896,8 +7900,8 @@ packages:
   prosemirror-tables@1.8.5:
     resolution: {integrity: sha512-V/0cDCsHKHe/tfWkeCmthNUcEp1IVO3p6vwN8XtwE9PZQLAZJigbw3QoraAdfJPir4NKJtNvOB8oYGKRl+t0Dw==}
 
-  prosemirror-transform@1.12.4:
-    resolution: {integrity: sha512-2/WuPum3pn+O/Vi2vzpi8210ICUe2kIPXdLYjQ09Pv5DtT5bcKWMJhAKPBwvpPjpp5iOYUVwVEr0gOM1BY1Mgw==}
+  prosemirror-transform@1.12.5:
+    resolution: {integrity: sha512-3EBXZBM4h3MKuWvs9sQ7IA0/v6jCqCZ4wC08PIvzY1VSQWDL90KEyfg5C0Ex52UJesf/QVogxvuBsZdKmLc3NQ==}
 
   prosemirror-view@1.42.9:
     resolution: {integrity: sha512-bKbfzeKZOu2H2JQU2TaJmYu6EBcor3VnGIR4jR31cbEt1ztUnfUB6bKGV1+fJzOJdrVWR+tRU0208zM3oQx4wA==}
@@ -13260,7 +13264,7 @@ snapshots:
       prosemirror-schema-list: 1.6.0
       prosemirror-state: 1.4.4
       prosemirror-tables: 1.8.5
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
       prosemirror-view: 1.42.9
 
   '@tiptap/starter-kit@3.32.2':
@@ -14436,7 +14440,11 @@ snapshots:
       normalize-path: 3.0.0
       picomatch: 2.3.2
 
-  apexcharts@5.16.0: {}
+  apex-commons@0.8.4: {}
+
+  apexcharts@8.7.0:
+    dependencies:
+      apex-commons: 0.8.4
 
   append-field@1.0.0: {}
 
@@ -18895,18 +18903,18 @@ snapshots:
 
   prosemirror-changeset@2.4.6:
     dependencies:
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
 
   prosemirror-commands@1.7.2:
     dependencies:
       prosemirror-model: 1.25.12
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
 
   prosemirror-dropcursor@1.8.4:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
       prosemirror-view: 1.42.9
 
   prosemirror-gapcursor@1.4.1:
@@ -18919,14 +18927,14 @@ snapshots:
   prosemirror-history@1.5.1:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
       prosemirror-view: 1.42.9
       rope-sequence: 1.3.4
 
   prosemirror-inputrules@1.5.1:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
 
   prosemirror-keymap@1.2.3:
     dependencies:
@@ -18941,12 +18949,12 @@ snapshots:
     dependencies:
       prosemirror-model: 1.25.12
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
 
   prosemirror-state@1.4.4:
     dependencies:
       prosemirror-model: 1.25.12
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
       prosemirror-view: 1.42.9
 
   prosemirror-tables@1.8.5:
@@ -18954,10 +18962,10 @@ snapshots:
       prosemirror-keymap: 1.2.3
       prosemirror-model: 1.25.12
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
       prosemirror-view: 1.42.9
 
-  prosemirror-transform@1.12.4:
+  prosemirror-transform@1.12.5:
     dependencies:
       prosemirror-model: 1.25.12
 
@@ -18965,7 +18973,7 @@ snapshots:
     dependencies:
       prosemirror-model: 1.25.12
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.4
+      prosemirror-transform: 1.12.5
 
   protocols@2.0.2: {}
 
@@ -20692,9 +20700,9 @@ snapshots:
       '@vue/language-core': 3.3.8
       typescript: 6.0.3
 
-  vue3-apexcharts@1.11.1(apexcharts@5.16.0)(vue@3.5.44(typescript@6.0.3)):
+  vue3-apexcharts@1.11.1(apexcharts@8.7.0)(vue@3.5.44(typescript@6.0.3)):
     dependencies:
-      apexcharts: 5.16.0
+      apexcharts: 8.7.0
       vue: 3.5.44(typescript@6.0.3)
 
   vue@3.5.44(typescript@6.0.3):
