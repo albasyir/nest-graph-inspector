@@ -3,6 +3,11 @@ export interface FrequentlyBoughtTogetherQuery {
   readonly productId: string;
   /** How many products to return, 1 to 10; 5 when left out. */
   readonly limit?: number;
+  /**
+   * Rank only these products — those still sold, say — so the limit counts
+   * eligible products alone. Every product bought together when left out.
+   */
+  readonly among?: readonly string[];
 }
 
 /** A product that shared paid orders with the one asked about. */

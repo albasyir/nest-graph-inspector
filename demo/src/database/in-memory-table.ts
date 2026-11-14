@@ -203,13 +203,20 @@ function deepFreeze<V>(value: V): V {
   return value;
 }
 
-function freezeNested(value: unknown): void {
-  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) {
+/**
+ * Freezes `value` and everything reachable from it. Containers that are
+ * already frozen are walked too: freezing is shallow, so a frozen array can
+ * still hold mutable rows. `visited` stops the walk at cycles and at objects
+ * shared between branches.
+ */
+function freezeNested(value: unknown, visited = new Set<object>()): void {
+  if (typeof value !== 'object' || value === null || visited.has(value)) {
     return;
   }
 
+  visited.add(value);
   Object.freeze(value);
   for (const nested of Object.values(value)) {
-    freezeNested(nested);
+    freezeNested(nested, visited);
   }
 }

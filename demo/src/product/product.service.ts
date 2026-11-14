@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { orConflict } from '../common/conflict';
-import { MAX_RECOMMENDATION_LIMIT } from '../recommendation/recommendation.dto';
 import { RecommendationService } from '../recommendation/recommendation.service';
 import type {
   NewProduct,
@@ -62,23 +61,22 @@ export class ProductService {
 
   /**
    * A product with the products most often bought together with it — the
-   * top three still sold: archived products are dropped before the three are
-   * chosen, so one leaving the catalogue makes room for the next.
+   * top three still sold. Only products still sold are ranked, so however
+   * many archived ones were bought with it more often, none takes a place.
    *
    * @throws NotFoundException when there is no such product, or it is archived
    */
   async getProductDetail(productId: string): Promise<ProductDetail> {
-    const product = await this.getProduct(productId);
+    const [product, stillSold] = await Promise.all([
+      this.getProduct(productId),
+      this.products.listActive(),
+    ]);
+    const byId = new Map(stillSold.map((related) => [related.id, related]));
     const together = await this.recommendations.frequentlyBoughtTogether({
       productId,
-      limit: MAX_RECOMMENDATION_LIMIT,
+      limit: RELATED_PRODUCT_LIMIT,
+      among: [...byId.keys()],
     });
-    const stillSold = together.length
-      ? await this.products.findActiveByIds(
-          together.map((item) => item.productId),
-        )
-      : [];
-    const byId = new Map(stillSold.map((related) => [related.id, related]));
 
     const frequentlyBoughtTogether = together.flatMap(
       (item): RelatedProduct[] => {
@@ -97,13 +95,7 @@ export class ProductService {
       },
     );
 
-    return {
-      ...product,
-      frequentlyBoughtTogether: frequentlyBoughtTogether.slice(
-        0,
-        RELATED_PRODUCT_LIMIT,
-      ),
-    };
+    return { ...product, frequentlyBoughtTogether };
   }
 
   /** The products among `productIds` that are still sold; unknown ids are skipped. */

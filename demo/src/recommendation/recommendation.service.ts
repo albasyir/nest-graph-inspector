@@ -35,6 +35,7 @@ export class RecommendationService {
       baskets,
       productId: query.productId,
       limit: query.limit ?? DEFAULT_RECOMMENDATION_LIMIT,
+      among: query.among === undefined ? undefined : new Set(query.among),
     });
   }
 }

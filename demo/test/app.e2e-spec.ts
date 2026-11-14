@@ -12,7 +12,7 @@ import { AppModule } from './../src/app.module';
  */
 const FLOW_TIMEOUT_MS = 120_000;
 
-type Method = 'get' | 'post' | 'delete';
+type Method = 'get' | 'post' | 'put' | 'delete';
 
 interface Route {
   readonly method: Method;
@@ -474,7 +474,7 @@ describe('Shop App (e2e)', () => {
   );
 
   it(
-    'keeps three related products when one of them leaves the catalogue',
+    'keeps three related products still sold, however many archived ones rank above them',
     async () => {
       const server = app.getHttpServer();
       // A seed customer, signing in with the published demo-only password.
@@ -509,6 +509,83 @@ describe('Shop App (e2e)', () => {
         server,
         { method: 'delete', path: '/products/prd_3', token },
         200,
+      );
+
+      expect(await relatedTo('prd_1')).toEqual(['prd_2', 'prd_5', 'prd_6']);
+
+      // More archived products than the old pool of ten, each bought with the
+      // cable twice — more often than prd_5 or prd_6 — so all of them rank
+      // above the products still sold. The seed catalogue is too small for
+      // this, so the products are made here.
+      const bundle = await Promise.all(
+        Array.from({ length: 11 }, (_, index) =>
+          call(
+            server,
+            {
+              method: 'post',
+              path: '/products',
+              token,
+              body: {
+                sku: `BUNDLE-${index}`,
+                name: `Bundle item ${index}`,
+                description: 'Bought with the cable, then discontinued.',
+                category: 'charging',
+              },
+            },
+            201,
+          ),
+        ),
+      );
+      const bundleIds = bundle.map((product) => textAt(product, 'id'));
+      await Promise.all(
+        bundleIds.map((productId) =>
+          call(
+            server,
+            {
+              method: 'put',
+              path: `/stores/str_1/products/${productId}`,
+              token,
+              body: { price: 10_000, stock: 10 },
+            },
+            200,
+          ),
+        ),
+      );
+      for (let round = 0; round < 2; round += 1) {
+        const checkout = await call(
+          server,
+          {
+            method: 'post',
+            path: '/orders/checkout',
+            token,
+            body: {
+              storeId: 'str_1',
+              items: ['prd_1', ...bundleIds].map((productId) => ({
+                productId,
+                quantity: 1,
+              })),
+            },
+          },
+          201,
+        );
+        await call(
+          server,
+          {
+            method: 'post',
+            path: `/payments/bills/${textAt(checkout, 'bill.id')}/simulate-pay`,
+            token,
+          },
+          200,
+        );
+      }
+      await Promise.all(
+        bundleIds.map((productId) =>
+          call(
+            server,
+            { method: 'delete', path: `/products/${productId}`, token },
+            200,
+          ),
+        ),
       );
 
       expect(await relatedTo('prd_1')).toEqual(['prd_2', 'prd_5', 'prd_6']);

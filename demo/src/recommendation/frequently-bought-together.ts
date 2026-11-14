@@ -3,13 +3,15 @@ import type { FrequentlyBoughtTogether } from './recommendation.dto';
 
 /**
  * Ranks what was bought alongside a product: every other product in a paid
- * order that held it, counted once per order. Most frequent first, then by
- * product id, so products with equal counts always come out in one order.
+ * order that held it — only those in `among`, when given — counted once per
+ * order. Most frequent first, then by product id, so products with equal
+ * counts always come out in one order. The limit applies last.
  */
 export function rankFrequentlyBoughtTogether(input: {
   readonly baskets: readonly PurchasedBasket[];
   readonly productId: string;
   readonly limit: number;
+  readonly among?: ReadonlySet<string>;
 }): FrequentlyBoughtTogether[] {
   const counts = new Map<string, { productName: string; orders: number }>();
 
@@ -25,6 +27,10 @@ export function rankFrequentlyBoughtTogether(input: {
     );
 
     for (const [productId, productName] of others) {
+      if (input.among && !input.among.has(productId)) {
+        continue;
+      }
+
       // Baskets arrive oldest first, so the latest name wins.
       counts.set(productId, {
         productName,
