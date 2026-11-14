@@ -133,6 +133,11 @@ export class StoreProductService {
   /**
    * Puts a product on an open store's shelf, or changes its price and stock.
    *
+   * `stock` replaces the count of units no order has reserved; it does not
+   * adjust it. Units held by orders waiting for payment are not part of it,
+   * and a count taken before a checkout reserved some will hand those units
+   * out a second time — count again after open orders settle.
+   *
    * @throws NotFoundException when the store or product does not exist
    * @throws ConflictException when the store is closed
    */

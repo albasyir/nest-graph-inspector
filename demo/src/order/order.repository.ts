@@ -31,19 +31,6 @@ export class OrderRepository {
     return this.orders.findMany((order) => order.customerId === customerId);
   }
 
-  /** The customer's order, if any, waiting for payment with this voucher. */
-  findPendingWithVoucher(input: {
-    readonly customerId: string;
-    readonly voucherId: string;
-  }): Promise<OrderRow | null> {
-    return this.orders.findOne(
-      (order) =>
-        order.status === 'PENDING_PAYMENT' &&
-        order.customerId === input.customerId &&
-        order.voucher?.voucherId === input.voucherId,
-    );
-  }
-
   /** Paid orders that held this product, oldest first. */
   listPaidContaining(productId: string): Promise<PaidOrderRow[]> {
     return this.orders.findMany(

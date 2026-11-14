@@ -11,16 +11,17 @@ import { CustomerLoyaltyService } from '../customer-loyalty/customer-loyalty.ser
 import type {
   CancelledOrderRow,
   OrderLine,
+  OrderRow,
   PaidOrderRow,
   PendingPaymentOrderRow,
 } from '../database/database.schema';
 import { PaymentService } from '../payment/payment.service';
 import { MAX_QUANTITY } from '../store-product/store-product.dto';
 import { StoreProductService } from '../store-product/store-product.service';
-import type { VoucherQuote, VoucherRedemption } from '../voucher/voucher.dto';
+import type { VoucherOnOrder } from '../voucher/voucher.dto';
 import { VoucherService } from '../voucher/voucher.service';
 import { priceLine, priceOrder, subtotalOf } from './order-pricing';
-import { assertPendingPayment, toCancelled, toPaid } from './order-state';
+import { toCancelled, toPaid } from './order-state';
 import {
   type CheckoutItem,
   type CheckoutRequest,
@@ -31,17 +32,18 @@ import {
   type OrderCancellation,
   type PurchasedBasket,
 } from './order.dto';
-import { OrderRepository } from './order.repository';
+import { type NewPendingOrder, OrderRepository } from './order.repository';
 
 /**
  * Orders, from checkout to payment.
  *
  * Checkout checks the store has the stock, prices the cart at its shelf
  * prices, takes off a voucher and then the loyalty-tier discount, reserves
- * the stock, records the order as PENDING_PAYMENT and has PaymentService
- * raise a bill — undoing the earlier steps if a later one fails. Paying the
- * bill marks the order PAID, spending the voucher and crediting points; a
- * failed payment or a change of mind cancels it and puts the stock back.
+ * the stock, records the order as PENDING_PAYMENT, reserves its voucher and
+ * has PaymentService raise a bill — undoing the earlier steps if a later one
+ * fails. Paying the bill marks the order PAID, spending the voucher and
+ * crediting points; a failed payment or a change of mind cancels it, putting
+ * the stock back and freeing the voucher.
  *
  * PaymentService is injected through forwardRef(): it calls back into this
  * service, so the two modules import each other.
@@ -67,7 +69,8 @@ export class OrderService {
    * @throws NotFoundException when the store, a product or the voucher does
    * not exist, or the store does not sell a product
    * @throws ConflictException when stock runs short, the store is closed, or
-   * the voucher is used or held by another unpaid order
+   * the voucher is used or on another order — two checkouts racing for one
+   * voucher both get this far, and the one that loses is cancelled
    */
   async checkout(request: CheckoutRequest): Promise<CheckoutResult> {
     assertCheckoutItems(request.items);
@@ -79,7 +82,7 @@ export class OrderService {
     const voucher =
       request.voucherCode === undefined
         ? null
-        : await this.quoteVoucher({
+        : await this.vouchers.quoteDiscount({
             customerId: request.customerId,
             code: request.voucherCode,
             subtotal,
@@ -93,82 +96,66 @@ export class OrderService {
 
     await this.reserveStock(request.storeId, request.items);
 
-    let order: PendingPaymentOrderRow;
-    try {
-      order = await this.orders.insertPending({
-        customerId: request.customerId,
-        storeId: request.storeId,
-        lines,
-        pricing,
-        voucher: voucher
-          ? { voucherId: voucher.voucherId, code: voucher.code }
-          : null,
-        loyaltyTier: tier.tier,
-        tierDiscountPercent: tier.percent,
-      });
-    } catch (error) {
-      await this.releaseAfterFailure(request.storeId, request.items);
-      throw error;
+    const order = await this.recordPendingOrder({
+      customerId: request.customerId,
+      storeId: request.storeId,
+      lines,
+      pricing,
+      voucher: voucher
+        ? { voucherId: voucher.voucherId, code: voucher.code }
+        : null,
+      loyaltyTier: tier.tier,
+      tierDiscountPercent: tier.percent,
+    });
+
+    const hold = voucherOnOrder(order);
+    if (hold) {
+      await this.undoCheckoutOnFailure(
+        order.id,
+        'Its voucher could not be reserved',
+        () => this.vouchers.reserve(hold),
+      );
     }
 
-    try {
-      const bill = await this.payments.createBill({
-        orderId: order.id,
-        customerId: order.customerId,
-        amount: pricing.total,
-      });
+    const bill = await this.undoCheckoutOnFailure(
+      order.id,
+      'Its bill could not be raised',
+      () =>
+        this.payments.createBill({
+          orderId: order.id,
+          customerId: order.customerId,
+          amount: order.pricing.total,
+        }),
+    );
 
-      return { order, bill };
-    } catch (error) {
-      await this.cancelOrder({
-        orderId: order.id,
-        reason: 'The bill could not be raised',
-      });
-      throw error;
-    }
+    return { order, bill };
   }
 
   /**
-   * Marks an order paid: spends its voucher, records the points it earns and
-   * credits them to the customer. PaymentService calls this once the bill
-   * is paid.
+   * Marks an order paid — checked and written in one step, so an order is
+   * paid at most once — then spends its voucher and credits the points it
+   * earned. PaymentService calls this once the bill is paid.
    *
    * @throws NotFoundException when there is no such order
-   * @throws ConflictException when the order is not waiting for payment, or
-   * its voucher was spent elsewhere in the meantime
+   * @throws ConflictException when the order is not waiting for payment
    */
   async markPaid(orderId: string): Promise<PaidOrderRow> {
-    const order = await this.requireOrder(orderId);
-    assertPendingPayment(order, 'paid');
+    const paid = await this.orders.transition(orderId, (current) =>
+      toPaid(current, {
+        paidAt: new Date().toISOString(),
+        pointsEarned: this.loyalty.pointsEarnedFor(current.pricing.total),
+      }),
+    );
 
-    const redemption: VoucherRedemption | null = order.voucher
-      ? {
-          voucherId: order.voucher.voucherId,
-          customerId: order.customerId,
-          orderId,
-        }
-      : null;
-    if (redemption) {
-      await this.vouchers.markUsed(redemption);
+    const hold = voucherOnOrder(paid);
+    if (hold) {
+      await this.spendVoucherOfPaidOrder(hold);
     }
 
-    const pointsEarned = this.loyalty.pointsEarnedFor(order.pricing.total);
-    let paid: PaidOrderRow;
-    try {
-      paid = await this.orders.transition(orderId, (current) =>
-        toPaid(current, { paidAt: new Date().toISOString(), pointsEarned }),
-      );
-    } catch (error) {
-      if (redemption) {
-        await this.restoreVoucherAfterFailure(redemption);
-      }
-      throw error;
-    }
-
-    if (pointsEarned > 0) {
+    if (paid.pointsEarned > 0) {
       await this.loyalty.addPoints({
         customerId: paid.customerId,
-        points: pointsEarned,
+        points: paid.pointsEarned,
       });
     }
 
@@ -176,7 +163,8 @@ export class OrderService {
   }
 
   /**
-   * Cancels an order that is waiting for payment and puts its stock back.
+   * Cancels an order that is waiting for payment, putting its stock back and
+   * freeing its voucher.
    *
    * @throws NotFoundException when there is no such order
    * @throws ConflictException when the order is already paid or cancelled
@@ -194,6 +182,11 @@ export class OrderService {
     );
 
     await this.releaseStock(cancelled.storeId, cancelled.lines);
+
+    const hold = voucherOnOrder(cancelled);
+    if (hold) {
+      await this.vouchers.release(hold);
+    }
 
     return cancelled;
   }
@@ -260,16 +253,6 @@ export class OrderService {
     }));
   }
 
-  private async requireOrder(orderId: string): Promise<Order> {
-    const order = await this.orders.findById(orderId);
-
-    if (!order) {
-      throw new NotFoundException(`Order ${orderId} not found`);
-    }
-
-    return order;
-  }
-
   /** Checks the shelf has enough and prices the line at the shelf price. */
   private async priceInStock(
     storeId: string,
@@ -291,28 +274,43 @@ export class OrderService {
     });
   }
 
-  /**
-   * Quotes the voucher, refusing one this customer already has on an order
-   * waiting for payment: it could only be spent once.
-   */
-  private async quoteVoucher(request: {
-    readonly customerId: string;
-    readonly code: string;
-    readonly subtotal: number;
-  }): Promise<VoucherQuote> {
-    const quote = await this.vouchers.quoteDiscount(request);
-    const pending = await this.orders.findPendingWithVoucher({
-      customerId: request.customerId,
-      voucherId: quote.voucherId,
-    });
-
-    if (pending) {
-      throw new ConflictException(
-        `Voucher ${quote.code} is already on order ${pending.id}, which is waiting for payment; pay or cancel that order first`,
-      );
+  /** Records a checked-out order, putting its stock back if that fails. */
+  private async recordPendingOrder(
+    order: NewPendingOrder,
+  ): Promise<PendingPaymentOrderRow> {
+    try {
+      return await this.orders.insertPending(order);
+    } catch (error) {
+      await this.releaseAfterFailure(order.storeId, order.lines);
+      throw error;
     }
+  }
 
-    return quote;
+  /**
+   * Runs one of the last steps of a checkout. If it fails, the order is
+   * cancelled — its stock put back and its voucher freed — and the step's own
+   * error is the one reported; a failure to cancel is logged with the id.
+   */
+  private async undoCheckoutOnFailure<T>(
+    orderId: string,
+    reason: string,
+    step: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await step();
+    } catch (error) {
+      try {
+        await this.cancelOrder({ orderId, reason });
+      } catch (cancelError) {
+        this.logger.error(
+          `Could not cancel order ${orderId} after its checkout failed`,
+          cancelError instanceof Error
+            ? cancelError.stack
+            : String(cancelError),
+        );
+      }
+      throw error;
+    }
   }
 
   /** Reserves every line at once; if any fails, the others are put back. */
@@ -372,19 +370,34 @@ export class OrderService {
     }
   }
 
-  /** Makes a voucher usable again after the order it was spent on failed to be paid. */
-  private async restoreVoucherAfterFailure(
-    redemption: VoucherRedemption,
-  ): Promise<void> {
+  /**
+   * Spends the voucher of an order that is already paid. The order holds it
+   * alone, so this does not fail in practice; if it does, the voucher stays
+   * held — still never usable twice — and, since the payment itself went
+   * through, the failure is logged with the ids rather than undoing it.
+   */
+  private async spendVoucherOfPaidOrder(hold: VoucherOnOrder): Promise<void> {
     try {
-      await this.vouchers.releaseRedemption(redemption);
+      await this.vouchers.markUsed(hold);
     } catch (error) {
       this.logger.error(
-        `Could not restore voucher ${redemption.voucherId} after order ${redemption.orderId} failed to be paid`,
+        `Could not mark voucher ${hold.voucherId} used by paid order ${hold.orderId}`,
         error instanceof Error ? error.stack : String(error),
       );
     }
   }
+}
+
+/** The voucher an order was checked out with, as the voucher module tracks it. */
+function voucherOnOrder(order: OrderRow): VoucherOnOrder | null {
+  return order.voucher
+    ? {
+        voucherId: order.voucher.voucherId,
+        code: order.voucher.code,
+        customerId: order.customerId,
+        orderId: order.id,
+      }
+    : null;
 }
 
 /** The rules a cart must keep before anything is priced or reserved. */

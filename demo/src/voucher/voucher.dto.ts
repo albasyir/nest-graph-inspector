@@ -22,6 +22,11 @@ export type Reward = RewardRow;
 export type VoucherUsage =
   | { readonly status: 'AVAILABLE' }
   | {
+      /** On an order waiting for payment; free again if it is cancelled. */
+      readonly status: 'RESERVED';
+      readonly orderId: string;
+    }
+  | {
       readonly status: 'USED';
       readonly orderId: string;
       readonly usedAt: string;
@@ -52,11 +57,17 @@ export interface VoucherQuote {
   readonly discountAmount: number;
 }
 
-/** A voucher spent on a paid order. */
-export type VoucherRedemption = Pick<
+/**
+ * A voucher on one order: checkout reserves it, paying the order spends it,
+ * and cancelling the order frees it again.
+ */
+export interface VoucherOnOrder extends Pick<
   VoucherRedemptionRow,
   'voucherId' | 'customerId' | 'orderId'
->;
+> {
+  /** The voucher's code, for messages. */
+  readonly code: string;
+}
 
 /** A customer buying a reward voucher with points. */
 export interface RewardClaim {

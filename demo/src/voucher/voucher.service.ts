@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
@@ -10,6 +11,7 @@ import { orConflict } from '../common/conflict';
 import { formatRupiah } from '../common/money';
 import { CustomerLoyaltyService } from '../customer-loyalty/customer-loyalty.service';
 import type {
+  UsedVoucherRedemptionRow,
   VoucherRedemptionRow,
   VoucherRow,
 } from '../database/database.schema';
@@ -21,9 +23,10 @@ import {
   type PublicVoucher,
   type Reward,
   type RewardClaim,
+  type VoucherOnOrder,
   type VoucherQuote,
   type VoucherQuoteRequest,
-  type VoucherRedemption,
+  type VoucherUsage,
 } from './voucher.dto';
 import { VoucherRepository } from './voucher.repository';
 
@@ -37,12 +40,16 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
  * ones customers claim from the reward catalogue with loyalty points.
  *
  * Checkout asks for a quote — may this customer use this code on this
- * subtotal, and how much does it take off — and paying the order marks the
- * voucher used. Claiming a reward spends points through
+ * subtotal, and how much does it take off — then reserves the voucher on its
+ * order; paying the order spends it, cancelling the order frees it. One row
+ * per voucher and customer carries all three states, so a voucher can never
+ * be on two orders at once. Claiming a reward spends points through
  * CustomerLoyaltyService, which is why this module imports that one.
  */
 @Injectable()
 export class VoucherService {
+  private readonly logger = new Logger(VoucherService.name);
+
   constructor(
     private readonly vouchers: VoucherRepository,
     private readonly loyalty: CustomerLoyaltyService,
@@ -131,10 +138,7 @@ export class VoucherService {
       };
     } catch (error) {
       // The points are already spent: hand them back before failing.
-      await this.loyalty.refundPoints({
-        customerId: claim.customerId,
-        points: reward.pointsCost,
-      });
+      await this.refundAfterFailure(claim, reward.pointsCost);
       throw error;
     }
   }
@@ -146,7 +150,8 @@ export class VoucherService {
    * @throws ForbiddenException when it is another customer's personal voucher
    * @throws BadRequestException when it has expired, or the subtotal is below
    * its minimum spend
-   * @throws ConflictException when this customer has already used it
+   * @throws ConflictException when this customer has already used it, or it
+   * is on another of their orders, waiting for payment
    */
   async quoteDiscount(request: VoucherQuoteRequest): Promise<VoucherQuote> {
     const code = normalizeVoucherCode(request.code);
@@ -171,14 +176,12 @@ export class VoucherService {
       );
     }
 
-    const redemption = await this.vouchers.findRedemption({
+    const held = await this.vouchers.findRedemption({
       voucherId: voucher.id,
       customerId: request.customerId,
     });
-    if (redemption) {
-      throw new ConflictException(
-        `Voucher ${code} was already used on order ${redemption.orderId}`,
-      );
+    if (held) {
+      throw new ConflictException(describeHold(code, held));
     }
 
     if (request.subtotal < voucher.minSpend) {
@@ -196,34 +199,78 @@ export class VoucherService {
   }
 
   /**
-   * Records a voucher as spent on a paid order. Unique per voucher and
-   * customer, so it can never be spent twice.
+   * Puts a quoted voucher on an order, in one write: of two orders racing
+   * for the same voucher, exactly one gets it.
    *
-   * @throws ConflictException when the customer has already used it
+   * @throws ConflictException when another order already holds or spent it
    */
-  async markUsed(redemption: VoucherRedemption): Promise<void> {
+  async reserve(hold: VoucherOnOrder): Promise<void> {
     await orConflict(
-      this.vouchers.insertRedemption(redemption),
-      `Voucher ${redemption.voucherId} has already been used`,
+      this.vouchers.insertReserved(hold),
+      `Voucher ${hold.code} was put on another order at the same moment`,
     );
   }
 
   /**
-   * Undoes `markUsed` for an order that ended up not being paid, so the
-   * voucher can be used again.
+   * Spends the voucher an order holds, once that order is paid. Checked and
+   * written in one step, so a voucher is spent at most once.
    *
-   * @throws NotFoundException when that order never used the voucher
+   * @throws ConflictException when the order does not hold the voucher
    */
-  async releaseRedemption(redemption: VoucherRedemption): Promise<void> {
-    const row = await this.vouchers.findRedemption(redemption);
-
-    if (!row || row.orderId !== redemption.orderId) {
-      throw new NotFoundException(
-        `Voucher ${redemption.voucherId} was not used on order ${redemption.orderId}`,
+  async markUsed(hold: VoucherOnOrder): Promise<void> {
+    const notHeld = () =>
+      new ConflictException(
+        `Voucher ${hold.code} is not held by order ${hold.orderId}`,
       );
+    const row = await this.vouchers.findRedemption(hold);
+
+    if (!row) {
+      throw notHeld();
     }
 
-    await this.vouchers.deleteRedemption(row.id);
+    const used = await this.vouchers.updateRedemption(
+      row.id,
+      (current): UsedVoucherRedemptionRow => {
+        if (current.status !== 'RESERVED' || current.orderId !== hold.orderId) {
+          throw notHeld();
+        }
+
+        return { ...current, status: 'USED', usedAt: new Date().toISOString() };
+      },
+    );
+
+    if (!used) {
+      throw notHeld();
+    }
+  }
+
+  /**
+   * Frees the voucher a cancelled order held, so it can be used again. Only a
+   * reserved voucher is freed — a spent one stays spent — and an order that
+   * holds none, such as one whose checkout lost the voucher to another
+   * order, has nothing to free.
+   */
+  async release(hold: VoucherOnOrder): Promise<void> {
+    const row = await this.vouchers.findRedemption(hold);
+
+    if (row?.status === 'RESERVED' && row.orderId === hold.orderId) {
+      await this.vouchers.deleteRedemption(row.id);
+    }
+  }
+
+  /** Hands back the points of a claim that failed after spending them. */
+  private async refundAfterFailure(
+    claim: RewardClaim,
+    points: number,
+  ): Promise<void> {
+    try {
+      await this.loyalty.refundPoints({ customerId: claim.customerId, points });
+    } catch (error) {
+      this.logger.error(
+        `Could not refund ${points} points to customer ${claim.customerId} after claiming reward ${claim.rewardId} failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }
 
@@ -240,16 +287,51 @@ function toCustomerVoucher(
     minSpend: voucher.minSpend,
     expiresAt: voucher.expiresAt,
     audience: voucher.audience.kind,
-    usage: redemption
-      ? {
-          status: 'USED',
-          orderId: redemption.orderId,
-          usedAt: redemption.createdAt,
-        }
-      : hasExpired(voucher, now)
-        ? { status: 'EXPIRED' }
-        : { status: 'AVAILABLE' },
+    usage: usageOf(voucher, redemption, now),
   };
+}
+
+function usageOf(
+  voucher: VoucherRow,
+  redemption: VoucherRedemptionRow | null,
+  now: Date,
+): VoucherUsage {
+  if (!redemption) {
+    return hasExpired(voucher, now)
+      ? { status: 'EXPIRED' }
+      : { status: 'AVAILABLE' };
+  }
+
+  switch (redemption.status) {
+    case 'RESERVED':
+      return { status: 'RESERVED', orderId: redemption.orderId };
+    case 'USED':
+      return {
+        status: 'USED',
+        orderId: redemption.orderId,
+        usedAt: redemption.usedAt,
+      };
+    default: {
+      const _exhaustive: never = redemption;
+
+      return _exhaustive;
+    }
+  }
+}
+
+/** Why a voucher this customer already has on an order cannot be quoted. */
+function describeHold(code: string, held: VoucherRedemptionRow): string {
+  switch (held.status) {
+    case 'RESERVED':
+      return `Voucher ${code} is already on order ${held.orderId}, which is waiting for payment; pay or cancel that order first`;
+    case 'USED':
+      return `Voucher ${code} was already used on order ${held.orderId}`;
+    default: {
+      const _exhaustive: never = held;
+
+      return _exhaustive;
+    }
+  }
 }
 
 /** `RWD-` and eight unambiguous characters, from a secure random source. */

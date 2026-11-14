@@ -51,7 +51,10 @@ export class StoreProductController {
     });
   }
 
-  /** `PUT /stores/:storeId/products/:productId` — set the price and stock. */
+  /**
+   * `PUT /stores/:storeId/products/:productId` — set the price, and the stock
+   * no order has reserved (it replaces the count; it does not adjust it).
+   */
   @Put(':productId')
   upsertListing(
     @Param('storeId') storeId: string,

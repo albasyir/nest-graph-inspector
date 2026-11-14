@@ -114,16 +114,33 @@ export interface VoucherRow extends RowMetadata {
   readonly audience: VoucherAudience;
 }
 
-/**
- * A voucher spent on a paid order. Unique per (voucherId, customerId): a
- * public voucher can be used once by each customer, and a personal voucher,
- * which only its owner may use, once in all.
- */
-export interface VoucherRedemptionRow extends RowMetadata {
+interface VoucherRedemptionRowBase extends RowMetadata {
   readonly voucherId: string;
   readonly customerId: string;
+  /** The order holding the voucher, or that spent it. */
   readonly orderId: string;
 }
+
+/** Held by an order waiting for payment; freed if that order is cancelled. */
+export interface ReservedVoucherRedemptionRow extends VoucherRedemptionRowBase {
+  readonly status: 'RESERVED';
+}
+
+/** Spent: the order holding it was paid. */
+export interface UsedVoucherRedemptionRow extends VoucherRedemptionRowBase {
+  readonly status: 'USED';
+  readonly usedAt: string;
+}
+
+/**
+ * A voucher on an order. Unique per (voucherId, customerId) whatever its
+ * status: checkout reserves it in one write, so two orders can never hold the
+ * same voucher and a spent one is never held again. A public voucher can
+ * therefore be used once by each customer, and a personal voucher, which only
+ * its owner may use, once in all.
+ */
+export type VoucherRedemptionRow =
+  ReservedVoucherRedemptionRow | UsedVoucherRedemptionRow;
 
 /** A voucher customers can buy with loyalty points. */
 export interface RewardRow extends RowMetadata {

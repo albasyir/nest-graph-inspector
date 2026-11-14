@@ -12,7 +12,7 @@ import { AppModule } from './../src/app.module';
  */
 const FLOW_TIMEOUT_MS = 120_000;
 
-type Method = 'get' | 'post';
+type Method = 'get' | 'post' | 'delete';
 
 interface Route {
   readonly method: Method;
@@ -379,6 +379,139 @@ describe('Shop App (e2e)', () => {
         lifetimePoints: 526,
         tier: 'BRONZE',
       });
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    'lets only one of two simultaneous checkouts take the same voucher',
+    async () => {
+      const server = app.getHttpServer();
+      const credentials = {
+        email: 'dewi@example.com',
+        password: 'correct horse battery',
+      };
+
+      await call(
+        server,
+        {
+          method: 'post',
+          path: '/auth/register',
+          body: { name: 'Dewi Lestari', ...credentials },
+        },
+        201,
+      );
+      const token = textAt(
+        await call(
+          server,
+          { method: 'post', path: '/auth/login', body: credentials },
+          200,
+        ),
+        'accessToken',
+      );
+      const shelfStock = async () =>
+        numberAt(
+          await call(
+            server,
+            { method: 'get', path: '/stores/str_1/products/prd_6' },
+            200,
+          ),
+          'stock',
+        );
+      const voucherUsage = async () =>
+        listOf(
+          await call(
+            server,
+            { method: 'get', path: '/vouchers/mine', token },
+            200,
+          ),
+        ).find((voucher) => textAt(voucher, 'code') === 'WELCOME10');
+      const stockBefore = await shelfStock();
+
+      // Two screen protectors, Rp 118.000, clear WELCOME10's Rp 100.000
+      // minimum. Both requests are in flight at once.
+      const checkout = () =>
+        request(server)
+          .post('/orders/checkout')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            storeId: 'str_1',
+            items: [{ productId: 'prd_6', quantity: 2 }],
+            voucherCode: 'WELCOME10',
+          });
+      const responses = await Promise.all([checkout(), checkout()]);
+
+      expect(responses.map((response) => response.status).sort()).toEqual([
+        201, 409,
+      ]);
+      const winner: unknown = responses.find(
+        (response) => response.status === 201,
+      )?.body;
+      const winningOrderId = textAt(winner, 'order.id');
+
+      // Only the winner's units left the shelf, and only it holds the voucher.
+      expect(await shelfStock()).toBe(stockBefore - 2);
+      expect(await voucherUsage()).toMatchObject({
+        usage: { status: 'RESERVED', orderId: winningOrderId },
+      });
+
+      // Cancelling the winner frees the voucher and puts its units back.
+      await call(
+        server,
+        {
+          method: 'post',
+          path: `/orders/${winningOrderId}/cancel`,
+          token,
+        },
+        200,
+      );
+      expect(await shelfStock()).toBe(stockBefore);
+      expect(await voucherUsage()).toMatchObject({
+        usage: { status: 'AVAILABLE' },
+      });
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    'keeps three related products when one of them leaves the catalogue',
+    async () => {
+      const server = app.getHttpServer();
+      // A seed customer, signing in with the published demo-only password.
+      const token = textAt(
+        await call(
+          server,
+          {
+            method: 'post',
+            path: '/auth/login',
+            body: { email: 'budi@example.com', password: 'shop-demo-password' },
+          },
+          200,
+        ),
+        'accessToken',
+      );
+      const relatedTo = async (productId: string) =>
+        listOf(
+          at(
+            await call(
+              server,
+              { method: 'get', path: `/products/${productId}` },
+              200,
+            ),
+            'frequentlyBoughtTogether',
+          ),
+        ).map((related) => textAt(related, 'productId'));
+
+      // The charger leads; the rest share one order each, ranked by id.
+      expect(await relatedTo('prd_1')).toEqual(['prd_2', 'prd_3', 'prd_5']);
+
+      await call(
+        server,
+        { method: 'delete', path: '/products/prd_3', token },
+        200,
+      );
+
+      expect(await relatedTo('prd_1')).toEqual(['prd_2', 'prd_5', 'prd_6']);
     },
     FLOW_TIMEOUT_MS,
   );

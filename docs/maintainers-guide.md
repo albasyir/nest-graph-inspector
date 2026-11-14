@@ -401,7 +401,7 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 **Purpose:** E2E tests for the demo application.
 
 **Contents:**
-- `app.e2e-spec.ts` — boots `AppModule` and walks one customer through the shop over HTTP with Supertest — register, sign in, check out, pay, earn points, claim a reward voucher, check out with it, pay — then reads the token-gated `/output.json` and checks every module's imports and both cycles. Generous timeouts: every storage operation waits 100–200 ms.
+- `app.e2e-spec.ts` — boots `AppModule` and walks one customer through the shop over HTTP with Supertest — register, sign in, check out, pay, earn points, claim a reward voucher, check out with it, pay — checks that of two simultaneous checkouts with one voucher only one gets it, then reads the token-gated `/output.json` and checks every module's imports and both cycles. Generous timeouts: every storage operation waits 100–200 ms.
 - `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
 - `graph-inspector-security.e2e-spec.ts` — boots the inspector over real sockets and checks the token guard, the lockout, CORS preflight and Direct Run's method rules.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"`. `test:e2e` runs the suites in band, since two of them bind the inspector's fixed ports.

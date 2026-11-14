@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  ReservedVoucherRedemptionRow,
   RewardRow,
   VoucherRedemptionRow,
   VoucherRow,
 } from '../database/database.schema';
 import { DatabaseService } from '../database/database.service';
 import type { InMemoryTable } from '../database/in-memory-table';
-import type { NewVoucher, VoucherRedemption } from './voucher.dto';
+import type { NewVoucher } from './voucher.dto';
+
+type RedemptionKey = Pick<VoucherRedemptionRow, 'voucherId' | 'customerId'>;
 
 /** Reads and writes the vouchers, voucher_redemptions and rewards tables. */
 @Injectable()
@@ -44,13 +47,10 @@ export class VoucherRepository {
     return this.vouchers.insert((metadata) => ({ ...metadata, ...voucher }));
   }
 
-  findRedemption(
-    redemption: Pick<VoucherRedemption, 'voucherId' | 'customerId'>,
-  ): Promise<VoucherRedemptionRow | null> {
+  findRedemption(key: RedemptionKey): Promise<VoucherRedemptionRow | null> {
     return this.redemptions.findOne(
       (row) =>
-        row.voucherId === redemption.voucherId &&
-        row.customerId === redemption.customerId,
+        row.voucherId === key.voucherId && row.customerId === key.customerId,
     );
   }
 
@@ -58,14 +58,32 @@ export class VoucherRepository {
     return this.redemptions.findMany((row) => row.customerId === customerId);
   }
 
-  /** @throws UniqueConstraintViolationError when the voucher was already used */
-  insertRedemption(
-    redemption: VoucherRedemption,
-  ): Promise<VoucherRedemptionRow> {
-    return this.redemptions.insert((metadata) => ({
-      ...metadata,
-      ...redemption,
-    }));
+  /**
+   * Puts a voucher on an order, in one write.
+   *
+   * @throws UniqueConstraintViolationError when an order already holds or
+   * spent it
+   */
+  insertReserved(
+    redemption: RedemptionKey & Pick<VoucherRedemptionRow, 'orderId'>,
+  ): Promise<ReservedVoucherRedemptionRow> {
+    return this.redemptions.insert(
+      (metadata): ReservedVoucherRedemptionRow => ({
+        ...metadata,
+        voucherId: redemption.voucherId,
+        customerId: redemption.customerId,
+        orderId: redemption.orderId,
+        status: 'RESERVED',
+      }),
+    );
+  }
+
+  /** Replaces a redemption with what `change` makes of it; `null` when there is none. */
+  updateRedemption<N extends VoucherRedemptionRow>(
+    redemptionId: string,
+    change: (current: VoucherRedemptionRow) => N,
+  ): Promise<N | null> {
+    return this.redemptions.update(redemptionId, change);
   }
 
   deleteRedemption(redemptionId: string): Promise<boolean> {

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { orConflict } from '../common/conflict';
+import { MAX_RECOMMENDATION_LIMIT } from '../recommendation/recommendation.dto';
 import { RecommendationService } from '../recommendation/recommendation.service';
 import type {
   NewProduct,
@@ -60,7 +61,9 @@ export class ProductService {
   }
 
   /**
-   * A product with the products most often bought together with it.
+   * A product with the products most often bought together with it — the
+   * top three still sold: archived products are dropped before the three are
+   * chosen, so one leaving the catalogue makes room for the next.
    *
    * @throws NotFoundException when there is no such product, or it is archived
    */
@@ -68,7 +71,7 @@ export class ProductService {
     const product = await this.getProduct(productId);
     const together = await this.recommendations.frequentlyBoughtTogether({
       productId,
-      limit: RELATED_PRODUCT_LIMIT,
+      limit: MAX_RECOMMENDATION_LIMIT,
     });
     const stillSold = together.length
       ? await this.products.findActiveByIds(
@@ -94,7 +97,13 @@ export class ProductService {
       },
     );
 
-    return { ...product, frequentlyBoughtTogether };
+    return {
+      ...product,
+      frequentlyBoughtTogether: frequentlyBoughtTogether.slice(
+        0,
+        RELATED_PRODUCT_LIMIT,
+      ),
+    };
   }
 
   /** The products among `productIds` that are still sold; unknown ids are skipped. */

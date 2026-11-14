@@ -752,9 +752,10 @@ Teaching the unused-import check about global modules is a follow-up.
 
 `demo/test/` holds three e2e suites: an application-level one that walks one
 customer through the shop's REST routes — sign-up, checkout, payment, loyalty
-points, a reward voucher, a second checkout paid with it — *and* then reads
-the token-gated graph endpoint over TCP, checking every module's imports and
-both cycles; the network-level security suite described above, which boots the real
+points, a reward voucher, a second checkout paid with it — checks that two
+simultaneous checkouts cannot both take one voucher, *and* then reads the
+token-gated graph endpoint over TCP, checking every module's imports and both
+cycles; the network-level security suite described above, which boots the real
 module and probes it over real sockets; and the export suite, which requires
 `nest-graph-inspector export` of the demo's `nest build` output — and of its
 TypeScript sources, through `ts-node` — to equal the `/output.json` the running
