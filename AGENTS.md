@@ -115,7 +115,8 @@ questioned rather than defaults to preserve — the Security architecture sectio
 of [`docs/architecture.md`](./docs/architecture.md) states what each one buys
 and what it costs. A change to any of them needs a matching case in
 `demo/test/graph-inspector-security.e2e-spec.ts`, and you have to run it
-yourself, because `pnpm run verify` does not:
+yourself, because `pnpm run verify` does not — CI's Demo e2e job runs it on
+every pull request, but only after you push:
 
 ```bash
 pnpm --filter nest-graph-inspector-demo run test:e2e

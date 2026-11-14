@@ -189,6 +189,16 @@ validation command unreliable.
 - `demo/test/jest-e2e.json`
 - `demo/src/app.module.ts`
 
+**Status (Unreleased)**
+
+Resolved. `app.e2e-spec.ts` exercises the demo's own product routes and reads
+the token-gated graph over TCP, and three Jest suites stand beside it in
+`demo/test/` — the network-level security suite, the export suite, and
+`demo-process.e2e-spec.ts`, which builds the demo, runs it as a process of its
+own and checks every surface a user reaches through the viewer link it prints
+— plus a Playwright suite, `demo/test/browser/`, driving the viewer against
+that process. CI runs both (see TD-05).
+
 ---
 
 ### TD-05 — CI deploys the site but does not validate the reusable library
@@ -215,6 +225,14 @@ by CI.
 - `lib/package.json`
 - `demo/package.json`
 - `site/package.json`
+
+**Status (Unreleased)**
+
+Resolved. `.github/workflows/ci.yml` runs on every pull request and every push
+to `main`: lint, typecheck, test and build across the workspace; the library on
+Node 20, 22 and 24; a full site build; the demo's e2e suites (Demo e2e,
+`test:e2e`); and the viewer in Chromium against the demo run as a process
+(Viewer e2e (browser), `test:e2e:browser`).
 
 ---
 

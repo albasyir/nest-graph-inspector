@@ -103,6 +103,8 @@ The verification pipeline. Runs on every pull request and every push to `main`:
 1. `verify` — lint, typecheck, test, and build the library and demo across the workspace.
 2. `library-matrix` — tests and builds `nest-graph-inspector` on Node 20, 22, and 24.
 3. `site` — builds the library, builds the demo payload, then generates the Nuxt site to catch site-breaking library changes.
+4. `demo-e2e` (Demo e2e) — builds the library and runs `pnpm --filter nest-graph-inspector-demo run test:e2e`: the demo's Jest e2e suites, in band.
+5. `viewer-e2e` (Viewer e2e (browser)) — builds the library, the demo payload and the site as the `site` job does, installs Chromium, and runs `pnpm --filter nest-graph-inspector-demo run test:e2e:browser`; on failure it uploads the Playwright report and traces as the `playwright-report` artifact.
 
 Node version for the non-matrix jobs comes from `.nvmrc`.
 
@@ -391,13 +393,15 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 **Purpose:** E2E tests for the demo application.
 
 **Contents:**
-- `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`.
+- `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`, exercises the demo's product routes, and reads the token-gated graph over TCP.
+- `graph-inspector-security.e2e-spec.ts` — the network-level security suite: the token guard, preflight, lockout, and Direct Run's strict and permissive modes, over real sockets.
 - `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
+- `demo-process.e2e-spec.ts` — builds the demo and starts it as a process of its own in a scratch directory, then checks every surface a user reaches through the viewer link it prints.
+- `support/` — what the process suite and the browser suite share: `demo.fixture.ts`, the only file that names facts of the demo (its ports, route prefix and outputs); `demo-process.ts`, which builds, starts and stops the demo; and the port, log, inspector-API and graph helpers. Nothing here declares a class: the demo's TypeScript project spans `test/`, and a class name declared twice loses its Direct Run methods.
+- `browser/` — the viewer in Chromium (Playwright): `playwright.config.ts`, the global setup that starts the demo and serves the generated site the way GitHub Pages does, and `viewer.browser-spec.ts`. Run with `test:e2e:browser`.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"` and maps the `nest-graph-inspector/nest-graph-inspector` alias.
 
-**⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `demo/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
-
-**What belongs here:** Integration tests that boot the full demo app via `AppModule`.
+**What belongs here:** Integration tests that boot the full demo app via `AppModule`, or build it and run it as a process of its own, and the viewer's browser tests against it.
 
 **What does NOT belong here:** Unit tests (those live co-located with source in `libs/`).
 

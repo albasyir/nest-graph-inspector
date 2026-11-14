@@ -19,7 +19,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test:e2e:browser": "playwright test --config test/browser/playwright.config.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.1",
@@ -36,10 +37,12 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.2.1",
+    "@playwright/test": "1.65.1",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/supertest": "^7.2.1",
+    "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
@@ -54,7 +57,8 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
+    "typescript-eslint": "^8.20.0",
+    "zod": "^4.6.7"
   },
   "jest": {
     "moduleFileExtensions": [
