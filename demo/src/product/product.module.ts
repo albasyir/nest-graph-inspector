@@ -1,18 +1,18 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { ProductController } from './product.controller';
-import { ProductService } from './product.service';
 import { ProductRepository } from './product.repository';
-import { UserModule } from '../user/user.module';
-import { MobileModule } from '../mobile/mobile.module';
+import { ProductService } from './product.service';
+import { RecommendationModule } from '../recommendation/recommendation.module';
 
 /**
- * ProductModule imports UserModule but does NOT use any of its providers.
- * This is an intentionally useless import to test graph-inspector detection.
+ * The product catalogue. Imports RecommendationModule for "frequently bought
+ * together" — through forwardRef(), because that import closes a loop:
+ * Product → Recommendation → Order → StoreProduct → Product.
  */
 @Module({
-  imports: [forwardRef(() => UserModule), forwardRef(() => MobileModule)],
+  imports: [forwardRef(() => RecommendationModule)],
   controllers: [ProductController],
-  providers: [ProductService, ProductRepository],
+  providers: [ProductRepository, ProductService],
   exports: [ProductService],
 })
 export class ProductModule {}

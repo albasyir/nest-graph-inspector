@@ -1,68 +1,82 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type {
+  OrderRow,
+  PaidOrderRow,
+  PendingPaymentOrderRow,
+} from '../database/database.schema';
+import { DatabaseService } from '../database/database.service';
+import type { InMemoryTable } from '../database/in-memory-table';
 
-export interface Order {
-  id: number;
-  userId: number;
-  productId: number;
-  quantity: number;
-  status: 'pending' | 'confirmed' | 'shipped';
-}
+/** What it takes to record a checked-out order. */
+export type NewPendingOrder = Omit<
+  PendingPaymentOrderRow,
+  'id' | 'createdAt' | 'updatedAt' | 'status'
+>;
 
+/** Reads and writes the orders table. */
 @Injectable()
 export class OrderRepository {
-  private orders: Order[] = [
-    {
-      id: 1,
-      userId: 1,
-      productId: 1,
-      quantity: 2,
-      status: 'pending',
-    },
-  ];
-  private nextId = 1;
+  private readonly orders: InMemoryTable<OrderRow>;
 
-  create(userId: number, productId: number, quantity: number): Order {
-    const order: Order = {
-      id: this.nextId++,
-      userId,
-      productId,
-      quantity,
-      status: 'pending',
-    };
-    this.orders.push(order);
-    return order;
+  constructor(database: DatabaseService) {
+    this.orders = database.orders;
   }
 
-  findById(id: number): Order | undefined {
-    return this.orders.find((o) => o.id === id);
+  findById(orderId: string): Promise<OrderRow | null> {
+    return this.orders.findById(orderId);
   }
 
-  async findAll(): Promise<Order[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    return [...this.orders];
+  /** A customer's orders, oldest first. */
+  listByCustomer(customerId: string): Promise<OrderRow[]> {
+    return this.orders.findMany((order) => order.customerId === customerId);
   }
 
-  async findByUserId(userId: number): Promise<Order[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    await this.findAll();
-
-    await this.findAll();
-
-    if (userId === 0) throw new NotFoundException('User not found');
-
-    return this.orders.filter((o) => o.userId === userId);
+  /** The customer's order, if any, waiting for payment with this voucher. */
+  findPendingWithVoucher(input: {
+    readonly customerId: string;
+    readonly voucherId: string;
+  }): Promise<OrderRow | null> {
+    return this.orders.findOne(
+      (order) =>
+        order.status === 'PENDING_PAYMENT' &&
+        order.customerId === input.customerId &&
+        order.voucher?.voucherId === input.voucherId,
+    );
   }
 
-  async updateStatus(
-    id: number,
-    status: Order['status'],
-  ): Promise<Order | undefined> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const order = this.orders.find((o) => o.id === id);
-    if (order) {
-      order.status = status;
+  /** Paid orders that held this product, oldest first. */
+  listPaidContaining(productId: string): Promise<PaidOrderRow[]> {
+    return this.orders.findMany(
+      (order): order is PaidOrderRow =>
+        order.status === 'PAID' &&
+        order.lines.some((line) => line.productId === productId),
+    );
+  }
+
+  insertPending(order: NewPendingOrder): Promise<PendingPaymentOrderRow> {
+    return this.orders.insert((metadata): PendingPaymentOrderRow => ({
+      ...metadata,
+      ...order,
+      status: 'PENDING_PAYMENT',
+    }));
+  }
+
+  /**
+   * Moves an order to the state `change` returns, checked and written in one
+   * step.
+   *
+   * @throws NotFoundException when there is no such order
+   */
+  async transition<N extends OrderRow>(
+    orderId: string,
+    change: (current: OrderRow) => N,
+  ): Promise<N> {
+    const order = await this.orders.update(orderId, change);
+
+    if (!order) {
+      throw new NotFoundException(`Order ${orderId} not found`);
     }
+
     return order;
   }
 }

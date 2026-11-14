@@ -77,10 +77,10 @@ const fixedBrightLineLabel = computed(() => {
 
   if (typeof fixedTarget === 'string') {
     const label = fixedTarget.trim()
-    return label || 'UserRepository'
+    return label || 'CustomerRepository'
   }
 
-  return 'UserRepository'
+  return 'CustomerRepository'
 })
 
 const {

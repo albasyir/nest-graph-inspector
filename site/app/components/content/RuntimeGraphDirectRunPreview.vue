@@ -15,31 +15,34 @@ const {
 
 /**
  * The section is about one provider, so the preview keeps that provider and
- * drops the rest of the graph. Until the visitor loads the example it is the
- * static graph, and nothing runs; once the demo is up, what runs is the real
- * application: the dialog calls its direct-run endpoint and the method executes.
+ * drops the rest of the graph. It is the demo's product catalogue: reads like
+ * `listProducts()` take nothing, and `getProductDetail('prd_1')` reaches
+ * through recommendations and order history, so its trace has something to
+ * show. Until the visitor loads the example it is the static graph, and
+ * nothing runs; once the demo is up, what runs is the real application: the
+ * dialog calls its direct-run endpoint and the method executes.
  */
 const previewData = computed<GraphOutput | null>(() => {
-  const userModule = graph.value?.modules.UserModule
-  const userService = userModule?.providers.find(
-    provider => provider.name === 'UserService'
+  const productModule = graph.value?.modules.ProductModule
+  const productService = productModule?.providers.find(
+    provider => provider.name === 'ProductService'
   )
 
-  if (!graph.value || !userModule || !userService) {
+  if (!graph.value || !productModule || !productService) {
     return null
   }
 
   return {
     ...graph.value,
-    root: 'UserModule',
+    root: 'ProductModule',
     modules: {
-      UserModule: {
-        ...userModule,
+      ProductModule: {
+        ...productModule,
         imports: [],
-        exports: ['UserService'],
+        exports: ['ProductService'],
         providers: [
           {
-            ...userService,
+            ...productService,
             dependencies: []
           }
         ],
@@ -156,11 +159,11 @@ function openTrace() {
     <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <p class="min-w-0 flex-1 basis-64 text-sm text-muted">
         <template v-if="view.source === 'live'">
-          Select the <span class="font-medium text-highlighted">UserService</span> provider and run a
+          Select the <span class="font-medium text-highlighted">ProductService</span> provider and run a
           method: the call reaches the application running in this tab.
         </template>
         <template v-else>
-          Select the <span class="font-medium text-highlighted">UserService</span> provider to see its
+          Select the <span class="font-medium text-highlighted">ProductService</span> provider to see its
           methods. Load Example starts the demo application in this tab, so a method you run really
           executes.
         </template>

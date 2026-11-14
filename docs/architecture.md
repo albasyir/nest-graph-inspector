@@ -691,34 +691,70 @@ the demo's export to equal the running demo's `/output.json` byte for byte.
 
 ## `demo/` — development host and showcase
 
-`demo/src` is an ordinary NestJS application with four feature modules — User,
-Product, Order, Mobile — and an inspector running all four output types at once
-(viewer on `localhost:53371`, a second plain `http` output on
-`localhost:53372/graph`, Markdown and JSON into `demo/tmp/graph/`).
+`demo/src` is an ordinary NestJS application, the Shop App: a REST API for a
+small chain of stores, with ten feature modules — Auth, Customer,
+CustomerLoyalty, Order, Payment, Product, Recommendation, Store, StoreProduct
+and Voucher — on a global `DatabaseModule`, serving on port 8889, and an
+inspector running all four output types at once (viewer on `localhost:53371`,
+a second plain `http` output on `localhost:53372/graph`, Markdown and JSON
+into `demo/tmp/graph/`).
+
+It needs nothing else running. `DatabaseModule` keeps every table in memory
+(`InMemoryTable`, in `demo/src/database/`), seeded at start-up with stores,
+products and their shelves, vouchers, a reward catalogue, and two customers
+with paid orders, so "frequently bought together" has history from the first
+request. Every read and write waits one simulated database round trip of
+100–200 ms, in one place (`simulated-latency.ts`), so a Direct Run trace has
+time worth looking at. Every route is private unless marked `@Public()`:
+`AuthModule` provides a global `AuthGuard` as `APP_GUARD`, sessions are opaque
+bearer tokens stored only as SHA-256 digests, and passwords only as scrypt
+hashes. The seed customers sign in with `shop-demo-password`, published on
+purpose.
 
 Its module graph is deliberately awkward, because a graph tool needs something
 worth graphing:
 
-- **A module-level cycle**: `OrderModule` ⇄ `UserModule` via `forwardRef`.
-- **A provider-level cycle**: `OrderService` ⇄ `OrderNotificationService`,
-  resolved with `forwardRef` inside `@Inject()`.
-- **A second cycle through Mobile**: `ProductModule` ⇄ `MobileModule`.
-- **A useless import**: `ProductModule` imports `UserModule` and uses nothing
-  from it, on purpose, to check the inspector reports it.
-- **A third-party module**: `ConfigModule.forRoot()` inside `MobileModule`, so
-  the graph contains something the repository does not own.
+- **A direct module cycle**: `OrderModule` ⇄ `PaymentModule`, both imports
+  `forwardRef()` — an order is billed through Payment, and Payment reports the
+  outcome back to Order.
+- **An indirect module cycle**: `ProductModule` → `RecommendationModule` →
+  `OrderModule` → `StoreProductModule` → `ProductModule`, of which only the
+  first two imports are `forwardRef()`.
+- **The same two cycles between providers**: `OrderService` ⇄
+  `PaymentService`, and `ProductService` → `RecommendationService` →
+  `OrderService` → `StoreProductService` → `ProductService`, with
+  `forwardRef()` inside `@Inject()` on exactly the constructor parameters that
+  cross a `forwardRef()` import.
+- **A global module**: no feature module imports `DatabaseModule`, and every
+  repository injects its `DatabaseService`. Nest itself adds a global module to
+  every module's `imports`, so the graph lists it under each of them.
+- **A global enhancer**: `AuthGuard`, provided as `APP_GUARD`, which the graph
+  names by its class.
+
+**Its import order is load-bearing.** Two imports of the indirect cycle are
+plain, so the class each one names must already be defined when the file
+naming it is evaluated: the cycle has to be entered at `OrderModule`, which
+`app.module.ts` imports before `ProductModule`, `RecommendationModule` and
+`StoreProductModule`, and which imports its own files before the modules it
+imports. Entered at `ProductModule` instead, `StoreProductModule` would read
+`ProductModule` — and `StoreProductService` read `ProductService` — while it is
+still undefined, and Nest would refuse to start. Comments in `app.module.ts`
+and `order/order.module.ts` mark the order where it lives.
 
 **A known false positive.** For the demo, the Issues page reports
-`ConfigService` as registered in 2 modules. `ConfigModule` registers a
-`ConfigService` provider whose factory returns `ConfigHostModule`'s instance,
-so there is one instance, not two, but the graph does not say that a factory
-hands back another module's instance. The static `graph.json` and the demo run
-by Node show it; the in-browser demo, which keeps to `src/`, does not. Teaching
-the duplicate check about such factories is a follow-up.
+`RecommendationModule imports DatabaseModule but never uses it`.
+RecommendationModule stores nothing — it reads paid orders through
+OrderService — and never imported DatabaseModule: Nest put the global module
+in its `imports`, and the graph does not say which imports are global, so the
+remedy the page offers, removing the import, does not apply. The static
+`graph.json`, the demo run by Node and the in-browser demo all show it.
+Teaching the unused-import check about global modules is a follow-up.
 
-`demo/test/` holds three e2e suites: an application-level one exercising the
-demo's own REST routes *and* then reading the token-gated graph endpoint over
-TCP; the network-level security suite described above, which boots the real
+`demo/test/` holds three e2e suites: an application-level one that walks one
+customer through the shop's REST routes — sign-up, checkout, payment, loyalty
+points, a reward voucher, a second checkout paid with it — *and* then reads
+the token-gated graph endpoint over TCP, checking every module's imports and
+both cycles; the network-level security suite described above, which boots the real
 module and probes it over real sockets; and the export suite, which requires
 `nest-graph-inspector export` of the demo's `nest build` output — and of its
 TypeScript sources, through `ts-node` — to equal the `/output.json` the running
@@ -919,9 +955,9 @@ build patches the bundled discovery adapter so the in-browser demo shows only
 what is declared under the demo's own `src/` (`DISCOVERY_PATCHES` in
 `demo/scripts/build-nodepod-payload.ts`), while `export:graph` runs the
 library as it is published. The static graph therefore also has
-`ConfigModule`, `ConfigHostModule` and `NestJSCoreModule`, and the providers
-they declare — the third-party module the demo imports on purpose — and the
-landing previews show them until "Load Example" swaps in the live graph. Generated with the payload and gitignored
+`NestJSCoreModule`, the virtual module the library gathers Nest's own
+providers into — for the demo, the `Reflector` its `AuthGuard` injects — and
+the landing previews show it until "Load Example" swaps in the live graph. Generated with the payload and gitignored
 with it, it cannot go stale. `build:graph` regenerates it alone.
 
 **Two constraints shape this design.**
@@ -1115,7 +1151,8 @@ Known limitations, accepted deliberately:
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
 - The payload is a few megabytes, downloaded once per visit that presses "Load
-  Example". The static graph the landing page draws until then is about 8 KB.
+  Example". The static graph the landing page draws until then is about 33 KB,
+  under 7 KB gzipped.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
@@ -1387,6 +1424,11 @@ Facts a code change can invalidate, and the file to check:
 - That the static demo graph holds more than the in-browser demo serves — the
   `src/`-only filter in `DISCOVERY_PATCHES`
   (`demo/scripts/build-nodepod-payload.ts`), which the export does not apply
+- That the demo starts only because its indirect cycle is entered at
+  `OrderModule` — the import order in `demo/src/app.module.ts` and
+  `demo/src/order/order.module.ts`
+- The demo's simulated database latency, 100–200 ms per operation —
+  `SIMULATED_LATENCY_MS` in `demo/src/database/simulated-latency.ts`
 - The newest graph format the viewer knows, `3` —
   `NEWEST_KNOWN_GRAPH_OUTPUT_VERSION` in `site/app/utils/graph-output-support.ts`
   (checked against the library's by `graph-output-support.test.ts`)

@@ -352,21 +352,31 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 **Purpose:** Demo / development application. Simulates a realistic consumer of the library.
 
-**Structure:**
+**Structure:** the Shop App, a REST API for a small chain of stores.
 ```
 src/
-├── main.ts           — bootstrap (NestFactory, listens on port 8889)
-├── app.module.ts     — root module; imports NestGraphInspectorModule.forRoot()
-├── user/             — User feature (UserModule, UserService, UserController, UserRepository, UserSchedule)
-├── product/          — Product feature (circular dep with MobileModule)
-├── order/            — Order feature (intentional forwardRef circular dep)
-└── mobile/           — Mobile feature (cross-feature dep)
+├── main.ts             — bootstrap (NestFactory, listens on port 8889)
+├── app.module.ts       — root module: NestGraphInspectorModule.forRoot(), DatabaseModule, the ten feature modules (their import order is load-bearing)
+├── database/           — global DatabaseModule: InMemoryTable, the schema, the seed data, and the 100–200 ms simulated latency every operation pays
+├── common/             — request parsing (400s that name the field), @Public(), @CurrentCustomerId(), orConflict()
+├── auth/               — AuthModule: register, sign in, sessions, the scrypt PasswordHasher, and the global AuthGuard (APP_GUARD)
+├── customer/           — CustomerModule: profiles, lookup by id and email
+├── customer-loyalty/   — CustomerLoyaltyModule: points, Bronze/Silver/Gold tiers, tier discounts
+├── voucher/            — VoucherModule: public vouchers, the reward catalogue, claiming, quoting, redemption
+├── store/              — StoreModule: store locations
+├── product/            — ProductModule: the catalogue; a product's detail carries "frequently bought together"
+├── store-product/      — StoreProductModule: per-store price and stock, reserving and releasing it
+├── recommendation/     — RecommendationModule: "frequently bought together", worked out from paid orders
+├── order/              — OrderModule: checkout, the order's states, history, co-purchase data
+└── payment/            — PaymentModule: bills and the simulated payment gateway
 ```
 
+Each feature folder has one layout: `<feature>.module.ts`; a thin `.controller.ts` that parses the request and calls the service; a `.service.ts` holding the rules, with JSDoc the viewer shows; a `.repository.ts` for the tables it owns; a `.dto.ts` for its request and response types and their parsers; and pure rule files where the rules are worth isolating (`order-pricing.ts`, `voucher-discount.ts`, `loyalty-rules.ts`). There is no `class-validator`: the payload build leaves Nest's optional peers external, so request bodies are parsed by hand at the controller.
+
 The demo intentionally includes:
-- Cross-module dependencies (UserService → MobileService → ProductService).
-- A circular import between ProductModule and MobileModule.
-- A `forwardRef` circular dependency between OrderService and OrderNotificationService.
+- Two module cycles — OrderModule ⇄ PaymentModule, and ProductModule → RecommendationModule → OrderModule → StoreProductModule → ProductModule — and the same two between their services, with `forwardRef()` only where an edge closes a cycle.
+- A global module, DatabaseModule, that every repository injects and no feature module imports, and a global guard, AuthGuard, provided as `APP_GUARD`.
+- Seed data and a simulated latency on every storage operation, so Direct Run calls do real work and their traces show where the time goes.
 
 This makes the demo useful for verifying cycle detection, dependency enrichment, and Direct Run metadata.
 
@@ -377,10 +387,10 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 - Modules that demonstrate specific scenarios (circular deps, forwardRef, JSDoc extraction).
 
 **What does NOT belong here:**
-- Reusable library implementation. If logic could be used by a real consumer, it belongs in `libs/`.
+- Reusable library implementation. If logic could be used by a real consumer, it belongs in `lib/`.
 - Production code.
 
-**Important:** `demo/src/app.module.ts` uses the path alias `nest-graph-inspector/nest-graph-inspector` which maps to `libs/nest-graph-inspector/src` via `tsconfig.json` paths.
+**Important:** `demo/src/app.module.ts` imports the package as `nest-graph-inspector`, the `workspace:*` dependency, which resolves through `lib/dist` — build the library before anything type-aware runs against the demo.
 
 **Related:** `demo/tmp/graph/` (runtime output), `demo/scripts/build-nodepod-payload.ts` (packages this application for the site).
 
@@ -391,15 +401,14 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 **Purpose:** E2E tests for the demo application.
 
 **Contents:**
-- `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`.
+- `app.e2e-spec.ts` — boots `AppModule` and walks one customer through the shop over HTTP with Supertest — register, sign in, check out, pay, earn points, claim a reward voucher, check out with it, pay — then reads the token-gated `/output.json` and checks every module's imports and both cycles. Generous timeouts: every storage operation waits 100–200 ms.
 - `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
-- `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"` and maps the `nest-graph-inspector/nest-graph-inspector` alias.
-
-**⚠️ Known issue:** `app.e2e-spec.ts` was scaffolded by the NestJS CLI and still contains a `GET /` → `"Hello World!"` assertion. No controller serving that route exists in `demo/src/`. This test fails as written. It should either be updated to reflect actual app behaviour or removed.
+- `graph-inspector-security.e2e-spec.ts` — boots the inspector over real sockets and checks the token guard, the lockout, CORS preflight and Direct Run's method rules.
+- `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"`. `test:e2e` runs the suites in band, since two of them bind the inspector's fixed ports.
 
 **What belongs here:** Integration tests that boot the full demo app via `AppModule`.
 
-**What does NOT belong here:** Unit tests (those live co-located with source in `libs/`).
+**What does NOT belong here:** Unit tests (those live co-located with source in `lib/`).
 
 ---
 
@@ -813,7 +822,7 @@ resolves the import graph itself.
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
-| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps the third-party `ConfigModule` too |
+| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps `NestJSCoreModule` too — the `Reflector` the demo's `AuthGuard` injects |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

@@ -1,48 +1,59 @@
-import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
+import { CurrentCustomerId } from '../common/current-customer.decorator';
+import {
+  type CheckoutResult,
+  type Order,
+  parseCheckoutBody,
+} from './order.dto';
 import { OrderService } from './order.service';
-import { OrderNotificationService } from './order-notification.service';
-import { ModuleRef } from '@nestjs/core';
 
+/** The signed-in customer's orders: checkout, history and cancelling. */
 @Controller('orders')
 export class OrderController {
-  /**
-   * Property injection using @Inject() decorator
-   */
-  @Inject(OrderNotificationService)
-  private readonly notificationService!: OrderNotificationService;
+  constructor(private readonly orderService: OrderService) {}
 
-  constructor(
-    private readonly orderService: OrderService,
-    private readonly moduleRef: ModuleRef,
-  ) {}
-
-  @Post()
-  createOrder(
-    @Body() body: { userId: number; productId: number; quantity: number },
-  ) {
-    return this.orderService.createOrder(
-      body.userId,
-      body.productId,
-      body.quantity,
-    );
+  /** `POST /orders/checkout` — check out a cart; answers with the order and its bill. */
+  @Post('checkout')
+  checkout(
+    @CurrentCustomerId() customerId: string,
+    @Body() body: unknown,
+  ): Promise<CheckoutResult> {
+    return this.orderService.checkout({
+      customerId,
+      ...parseCheckoutBody(body),
+    });
   }
 
+  /** `GET /orders` — the signed-in customer's orders, newest first. */
   @Get()
-  getAllOrders() {
-    return this.orderService.getAllOrders();
+  listMyOrders(@CurrentCustomerId() customerId: string): Promise<Order[]> {
+    return this.orderService.listOrdersForCustomer(customerId);
   }
 
-  @Get(':id')
-  getOrderById(@Param('id') id: string) {
-    return this.orderService.getOrderById(Number(id));
+  /** `GET /orders/:orderId` — one of the signed-in customer's orders. */
+  @Get(':orderId')
+  getMyOrder(
+    @CurrentCustomerId() customerId: string,
+    @Param('orderId') orderId: string,
+  ): Promise<Order> {
+    return this.orderService.getOrderForCustomer({ orderId, customerId });
   }
 
-  @Get(':id/confirm')
-  async confirmOrder(@Param('id') id: string) {
-    const order = await this.orderService.confirmOrder(Number(id));
-    if (order) {
-      this.notificationService.notifyOrderShipped(order.id);
-    }
-    return order;
+  /** `POST /orders/:orderId/cancel` — cancel an unpaid order. */
+  @Post(':orderId/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelMyOrder(
+    @CurrentCustomerId() customerId: string,
+    @Param('orderId') orderId: string,
+  ): Promise<Order> {
+    return this.orderService.cancelOrderForCustomer({ orderId, customerId });
   }
 }

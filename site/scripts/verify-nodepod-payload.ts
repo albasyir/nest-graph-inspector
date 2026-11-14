@@ -205,10 +205,10 @@ const parsed = JSON.parse(graph.body) as {
 
 assert.equal(parsed.root, 'AppModule')
 assert.ok(
-  parsed.modules.UserModule?.providers.some(
-    provider => provider.name === 'UserService'
+  parsed.modules.ProductModule?.providers.some(
+    provider => provider.name === 'ProductService'
   ),
-  'UserService is missing from the graph, so dependency metadata did not survive the bundle'
+  'ProductService is missing from the graph, so dependency metadata did not survive the bundle'
 )
 
 // The static graph the landing page draws until a visitor loads the example,
@@ -280,10 +280,10 @@ if (!typedFromSource.length) {
 // This is what the runtime accommodations in the payload build are for: without
 // them the browser runtime answers Express's ETag hashing with something the
 // `etag` package rejects, and every one of these is a 500.
-const users = await call('/users', undefined, APP_PORT)
+const products = await call('/products', undefined, APP_PORT)
 
-if (users.status !== 200) {
-  fail(`GET /users answered ${users.status}: ${users.body.slice(0, 200)}`)
+if (products.status !== 200) {
+  fail(`GET /products answered ${products.status}: ${products.body.slice(0, 200)}`)
 }
 
 console.log(
