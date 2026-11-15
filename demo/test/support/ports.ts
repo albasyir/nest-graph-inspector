@@ -2,13 +2,19 @@ import { readFile, readdir, readlink } from 'node:fs/promises';
 import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const CONNECT_TIMEOUT_MS = 1_000;
 const POLL_INTERVAL_MS = 100;
 
 /** The TCP state `/proc/net/tcp` reports for a listening socket. */
 const TCP_LISTEN_STATE = '0A';
 
 type ListenAttempt = 'free' | 'in-use' | 'unsupported';
+
+/** One socket of `/proc/net/tcp` or `/proc/net/tcp6`. */
+type TcpSocket = {
+  readonly localPort: number;
+  readonly state: string;
+  readonly inode: string;
+};
 
 function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' &&
@@ -17,6 +23,45 @@ function errorCode(error: unknown): string | undefined {
     typeof error.code === 'string'
     ? error.code
     : undefined;
+}
+
+/**
+ * Every TCP socket of this machine's network namespace, read from procfs,
+ * or `undefined` where there is no procfs to read (anything but Linux).
+ */
+async function tcpSockets(): Promise<TcpSocket[] | undefined> {
+  const sockets: TcpSocket[] = [];
+  let tablesRead = 0;
+
+  for (const table of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let text: string;
+
+    try {
+      text = await readFile(table, 'utf8');
+    } catch {
+      continue;
+    }
+
+    tablesRead += 1;
+
+    // sl  local_address  rem_address  st  tx:rx  tr:when  retrnsmt  uid  timeout  inode
+    for (const line of text.split('\n').slice(1)) {
+      const [, localAddress, , state, , , , , , inode] = line
+        .trim()
+        .split(/\s+/);
+      const localPort = localAddress?.split(':').at(-1);
+
+      if (localPort && state && inode) {
+        sockets.push({
+          localPort: Number.parseInt(localPort, 16),
+          state,
+          inode,
+        });
+      }
+    }
+  }
+
+  return tablesRead > 0 ? sockets : undefined;
 }
 
 function tryListen(port: number, host: string): Promise<ListenAttempt> {
@@ -41,15 +86,13 @@ function tryListen(port: number, host: string): Promise<ListenAttempt> {
 }
 
 /**
- * Whether nothing listens on `port`, on any address.
- *
- * Probed by binding the dual-stack wildcard `::`, which conflicts with a
- * listener on any address — IPv4 or IPv6, loopback or not. Binding `0.0.0.0`
- * alone would miss a listener on `::1`, which is where `localhost` — the host
- * the demo's inspector outputs bind — resolves on many machines. Where the
- * host has no IPv6 at all, nothing can listen on `::1` either.
+ * Whether `port` can be bound on the dual-stack wildcard `::`, which conflicts
+ * with a listener on any address — IPv4 or IPv6, loopback or not. Binding
+ * `0.0.0.0` alone would miss a listener on `::1`, which is where `localhost` —
+ * the host the demo's inspector outputs bind — resolves on many machines.
+ * Where the host has no IPv6 at all, nothing can listen on `::1` either.
  */
-export async function isPortFree(port: number): Promise<boolean> {
+async function bindsOnEveryAddress(port: number): Promise<boolean> {
   const attempt = await tryListen(port, '::');
 
   if (attempt === 'unsupported') {
@@ -59,13 +102,33 @@ export async function isPortFree(port: number): Promise<boolean> {
   return attempt === 'free';
 }
 
-/** The ports in `ports` something listens on. */
+/**
+ * The ports in `ports` something listens on, on any address.
+ *
+ * Read from procfs where there is one, rather than probed by binding. A bind
+ * also fails while an outgoing connection holds the port as its local end,
+ * and Linux hands ports 32768–60999 to outgoing connections by default — the
+ * inspector's among them — so on a busy machine a bind probe now and then
+ * reports a port in use that nothing listens on, and that the inspector,
+ * binding `localhost` while the connection is on another address, binds
+ * without trouble. Elsewhere, the bind probe it is.
+ */
 export async function busyPorts(ports: readonly number[]): Promise<number[]> {
-  const states = await Promise.all(
-    ports.map(async (port) => ({ port, free: await isPortFree(port) })),
-  );
+  const sockets = await tcpSockets();
 
-  return states.filter((state) => !state.free).map((state) => state.port);
+  if (sockets) {
+    const listening = new Set(
+      sockets
+        .filter((socket) => socket.state === TCP_LISTEN_STATE)
+        .map((socket) => socket.localPort),
+    );
+
+    return ports.filter((port) => listening.has(port));
+  }
+
+  const free = await Promise.all(ports.map(bindsOnEveryAddress));
+
+  return ports.filter((_, index) => !free[index]);
 }
 
 /**
@@ -97,13 +160,15 @@ export async function waitForPortsFree({
   }
 }
 
-/** Whether a TCP connection to `host:port` is accepted. */
+/** Whether a TCP connection to `host:port` is accepted within `timeoutMs`. */
 export function acceptsConnection({
   host,
   port,
+  timeoutMs,
 }: {
   host: string;
   port: number;
+  timeoutMs: number;
 }): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port });
@@ -112,7 +177,7 @@ export function acceptsConnection({
       resolve(accepted);
     };
 
-    socket.setTimeout(CONNECT_TIMEOUT_MS, () => settle(false));
+    socket.setTimeout(timeoutMs, () => settle(false));
     socket.once('connect', () => settle(true));
     socket.once('error', () => settle(false));
   });
@@ -158,34 +223,21 @@ async function socketInodesOf(pid: number): Promise<Set<string> | undefined> {
 export async function listeningPortsOf(
   pid: number,
 ): Promise<ReadonlySet<number> | undefined> {
-  const inodes = await socketInodesOf(pid);
+  const [inodes, sockets] = await Promise.all([
+    socketInodesOf(pid),
+    tcpSockets(),
+  ]);
 
-  if (!inodes) {
+  if (!inodes || !sockets) {
     return undefined;
   }
 
-  const ports = new Set<number>();
-
-  for (const table of ['/proc/net/tcp', '/proc/net/tcp6']) {
-    let text: string;
-
-    try {
-      text = await readFile(table, 'utf8');
-    } catch {
-      continue;
-    }
-
-    // sl  local_address  rem_address  st  tx:rx  tr:when  retrnsmt  uid  timeout  inode
-    for (const line of text.split('\n').slice(1)) {
-      const columns = line.trim().split(/\s+/);
-      const [, localAddress, , state, , , , , , inode] = columns;
-      const port = localAddress?.split(':').at(-1);
-
-      if (state === TCP_LISTEN_STATE && inode && inodes.has(inode) && port) {
-        ports.add(Number.parseInt(port, 16));
-      }
-    }
-  }
-
-  return ports;
+  return new Set(
+    sockets
+      .filter(
+        (socket) =>
+          socket.state === TCP_LISTEN_STATE && inodes.has(socket.inode),
+      )
+      .map((socket) => socket.localPort),
+  );
 }

@@ -30,9 +30,9 @@ import {
 /**
  * The demo package: the project `nest build` compiles and the export reads.
  *
- * Nothing under `test/` declares a class, and nothing should: the demo's own
- * TypeScript project, which the inspector reads for JSDoc and Direct Run
- * methods, spans `test/` too, and a class name declared in two files loses
+ * These helpers declare no class, and should not: the demo's own TypeScript
+ * project, which the inspector reads for JSDoc and Direct Run methods, spans
+ * `test/` too, and a class whose name is declared in two of its files loses
  * its Direct Run methods.
  */
 export const DEMO_DIR = resolve(__dirname, '../..');
@@ -45,6 +45,8 @@ const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 100;
 /** One readiness probe of an inspector endpoint. */
 const PROBE_TIMEOUT_MS = 5_000;
+/** One readiness probe of a port: a connection attempt. */
+const CONNECT_PROBE_TIMEOUT_MS = 1_000;
 const PORT_RELEASE_TIMEOUT_MS = 10_000;
 const TERMINATE_TIMEOUT_MS = 10_000;
 const KILL_TIMEOUT_MS = 5_000;
@@ -56,9 +58,11 @@ const MAX_CAPTURED_CHARACTERS = 1_000_000;
 
 /**
  * The longest `buildDemo()` and then `startDemo()` can take before either has
- * settled — and, on a failure, stopped what it started. A test framework's
- * hook timeout around them has to be longer, or the hook gives up while the
- * demo is still running.
+ * settled — and, on a failure, stopped what it started. Every readiness probe
+ * is cut to the time left before the readiness deadline, so the pass under
+ * way when it passes ends within moments of it; one probe's worth is allowed
+ * for that. A test framework's hook timeout around them has to be longer, or
+ * the hook gives up while the demo is still running.
  */
 export const BUILD_AND_START_TIMEOUT_MS =
   COMMAND_TIMEOUT_MS +
@@ -83,8 +87,6 @@ export type RunningDemo = {
   readonly appOrigin: URL;
   /** Throws, with everything the demo printed, if it is no longer running. */
   assertRunning(): void;
-  /** Everything the demo printed so far, credentials redacted. */
-  output(): string;
   /**
    * Stops the demo, waits until it has exited and its ports are free, and
    * removes its working directory. Safe to call more than once.
@@ -315,12 +317,13 @@ async function createWorkingDir(): Promise<string> {
 }
 
 /**
- * Fails, before anything is spawned, when another process already listens on
- * a port the demo binds. Its ports are fixed, so a second demo — another
- * checkout's, say — would otherwise leave this one half started, or leave the
- * suite talking to the wrong one.
+ * Fails when another process already listens on a port the demo binds. Its
+ * ports are fixed, so a second demo — another checkout's, say — would
+ * otherwise leave this one half started, or leave a suite talking to the
+ * wrong one. `startDemo` checks before it spawns the demo, and `test:e2e`
+ * once before any of its suites boots it (`test/e2e-global-setup.ts`).
  */
-async function assertPortsFree(): Promise<void> {
+export async function assertDemoPortsFree(): Promise<void> {
   const busy = await busyPorts(DEMO_PORTS);
 
   if (busy.length > 0) {
@@ -407,7 +410,7 @@ async function settlesWithin(
  * `READY_TIMEOUT_MS`; the demo is stopped before the error is thrown.
  */
 export async function startDemo(): Promise<RunningDemo> {
-  await assertPortsFree();
+  await assertDemoPortsFree();
 
   const entry = await findBuiltEntry();
   const workingDir = await createWorkingDir();
@@ -522,13 +525,18 @@ export async function startDemo(): Promise<RunningDemo> {
     }
   };
 
-  const checkReadiness = async (): Promise<Readiness> => {
-    // The ports were free when it was spawned; one taken in between leaves
-    // an inspector output that logs the failure and stays down, which no
-    // amount of waiting will change.
+  const checkReadiness = async (deadline: number): Promise<Readiness> => {
+    // Every probe is cut to the time left, so a pass begun just before the
+    // deadline ends with it, not a probe timeout or two after it.
+    const timeLeft = (atMostMs: number): number =>
+      Math.max(1, Math.min(atMostMs, deadline - Date.now()));
+
+    // Nothing listened on its ports when it was spawned; a port it still
+    // cannot bind leaves an inspector output that logs the failure and stays
+    // down, which no amount of waiting will change.
     if (/\bEADDRINUSE\b/.test(`${output.stdout}\n${output.stderr}`)) {
       throw failure(
-        'could not bind one of its ports: another process took it after the ports were checked (EADDRINUSE below)',
+        'could not bind one of its ports (EADDRINUSE below): something started listening on it after the ports were checked, or a connection on the same address holds it as its local port',
       );
     }
 
@@ -574,7 +582,13 @@ export async function startDemo(): Promise<RunningDemo> {
         };
       }
 
-      if (!(await acceptsConnection({ host: 'localhost', port }))) {
+      if (
+        !(await acceptsConnection({
+          host: 'localhost',
+          port,
+          timeoutMs: timeLeft(CONNECT_PROBE_TIMEOUT_MS),
+        }))
+      ) {
         return {
           kind: 'waiting',
           waitingFor: `port ${port} to accept connections`,
@@ -589,7 +603,7 @@ export async function startDemo(): Promise<RunningDemo> {
         handshake = await inspectorRequest({
           url: endpointFile(endpoint, 'information.json'),
           token: link.token,
-          timeoutMs: PROBE_TIMEOUT_MS,
+          timeoutMs: timeLeft(PROBE_TIMEOUT_MS),
         });
       } catch (error) {
         return {
@@ -623,7 +637,7 @@ export async function startDemo(): Promise<RunningDemo> {
         );
       }
 
-      const readiness = await checkReadiness();
+      const readiness = await checkReadiness(deadline);
 
       if (readiness.kind === 'ready' && !exitStatus) {
         return readiness;
@@ -673,7 +687,6 @@ export async function startDemo(): Promise<RunningDemo> {
         );
       }
     },
-    output: describeOutput,
     stop,
   };
 }

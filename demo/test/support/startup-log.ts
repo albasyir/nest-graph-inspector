@@ -30,8 +30,6 @@ export type PrintedViewerLink = {
   readonly href: string;
   /** Where the link sends the browser: everything before `/view/`. */
   readonly viewerBase: string;
-  /** The segment after `/view/`: the graph endpoint, base64url-encoded. */
-  readonly encodedEndpoint: string;
   /** The graph endpoint the link carries, without its access token. */
   readonly endpoint: URL;
   /** The access token the link carries. */
@@ -79,7 +77,7 @@ export function readPrintedViewerLink(
 
   endpoint.searchParams.delete(ACCESS_TOKEN_QUERY_PARAM);
 
-  return { href, viewerBase, encodedEndpoint, endpoint, token };
+  return { href, viewerBase, endpoint, token };
 }
 
 /**

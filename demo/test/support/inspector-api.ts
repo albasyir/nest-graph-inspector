@@ -37,7 +37,9 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * One request to the inspector, or to the application beside it. The access
  * token, when there is one, travels in the header the viewer sends it in.
  * A server that accepts the connection and never answers fails it once
- * `timeoutMs` has passed, rather than holding the caller forever.
+ * `timeoutMs` has passed, rather than holding the caller forever. A redirect
+ * is not followed — its 3xx is the answer — so no request leaves for an
+ * address the caller did not name.
  */
 export async function inspectorRequest({
   url,
@@ -56,6 +58,7 @@ export async function inspectorRequest({
 }): Promise<InspectorResponse> {
   const response = await fetch(url, {
     method,
+    redirect: 'manual',
     signal: AbortSignal.timeout(timeoutMs),
     headers: {
       ...(token === undefined ? {} : { [ACCESS_TOKEN_HEADER]: token }),

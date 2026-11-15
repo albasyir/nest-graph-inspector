@@ -63,8 +63,8 @@ pnpm --filter nest-graph-inspector-demo run test:e2e:browser
 ```
 
 Both e2e commands start the demo on its fixed ports (8889, 53371 and 53372),
-and refuse to while another process holds one — another checkout running its
-demo, say. Neither runs under `verify`; CI runs both on every pull request.
+and refuse to while another process listens on one — another checkout running
+its demo, say. Neither runs under `verify`; CI runs both on every pull request.
 
 The site's demo is the demo application itself, running in the visitor's
 browser. It is served from `site/public/nodepod-demo/`, which is generated and

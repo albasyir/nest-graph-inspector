@@ -5,6 +5,7 @@
     "ts"
   ],
   "rootDir": ".",
+  "globalSetup": "<rootDir>/e2e-global-setup.ts",
   "testEnvironment": "node",
   "testTimeout": 60000,
   "testRegex": ".e2e-spec.ts$",

@@ -730,8 +730,10 @@ working directory — and reaches it only through the viewer link it prints:
 the handshake, the graph against the schema served beside it, the Markdown
 report, the token's transports and refusals, a layout saved and read back,
 Direct Run on a controller and on a provider with the traces they leave, the
-plain `http` output, the files the outputs write, the application's own port,
-and an export equal to what it serves. Beside them, `demo/test/browser/` drives
+plain `http` output, the files the outputs write, the application's own routes
+on its own port — every argument-free `GET` the graph lists, none failing and
+at least one answering, since a guard may turn an anonymous caller away — and
+an export equal to what it serves. Beside them, `demo/test/browser/` drives
 the viewer in Chromium with Playwright against the same kind of process and
 the generated site, served the way GitHub Pages serves it.
 
@@ -739,14 +741,14 @@ Neither the process suite nor the browser suite names a module, a route or a
 provider of the demo: their expectations come from the graph it serves, and
 the few facts no running demo can tell — its ports, route prefix and outputs —
 live in `demo/test/support/demo.fixture.ts`. The harness that starts it
-(`demo/test/support/demo-process.ts`) refuses while another process holds one
-of those ports, counts the demo ready only on signals from its own child — the
-printed link, its own sockets listening (read from procfs where there is one),
-and the printed token accepted — and fails with the demo's output, credentials
-redacted, when it exits early or is not ready in time. Since the inspector
-reads source metadata from `<cwd>/tsconfig.json`, the harness writes one into
-the scratch directory describing the demo's own project, and the export
-comparison holds it to that.
+(`demo/test/support/demo-process.ts`) refuses while another process listens on
+one of those ports, counts the demo ready only on signals from its own child —
+the printed link, its own sockets listening, and the printed token accepted —
+reading who listens from procfs where there is one, and fails with the demo's
+output, credentials redacted, when it exits early or is not ready in time.
+Since the inspector reads source metadata from `<cwd>/tsconfig.json`, the
+harness writes one into the scratch directory describing the demo's own
+project, and the export comparison holds it to that.
 
 **Neither `test` nor `verify` runs them.** The Jest suites live behind `pnpm
 --filter nest-graph-inspector-demo run test:e2e` with their own Jest config,
@@ -757,7 +759,8 @@ their own, Demo e2e and Viewer e2e (browser) — locally, change anything in the
 security surface and run `test:e2e` yourself before you push. The Jest suites
 run in band: the application-level and export suites boot the demo's
 `AppModule`, and the process suite starts the built demo, all on the same
-fixed ports.
+fixed ports — which is why the run refuses to start, before any of them,
+while another process listens on one (`demo/test/e2e-global-setup.ts`).
 
 The application knows nothing about the documentation site, deliberately: it is
 a NestJS project you could copy elsewhere and run unchanged. Everything the

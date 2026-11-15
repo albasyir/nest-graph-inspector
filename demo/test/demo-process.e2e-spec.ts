@@ -21,7 +21,11 @@ import {
   type RunningDemo,
   startDemo,
 } from './support/demo-process';
-import { listEndpointOf, providerMethodIn } from './support/graph-facts';
+import {
+  listEndpointOf,
+  listEndpointsOf,
+  providerMethodIn,
+} from './support/graph-facts';
 import { redactCredentials } from './support/startup-log';
 import {
   directRunSuccessSchema,
@@ -150,6 +154,50 @@ describe('the demo, running as a process of its own (e2e)', () => {
     expect({ body, status: response.status }).toEqual({ body, status: 200 });
 
     return parseJson(response.text, directRunSuccessSchema);
+  }
+
+  /**
+   * The list endpoints, in their order, run through Direct Run until one
+   * calls a provider method Direct Run can call again with no arguments:
+   * that run, and that method. Each of them must run cleanly on the way.
+   */
+  async function firstListRunReachingAProvider(graph: GraphOutput) {
+    const reachedNone: string[] = [];
+
+    for (const handler of listEndpointsOf(graph)) {
+      const run = await directRun({
+        module: handler.moduleName,
+        target: 'controller',
+        controller: handler.controllerName,
+        method: handler.methodName,
+      });
+
+      expect(run.runtimeTrace.status).toBe('success');
+      expect(run.runtimeTrace.entrypoint).toEqual({
+        module: handler.moduleName,
+        className: handler.controllerName,
+        methodName: handler.methodName,
+      });
+
+      const providerMethod = providerMethodIn({
+        graph,
+        trace: run.runtimeTrace,
+      });
+
+      if (providerMethod) {
+        return { run, providerMethod };
+      }
+
+      reachedNone.push(
+        `${handler.controllerName}.${handler.methodName}() recorded ${run.runtimeTrace.spans
+          .map((span) => span.name)
+          .join(', ')}`,
+      );
+    }
+
+    throw new Error(
+      `No list endpoint called a provider method that takes no arguments:\n${reachedNone.join('\n')}`,
+    );
   }
 
   /** The `json` output's files: those under the working directory holding the served graph. */
@@ -395,35 +443,8 @@ describe('the demo, running as a process of its own (e2e)', () => {
     'runs a list endpoint through Direct Run, then a provider method it called, and keeps both traces',
     async () => {
       const { link } = running();
-      const served = servedGraph();
-      const handler = listEndpointOf(served);
-      const handlerRun = await directRun({
-        module: handler.moduleName,
-        target: 'controller',
-        controller: handler.controllerName,
-        method: handler.methodName,
-      });
-
-      expect(handlerRun.runtimeTrace.status).toBe('success');
-      expect(handlerRun.runtimeTrace.entrypoint).toEqual({
-        module: handler.moduleName,
-        className: handler.controllerName,
-        methodName: handler.methodName,
-      });
-
-      const providerMethod = providerMethodIn({
-        graph: served,
-        trace: handlerRun.runtimeTrace,
-      });
-
-      if (!providerMethod) {
-        throw new Error(
-          `${handler.controllerName}.${handler.methodName}() called no provider method that takes no arguments; its trace recorded ${handlerRun.runtimeTrace.spans
-            .map((span) => span.name)
-            .join(', ')}`,
-        );
-      }
-
+      const { run: handlerRun, providerMethod } =
+        await firstListRunReachingAProvider(servedGraph());
       const providerRun = await directRun({
         module: providerMethod.moduleName,
         target: 'provider',
@@ -562,14 +583,28 @@ describe('the demo, running as a process of its own (e2e)', () => {
     'serves its own routes on its own port',
     async () => {
       const { appOrigin } = running();
-      const handler = listEndpointOf(servedGraph());
-      const url = new URL(`${DEMO.routePrefix}${handler.http.path}`, appOrigin);
-      const response = await inspectorRequest({ url });
+      const answers: { url: string; status: number }[] = [];
 
-      expect({ url: url.href, status: response.status }).toEqual({
-        url: url.href,
-        status: 200,
-      });
+      // Every list endpoint, one at a time and always in the same order —
+      // nothing about any of them is known here but that it takes no input.
+      for (const handler of listEndpointsOf(servedGraph())) {
+        const url = new URL(
+          `${DEMO.routePrefix}${handler.http.path}`,
+          appOrigin,
+        );
+        const { status } = await inspectorRequest({ url });
+
+        answers.push({ url: url.href, status });
+      }
+
+      // A guard may turn an anonymous caller away from a route (a 4xx), but
+      // no route may fail (a 5xx), and at least one must answer. Compared
+      // whole, so a failure prints every route's answer.
+      expect({
+        answers,
+        failed: answers.filter(({ status }) => status >= 500),
+        answered: answers.some(({ status }) => status >= 200 && status < 300),
+      }).toEqual({ answers, failed: [], answered: true });
     },
     TEST_TIMEOUT_MS,
   );

@@ -29,6 +29,13 @@ import { expect, graphNode, openPrintedLink, test } from './viewer.fixtures';
 const SITE_DEFAULT_INSPECTOR_ENDPOINT =
   'http://localhost:53371/__graph-inspector';
 
+/** Whether two graph endpoints are one address, a trailing slash aside. */
+function sameEndpoint(left: URL, right: URL): boolean {
+  const path = (url: URL): string => url.pathname.replace(/\/+$/, '');
+
+  return left.origin === right.origin && path(left) === path(right);
+}
+
 /** The in-browser demo boots in seconds; a CI runner can take far longer. */
 const IN_BROWSER_DEMO_TIMEOUT_MS = 150_000;
 
@@ -227,8 +234,19 @@ test('/view opens an exported graph file and draws every module in it', async ({
 
   // The landing card looks for an inspector at the default address; when the
   // demo serves its graph there, it finds it, and asks for the printed link.
-  if (state.endpoint === SITE_DEFAULT_INSPECTOR_ENDPOINT) {
+  // When it does not, the report says this went unchecked.
+  const servedAtSiteDefault = sameEndpoint(
+    new URL(state.endpoint),
+    new URL(SITE_DEFAULT_INSPECTOR_ENDPOINT),
+  );
+
+  if (servedAtSiteDefault) {
     await expect(page.getByText('Nest Graph Inspector detected')).toBeVisible();
+  } else {
+    test.info().annotations.push({
+      type: 'unchecked',
+      description: `the landing card's inspector detection: the demo serves its graph at ${state.endpoint}, not at the site's default ${SITE_DEFAULT_INSPECTOR_ENDPOINT}`,
+    });
   }
 
   await page.getByTestId('graph-file-input').setInputFiles(state.graphFile);

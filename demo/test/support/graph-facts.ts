@@ -22,6 +22,9 @@ export type ProviderMethod = {
   readonly methodName: string;
 };
 
+/** A list that holds at least one item. */
+type NonEmpty<T> = readonly [T, ...T[]];
+
 function pathDepth(path: string): number {
   return path.split('/').filter(Boolean).length;
 }
@@ -31,14 +34,16 @@ function compareText(left: string, right: string): number {
 }
 
 /**
- * A "list" endpoint: a routed `GET` handler that takes no arguments, on a
- * path without parameters. One can be called over HTTP and through Direct
- * Run alike knowing nothing about the application — it needs no input, and a
- * `GET` changes nothing by convention. The shallowest path wins, a
- * controller's own root, then alphabetical order, so the choice is the same
- * on every run.
+ * Every "list" endpoint the graph advertises: a routed `GET` handler that
+ * takes no arguments, on a path without parameters. One can be called over
+ * HTTP and through Direct Run alike knowing nothing about the application —
+ * it needs no input, and a `GET` changes nothing by convention. The
+ * shallowest path comes first, a controller's own root before its
+ * sub-routes, then alphabetical order, so the order is the same on every run.
+ *
+ * Throws when there is none, since then these suites have nothing to call.
  */
-export function listEndpointOf(graph: GraphOutput): RoutedHandler {
+export function listEndpointsOf(graph: GraphOutput): NonEmpty<RoutedHandler> {
   const handlers = Object.entries(graph.modules).flatMap(
     ([moduleName, module]) =>
       module.controllers.flatMap((controller) =>
@@ -68,7 +73,7 @@ export function listEndpointOf(graph: GraphOutput): RoutedHandler {
       compareText(left.methodName, right.methodName),
   );
 
-  const [first] = handlers;
+  const [first, ...rest] = handlers;
 
   if (!first) {
     throw new Error(
@@ -76,7 +81,15 @@ export function listEndpointOf(graph: GraphOutput): RoutedHandler {
     );
   }
 
-  return first;
+  return [first, ...rest];
+}
+
+/**
+ * The first of {@link listEndpointsOf}: the list endpoint a check that
+ * calls just one of them calls, the same one on every run.
+ */
+export function listEndpointOf(graph: GraphOutput): RoutedHandler {
+  return listEndpointsOf(graph)[0];
 }
 
 /**
