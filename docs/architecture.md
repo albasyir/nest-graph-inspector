@@ -945,9 +945,13 @@ it while its payload downloads and boots. A warm-up lays a small graph shaped
 like a real one out three times, so the first real layout finds ELK compiled
 and optimised. Until the first layout lands the canvas is drawn but hidden, so
 the modules appear already in place; that layout is asked for once Vue Flow
-has measured the hidden canvas, since its answer could not be drawn sooner. A
+has measured the hidden canvas, since its answer could not be drawn sooner.
+Meanwhile the layout toolbar's Auto layout, Download and Save wait for it —
+there is no arrangement on screen yet to keep — and a layout that takes over
+before it lands is drawn and shown in its place. A
 layout still running after `AUTO_LAYOUT_TIMEOUT_MS` is abandoned and the
-worker with it — terminated, and started afresh by the next layout — and the
+worker with it — terminated, and started afresh by the next layout; one still
+waiting for ELK to load or start is dropped before ELK sees it — and the
 modules fall back to the rows the viewer drew before ELK: breadth-first layers
 from the root, each one centred row. So do they when ELK throws or its worker
 fails to load. Where no worker can be made at all, ELK's bundled build lays

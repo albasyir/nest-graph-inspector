@@ -65,7 +65,7 @@ function startElkWorker(): RunningElk | undefined {
   }
 
   const worker = new Worker(elkWorkerUrl, { name: 'ngi-elk' })
-  const { failure, fail } = failureSignal()
+  const { failure, fail, guard } = failureSignal()
   worker.addEventListener('error', (event) => {
     // An error the worker did not catch can leave it running, but nothing
     // will use it again, so it is stopped rather than left idle.
@@ -77,7 +77,9 @@ function startElkWorker(): RunningElk | undefined {
   return {
     engine: {
       runtime: 'worker',
-      layout: graph => Promise.race([elk.layout(graph), failure])
+      // Fails with the worker, and is let go of once it settles, so the
+      // worker's failure holds on to none of its finished layouts.
+      layout: graph => guard(() => elk.layout(graph))
     },
     stop: () => {
       worker.terminate()

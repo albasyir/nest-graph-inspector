@@ -25,20 +25,17 @@ function settle(): Promise<void> {
 function standIn(runtime: ElkRuntime = 'worker') {
   const requested: ElkNode[] = []
   const unanswered: (() => void)[] = []
-  const { failure, fail } = failureSignal()
+  const { failure, fail, guard } = failureSignal()
   let isStopped = false
   const running: RunningElk = {
     engine: {
       runtime,
-      layout: (graph) => {
+      layout: graph => guard(() => {
         requested.push(graph)
-        return Promise.race([
-          new Promise<ElkNode>((resolve) => {
-            unanswered.push(() => resolve(graph))
-          }),
-          failure
-        ])
-      }
+        return new Promise<ElkNode>((resolve) => {
+          unanswered.push(() => resolve(graph))
+        })
+      })
     },
     stop: () => {
       isStopped = true
@@ -181,6 +178,35 @@ describe('aborting', () => {
     assert.deepEqual(await next, GRAPH)
     assert.equal(starts(), 2)
   })
+
+  test('drops a layout still waiting for ELK to start, which ELK never lays out', async () => {
+    const [abandonedElk, nextElk] = [standIn('main-thread'), standIn('main-thread')]
+    const starting: ((running: RunningElk) => void)[] = []
+    const engines = createSharedElkEngineSource({
+      startWorker: () => undefined,
+      startOnThisThread: () => new Promise((resolve) => {
+        starting.push(resolve)
+      }),
+      warmUpGraph: WARM_UP_GRAPH
+    })
+
+    const abandoned = assert.rejects(engines.acquire(), /stopped before it had started/)
+    engines.abort()
+    starting[0]?.(abandonedElk.running)
+    await abandoned
+    await settle()
+    assert.deepEqual(abandonedElk.requested, [])
+    assert.equal(abandonedElk.isStopped(), true)
+
+    // The next layout starts ELK afresh, and is laid out.
+    const next = engines.acquire().then(engine => engine.layout(GRAPH))
+    await settle()
+    starting[1]?.(nextElk.running)
+    await settle()
+    await nextElk.answerAll()
+    assert.deepEqual(await next, GRAPH)
+    assert.equal(starting.length, 2)
+  })
 })
 
 describe('without a worker', () => {
@@ -319,6 +345,24 @@ describe('a source in a module of its own', () => {
 
     assert.equal(imports, 2)
   })
+
+  test('drops a layout still waiting for its module when it aborts, never starting ELK for it', async () => {
+    const module = inner(false)
+    let finishImport: (source: ElkEngineSource) => void = () => undefined
+    const engines = lazyElkEngineSource(() => new Promise((resolve) => {
+      finishImport = resolve
+    }))
+
+    const abandoned = assert.rejects(engines.acquire(), /stopped before it had loaded/)
+    engines.abort()
+    finishImport(module.source)
+    await abandoned
+
+    assert.equal(module.acquired(), 0)
+    // A layout asked for after the abort is served as any other.
+    await engines.acquire()
+    assert.equal(module.acquired(), 1)
+  })
 })
 
 describe('failureSignal', () => {
@@ -336,5 +380,51 @@ describe('failureSignal', () => {
     // An unhandled rejection would fail this run.
     fail(new Error('nobody is listening'))
     await settle()
+  })
+
+  test('fails every guarded layout still waiting, with the first failure only', async () => {
+    const { fail, guard } = failureSignal()
+    const waiting = [
+      guard(() => new Promise<ElkNode>(() => {})),
+      guard(() => new Promise<ElkNode>(() => {}))
+    ]
+
+    fail(new Error('the worker died'))
+    fail(new Error('and was stopped'))
+
+    for (const layout of waiting) {
+      await assert.rejects(layout, /the worker died/)
+    }
+  })
+
+  test('fails a layout asked for after the failure at once, without starting it', async () => {
+    const { fail, guard } = failureSignal()
+    let started = 0
+
+    fail(new Error('the worker died'))
+    await assert.rejects(guard(() => {
+      started += 1
+      return Promise.resolve(GRAPH)
+    }), /the worker died/)
+    assert.equal(started, 0)
+  })
+
+  test('leaves a layout that has settled as it settled when the engine fails after', async () => {
+    const { fail, guard } = failureSignal()
+
+    const answered = guard(() => Promise.resolve(GRAPH))
+    const refused = guard(() => Promise.reject(new Error('ELK refused the graph')))
+    await assert.rejects(refused, /refused the graph/)
+    fail(new Error('the worker died'))
+
+    assert.deepEqual(await answered, GRAPH)
+  })
+
+  test('fails a layout whose work throws, as one that rejects', async () => {
+    const { guard } = failureSignal()
+
+    await assert.rejects(guard(() => {
+      throw new Error('could not post the graph')
+    }), /could not post the graph/)
   })
 })

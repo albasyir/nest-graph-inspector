@@ -2549,7 +2549,17 @@ async function runAutoLayout(run: number): Promise<void> {
     input: moduleGraphLayoutInput({ moduleMap, sizes }),
     engines: moduleLayoutEngine
   })
-  if (run !== autoLayoutRun || layoutDraft.value) {
+  if (run !== autoLayoutRun) {
+    return
+  }
+
+  if (layoutDraft.value) {
+    // A layout took over while this one ran. It is the arrangement now, so a
+    // canvas still held for this layout is drawn from it and shown rather
+    // than left hidden.
+    if (isArrangingModules.value) {
+      await drawLayoutDraft()
+    }
     return
   }
 
@@ -2624,16 +2634,23 @@ function redrawCanvas(): void {
     return
   }
 
+  void drawLayoutDraft()
+}
+
+/**
+ * Draws the canvas from the layout draft and centres it — at once, then
+ * shows it, when the canvas is still held for a first automatic layout that
+ * the draft has overtaken.
+ */
+async function drawLayoutDraft(): Promise<void> {
   refreshGraph({ preservePositions: false })
   if (!isArrangingModules.value) {
     void centerGraph()
     return
   }
 
-  // A layout arrived while the first automatic one was under way.
-  void centerGraph(0).then(() => {
-    isArrangingModules.value = false
-  })
+  await centerGraph(0)
+  isArrangingModules.value = false
 }
 
 /**
@@ -3088,6 +3105,10 @@ defineExpose({ centerGraph, focusModule })
         :title="props.layoutSaveError || undefined"
         class="graph-viewer-layout__status"
       />
+      <!--
+        Until the first automatic layout lands there is no arrangement on
+        screen: saving or downloading would keep the hidden rows it replaces.
+      -->
       <UButton
         type="button"
         icon="i-lucide-rotate-ccw"
@@ -3096,6 +3117,7 @@ defineExpose({ centerGraph, focusModule })
         variant="soft"
         size="sm"
         title="Reset to the automatic layout"
+        :disabled="isArrangingModules"
         @click="resetToAutoLayout"
       />
       <UButton
@@ -3108,6 +3130,7 @@ defineExpose({ centerGraph, focusModule })
         square
         aria-label="Download layout"
         title="Download nest-graph-layout.json — rename it to .muse in the project root for a running inspector to read"
+        :disabled="isArrangingModules"
         @click="downloadCurrentLayout"
       />
       <UButton
@@ -3115,7 +3138,7 @@ defineExpose({ centerGraph, focusModule })
         :icon="layoutSaveButton.icon"
         :label="layoutSaveButton.label"
         :title="layoutSaveTitle"
-        :disabled="props.layoutSaving"
+        :disabled="props.layoutSaving || isArrangingModules"
         color="primary"
         variant="soft"
         size="sm"

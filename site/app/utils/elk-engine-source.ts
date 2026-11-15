@@ -68,6 +68,8 @@ export function createSharedElkEngineSource(options: {
     running: Promise<RunningElk>
     startedAt: number
     isReady: boolean
+    /** Set when the source aborts it, so a layout still waiting for it is dropped. */
+    isAborted: boolean
   }
   let current: Started | undefined
 
@@ -86,7 +88,7 @@ export function createSharedElkEngineSource(options: {
 
   function start(): Started {
     const startedAt = now()
-    const started: Started = { running: startRunning(), startedAt, isReady: false }
+    const started: Started = { running: startRunning(), startedAt, isReady: false, isAborted: false }
     // An engine that could not start, or that died on its own, is forgotten,
     // so the next layout starts another.
     started.running.then(
@@ -116,15 +118,25 @@ export function createSharedElkEngineSource(options: {
     onReady?.({ start: started.startedAt, end: now(), runtime })
   }
 
-  /** The engine, telling the source when it has finished its first layout. */
+  /**
+   * The engine, telling the source when it has finished its first layout — or,
+   * when the source aborted it before it had started, a failure, so a layout
+   * given up while it waited is never handed to ELK.
+   */
   function engineOf(started: Started): Promise<ElkEngine> {
-    return started.running.then(({ engine }) => ({
-      runtime: engine.runtime,
-      layout: graph => engine.layout(graph).then((laidOut) => {
-        markReady(started, engine.runtime)
-        return laidOut
-      })
-    }))
+    return started.running.then(({ engine }) => {
+      if (started.isAborted) {
+        throw new Error('ELK was stopped before it had started')
+      }
+
+      return {
+        runtime: engine.runtime,
+        layout: graph => engine.layout(graph).then((laidOut) => {
+          markReady(started, engine.runtime)
+          return laidOut
+        })
+      }
+    })
   }
 
   return {
@@ -133,7 +145,12 @@ export function createSharedElkEngineSource(options: {
     abort: () => {
       const stopping = current
       current = undefined
-      void stopping?.running.then(running => running.stop(), () => undefined)
+      if (!stopping) {
+        return
+      }
+
+      stopping.isAborted = true
+      void stopping.running.then(running => running.stop(), () => undefined)
     },
     warmUp: () => {
       if (current) {
@@ -161,14 +178,17 @@ export type LazyElkEngineSource = ElkEngineSource & {
 /**
  * An engine source that lives in a module of its own, imported the first time
  * it is needed — or when `load` asks for it early. Until then it is not ready,
- * and has nothing to abort. A failed import fails that layout, and the next
- * one imports again.
+ * and an abort drops every layout still waiting for the import, so ELK is not
+ * started for a layout already given up. A failed import fails that layout,
+ * and the next one imports again.
  */
 export function lazyElkEngineSource(
   importSource: () => Promise<ElkEngineSource>
 ): LazyElkEngineSource {
   let loaded: ElkEngineSource | undefined
   let loading: Promise<ElkEngineSource> | undefined
+  /** How often the source has aborted, so a layout asked for before one is dropped. */
+  let aborts = 0
 
   function load(): Promise<ElkEngineSource> {
     loading ??= importSource().then(
@@ -186,26 +206,85 @@ export function lazyElkEngineSource(
 
   return {
     isReady: () => loaded?.isReady() ?? false,
-    acquire: () => load().then(source => source.acquire()),
-    abort: () => loaded?.abort(),
+    acquire: () => {
+      const abortsWhenAsked = aborts
+      return load().then((source) => {
+        if (aborts !== abortsWhenAsked) {
+          throw new Error('ELK was stopped before it had loaded')
+        }
+
+        return source.acquire()
+      })
+    },
+    abort: () => {
+      aborts += 1
+      loaded?.abort()
+    },
     load: () => load().then(() => undefined, () => undefined)
   }
 }
 
 /**
- * A promise that only ever fails, and the means to fail it. Nothing may be
- * waiting when it fails — a worker can die between layouts — so it never
- * reports itself unhandled.
+ * An engine's failure, and the means to fail it. `failure` fails the moment
+ * the engine does; nothing may be waiting on it then — a worker can die
+ * between layouts — so it never reports itself unhandled. `guard` runs one of
+ * the engine's layouts so that it fails then too: a layout still waiting when
+ * `fail` is called fails with it, and one asked for afterwards fails at once,
+ * without being started. A guarded layout is let go of once it settles, so a
+ * long-lived engine holds on to none of the layouts it has finished.
  */
 export function failureSignal(): {
   failure: Promise<never>
   fail: (error: Error) => void
+  guard: <T>(work: () => Promise<T>) => Promise<T>
 } {
-  let fail: (error: Error) => void = () => undefined
+  let failedWith: Error | undefined
+  const waiting = new Set<(error: Error) => void>()
+  let rejectFailure: (error: Error) => void = () => undefined
   const failure = new Promise<never>((_, reject) => {
-    fail = reject
+    rejectFailure = reject
   })
   failure.catch(() => undefined)
 
-  return { failure, fail }
+  function fail(error: Error): void {
+    if (failedWith) {
+      return
+    }
+
+    failedWith = error
+    rejectFailure(error)
+    for (const reject of waiting) {
+      reject(error)
+    }
+    waiting.clear()
+  }
+
+  function guard<T>(work: () => Promise<T>): Promise<T> {
+    const failed = failedWith
+    if (failed) {
+      return Promise.reject(failed)
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const letGo = () => waiting.delete(reject)
+      waiting.add(reject)
+      try {
+        work().then(
+          (value) => {
+            letGo()
+            resolve(value)
+          },
+          (error: unknown) => {
+            letGo()
+            reject(error)
+          }
+        )
+      } catch (error) {
+        letGo()
+        reject(error)
+      }
+    })
+  }
+
+  return { failure, fail, guard }
 }
