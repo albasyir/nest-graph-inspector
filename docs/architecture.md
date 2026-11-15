@@ -902,9 +902,57 @@ outside the body is its `<title>`, so no viewer page names the graph there —
 the deep dive is "Module Deep Dive" — and `session_recording.maskTextSelector`
 in `nuxt.config.ts` masks titles in replays besides.
 
-Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
-for JSON editing, ApexCharts for timings, and LangChain over `@mlc-ai/web-llm`
-for the AI chat panel.
+Rendering stack: Vue Flow for the graph, ELK (`elkjs`) for its automatic
+layout, Mermaid for sequence diagrams, Monaco for JSON editing, ApexCharts for
+timings, and LangChain over `@mlc-ai/web-llm` for the AI chat panel.
+
+**The automatic layout.** A graph with no saved layout, and every **Auto
+layout**, is laid out by `app/utils/module-graph-auto-layout.ts` with ELK's
+layered algorithm, top-down as a Mermaid flowchart of the imports would be:
+the root module pinned to the top layer, each module one layer below the
+deepest module importing it, crossings minimised layer by layer, and each cycle
+broken where a depth-first walk of the imports from the root first comes back
+on itself — so the import closing it is the one edge pointing back up. A module
+that imports nothing and that nothing imports is pinned to the bottom layer
+rather than sitting beside the root. Imports between modules are drawn along
+ELK's routes, through the gaps it leaves between modules, for as long as both
+ends stand where ELK put them at the size it gave them; once either is dragged
+or resized, that import falls back to Vue Flow's step edge between the handles,
+and a cycle's imports keep their own curved, labelled edges throughout.
+
+ELK runs in a Web Worker, one per page and shared by every viewer on it, so a
+layout never holds up the page's own thread. The worker runs elkjs's own
+`elk-worker.min.js`, emitted as-is by a `?url` import under the site's base
+path, driven through `elkjs/lib/elk-api.js` from
+`app/utils/module-layout-engine.ts`; `app/utils/elk-engine-source.ts` keeps the
+one engine — starting it, warming it, stopping it — and is what the tests
+drive. The script is a megabyte and a half, so it is fetched only by a page
+that lays a graph out, never preloaded or prefetched (`build:manifest` in
+`nuxt.config.ts` drops ELK's files from every page's hints), and warmed early
+where a graph is coming: `plugins/module-layout-warm-up.client.ts` starts it on
+arriving at the navigator or `/view?preview=true` — while the page itself
+loads — and on any navigation to the navigator, and the in-browser demo starts
+it while its payload downloads and boots. A warm-up lays a small graph shaped
+like a real one out three times, so the first real layout finds ELK compiled
+and optimised. Until the first layout lands the canvas is drawn but hidden, so
+the modules appear already in place; that layout is asked for once Vue Flow
+has measured the hidden canvas, since its answer could not be drawn sooner. A
+layout still running after `AUTO_LAYOUT_TIMEOUT_MS` is abandoned and the
+worker with it — terminated, and started afresh by the next layout — and the
+modules fall back to the rows the viewer drew before ELK: breadth-first layers
+from the root, each one centred row. So do they when ELK throws or its worker
+fails to load. Where no worker can be made at all, ELK's bundled build lays
+out on the page's own thread instead, which nothing can stop part way. With
+**Auto Re-position** on, opening or closing a module on a canvas nobody has
+arranged lays it out again; a saved or dragged arrangement is never re-laid
+out. Layouts run one at a time: one asked for while another runs waits for it,
+and is skipped if a later one has been asked for by then, so a burst of clicks
+lays the graph out at most twice. Each layout is recorded as the User Timing
+measure `ngi:auto-layout`, from
+asking for the layout to the modules drawn, whose `detail` says which engine
+placed the modules, whether ELK was warm when asked, where it ran, and why it
+did not place them when it did not; and each engine records
+`ngi:auto-layout:engine-ready`, from being started to its first layout done.
 
 **The graph carries the application's own documentation.** Every module,
 provider and controller in `GraphOutput` may hold a `jsdoc` string —
@@ -1456,3 +1504,12 @@ Facts a code change can invalidate, and the file to check:
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
   `demo/scripts/build-nodepod-payload.ts`
+- How the automatic layout lays a graph out, and how long it waits for ELK
+  before falling back to rows (5 s) — `MODULE_GRAPH_ELK_OPTIONS` and
+  `AUTO_LAYOUT_TIMEOUT_MS` in `site/app/utils/module-graph-auto-layout.ts`; how
+  often a warm-up lays its graph out (3) — `warmUpRuns` in
+  `site/app/utils/module-layout-engine.ts`; which arrivals warm ELK —
+  `drawsModuleGraphOnArrival` in `site/app/utils/module-layout-warm-up.ts`, and
+  `start()` in `site/app/stores/nodepod-demo.ts`; the size of ELK's worker
+  script, `~1.6 MB` (`~477 KB` gzipped) — the `elkjs` version in
+  `site/package.json`

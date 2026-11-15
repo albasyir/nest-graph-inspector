@@ -15,6 +15,7 @@ import {
 import { captureBestEffort } from '~/utils/graph-viewer-analytics'
 import { resolveDirectRunUrl } from '~/utils/inspector-endpoint-url'
 import { createNodepodDemoRunGuard } from '~/utils/nodepod-demo-run-guard'
+import { startModuleLayoutWarmUp } from '~/utils/module-layout-warm-up'
 import {
   stripAnsi,
   toRequestBody,
@@ -671,6 +672,9 @@ export const useNodepodDemoStore = defineStore('nodepod-demo', () => {
     }
 
     if (!startPromise) {
+      // The demo's graph is laid out the moment it comes up, so ELK warms
+      // while the payload downloads and the application boots.
+      startModuleLayoutWarmUp()
       const attempt = run()
       // run() tears the previous pod down before its first await, so a claim
       // taken here is this attempt's own.
