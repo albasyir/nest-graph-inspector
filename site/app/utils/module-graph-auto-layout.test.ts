@@ -1,10 +1,17 @@
 import { strict as assert } from 'node:assert'
-import { describe, test } from 'node:test'
+import { before, describe, test } from 'node:test'
 import type { ElkNode } from 'elkjs/lib/elk-api'
 import type { GraphOutput } from 'nest-graph-inspector'
 import {
+  CIRCULAR_LABEL_MAX_SCALE,
+  getCircularLabelBox,
+  placeRouteLabels
+} from './circular-dependency-edge.ts'
+import {
   AUTO_LAYOUT_ENGINE_READY_MEASURE,
   AUTO_LAYOUT_MEASURE,
+  ROUTE_GAP,
+  ROUTE_MODULE_CLEARANCE,
   WARM_UP_LAYOUT_INPUT,
   autoLayoutModuleGraph,
   autoLayoutTimingDetail,
@@ -327,35 +334,211 @@ describe('the routes ELK gives the Shop App\'s imports', () => {
       }
     }
   })
+})
 
-  test('never pass through a module they do not join', async () => {
-    const input = shopApp(variedSize)
-    const { positions, routes } = await layoutModuleGraphWithElk({ input, elk: await freshElk() })
-    const laidOut = boxes(input, positions)
+/** One straight leg of a route. */
+type Leg = { from: LayoutPoint, to: LayoutPoint }
 
-    for (const moduleImport of input.imports) {
-      const route = routes.get(importRouteKey(moduleImport)) ?? []
-      for (const [index, point] of route.slice(1).entries()) {
-        const previous = route[index]
-        assert.ok(previous)
-        const leg = {
-          left: Math.min(previous.x, point.x),
-          right: Math.max(previous.x, point.x),
-          top: Math.min(previous.y, point.y),
-          bottom: Math.max(previous.y, point.y)
-        }
-        for (const box of laidOut) {
-          if (box.name === moduleImport.importer || box.name === moduleImport.imported) {
-            continue
+function legsOf(route: readonly LayoutPoint[]): Leg[] {
+  return route.slice(1).flatMap((to, index) => {
+    const from = route[index]
+    return from ? [{ from, to }] : []
+  })
+}
+
+/** Whether a leg runs through a box's inside, more than a pixel past its border. */
+function entersBox({ from, to }: Leg, box: Box): boolean {
+  return Math.min(from.x, to.x) < box.x + box.width - 1 && Math.max(from.x, to.x) > box.x + 1
+    && Math.min(from.y, to.y) < box.y + box.height - 1 && Math.max(from.y, to.y) > box.y + 1
+}
+
+/** How far a leg passes from a box: 0 where it touches or enters it. */
+function distanceToBox({ from, to }: Leg, box: Box): number {
+  const dx = Math.max(box.x - Math.max(from.x, to.x), Math.min(from.x, to.x) - (box.x + box.width), 0)
+  const dy = Math.max(box.y - Math.max(from.y, to.y), Math.min(from.y, to.y) - (box.y + box.height), 0)
+  return Math.hypot(dx, dy)
+}
+
+/** How far apart two legs running side by side are; `Infinity` where they do not. */
+function sideBySideGap(left: Leg, right: Leg): number {
+  const isVertical = (leg: Leg) => leg.from.x === leg.to.x
+  if (isVertical(left) !== isVertical(right)) {
+    return Infinity
+  }
+
+  const along = isVertical(left) ? 'y' : 'x'
+  const across = isVertical(left) ? 'x' : 'y'
+  const start = (leg: Leg) => Math.min(leg.from[along], leg.to[along])
+  const end = (leg: Leg) => Math.max(leg.from[along], leg.to[along])
+  const shared = Math.min(end(left), end(right)) - Math.max(start(left), start(right))
+
+  return shared > 0 ? Math.abs(left.from[across] - right.from[across]) : Infinity
+}
+
+function isOnLeg(point: LayoutPoint, { from, to }: Leg): boolean {
+  return point.x >= Math.min(from.x, to.x) - 0.5 && point.x <= Math.max(from.x, to.x) + 0.5
+    && point.y >= Math.min(from.y, to.y) - 0.5 && point.y <= Math.max(from.y, to.y) + 0.5
+}
+
+function isApart(left: Box, right: Box): boolean {
+  return left.x + left.width <= right.x || right.x + right.width <= left.x
+    || left.y + left.height <= right.y || right.y + right.height <= left.y
+}
+
+/**
+ * The label on each pair of modules a cycle runs between, as the viewer puts
+ * them: on one import of the pair, numbered as the issues page numbers the
+ * cycles — Order → StoreProduct → Product → Recommendation → Order is #1, and
+ * Order ⇄ Payment #2.
+ */
+const SHOP_APP_CYCLE_LABELS = [
+  { importer: 'OrderModule', imported: 'StoreProductModule', text: '#1' },
+  { importer: 'StoreProductModule', imported: 'ProductModule', text: '#1' },
+  { importer: 'ProductModule', imported: 'RecommendationModule', text: '#1' },
+  { importer: 'RecommendationModule', imported: 'OrderModule', text: '#1' },
+  { importer: 'PaymentModule', imported: 'OrderModule', text: '#2' }
+]
+
+const SHOP_APP_SIZES = [
+  ['every module collapsed', () => COLLAPSED],
+  ['modules of every size', variedSize]
+] as const
+
+for (const [sizes, sizeOf] of SHOP_APP_SIZES) {
+  describe(`the Shop App's routes, ${sizes}`, () => {
+    const input = shopApp(sizeOf)
+    let routes: ReadonlyMap<string, readonly LayoutPoint[]> = new Map()
+    let modules: Box[] = []
+    const routeOf = (importer: string, imported: string) =>
+      routes.get(importRouteKey({ importer, imported })) ?? []
+
+    before(async () => {
+      const laidOut = await layoutModuleGraphWithElk({ input, elk: await freshElk() })
+      routes = laidOut.routes
+      modules = boxes(input, laidOut.positions)
+    })
+
+    test('never pass through a module they do not join, the cycles\' imports among them', (t) => {
+      let legs = 0
+      for (const { importer, imported } of input.imports) {
+        for (const leg of legsOf(routeOf(importer, imported))) {
+          legs += 1
+          for (const module of modules) {
+            if (module.name !== importer && module.name !== imported) {
+              assert.ok(!entersBox(leg, module), `${importer} → ${imported} passes through ${module.name}`)
+            }
           }
-          const crosses = leg.left < box.x + box.width - 1 && leg.right > box.x + 1
-            && leg.top < box.y + box.height - 1 && leg.bottom > box.y + 1
-          assert.ok(!crosses, `${moduleImport.importer} → ${moduleImport.imported} passes through ${box.name}`)
         }
       }
-    }
+
+      const cycleImports = input.imports.filter(({ importer, imported }) => closesCycle(importer, imported))
+      assert.equal(routes.size, input.imports.length)
+      assert.equal(cycleImports.length, 6)
+      t.diagnostic(`${routes.size} routes, ${cycleImports.length} of them cycle imports: ${legs} legs × ${modules.length} modules, 0 through a module`)
+    })
+
+    test(`keep ${ROUTE_MODULE_CLEARANCE} px from every module they pass, their own away from where they meet it`, (t) => {
+      let nearest = Infinity
+      for (const { importer, imported } of input.imports) {
+        const legs = legsOf(routeOf(importer, imported))
+        for (const [index, leg] of legs.entries()) {
+          for (const module of modules) {
+            const meets = (index === 0 && module.name === importer)
+              || (index === legs.length - 1 && module.name === imported)
+            if (!meets) {
+              nearest = Math.min(nearest, distanceToBox(leg, module))
+            }
+          }
+        }
+      }
+
+      // Less a pixel: the drawing is moved onto whole pixels after ELK.
+      assert.ok(nearest >= ROUTE_MODULE_CLEARANCE - 1, `a route passes ${nearest} px from a module`)
+      t.diagnostic(`nearest a route passes a module: ${nearest} px`)
+    })
+
+    test(`keep ${ROUTE_GAP} px from the routes beside them`, (t) => {
+      const legsByRoute = input.imports.map(({ importer, imported }) => legsOf(routeOf(importer, imported)))
+      let nearest = Infinity
+      for (const [index, legs] of legsByRoute.entries()) {
+        for (const others of legsByRoute.slice(index + 1)) {
+          for (const leg of legs) {
+            for (const other of others) {
+              nearest = Math.min(nearest, sideBySideGap(leg, other))
+            }
+          }
+        }
+      }
+
+      assert.ok(nearest >= ROUTE_GAP - 1, `two routes run ${nearest} px apart`)
+      t.diagnostic(`nearest two routes run side by side: ${nearest} px`)
+    })
+
+    test('meet each module at a point of their own', (t) => {
+      const ends = input.imports.flatMap(({ importer, imported }) => {
+        const route = routeOf(importer, imported)
+        const start = route[0]
+        const end = route.at(-1)
+        return start && end ? [`${importer}@${start.x},${start.y}`, `${imported}@${end.x},${end.y}`] : []
+      })
+
+      assert.equal(ends.length, input.imports.length * 2)
+      assert.equal(new Set(ends).size, ends.length, 'two routes meet a module at one point')
+      t.diagnostic(`${ends.length} route ends, each at a point of its own`)
+    })
+
+    test('draw Order ⇄ Payment as two paths, apart', (t) => {
+      const there = legsOf(routeOf('OrderModule', 'PaymentModule'))
+      const back = legsOf(routeOf('PaymentModule', 'OrderModule'))
+      const gap = Math.min(...there.flatMap(leg => back.map(other => sideBySideGap(leg, other))))
+
+      assert.ok(there.length > 0 && back.length > 0)
+      assert.notDeepEqual(there, back)
+      assert.ok(gap >= ROUTE_GAP - 1, `the two run ${gap} px apart`)
+      t.diagnostic(`Order ⇄ Payment: nearest the two paths run side by side: ${gap} px`)
+    })
+
+    test('carry the cycle labels on them, clear of every module and of each other at every zoom', (t) => {
+      // As the viewer draws each cycle edge: from the module imported to its importer.
+      const cycleRoutes = new Map(
+        input.imports
+          .filter(({ importer, imported }) => closesCycle(importer, imported))
+          .map(moduleImport => [
+            importRouteKey(moduleImport),
+            [...routeOf(moduleImport.importer, moduleImport.imported)].reverse()
+          ])
+      )
+      const labels = SHOP_APP_CYCLE_LABELS.map(({ importer, imported, text }) => {
+        const key = importRouteKey({ importer, imported })
+        return { key, text, route: cycleRoutes.get(key) ?? [] }
+      })
+      const placements = placeRouteLabels({ labels, obstacles: modules, lines: [...cycleRoutes.values()] })
+      const placed = labels.map(({ key, text, route }) => {
+        const spot = placements.get(key)
+        assert.ok(spot, `${key} has a label`)
+        assert.equal(spot.clearScale, CIRCULAR_LABEL_MAX_SCALE, `${key}'s label is clear at every zoom`)
+        assert.ok(
+          legsOf(route).some(leg => isOnLeg({ x: spot.labelX, y: spot.labelY }, leg)),
+          `${key}'s label sits on its route`
+        )
+        return { name: key, ...getCircularLabelBox(spot, text, CIRCULAR_LABEL_MAX_SCALE) }
+      })
+
+      for (const label of placed) {
+        for (const module of modules) {
+          assert.ok(isApart(label, module), `${label.name}'s label covers ${module.name}`)
+        }
+      }
+      assertNoOverlap(placed)
+      // Keeping off the other cycles' lines is a preference, not a promise, so
+      // it is counted rather than asserted.
+      const onAnotherCycle = placed.filter(label => [...cycleRoutes].some(([key, route]) =>
+        key !== label.name && legsOf(route).some(leg => distanceToBox(leg, label) === 0)
+      ))
+      t.diagnostic(`${placed.length} labels at ${CIRCULAR_LABEL_MAX_SCALE}× size: 0 on a module, 0 on another label, ${onAnotherCycle.length} over another cycle's line (${onAnotherCycle.map(label => label.name).join(', ') || 'none'})`)
+    })
   })
-})
+}
 
 describe('a larger graph', () => {
   /**

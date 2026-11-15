@@ -44,7 +44,10 @@ import {
   getCircularEdgeGeometry,
   getCircularLabelPlacement,
   getCircularLabelScale,
-  type CircularEdgeGeometry
+  placeRouteLabels,
+  type CircularEdgeGeometry,
+  type CircularEdgeRect,
+  type CircularLabelSpot
 } from '~/utils/circular-dependency-edge'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
 import { findDirectRunTarget } from '~/utils/direct-run-provider'
@@ -159,6 +162,8 @@ type CircularEdgeData = {
   circularIds: number[]
   circularReason: string
   circularDetails: CircularEdgeInfo[]
+  /** For an edge between two modules, the automatic layout's route for it. */
+  route?: ModuleEdgeRoute
 }
 
 type StandardEdgeData = {
@@ -171,12 +176,15 @@ type StandardEdgeData = {
 /**
  * The way the automatic layout ran an import, from the module imported to its
  * importer, and the boxes the two had then. It is drawn only while they keep
- * them: a drag or a resize leaves the route behind for the usual step path.
+ * them: a drag or a resize leaves the route behind for the usual step path —
+ * or, for an edge closing a cycle, for its curve.
  */
 type ModuleEdgeRoute = {
   points: NodePosition[]
   sourceBox: ModuleEdgeBox
   targetBox: ModuleEdgeBox
+  /** For an edge closing a cycle, where its label sits on the route. */
+  label?: CircularLabelSpot
 }
 
 /** What the automatic layout worked out, and for which boxes. */
@@ -829,19 +837,26 @@ function withRoute(
 const ROUTED_EDGE_CORNER_RADIUS = 5
 
 /**
- * A routed edge's path: the automatic layout's route while both modules keep
- * the boxes it gave them, and once either is dragged away or resized, the step
- * path between the handles that Vue Flow draws for any other edge.
+ * An edge's route from the automatic layout, while both its modules keep the
+ * boxes that layout gave them; once either is dragged away or resized, none.
  */
-function getRoutedEdgePath(edgeProps: RoutedEdgeProps): string {
-  const route = edgeProps.data && 'route' in edgeProps.data
-    ? edgeProps.data.route
-    : undefined
-  if (
-    route
+function standingRoute(edgeProps: EdgeProps<FlowEdgeData>): ModuleEdgeRoute | undefined {
+  const route = edgeProps.data?.route
+  const isStanding = route
     && hasNodeBox(edgeProps.sourceNode, route.sourceBox)
     && hasNodeBox(edgeProps.targetNode, route.targetBox)
-  ) {
+
+  return isStanding ? route : undefined
+}
+
+/**
+ * A routed edge's path: the automatic layout's route while it stands, and
+ * otherwise the step path between the handles that Vue Flow draws for any
+ * other edge.
+ */
+function getRoutedEdgePath(edgeProps: RoutedEdgeProps): string {
+  const route = standingRoute(edgeProps)
+  if (route) {
     return roundedPolylinePath(route.points, ROUTED_EDGE_CORNER_RADIUS)
   }
 
@@ -987,22 +1002,80 @@ function getWarningEdgeGeometry(edgeProps: WarningEdgeProps): CircularEdgeGeomet
   })
 }
 
+/**
+ * A cycle edge's path: the automatic layout's route while it stands, so the
+ * edge goes around modules as every other import does, and otherwise its
+ * curve.
+ */
 function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
-  return getWarningEdgeGeometry(edgeProps).path
+  const route = standingRoute(edgeProps)
+
+  return route
+    ? roundedPolylinePath(route.points, ROUTED_EDGE_CORNER_RADIUS)
+    : getWarningEdgeGeometry(edgeProps).path
 }
 
 /** Labels keep their own size on a zoomed-out canvas, so a phone can read them. */
 const circularLabelScale = computed(() => getCircularLabelScale(viewport.value.zoom))
 
+/** Where a cycle edge's label sits: on its route while that stands, else on its curve. */
 function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
   return {
     position: 'absolute',
     ...getCircularLabelPlacement(
-      getWarningEdgeGeometry(edgeProps),
+      standingRoute(edgeProps)?.label ?? getWarningEdgeGeometry(edgeProps),
       circularLabelScale.value
     ),
     pointerEvents: 'all'
   }
+}
+
+/**
+ * Every cycle edge drawn along a route gets its label on that route, clear of
+ * every module and of every label placed before it: the labels always shown
+ * first, then those Bright Line shows only while it lights their edge, so
+ * lighting one never moves a label already on screen. Where it can, a label
+ * also keeps off the other cycle edges on screen, so it hides none of their
+ * turns.
+ */
+function withRouteLabels(
+  edges: FlowEdge[],
+  obstacles: readonly CircularEdgeRect[]
+): FlowEdge[] {
+  const labelled = edges.flatMap((edge) => {
+    const data = edge.data
+    return edge.type === 'warning' && hasCircularEdgeLabel(data) && data.route
+      ? [{ id: edge.id, data, points: data.route.points }]
+      : []
+  })
+  if (labelled.length === 0) {
+    return edges
+  }
+
+  const placements = placeRouteLabels({
+    labels: [
+      ...labelled.filter(({ data }) => data.isNormallyVisible),
+      ...labelled.filter(({ data }) => !data.isNormallyVisible)
+    ].map(({ id, data, points }) => ({
+      key: id,
+      route: points,
+      text: formatCircularEdgeLabel(data.circularIds)
+    })),
+    obstacles,
+    lines: edges.flatMap(edge =>
+      edge.type === 'warning' && edge.data?.isNormallyVisible && edge.data.route
+        ? [edge.data.route.points]
+        : []
+    )
+  })
+
+  return edges.map((edge) => {
+    const label = placements.get(edge.id)
+    const data = edge.data
+    return label && data?.route
+      ? { ...edge, data: { ...data, route: { ...data.route, label } } }
+      : edge
+  })
 }
 
 /** Whether an edge carries the label for the cycles between its two nodes. */
@@ -1590,7 +1663,7 @@ function buildGraph(
         })
         const edgeColor = getEdgeColor(relationship)
         const edgeRelationClass = getEdgeRelationClass(relationship)
-        const route = circularInfo ? undefined : autoRoute(moduleName, imp)
+        const route = autoRoute(moduleName, imp)
 
         edges.push({
           id: `e-mod-${imp}->${moduleName}`,
@@ -1598,9 +1671,10 @@ function buildGraph(
           target,
           sourceHandle,
           targetHandle,
-          // Every edge closing a cycle is curved, labelled or not, so the
-          // two directions of a mutual import stay apart. Any other import
-          // takes the automatic layout's route while it still has one.
+          // Every import takes the automatic layout's route while it still
+          // has one — an edge closing a cycle too, in its own colour and with
+          // its label on the route. Without a route, an edge closing a cycle
+          // is curved, so the two directions of a mutual import stay apart.
           type: circularInfo ? 'warning' : route ? 'routed' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
           class: edge => [
@@ -1681,7 +1755,7 @@ function buildGraph(
       relationship: overrides.relationship
     })
 
-    const route = isCircular ? undefined : overrides.route
+    const route = overrides.route
     edges.push({
       id: overrides.id ?? `e-dep-${sourceId}->${targetId}`,
       source: sourceId,
@@ -1836,7 +1910,14 @@ function buildGraph(
 
   addModuleItemDependencyEdges()
 
-  return { nodes, edges }
+  // Labels go on routes clear of every module, wherever each is drawn now.
+  const moduleBoxes = Object.keys(moduleMap.modules).flatMap((moduleName) => {
+    const at = modulePositions.get(moduleName) ?? { x: 0, y: 0 }
+    const size = moduleSizes.get(moduleName)
+    return size ? [{ ...at, ...size }] : []
+  })
+
+  return { nodes, edges: withRouteLabels(edges, moduleBoxes) }
 }
 
 /**

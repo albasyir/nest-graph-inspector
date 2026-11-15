@@ -915,10 +915,19 @@ broken where a depth-first walk of the imports from the root first comes back
 on itself — so the import closing it is the one edge pointing back up. A module
 that imports nothing and that nothing imports is pinned to the bottom layer
 rather than sitting beside the root. Imports between modules are drawn along
-ELK's routes, through the gaps it leaves between modules, for as long as both
-ends stand where ELK put them at the size it gave them; once either is dragged
-or resized, that import falls back to Vue Flow's step edge between the handles,
-and a cycle's imports keep their own curved, labelled edges throughout.
+ELK's routes, through the gaps it leaves between modules — 24 px clear of
+every module, 16 px clear of each other, and each meeting its modules at a
+point of its own — for as long as both ends stand where ELK put them at the
+size it gave them. A cycle's imports take ELK's routes too, in the cycle
+colour, so the two imports of a mutual pair are two paths, and each ⚠ label
+sits on its route where it covers no module and no other label — at the
+largest size a label is ever drawn where its route has room for that, at a
+smaller one where it has not, in the middle of its route where nothing is
+clear — and, where its route leaves room, no other cycle's line, so no label
+hides where one turns (`placeRouteLabels` in
+`app/utils/circular-dependency-edge.ts`). Once either end is dragged or
+resized, an import falls back to Vue Flow's step edge between the handles, and
+a cycle's import to its own curved, labelled edge.
 
 ELK runs in a Web Worker, one per page and shared by every viewer on it, so a
 layout never holds up the page's own thread. The worker runs elkjs's own
@@ -1504,9 +1513,11 @@ Facts a code change can invalidate, and the file to check:
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
   `demo/scripts/build-nodepod-payload.ts`
-- How the automatic layout lays a graph out, and how long it waits for ELK
-  before falling back to rows (5 s) — `MODULE_GRAPH_ELK_OPTIONS` and
-  `AUTO_LAYOUT_TIMEOUT_MS` in `site/app/utils/module-graph-auto-layout.ts`; how
+- How the automatic layout lays a graph out, how far its routes keep from
+  modules and from each other (24 px, 16 px), and how long it waits for ELK
+  before falling back to rows (5 s) — `MODULE_GRAPH_ELK_OPTIONS`,
+  `ROUTE_MODULE_CLEARANCE`, `ROUTE_GAP` and `AUTO_LAYOUT_TIMEOUT_MS` in
+  `site/app/utils/module-graph-auto-layout.ts`; how
   often a warm-up lays its graph out (3) — `warmUpRuns` in
   `site/app/utils/module-layout-engine.ts`; which arrivals warm ELK —
   `drawsModuleGraphOnArrival` in `site/app/utils/module-layout-warm-up.ts`, and

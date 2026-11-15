@@ -134,6 +134,15 @@ export const AUTO_LAYOUT_TIMEOUT_MS = 5000
  */
 const MODULE_SPACING = LAYOUT_GEOMETRY.moduleGapY
 
+/**
+ * How far a route keeps from the modules it passes, its own included away
+ * from where it meets them: far enough that no line seems to run along a
+ * module's border, at no more than a few per cent on the drawing's size.
+ */
+export const ROUTE_MODULE_CLEARANCE = 24
+/** How far apart two routes running side by side keep. */
+export const ROUTE_GAP = 16
+
 /** The box of a module the input has no size for, as the rows always drew it. */
 const DEFAULT_MODULE_BOX: LayoutSize = {
   width: LAYOUT_GEOMETRY.nodeWidth + LAYOUT_GEOMETRY.modulePadding * 2,
@@ -160,6 +169,17 @@ export const MODULE_GRAPH_ELK_OPTIONS = {
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.spacing.nodeNode': String(MODULE_SPACING),
   'elk.layered.spacing.nodeNodeBetweenLayers': String(MODULE_SPACING),
+  // A route clears a module beside it within a layer, and one above or below
+  // it in the gap between layers, by the same distance; routes side by side
+  // keep their own gap, so a bundle of them still reads as separate lines.
+  'elk.spacing.edgeNode': String(ROUTE_MODULE_CLEARANCE),
+  'elk.layered.spacing.edgeNodeBetweenLayers': String(ROUTE_MODULE_CLEARANCE),
+  'elk.spacing.edgeEdge': String(ROUTE_GAP),
+  'elk.layered.spacing.edgeEdgeBetweenLayers': String(ROUTE_GAP),
+  // Each import meets each of its modules at a port of its own, so no two
+  // lines share an end point, and the two imports of a mutual pair stay two
+  // paths. ELK's default, set so nothing comes to rely on it unawares.
+  'elk.layered.mergeEdges': 'false',
   // One set of layers for every module, so the root's top layer is the top:
   // laid out apart, a module with no imports could be packed above the root.
   'elk.separateConnectedComponents': 'false',
