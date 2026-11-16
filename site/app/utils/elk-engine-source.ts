@@ -1,30 +1,28 @@
 import type { ElkNode } from 'elkjs/lib/elk-api'
-import type {
-  ElkEngine,
-  ElkEngineSource,
-  ElkRuntime
+import {
+  ElkEngineFailure,
+  type ElkEngine,
+  type ElkEngineSource,
+  type ElkRuntime
 } from './module-graph-auto-layout.ts'
 
 /**
- * The page's one ELK, shared by every graph it lays out: started once —
- * early, by a page that knows it is about to draw a graph — stopped when a
- * layout runs past its deadline, and started afresh when next asked for.
+ * The page's one ELK, shared by every graph it lays out: started once — early,
+ * by a page that knows it is about to draw a graph — and, should it fail, let
+ * go of at once and started afresh by the next layout.
  *
  * ELK runs in a worker wherever one can be made, off the thread the page draws
- * on, so a large graph never freezes the page and a stuck layout can be
- * stopped. Where no worker can be made — a browser without them, a page whose
- * policy forbids one — it runs on this thread instead: the same layout, paid
- * for in the page's own time.
+ * on, so a large graph never freezes the page. Where no worker can be made — a
+ * browser without them, a page whose policy forbids one — it runs on this
+ * thread instead: the same layout, paid for in the page's own time.
  *
  * Pure apart from what it is handed, so a test drives it with stand-ins; the
  * worker itself is made in `module-layout-engine.ts`.
  */
 
-/** ELK running somewhere it can be stopped. */
+/** ELK, started. */
 export type RunningElk = {
   engine: ElkEngine
-  /** Stops it, failing whatever it is laying out. */
-  stop: () => void
   /** Fails when it dies on its own, as a worker whose script will not load does. */
   failure?: Promise<never>
 }
@@ -68,8 +66,10 @@ export function createSharedElkEngineSource(options: {
     running: Promise<RunningElk>
     startedAt: number
     isReady: boolean
-    /** Set when the source aborts it, so a layout still waiting for it is dropped. */
-    isAborted: boolean
+    /** Resolves once it has finished its first layout; rejects if it fails first. */
+    ready: Promise<void>
+    resolveReady: () => void
+    rejectReady: (error: unknown) => void
   }
   let current: Started | undefined
 
@@ -87,13 +87,27 @@ export function createSharedElkEngineSource(options: {
   }
 
   function start(): Started {
-    const startedAt = now()
-    const started: Started = { running: startRunning(), startedAt, isReady: false, isAborted: false }
-    // An engine that could not start, or that died on its own, is forgotten,
-    // so the next layout starts another.
+    let resolveReady: () => void = () => undefined
+    let rejectReady: (error: unknown) => void = () => undefined
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve
+      rejectReady = reject
+    })
+    // Nothing need be waiting on it when the engine fails.
+    ready.catch(() => undefined)
+    const started: Started = {
+      running: startRunning(),
+      startedAt: now(),
+      isReady: false,
+      ready,
+      resolveReady,
+      rejectReady
+    }
+    // An engine that could not start, or that died on its own, is forgotten
+    // at once, so the next layout — a retry included — starts another.
     started.running.then(
-      running => running.failure?.catch(() => forget(started)),
-      () => forget(started)
+      running => running.failure?.catch((error: unknown) => forget(started, error)),
+      (error: unknown) => forget(started, error)
     )
     return started
   }
@@ -103,7 +117,8 @@ export function createSharedElkEngineSource(options: {
     return current
   }
 
-  function forget(started: Started): void {
+  function forget(started: Started, error: unknown): void {
+    started.rejectReady(error)
     if (current === started) {
       current = undefined
     }
@@ -115,43 +130,27 @@ export function createSharedElkEngineSource(options: {
     }
 
     started.isReady = true
+    started.resolveReady()
     onReady?.({ start: started.startedAt, end: now(), runtime })
   }
 
-  /**
-   * The engine, telling the source when it has finished its first layout — or,
-   * when the source aborted it before it had started, a failure, so a layout
-   * given up while it waited is never handed to ELK.
-   */
+  /** The engine, telling the source when it has finished its first layout. */
   function engineOf(started: Started): Promise<ElkEngine> {
-    return started.running.then(({ engine }) => {
-      if (started.isAborted) {
-        throw new Error('ELK was stopped before it had started')
-      }
-
-      return {
-        runtime: engine.runtime,
-        layout: graph => engine.layout(graph).then((laidOut) => {
-          markReady(started, engine.runtime)
-          return laidOut
-        })
-      }
-    })
+    return started.running.then(({ engine }) => ({
+      runtime: engine.runtime,
+      layout: graph => engine.layout(graph).then((laidOut) => {
+        markReady(started, engine.runtime)
+        return laidOut
+      })
+    }))
   }
 
   return {
     isReady: () => current?.isReady ?? false,
     acquire: () => engineOf(ensureStarted()),
-    abort: () => {
-      const stopping = current
-      current = undefined
-      if (!stopping) {
-        return
-      }
-
-      stopping.isAborted = true
-      void stopping.running.then(running => running.stop(), () => undefined)
-    },
+    whenReady: () => current
+      ? current.ready
+      : Promise.reject(new ElkEngineFailure('ELK is not running')),
     warmUp: () => {
       if (current) {
         return
@@ -177,18 +176,16 @@ export type LazyElkEngineSource = ElkEngineSource & {
 
 /**
  * An engine source that lives in a module of its own, imported the first time
- * it is needed — or when `load` asks for it early. Until then it is not ready,
- * and an abort drops every layout still waiting for the import, so ELK is not
- * started for a layout already given up. A failed import fails that layout,
- * and the next one imports again.
+ * it is needed — or when `load` asks for it early. Until then it is not ready.
+ * A failed import fails that layout, and the next one imports again: the
+ * browser fetches a module whose fetch failed afresh — Chromium 156 and 159
+ * were checked — so a transient failure does not stick.
  */
 export function lazyElkEngineSource(
   importSource: () => Promise<ElkEngineSource>
 ): LazyElkEngineSource {
   let loaded: ElkEngineSource | undefined
   let loading: Promise<ElkEngineSource> | undefined
-  /** How often the source has aborted, so a layout asked for before one is dropped. */
-  let aborts = 0
 
   function load(): Promise<ElkEngineSource> {
     loading ??= importSource().then(
@@ -206,20 +203,10 @@ export function lazyElkEngineSource(
 
   return {
     isReady: () => loaded?.isReady() ?? false,
-    acquire: () => {
-      const abortsWhenAsked = aborts
-      return load().then((source) => {
-        if (aborts !== abortsWhenAsked) {
-          throw new Error('ELK was stopped before it had loaded')
-        }
-
-        return source.acquire()
-      })
-    },
-    abort: () => {
-      aborts += 1
-      loaded?.abort()
-    },
+    acquire: () => load().then(source => source.acquire()),
+    whenReady: () => loaded
+      ? loaded.whenReady()
+      : Promise.reject(new ElkEngineFailure('ELK is not loaded')),
     load: () => load().then(() => undefined, () => undefined)
   }
 }
@@ -232,15 +219,18 @@ export function lazyElkEngineSource(
  * `fail` is called fails with it, and one asked for afterwards fails at once,
  * without being started. A guarded layout is let go of once it settles, so a
  * long-lived engine holds on to none of the layouts it has finished.
+ *
+ * Whatever it fails with is an `ElkEngineFailure`, so a layout that fails
+ * because the engine did is told apart from one ELK refused.
  */
 export function failureSignal(): {
   failure: Promise<never>
   fail: (error: Error) => void
   guard: <T>(work: () => Promise<T>) => Promise<T>
 } {
-  let failedWith: Error | undefined
-  const waiting = new Set<(error: Error) => void>()
-  let rejectFailure: (error: Error) => void = () => undefined
+  let failedWith: ElkEngineFailure | undefined
+  const waiting = new Set<(error: ElkEngineFailure) => void>()
+  let rejectFailure: (error: ElkEngineFailure) => void = () => undefined
   const failure = new Promise<never>((_, reject) => {
     rejectFailure = reject
   })
@@ -251,10 +241,12 @@ export function failureSignal(): {
       return
     }
 
-    failedWith = error
-    rejectFailure(error)
+    failedWith = error instanceof ElkEngineFailure
+      ? error
+      : new ElkEngineFailure(error.message, { cause: error })
+    rejectFailure(failedWith)
     for (const reject of waiting) {
-      reject(error)
+      reject(failedWith)
     }
     waiting.clear()
   }

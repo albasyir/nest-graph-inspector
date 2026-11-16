@@ -25,9 +25,10 @@ export function drawsModuleGraphOnArrival({
  * is still doing. Does nothing on the server, or when ELK is already running.
  *
  * ELK's module is imported here, never statically — see
- * `module-layout-engine.ts` — so no caller has to know it must not be. A
+ * `module-layout-engine.ts` — so a page that only warms ELK up need not know
+ * it must not be; the graph viewer imports it the same way for its layouts. A
  * failed import costs nothing: the layout imports ELK again, and falls back to
- * rows if that fails too.
+ * the simple arrangement if that fails too.
  */
 export function startModuleLayoutWarmUp(): void {
   if (!import.meta.client) {

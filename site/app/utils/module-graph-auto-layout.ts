@@ -16,10 +16,10 @@ import { LAYOUT_GEOMETRY, type LayoutSize } from './graph-layout-placement.ts'
  * above the modules it imports, the order inside each layer chosen to keep
  * crossings down, and the import that closes a cycle drawn as the one edge
  * pointing back up. ELK also routes every import through the gaps it leaves
- * between modules, so a line never has to pass behind one. When ELK cannot
- * start, throws, or takes too long — a layout past its deadline is stopped,
- * engine and all — the modules fall back to the rows the viewer drew before
- * it.
+ * between modules, so a line never has to pass behind one. When ELK cannot be
+ * loaded or started, dies, throws, or answers with something that cannot be
+ * drawn, the modules fall back to a simple arrangement instead: layers from
+ * the root, each wrapped into rows of a bounded width.
  *
  * ELK is the one thing here that is not pure, and it is handed in as an
  * `ElkEngineSource`: the viewer's runs ELK in a worker, warmed before the
@@ -61,8 +61,13 @@ export type ElkModuleLayout = {
   routes: Map<string, LayoutPoint[]>
 }
 
-/** Why the modules were laid out in rows instead. */
-export type AutoLayoutFallbackReason = 'error' | 'timeout'
+/**
+ * Why the modules were laid out in rows instead: ELK itself failed — it could
+ * not be loaded or started, or its worker died (`engine`) — or it ran and
+ * failed this graph, throwing or answering with something that cannot be
+ * drawn (`layout`).
+ */
+export type AutoLayoutFallbackReason = 'engine' | 'layout'
 
 /** Where ELK runs: in a worker, off the thread the page draws on, or on it. */
 export type ElkRuntime = 'worker' | 'main-thread'
@@ -81,7 +86,7 @@ export type ModuleGraphAutoLayout
     warm: boolean
     positions: ModulePositions
     reason: AutoLayoutFallbackReason
-    /** What ELK failed with, or the timeout. */
+    /** What ELK failed with. */
     error: unknown
   }
   /** A graph with no modules, which there is nothing to lay out for. */
@@ -94,17 +99,36 @@ export type ElkEngine = {
 }
 
 /**
- * The ELK a page's layouts share. A layout that runs past its deadline aborts
- * it: the engine stops — a worker is terminated, with whatever it was laying
- * out — and the next layout starts another.
+ * The ELK a page's layouts share. An engine that fails is let go of the moment
+ * it does, so the next layout — a retry included — starts a fresh one and
+ * never reuses a broken one.
  */
 export type ElkEngineSource = {
   /** Whether a layout asked for now would start at once: ELK up and warm. */
   isReady: () => boolean
-  /** The engine, started if it is not running yet. */
+  /**
+   * The engine, started if it is not running yet. Rejects when ELK cannot be
+   * loaded or started.
+   */
   acquire: () => Promise<ElkEngine>
-  /** Stops the engine and anything it is laying out. */
-  abort: () => void
+  /**
+   * Resolves once the engine running now has finished its first layout — a
+   * warm-up's or a real one's — at once if it has. Rejects if that engine
+   * fails first, or if none is running.
+   */
+  whenReady: () => Promise<void>
+}
+
+/**
+ * ELK itself failed, rather than the graph it was given: its worker's script
+ * did not load, or the worker died. A layout an engine cannot finish for this
+ * reason rejects with it, so it is told apart from ELK refusing a graph.
+ */
+export class ElkEngineFailure extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'ElkEngineFailure'
+  }
 }
 
 /**
@@ -119,14 +143,6 @@ export const AUTO_LAYOUT_MEASURE = 'ngi:auto-layout'
  * first layout done — a warm-up's, ideally, before any graph arrives.
  */
 export const AUTO_LAYOUT_ENGINE_READY_MEASURE = 'ngi:auto-layout:engine-ready'
-
-/**
- * How long a layout may take, waiting for ELK to start included, before it is
- * stopped and the modules fall back to rows: room for ELK's script on a slow
- * connection, short of a wait nobody would sit through in front of a blank
- * canvas.
- */
-export const AUTO_LAYOUT_TIMEOUT_MS = 5000
 
 /**
  * The gap between modules, side by side in a layer and from one layer to the
@@ -228,53 +244,72 @@ export function moduleGraphLayoutInput(params: {
 }
 
 /**
- * Lays the modules out: with ELK when it starts and answers in time, and
- * otherwise in rows, saying why. A layout still running at the deadline is
- * abandoned with the engine running it. Never rejects.
+ * Lays the modules out: with ELK, or — when ELK fails — in rows, saying why.
+ * Never rejects.
+ *
+ * There is no deadline. A layout waits for ELK for as long as ELK takes to
+ * arrive and answer: on a slow connection its worker's script alone is a
+ * megabyte and a half, and no fixed time tells a slow ELK from a stuck one —
+ * a deadline short enough to matter throws away layouts about to land, and a
+ * long one only delays the same rows. So only a real failure falls back: the
+ * engine's import rejecting, its worker's `error` event, `elk.layout`
+ * rejecting, or an answer that cannot be drawn. A layout that never settles
+ * leaves its viewer saying it is still arranging, deliberately: there is no
+ * hang guard, since a guard is a deadline by another name.
  */
 export async function autoLayoutModuleGraph(params: {
   input: ModuleGraphLayoutInput
   engines?: ElkEngineSource
-  timeoutMs?: number
+  /**
+   * Told once ELK is up — has finished its first layout, a warm-up's or this
+   * one's — or at once if it already was. Not told when ELK fails first.
+   */
+  onEngineReady?: () => void
 }): Promise<ModuleGraphAutoLayout> {
-  const {
-    input,
-    engines = bundledElkSource,
-    timeoutMs = AUTO_LAYOUT_TIMEOUT_MS
-  } = params
+  const { input, engines = bundledElkSource, onEngineReady } = params
   if (input.modules.length === 0) {
     return { engine: 'none', positions: new Map() }
   }
 
+  let elk: ElkEngine
+  try {
+    elk = await engines.acquire()
+  } catch (error) {
+    return fallBackToRows({ input, warm: false, reason: 'engine', error })
+  }
+
   // Whether ELK was up and warm, as this layout found it once it had the
   // engine: a source still being imported cannot say before then.
-  let warm = false
-  const seeWhetherWarm = () => {
-    warm = engines.isReady()
+  const warm = engines.isReady()
+  if (warm) {
+    onEngineReady?.()
+  } else {
+    // An engine that fails before it is ready fails this layout too, which
+    // says so itself.
+    void engines.whenReady().then(() => onEngineReady?.(), () => undefined)
   }
-  try {
-    const { runtime, positions, routes } = await withTimeout({
-      work: layoutWith({ input, engines, onEngine: seeWhetherWarm }),
-      timeoutMs
-    })
-    return { engine: 'elk', runtime, warm, positions, routes }
-  } catch (error) {
-    const isTimeout = error instanceof AutoLayoutTimeoutError
-    if (isTimeout) {
-      // Whatever ELK is still doing for this layout is thrown away, and so is
-      // the engine doing it: a worker is stopped, and the next layout starts
-      // a fresh one rather than queueing behind a layout nobody awaits.
-      engines.abort()
-    }
 
-    return {
-      engine: 'rows',
+  try {
+    const { positions, routes } = await layoutModuleGraphWithElk({ input, elk })
+    return { engine: 'elk', runtime: elk.runtime, warm, positions, routes }
+  } catch (error) {
+    return fallBackToRows({
+      input,
       warm,
-      positions: layoutModuleRows(input),
-      reason: isTimeout ? 'timeout' : 'error',
+      reason: error instanceof ElkEngineFailure ? 'engine' : 'layout',
       error
-    }
+    })
   }
+}
+
+function fallBackToRows(params: {
+  input: ModuleGraphLayoutInput
+  warm: boolean
+  reason: AutoLayoutFallbackReason
+  error: unknown
+}): ModuleGraphAutoLayout {
+  const { input, warm, reason, error } = params
+  return { engine: 'rows', warm, positions: layoutModuleRows(input), reason, error }
 }
 
 /**
@@ -311,36 +346,125 @@ export function toElkGraph(input: ModuleGraphLayoutInput): ElkNode {
 }
 
 /**
- * The rows the viewer drew before ELK, and draws when ELK fails: each module
- * in the layer of its shortest import path from the root, each module the
- * root does not reach in a layer of its own below those, and each layer one
- * row centred under the root's.
+ * The shape the rows aim for, width to height: a little wider than tall, as
+ * the canvases they are drawn on are.
+ */
+const ROWS_ASPECT_RATIO = 16 / 10
+/**
+ * The gap between one layer's rows and the next layer's: twice the gap between
+ * the rows a layer wraps into, so each layer still reads as one.
+ */
+const ROWS_LAYER_GAP = MODULE_SPACING * 2
+
+/** A module in the rows: its box, and whether the input has it to place. */
+type RowModule = LayoutSize & { name: string, isPlaced: boolean }
+
+/**
+ * The simple arrangement drawn before ELK's lands, and in its place when ELK
+ * fails. Modules go in layers by their shortest import path from the root —
+ * the root alone on top, the modules it does not reach in one layer at the
+ * bottom — and each layer is wrapped into rows, in the graph's order, no
+ * wider than the whole drawing needs to come out about `ROWS_ASPECT_RATIO`:
+ * a layer of many modules never becomes one row thousands of pixels wide.
+ * Each row is centred under the root, and the same input always gives the
+ * same rows.
  */
 export function layoutModuleRows(
   input: ModuleGraphLayoutInput
 ): Map<string, LayoutPoint> {
   const boxes = new Map(input.modules.map(module => [module.name, module]))
+  const layers = assignLayers(input).map(layer => layer.map((name): RowModule => {
+    const box = boxes.get(name)
+    const { width, height } = box ?? DEFAULT_MODULE_BOX
+    return { name, width, height, isPlaced: box !== undefined }
+  }))
+  const widest = Math.max(...layers.flat().map(module => module.width))
+  const longest = Math.max(...layers.map(layer => layer.length))
+
+  // A row of `perRow` of the widest module, for each count a layer could
+  // take: the one whose drawing comes out nearest the aspect ratio wins, the
+  // narrower on a tie.
+  let best: { rows: RowModule[][][], miss: number } | undefined
+  for (let perRow = 1; perRow <= longest; perRow += 1) {
+    const maxWidth = perRow * widest + (perRow - 1) * MODULE_SPACING
+    const rows = layers.map(layer => wrapIntoRows(layer, maxWidth))
+    const miss = Math.abs(Math.log(drawingWidth(rows) / drawingHeight(rows) / ROWS_ASPECT_RATIO))
+    if (!best || miss < best.miss) {
+      best = { rows, miss }
+    }
+  }
+
+  return placeRows(best?.rows ?? [])
+}
+
+/** One layer's modules, in order, in rows no wider than `maxWidth` unless one module is. */
+function wrapIntoRows(layer: readonly RowModule[], maxWidth: number): RowModule[][] {
+  const rows: RowModule[][] = []
+  let width = 0
+  for (const module of layer) {
+    const row = rows.at(-1)
+    const widthWithIt = width + MODULE_SPACING + module.width
+    if (row && widthWithIt <= maxWidth) {
+      row.push(module)
+      width = widthWithIt
+    } else {
+      rows.push([module])
+      width = module.width
+    }
+  }
+
+  return rows
+}
+
+function rowWidth(row: readonly RowModule[]): number {
+  return row.reduce((sum, module) => sum + module.width, 0)
+    + Math.max(row.length - 1, 0) * MODULE_SPACING
+}
+
+function rowHeight(row: readonly RowModule[]): number {
+  return Math.max(...row.map(module => module.height), 0)
+}
+
+function drawingWidth(layers: readonly (readonly RowModule[][])[]): number {
+  return Math.max(...layers.flat().map(rowWidth), 1)
+}
+
+function drawingHeight(layers: readonly (readonly RowModule[][])[]): number {
+  const layerHeights = layers.map(rows =>
+    rows.reduce((sum, row) => sum + rowHeight(row), 0)
+    + Math.max(rows.length - 1, 0) * MODULE_SPACING
+  )
+  return Math.max(
+    layerHeights.reduce((sum, height) => sum + height, 0)
+    + Math.max(layers.length - 1, 0) * ROWS_LAYER_GAP,
+    1
+  )
+}
+
+/** Each layer's rows top to bottom, each row centred on the origin. */
+function placeRows(layers: readonly (readonly RowModule[][])[]): Map<string, LayoutPoint> {
   const positions = new Map<string, LayoutPoint>()
   let top = 0
 
-  for (const row of assignRows(input)) {
-    const rowWidth = row.reduce(
-      (sum, name) => sum + (boxes.get(name) ?? DEFAULT_MODULE_BOX).width,
-      Math.max(row.length - 1, 0) * LAYOUT_GEOMETRY.moduleGapX
-    )
-    let left = -(rowWidth / 2)
-    let rowHeight = 0
-
-    for (const name of row) {
-      const box = boxes.get(name) ?? DEFAULT_MODULE_BOX
-      if (boxes.has(name)) {
-        positions.set(name, { x: left, y: top })
-      }
-      rowHeight = Math.max(rowHeight, box.height)
-      left += box.width + LAYOUT_GEOMETRY.moduleGapX
+  for (const [layerIndex, rows] of layers.entries()) {
+    if (layerIndex > 0) {
+      top += ROWS_LAYER_GAP
     }
 
-    top += rowHeight + LAYOUT_GEOMETRY.moduleGapY
+    for (const [rowIndex, row] of rows.entries()) {
+      if (rowIndex > 0) {
+        top += MODULE_SPACING
+      }
+
+      let left = -(rowWidth(row) / 2)
+      for (const module of row) {
+        if (module.isPlaced) {
+          positions.set(module.name, { x: left, y: top })
+        }
+        left += module.width + MODULE_SPACING
+      }
+      top += rowHeight(row)
+    }
   }
 
   return positions
@@ -479,70 +603,15 @@ export function loadBundledElk(): Promise<ElkEngine> {
 }
 
 /**
- * The bundled build on this thread, as an engine source. A layout on this
- * thread cannot be stopped part way, so `abort` leaves it to finish.
+ * The bundled build on this thread, as an engine source: ready as soon as it
+ * is loaded, since it needs no worker to come up.
  */
 export const bundledElkSource: ElkEngineSource = {
   isReady: () => isBundledElkLoaded,
   acquire: loadBundledElk,
-  abort: () => undefined
-}
-
-class AutoLayoutTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`The automatic layout took longer than ${timeoutMs} ms`)
-    this.name = 'AutoLayoutTimeoutError'
-  }
-}
-
-/**
- * `work`, or a timeout once `timeoutMs` has passed without it settling.
- *
- * ELK in a worker is stopped at the deadline. ELK on this thread — the
- * fallback where no worker can be made — cannot be: a layout running past the
- * deadline holds the deadline back until it has finished and queued its
- * answer. So the timeout waits one more turn for an answer already queued: by
- * then the visitor has waited for that layout, and rows would throw it away.
- */
-function withTimeout<T>(params: {
-  work: Promise<T>
-  timeoutMs: number
-}): Promise<T> {
-  const { work, timeoutMs } = params
-
-  return new Promise<T>((resolve, reject) => {
-    let lastTurn: ReturnType<typeof setTimeout> | undefined
-    const deadline = setTimeout(() => {
-      lastTurn = setTimeout(() => reject(new AutoLayoutTimeoutError(timeoutMs)), 0)
-    }, timeoutMs)
-    const clearTimers = () => {
-      clearTimeout(deadline)
-      clearTimeout(lastTurn)
-    }
-
-    work.then(
-      (value) => {
-        clearTimers()
-        resolve(value)
-      },
-      (error: unknown) => {
-        clearTimers()
-        reject(error)
-      }
-    )
-  })
-}
-
-async function layoutWith(params: {
-  input: ModuleGraphLayoutInput
-  engines: ElkEngineSource
-  /** Called with the engine in hand, before it is given the graph. */
-  onEngine: () => void
-}): Promise<ElkModuleLayout & { runtime: ElkRuntime }> {
-  const elk = await params.engines.acquire()
-  params.onEngine()
-  const laidOut = await layoutModuleGraphWithElk({ input: params.input, elk })
-  return { ...laidOut, runtime: elk.runtime }
+  whenReady: () => bundledElk
+    ? bundledElk.then(() => undefined)
+    : Promise.reject(new ElkEngineFailure('ELK\'s bundled build is not loading'))
 }
 
 /**
@@ -694,25 +763,22 @@ function isFiniteNumber(value: number | undefined): value is number {
 }
 
 /**
- * The rows, top first: breadth first from the root along the imports, then
- * each module the root does not reach in a new row of its own.
+ * The layers, top first: breadth first from the root along the imports, then
+ * every module the root does not reach, together in one layer at the bottom.
  */
-function assignRows(input: ModuleGraphLayoutInput): string[][] {
+function assignLayers(input: ModuleGraphLayoutInput): string[][] {
   const known = new Set(input.modules.map(module => module.name))
   const importsOf = new Map<string, string[]>()
   for (const { importer, imported } of input.imports) {
     importsOf.set(importer, [...(importsOf.get(importer) ?? []), imported])
   }
 
-  const rows = new Map<number, string[]>()
-  const addToRow = (depth: number, name: string) => {
-    rows.set(depth, [...(rows.get(depth) ?? []), name])
-  }
+  const layers: string[][] = []
   const visited = new Set([input.root])
   const queue = [{ name: input.root, depth: 0 }]
 
   for (const { name, depth } of queue) {
-    addToRow(depth, name)
+    layers[depth] = [...(layers[depth] ?? []), name]
     for (const imported of importsOf.get(name) ?? []) {
       if (!visited.has(imported) && known.has(imported)) {
         visited.add(imported)
@@ -721,13 +787,8 @@ function assignRows(input: ModuleGraphLayoutInput): string[][] {
     }
   }
 
-  for (const { name } of input.modules) {
-    if (!visited.has(name)) {
-      addToRow(Math.max(...rows.keys(), 0) + 1, name)
-    }
-  }
-
-  return [...rows.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([, row]) => row)
+  const unreached = input.modules
+    .map(module => module.name)
+    .filter(name => !visited.has(name))
+  return unreached.length > 0 ? [...layers, unreached] : layers
 }

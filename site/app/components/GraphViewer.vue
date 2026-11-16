@@ -84,6 +84,15 @@ import {
 } from '~/utils/module-graph-auto-layout'
 import { lazyElkEngineSource } from '~/utils/elk-engine-source'
 import {
+  initialModuleLayoutStatus,
+  isModuleLayoutPending,
+  moduleLayoutFailureText,
+  moduleLayoutProgressText,
+  nextModuleLayoutStatus,
+  type ModuleLayoutEvent,
+  type ModuleLayoutStatus
+} from '~/utils/module-layout-state'
+import {
   buildModuleFocusFitViewOptions,
   resolveModuleFocusTargetNodeIds,
   resolveModuleHeaderAction
@@ -1937,11 +1946,40 @@ const collapsedModuleNames = ref<Set<string>>(
  */
 let autoLayout: AutoLayoutResult | undefined
 /**
- * Whether the canvas is waiting for its first automatic layout: drawn, so Vue
- * Flow can measure it, but hidden, so the modules first appear in place
- * rather than in rows that then jump.
+ * Where the automatic layout stands — the root's `data-layout-state` — and
+ * whether the canvas is shown yet. Until its first arrangement is drawn and
+ * fitted the canvas is drawn hidden, so Vue Flow can measure it and the
+ * modules first appear in place, never in rows that then jump; a saved
+ * arrangement is drawn at once.
  */
-const isArrangingModules = ref(layoutDraft.value === null)
+const moduleLayoutStatus = shallowRef<ModuleLayoutStatus>(
+  initialModuleLayoutStatus({ hasArrangement: layoutDraft.value !== null })
+)
+const isCanvasShown = computed(() => moduleLayoutStatus.value.isCanvasShown)
+const isLayoutPending = computed(() => isModuleLayoutPending(moduleLayoutStatus.value))
+const layoutProgressText = computed(() => moduleLayoutProgressText(moduleLayoutStatus.value))
+const layoutFailureText = computed(() => {
+  const status = moduleLayoutStatus.value
+  return status.state === 'failed' ? moduleLayoutFailureText(status.failure) : undefined
+})
+function updateLayoutStatus(event: ModuleLayoutEvent): void {
+  moduleLayoutStatus.value = nextModuleLayoutStatus(moduleLayoutStatus.value, event)
+}
+/**
+ * Whether Vue Flow has measured every node now on the canvas, as it says with
+ * `nodes-initialized`. A redraw that adds nodes it has not seen clears it, and
+ * Vue Flow says so again once it has measured those. A fit needs every size,
+ * so the hidden canvas is fitted — and shown — no sooner.
+ */
+const isCanvasMeasured = ref(false)
+/** Whether the canvas has had its first fit: a saved arrangement's, or a layout's on being shown. */
+let hasFittedCanvas = false
+/** The status line, where focus goes when Try again takes its own button away. */
+const layoutStatusRef = ref<HTMLElement | null>(null)
+/** The failure notice, which holds Try again. */
+const layoutFailureRef = ref<HTMLElement | null>(null)
+/** Ties Try again to the sentence saying what failed. */
+const layoutFailureTextId = useId()
 /**
  * The page's one ELK, in a worker — started early on a page that knew it
  * would draw a graph, or by the first layout on one that did not. Its module
@@ -1951,7 +1989,7 @@ const isArrangingModules = ref(layoutDraft.value === null)
 const moduleLayoutEngine = lazyElkEngineSource(
   () => import('~/utils/module-layout-engine').then(engine => engine.moduleLayoutEngine)
 )
-if (import.meta.client && isArrangingModules.value) {
+if (import.meta.client && layoutDraft.value === null) {
   // The module is small; importing it now lets the first layout tell whether
   // the ELK it finds was already warm.
   void moduleLayoutEngine.load()
@@ -1966,7 +2004,7 @@ let autoLayoutRun = 0
  */
 let autoLayoutDone: Promise<void> = Promise.resolve()
 /** Set once the viewer is unmounted: nothing is drawn or emitted after that. */
-let isUnmounted = false
+const isUnmounted = ref(false)
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
@@ -2019,6 +2057,12 @@ const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
+/**
+ * Whether every node on the canvas has a size to fit to: measured by Vue
+ * Flow, or none there to measure, as Vue Flow never says it has measured an
+ * empty canvas.
+ */
+const hasCanvasSizes = computed(() => isCanvasMeasured.value || flowNodes.value.length === 0)
 const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
 const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
@@ -2493,6 +2537,11 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
     moduleSizes: layoutPositions?.moduleSizes,
     autoLayout
   })
+  // Nodes the canvas has not had before have no size yet.
+  const drawnNodeIds = new Set(flowNodes.value.map(node => node.id))
+  if (graph.nodes.some(node => !drawnNodeIds.has(node.id))) {
+    isCanvasMeasured.value = false
+  }
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
   syncFixedBrightLineNode()
@@ -2502,14 +2551,16 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
  * Lays the modules out automatically, as they are drawn now — open or
  * collapsed — then redraws the canvas there and centres it. Nothing moves
  * until the positions are known, so the canvas is redrawn once, already in
- * place; a canvas still hidden for its first layout is fitted at once and
- * shown. A layout waits for the one before it to finish, and one that a later
- * layout, or a loaded layout, has overtaken is dropped. Resolves once the
- * modules are in place: after this layout and any asked for while it ran.
+ * place, and the drawing on screen stays until then; a canvas still hidden
+ * for its first layout is fitted and shown once Vue Flow has measured it. A
+ * layout waits for the one before it to finish, and one that a later layout,
+ * or a loaded layout, has overtaken is dropped. Resolves once the modules are
+ * in place: after this layout and any asked for while it ran.
  */
 function arrangeModules(): Promise<void> {
   autoLayoutRun += 1
   const run = autoLayoutRun
+  updateLayoutStatus({ type: 'requested', isEngineReady: moduleLayoutEngine.isReady() })
   autoLayoutDone = autoLayoutDone.then(async () => {
     if (run !== autoLayoutRun) {
       return
@@ -2520,7 +2571,9 @@ function arrangeModules(): Promise<void> {
     } catch (error) {
       // Reported like any other error, without leaving the canvas hidden or
       // stopping the layouts asked for after this one.
-      isArrangingModules.value = false
+      if (run === autoLayoutRun) {
+        updateLayoutStatus({ type: 'fell-back', failure: 'layout' })
+      }
       reportError(error)
     }
   })
@@ -2542,12 +2595,17 @@ async function runAutoLayout(run: number): Promise<void> {
     return
   }
 
+  // Said again now the layout starts, rather than when it was asked for: a
+  // layout that waited behind another may find the engine that came up for
+  // that one gone, and a fresh one to load.
+  updateLayoutStatus({ type: 'requested', isEngineReady: moduleLayoutEngine.isReady() })
   const startedAt = performance.now()
   const moduleMap = graphData.value
   const sizes = resolveModuleSizes(moduleMap, collapsedModuleNames.value)
   const layout = await autoLayoutModuleGraph({
     input: moduleGraphLayoutInput({ moduleMap, sizes }),
-    engines: moduleLayoutEngine
+    engines: moduleLayoutEngine,
+    onEngineReady: () => updateLayoutStatus({ type: 'engine-ready' })
   })
   if (run !== autoLayoutRun) {
     return
@@ -2557,7 +2615,9 @@ async function runAutoLayout(run: number): Promise<void> {
     // A layout took over while this one ran. It is the arrangement now, so a
     // canvas still held for this layout is drawn from it and shown rather
     // than left hidden.
-    if (isArrangingModules.value) {
+    if (isCanvasShown.value) {
+      updateLayoutStatus({ type: 'arrangement-drawn' })
+    } else {
       await drawLayoutDraft()
     }
     return
@@ -2577,51 +2637,75 @@ async function runAutoLayout(run: number): Promise<void> {
     detail: autoLayoutTimingDetail(layout)
   })
 
-  if (!isArrangingModules.value) {
+  if (isCanvasShown.value) {
     void centerGraph()
+  } else if (!await fitHiddenCanvas(
+    // Not once a later layout has been asked for, nor once a saved
+    // arrangement has taken over while the canvas waited to be measured:
+    // drawing that one says so itself.
+    () => run === autoLayoutRun && layoutDraft.value === null
+  )) {
     return
   }
 
-  // The canvas is shown the moment it is fitted. Once Vue Flow has measured
-  // the hidden canvas, it has every node's size — the ones laid out — and by
-  // now their new positions, so the fit needs no further frame. Without a
-  // duration either way, the fit is applied at once, so it always settles.
-  if (hasMeasuredCanvas) {
-    await fitView({ padding: GRAPH_FIT_PADDING, duration: 0 })
-  } else {
-    await centerGraph(0)
-  }
-  isArrangingModules.value = false
+  updateLayoutStatus(
+    layout.engine === 'rows'
+      ? { type: 'fell-back', failure: layout.reason }
+      : { type: 'laid-out' }
+  )
 }
 
 /**
- * Whether the canvas's first automatic layout has been asked for. It is asked
- * for once Vue Flow has measured the canvas — drawn hidden, in rows — rather
- * than on mount: until then the page is busy mounting and measuring it, so a
- * layout's answer could not be drawn any sooner, and asking earlier would only
- * leave the layout waiting behind that work.
+ * Fits the hidden canvas to what is drawn on it, once Vue Flow has taken the
+ * drawing in and measured every node there; a canvas with no nodes has
+ * nothing to measure. Resolves whether the drawing was fitted to be shown:
+ * not once the viewer has gone, nor once `isStillToShow` says another drawing
+ * has taken its place. Without a duration the fit is applied at once, so it
+ * always settles.
  */
-let isFirstLayoutRequested = false
-/** Whether Vue Flow has measured every node on the canvas. */
-let hasMeasuredCanvas = false
-/** How long the canvas waits for Vue Flow's measurements before laying out regardless. */
-const FIRST_LAYOUT_FALLBACK_MS = 1000
-/** The timer that asks for the first layout should Vue Flow never measure the canvas. */
-let firstLayoutFallback: ReturnType<typeof setTimeout> | undefined
-
-function requestFirstLayout(): void {
-  if (isFirstLayoutRequested || !isArrangingModules.value) {
-    return
+async function fitHiddenCanvas(isStillToShow: () => boolean): Promise<boolean> {
+  await nextTick()
+  await until(() => isUnmounted.value || hasCanvasSizes.value).toBe(true)
+  if (isUnmounted.value || !isStillToShow()) {
+    return false
   }
 
-  isFirstLayoutRequested = true
-  clearTimeout(firstLayoutFallback)
-  void arrangeModules()
+  await fitView({ padding: GRAPH_FIT_PADDING, duration: 0 })
+  hasFittedCanvas = true
+  return true
 }
 
 function handleNodesInitialized(): void {
-  hasMeasuredCanvas = true
-  requestFirstLayout()
+  isCanvasMeasured.value = true
+  // A saved arrangement is on screen from the start, so it is fitted the
+  // moment its nodes have sizes, as a laid-out canvas is before it is shown.
+  if (!hasFittedCanvas && isCanvasShown.value) {
+    hasFittedCanvas = true
+    void fitView({ padding: GRAPH_FIT_PADDING, duration: 0 })
+  }
+}
+
+/**
+ * Tries the automatic layout again after ELK failed. An engine that failed is
+ * already let go of, so this starts a fresh one — importing ELK's module or
+ * fetching its worker's script again — and the engine a refused graph ran on
+ * is left running, since other viewers on the page may be using it. Modules
+ * the visitor dragged around the simple arrangement go back with the rest, as
+ * Auto layout puts them.
+ */
+function retryAutoLayout(): void {
+  // The notice goes as the layout starts, the button with it: focus moves to
+  // the status line, which says what happens next, rather than to the page.
+  if (layoutFailureRef.value?.contains(document.activeElement)) {
+    layoutStatusRef.value?.focus({ preventScroll: true })
+  }
+
+  if (layoutDraft.value) {
+    resetToAutoLayout()
+    return
+  }
+
+  void arrangeModules()
 }
 
 /**
@@ -2644,13 +2728,17 @@ function redrawCanvas(): void {
  */
 async function drawLayoutDraft(): Promise<void> {
   refreshGraph({ preservePositions: false })
-  if (!isArrangingModules.value) {
+  if (isCanvasShown.value) {
     void centerGraph()
+  } else if (!await fitHiddenCanvas(
+    // Not once the arrangement has been dropped again, for an automatic
+    // layout that shows itself.
+    () => layoutDraft.value !== null
+  )) {
     return
   }
 
-  await centerGraph(0)
-  isArrangingModules.value = false
+  updateLayoutStatus({ type: 'arrangement-drawn' })
 }
 
 /**
@@ -2766,7 +2854,7 @@ function resetToAutoLayout(): void {
   void arrangeModules().then(() => {
     // The arrangement the canvas settled on — unless a layout has taken over
     // since, which the page has heard of already.
-    if (!layoutDraft.value && !isUnmounted) {
+    if (!layoutDraft.value && !isUnmounted.value) {
       emit('layoutChange', snapshotCanvasLayout())
     }
   })
@@ -2855,6 +2943,9 @@ function rearrangeUntouchedCanvas(): void {
   refreshGraph()
 }
 
+/** Counts focuses asked for, so only the latest one moves the camera. */
+let focusRequest = 0
+
 /**
  * Moves the camera onto one module — its node, and the items inside it while
  * it is open — without moving any node, so a layout the reader dragged into
@@ -2869,13 +2960,19 @@ async function focusModule(moduleName: string, duration?: number) {
     return
   }
 
-  // Modules move when an automatic layout lands, and the canvas is centred —
-  // the first one included, which is only asked for once Vue Flow has
-  // measured the canvas, and until then the canvas is not even shown.
-  await until(isArrangingModules).toBe(false)
+  focusRequest += 1
+  const request = focusRequest
+  // Modules move when an automatic layout lands, and the canvas is fitted to
+  // them: the first time once Vue Flow has measured the canvas — a saved
+  // arrangement is fitted then too — and before that the canvas is not
+  // shown. A focus any sooner would be undone.
+  await until(() =>
+    isUnmounted.value || (isCanvasShown.value && hasCanvasSizes.value)
+  ).toBe(true)
   await settleAutoLayouts()
   await nextTick()
-  if (isUnmounted) {
+  // A focus asked for while this one waited goes instead.
+  if (isUnmounted.value || request !== focusRequest) {
     return
   }
 
@@ -3049,33 +3146,40 @@ watch(showJsDocOnHover, () => {
 
 onMounted(() => {
   syncDirectRunOn()
-  if (isArrangingModules.value) {
-    if (flowNodes.value.length === 0) {
-      // A graph with no modules leaves nothing to measure.
-      requestFirstLayout()
-    } else {
-      // Should Vue Flow never say it has measured the canvas, the layout is
-      // asked for anyway rather than leaving the canvas hidden.
-      firstLayoutFallback = setTimeout(requestFirstLayout, FIRST_LAYOUT_FALLBACK_MS)
-    }
+  // The first automatic layout is asked for as soon as the viewer is in the
+  // page. Its input is each module's box, which comes from the graph rather
+  // than the DOM, so nothing needs measuring first, and ELK lays the graph out
+  // in its worker while Vue Flow mounts and measures the canvas it will be
+  // shown on. A saved arrangement is drawn at once instead, and fitted as soon
+  // as Vue Flow has measured it (`handleNodesInitialized`).
+  if (layoutDraft.value === null) {
+    void arrangeModules()
   }
-  setTimeout(() => {
-    void centerGraph(0)
-  }, 200)
 })
 
 onBeforeUnmount(() => {
   clearJsDocHoverTimers()
   // A layout under way is dropped when it lands, none is asked for after, and
-  // nothing waiting for the canvas to be shown waits any longer.
-  isUnmounted = true
+  // nothing waiting on the canvas waits any longer.
+  isUnmounted.value = true
   autoLayoutRun += 1
-  clearTimeout(firstLayoutFallback)
-  isArrangingModules.value = false
 })
 
-useResizeObserver(graphViewerRef, () => {
-  debouncedCenterGraph()
+/** The viewer's size when last seen, so only a change of it re-centres the graph. */
+let viewerSize: { width: number, height: number } | undefined
+useResizeObserver(graphViewerRef, ([entry]) => {
+  if (!entry) {
+    return
+  }
+
+  const { width, height } = entry.contentRect
+  const previous = viewerSize
+  viewerSize = { width, height }
+  // The first observation is the size the viewer mounted at, which the
+  // canvas's first fit is made for already.
+  if (previous && (previous.width !== width || previous.height !== height)) {
+    debouncedCenterGraph()
+  }
 })
 
 defineExpose({ centerGraph, focusModule })
@@ -3087,10 +3191,10 @@ defineExpose({ centerGraph, focusModule })
     class="graph-viewer"
     :class="{
       'graph-viewer--flush': props.flush,
-      'graph-viewer--arranging': isArrangingModules
+      'graph-viewer--canvas-hidden': !isCanvasShown
     }"
     :style="{ height: props.height }"
-    :aria-busy="isArrangingModules || undefined"
+    :data-layout-state="moduleLayoutStatus.state"
   >
     <div
       v-if="props.interactive && props.canSaveLayout"
@@ -3117,7 +3221,7 @@ defineExpose({ centerGraph, focusModule })
         variant="soft"
         size="sm"
         title="Reset to the automatic layout"
-        :disabled="isArrangingModules"
+        :disabled="!isCanvasShown"
         @click="resetToAutoLayout"
       />
       <UButton
@@ -3130,7 +3234,7 @@ defineExpose({ centerGraph, focusModule })
         square
         aria-label="Download layout"
         title="Download nest-graph-layout.json — rename it to .muse in the project root for a running inspector to read"
-        :disabled="isArrangingModules"
+        :disabled="!isCanvasShown"
         @click="downloadCurrentLayout"
       />
       <UButton
@@ -3138,7 +3242,7 @@ defineExpose({ centerGraph, focusModule })
         :icon="layoutSaveButton.icon"
         :label="layoutSaveButton.label"
         :title="layoutSaveTitle"
-        :disabled="props.layoutSaving || isArrangingModules"
+        :disabled="props.layoutSaving || !isCanvasShown"
         color="primary"
         variant="soft"
         size="sm"
@@ -3383,28 +3487,83 @@ defineExpose({ centerGraph, focusModule })
       />
     </div>
 
-    <p
-      v-if="isArrangingModules"
-      class="graph-viewer-arranging"
+    <!--
+      Always in the page, so a screen reader hears each phase as its text
+      changes; empty once the layout has landed.
+    -->
+    <div
+      ref="layoutStatusRef"
+      class="graph-viewer-layout-status"
+      :class="{ 'graph-viewer-layout-status--over-canvas': isCanvasShown }"
       role="status"
+      aria-live="polite"
+      tabindex="-1"
+    >
+      <span
+        v-if="layoutProgressText"
+        class="graph-viewer-layout-status__text"
+      >
+        <UIcon
+          name="i-lucide-loader-2"
+          class="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        {{ layoutProgressText }}
+      </span>
+    </div>
+
+    <!--
+      Outside the canvas, so it answers a click in every viewer, the ones that
+      cannot be panned or dragged included.
+    -->
+    <div
+      v-if="layoutFailureText"
+      ref="layoutFailureRef"
+      class="graph-viewer-layout-failure"
+      :class="{
+        'graph-viewer-layout-failure--above-panels':
+          props.interactive && (props.showControls || props.showMiniMap)
+      }"
+      role="alert"
     >
       <UIcon
-        name="i-lucide-loader-2"
-        class="size-4 animate-spin text-primary motion-reduce:animate-none"
+        name="i-lucide-triangle-alert"
+        class="size-4 shrink-0 text-error"
         aria-hidden="true"
       />
-      Arranging modules…
-    </p>
+      <p
+        :id="layoutFailureTextId"
+        class="graph-viewer-layout-failure__text"
+      >
+        {{ layoutFailureText }}
+      </p>
+      <UButton
+        type="button"
+        icon="i-lucide-refresh-cw"
+        label="Try again"
+        color="neutral"
+        variant="outline"
+        size="xs"
+        class="shrink-0 cursor-pointer"
+        :aria-describedby="layoutFailureTextId"
+        @click="retryAutoLayout"
+      />
+    </div>
 
+    <!--
+      The canvas is what a layout is busy with. Its progress and its failure
+      are said beside it rather than inside it, where some screen readers hold
+      back a busy region's announcements until it is done.
+    -->
     <VueFlow
       :id="flowId"
       v-model:nodes="flowNodes"
       v-model:edges="flowEdges"
+      :aria-busy="isLayoutPending || undefined"
       :default-viewport="{ zoom: 0.8, x: 0, y: 0 }"
       :min-zoom="0.05"
       :max-zoom="2"
       fit-view-on-init
-      :fit-view-on-init-options="{ padding: GRAPH_FIT_PADDING }"
       :nodes-draggable="props.interactive"
       :nodes-connectable="props.interactive"
       :elements-selectable="props.interactive"
@@ -3861,30 +4020,68 @@ defineExpose({ centerGraph, focusModule })
 }
 
 /*
- * Held back until the first automatic layout lands, so the modules appear in
- * place. Hidden rather than removed: Vue Flow still measures every node.
+ * Held back until the first arrangement is drawn and fitted, so the modules
+ * appear in place. Hidden rather than removed: Vue Flow still measures every
+ * node. Hidden down to every node, too: Vue Flow shows each node it has
+ * measured with an inline `visibility: visible`, which would otherwise draw
+ * them where they stand before the layout lands — in rows.
  */
-.graph-viewer--arranging .graph-flow {
-  visibility: hidden;
+.graph-viewer--canvas-hidden .graph-flow,
+.graph-viewer--canvas-hidden .graph-flow * {
+  visibility: hidden !important;
 }
 
-/* Said only once arranging takes long enough to notice. */
-.graph-viewer-arranging {
+/*
+ * The layout's progress: centred on the empty viewer while the canvas is held
+ * back, and a small note at its foot while a later layout is on its way to
+ * replace a drawing still on screen.
+ */
+.graph-viewer-layout-status {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin: 0;
-  color: var(--ui-text-muted);
-  font-size: 14px;
   pointer-events: none;
-  animation: graph-viewer-arranging-in 160ms ease-out 400ms both;
 }
 
-@keyframes graph-viewer-arranging-in {
+.graph-viewer-layout-status--over-canvas {
+  inset: auto 12px 12px;
+}
+
+/*
+ * Focus lands here when Try again takes its own button away; ringed inside
+ * the viewer, which hides its overflow.
+ */
+.graph-viewer-layout-status:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+/*
+ * Said only once a layout takes long enough to notice. The 400 ms fade-in is
+ * presentation only: which drawing is shown never waits on a timer.
+ */
+.graph-viewer-layout-status__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ui-text-muted);
+  font-size: 14px;
+  animation: graph-viewer-layout-status-in 160ms ease-out 400ms both;
+}
+
+.graph-viewer-layout-status--over-canvas .graph-viewer-layout-status__text {
+  padding: 4px 10px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
+  font-size: 13px;
+}
+
+@keyframes graph-viewer-layout-status-in {
   from {
     opacity: 0;
   }
@@ -3895,8 +4092,50 @@ defineExpose({ centerGraph, focusModule })
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .graph-viewer-arranging {
+  .graph-viewer-layout-status__text {
     animation-duration: 1ms;
+  }
+}
+
+/*
+ * ELK failed: said on the graph, at its foot — clear of the legend at the top
+ * left and the toolbar at the top right — with the one thing to do about it.
+ * Only the icon carries the error colour.
+ */
+.graph-viewer-layout-failure {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  color: var(--ui-text);
+  font-size: 13px;
+  line-height: 1.4;
+  transform: translateX(-50%);
+}
+
+.graph-viewer-layout-failure__text {
+  min-width: 0;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/*
+ * Vue Flow's controls and minimap sit at the foot of the viewer too; where
+ * there is no room beside them, the notice goes above them.
+ */
+@media (max-width: 960px) {
+  .graph-viewer-layout-failure--above-panels {
+    bottom: 180px;
   }
 }
 

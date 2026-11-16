@@ -8,8 +8,16 @@ import {
   placeRouteLabels
 } from './circular-dependency-edge.ts'
 import {
+  createSharedElkEngineSource,
+  failureSignal,
+  lazyElkEngineSource,
+  type RunningElk
+} from './elk-engine-source.ts'
+import { LAYOUT_GEOMETRY } from './graph-layout-placement.ts'
+import {
   AUTO_LAYOUT_ENGINE_READY_MEASURE,
   AUTO_LAYOUT_MEASURE,
+  ElkEngineFailure,
   ROUTE_GAP,
   ROUTE_MODULE_CLEARANCE,
   WARM_UP_LAYOUT_INPUT,
@@ -26,6 +34,7 @@ import {
   type ElkEngineSource,
   type ElkRuntime,
   type LayoutPoint,
+  type ModuleGraphAutoLayout,
   type ModuleGraphLayoutInput,
   type ModulePositions
 } from './module-graph-auto-layout.ts'
@@ -169,24 +178,22 @@ async function freshElk(): Promise<ElkEngine> {
 }
 
 /**
- * A source handing out the engine `start` makes, saying it is warm or not, and
- * counting how often it is asked for one and told to abort.
+ * A source handing out the engine `start` makes, saying it is warm or not —
+ * one that is not comes up as soon as it is asked for — and counting how often
+ * it is asked for one.
  */
 function sourceOf(params: { start: () => Promise<ElkEngine>, isReady?: boolean }) {
   let acquired = 0
-  let aborted = 0
   const engines: ElkEngineSource = {
     isReady: () => params.isReady ?? false,
     acquire: () => {
       acquired += 1
       return params.start()
     },
-    abort: () => {
-      aborted += 1
-    }
+    whenReady: () => Promise.resolve()
   }
 
-  return { engines, acquired: () => acquired, aborted: () => aborted }
+  return { engines, acquired: () => acquired }
 }
 
 /** A source over a stand-in ELK that answers with `layout`. */
@@ -610,14 +617,17 @@ describe('a larger graph', () => {
 describe('graphs with almost nothing in them', () => {
   test('an empty graph places nothing, and never starts ELK', async () => {
     const source = sourceOf({ start: freshElk })
+    const told: string[] = []
     const layout = await autoLayoutModuleGraph({
       input: { root: 'AppModule', modules: [], imports: [] },
-      engines: source.engines
+      engines: source.engines,
+      onEngineReady: () => told.push('up')
     })
 
     assert.equal(layout.engine, 'none')
     assert.equal(layout.positions.size, 0)
     assert.equal(source.acquired(), 0)
+    assert.deepEqual(told, [])
     assert.deepEqual(autoLayoutTimingDetail(layout), { engine: 'none', modules: 0 })
   })
 
@@ -691,85 +701,313 @@ describe('what ELK is given', () => {
   })
 })
 
-describe('falling back to rows', () => {
+/** Lets every callback already queued run. */
+function settle(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve))
+}
+
+/** Whether a promise has settled, waiting only for what is already queued. */
+async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false
+  promise.then(() => {
+    settled = true
+  }, () => {
+    settled = true
+  })
+  await settle()
+  return settled
+}
+
+/**
+ * A stand-in worker for the page's shared source: each layout answers with the
+ * modules side by side, only when told to, and the worker can die, as one
+ * whose script did not load does.
+ */
+function standInWorker() {
+  const { failure, fail, guard } = failureSignal()
+  const unanswered: (() => void)[] = []
+  const running: RunningElk = {
+    engine: {
+      runtime: 'worker',
+      layout: graph => guard(() => new Promise<ElkNode>((resolve) => {
+        unanswered.push(() => resolve(sideBySide(graph)))
+      }))
+    },
+    failure
+  }
+
+  return {
+    running,
+    answerNext: async () => {
+      unanswered.shift()?.()
+      await settle()
+    },
+    die: () => fail(new Error('ELK\'s worker failed: its script did not load'))
+  }
+}
+
+/** The page's shared source over stand-in workers, started one after another. */
+function sharedSourceOver(workers: readonly ReturnType<typeof standInWorker>[]) {
+  let starts = 0
+  return createSharedElkEngineSource({
+    startWorker: () => workers[starts++]?.running,
+    startOnThisThread: () => Promise.reject(new Error('there is always a worker here')),
+    warmUpGraph: toElkGraph(WARM_UP_LAYOUT_INPUT)
+  })
+}
+
+type DrawnRow = { names: string[], left: number, right: number }
+
+/** The drawing's rows, top first: the modules sharing a top, left to right, and where the row runs. */
+function rowsOf(input: ModuleGraphLayoutInput, positions: ModulePositions): DrawnRow[] {
+  const byTop = new Map<number, Box[]>()
+  for (const box of boxes(input, positions)) {
+    byTop.set(box.y, [...(byTop.get(box.y) ?? []), box])
+  }
+
+  return [...byTop.entries()]
+    .sort(([top], [otherTop]) => top - otherTop)
+    .map(([, row]) => ({
+      names: [...row].sort((left, right) => left.x - right.x).map(box => box.name),
+      left: Math.min(...row.map(box => box.x)),
+      right: Math.max(...row.map(box => box.x + box.width))
+    }))
+}
+
+function widthOf(row: DrawnRow): number {
+  return row.right - row.left
+}
+
+/**
+ * How wide a row of the Shop App's simple arrangement may run, every module
+ * collapsed: four modules a row at most, as far apart as ELK sets modules —
+ * where one row of all eleven the root imports ran 5,840 px.
+ */
+const SHOP_APP_ROW_WIDTH_LIMIT = 4 * COLLAPSED.width + 3 * LAYOUT_GEOMETRY.moduleGapY
+
+/** The fallback for the Shop App: the simple arrangement, each layer wrapped. */
+function assertShopAppWrapped(input: ModuleGraphLayoutInput, layout: ModuleGraphAutoLayout): void {
+  assert.equal(layout.engine, 'rows')
+  assert.deepEqual([...layout.positions], [...layoutModuleRows(input)])
+  const rows = rowsOf(input, layout.positions)
+  const widest = Math.max(...rows.map(widthOf))
+  assert.ok(widest <= SHOP_APP_ROW_WIDTH_LIMIT, `the widest row runs ${widest} px`)
+  for (const row of rows) {
+    assert.ok(
+      row.names.length < (SHOP_APP_IMPORTS.AppModule?.length ?? 0),
+      `no row holds all the root imports: ${row.names.join(', ')}`
+    )
+  }
+}
+
+describe('falling back to the simple arrangement', () => {
   const input = shopApp()
-  const rows = layoutModuleRows(input)
 
-  test('when ELK cannot start', async () => {
-    const source = sourceOf({ start: () => Promise.reject(new Error('the chunk failed to load')) })
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines })
+  test('when ELK\'s module cannot be imported, as an engine failure', async () => {
+    const engines = lazyElkEngineSource(() => Promise.reject(
+      new TypeError('Failed to fetch dynamically imported module: https://example.test/_nuxt/engine.js')
+    ))
+    const layout = await autoLayoutModuleGraph({ input, engines })
 
-    assert.equal(layout.engine, 'rows')
-    assert.deepEqual([...layout.positions], [...rows])
+    assertShopAppWrapped(input, layout)
     assert.deepEqual(autoLayoutTimingDetail(layout), {
       engine: 'rows',
       modules: input.modules.length,
       warm: false,
-      reason: 'error',
-      error: 'the chunk failed to load'
+      reason: 'engine',
+      error: 'Failed to fetch dynamically imported module: https://example.test/_nuxt/engine.js'
     })
   })
 
-  test('when ELK throws, leaving the engine running for the next layout', async () => {
-    const source = standIn(() => Promise.reject(new Error('layout failed')))
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines })
+  test('when ELK\'s worker fails while it lays the graph out, as an engine failure', async () => {
+    const worker = standInWorker()
+    const pending = autoLayoutModuleGraph({ input, engines: sharedSourceOver([worker]) })
+    await settle()
+    worker.die()
+    const layout = await pending
 
-    assert.equal(layout.engine === 'rows' && layout.reason, 'error')
-    assert.equal(source.aborted(), 0)
+    assertShopAppWrapped(input, layout)
+    assert.equal(layout.engine === 'rows' && layout.reason, 'engine')
+    assert.ok(layout.engine === 'rows' && layout.error instanceof ElkEngineFailure)
   })
 
-  test('when ELK answers without placing every module', async () => {
+  test('when ELK cannot be started at all, as an engine failure', async () => {
+    const layout = await autoLayoutModuleGraph({
+      input,
+      engines: sourceOf({ start: () => Promise.reject(new Error('no worker, and no bundled build')) }).engines
+    })
+
+    assertShopAppWrapped(input, layout)
+    assert.equal(layout.engine === 'rows' && layout.reason, 'engine')
+  })
+
+  test('when the engine fails while it answers, as an engine failure', async () => {
+    const layout = await autoLayoutModuleGraph({
+      input,
+      engines: standIn(() => Promise.reject(new ElkEngineFailure('ELK\'s worker failed'))).engines
+    })
+
+    assertShopAppWrapped(input, layout)
+    assert.equal(layout.engine === 'rows' && layout.reason, 'engine')
+  })
+
+  test('when ELK throws, as a layout failure', async () => {
+    const layout = await autoLayoutModuleGraph({
+      input,
+      engines: standIn(() => Promise.reject(new Error('ELK refused the graph'))).engines
+    })
+
+    assertShopAppWrapped(input, layout)
+    assert.equal(layout.engine === 'rows' && layout.reason, 'layout')
+  })
+
+  test('when ELK answers without placing every module, as a layout failure', async () => {
     const layout = await autoLayoutModuleGraph({
       input,
       engines: standIn(graph => Promise.resolve({ ...sideBySide(graph), children: [] })).engines
     })
 
-    assert.equal(layout.engine === 'rows' && layout.reason, 'error')
+    assertShopAppWrapped(input, layout)
+    assert.equal(layout.engine === 'rows' && layout.reason, 'layout')
   })
+})
 
-  test('when ELK never answers, stopping the engine that holds the layout', async () => {
-    const source = standIn(() => new Promise<ElkNode>(() => {}))
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines, timeoutMs: 20 })
+describe('no deadline', () => {
+  const TEN_MINUTES = 10 * 60_000
 
-    assert.equal(layout.engine === 'rows' && layout.reason, 'timeout')
-    assert.deepEqual([...layout.positions], [...rows])
-    assert.equal(source.aborted(), 1)
-  })
-
-  test('when ELK does not start in time, stopping it too', async () => {
-    const source = sourceOf({ start: () => new Promise<ElkEngine>(() => {}) })
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines, timeoutMs: 20 })
-
-    assert.equal(layout.engine === 'rows' && layout.reason, 'timeout')
-    assert.equal(source.aborted(), 1)
-  })
-
-  test('when ELK answers after the deadline, having waited on something else', async () => {
+  test('a slow ELK answering ten minutes on still places the modules', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     const source = standIn(graph => new Promise((resolve) => {
-      setTimeout(() => resolve(sideBySide(graph)), 120)
+      setTimeout(() => resolve(sideBySide(graph)), TEN_MINUTES)
     }))
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines, timeoutMs: 20 })
+    const pending = autoLayoutModuleGraph({ input: shopApp(), engines: source.engines })
+    await settle()
 
-    assert.equal(layout.engine === 'rows' && layout.reason, 'timeout')
-    assert.equal(source.aborted(), 1)
+    t.mock.timers.tick(TEN_MINUTES - 1)
+    assert.equal(await hasSettled(pending), false)
+    t.mock.timers.tick(1)
+
+    assert.equal((await pending).engine, 'elk')
   })
 
-  test('but not when ELK was laying out on this thread past the deadline', async () => {
-    // As the bundled build does where no worker can be made: the layout runs
-    // in a task of its own, and its answer is queued as another once done.
-    const source = standIn(graph => new Promise((resolve) => {
-      setTimeout(() => {
-        const busyUntil = Date.now() + 80
-        while (Date.now() < busyUntil) {
-          // laying out
-        }
-        setTimeout(() => resolve(sideBySide(graph)), 0)
-      }, 0)
-    }), 'main-thread')
-    const layout = await autoLayoutModuleGraph({ input, engines: source.engines, timeoutMs: 20 })
+  test('nor does an ELK whose module takes ten minutes to arrive', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const engines = lazyElkEngineSource(() => new Promise((resolve) => {
+      setTimeout(() => resolve(standIn(graph => Promise.resolve(sideBySide(graph))).engines), TEN_MINUTES)
+    }))
+    const pending = autoLayoutModuleGraph({ input: shopApp(), engines })
+    await settle()
 
-    assert.equal(layout.engine, 'elk')
-    assert.equal(source.aborted(), 0)
+    t.mock.timers.tick(TEN_MINUTES - 1)
+    assert.equal(await hasSettled(pending), false)
+    t.mock.timers.tick(1)
+
+    assert.equal((await pending).engine, 'elk')
+  })
+})
+
+describe('trying again after ELK failed', () => {
+  const input = shopApp()
+
+  test('starts a fresh worker in place of the one that died, and gets ELK\'s layout', async () => {
+    const [dying, fresh] = [standInWorker(), standInWorker()]
+    const engines = sharedSourceOver([dying, fresh])
+
+    const first = autoLayoutModuleGraph({ input, engines })
+    await settle()
+    dying.die()
+    assert.equal((await first).engine, 'rows')
+
+    const retried = autoLayoutModuleGraph({ input, engines })
+    await settle()
+    await fresh.answerNext()
+
+    assert.equal((await retried).engine, 'elk')
+  })
+
+  test('imports ELK\'s module again after its import failed, and gets ELK\'s layout', async () => {
+    let imports = 0
+    const engines = lazyElkEngineSource(() => {
+      imports += 1
+      return imports === 1
+        ? Promise.reject(new TypeError('Failed to fetch dynamically imported module'))
+        : Promise.resolve(sourceOf({ start: freshElk }).engines)
+    })
+
+    assert.equal((await autoLayoutModuleGraph({ input, engines })).engine, 'rows')
+    assert.equal((await autoLayoutModuleGraph({ input, engines })).engine, 'elk')
+    assert.equal(imports, 2)
+  })
+
+  test('lays out on the same engine after ELK refused a graph once', async () => {
+    let attempts = 0
+    const source = standIn((graph) => {
+      attempts += 1
+      return attempts === 1
+        ? Promise.reject(new Error('ELK refused the graph'))
+        : Promise.resolve(sideBySide(graph))
+    })
+
+    assert.equal((await autoLayoutModuleGraph({ input, engines: source.engines })).engine, 'rows')
+    assert.equal((await autoLayoutModuleGraph({ input, engines: source.engines })).engine, 'elk')
+    assert.equal(source.acquired(), 2)
+  })
+})
+
+describe('saying when ELK is up', () => {
+  const input = shopApp()
+
+  test('at once, when it already was', async () => {
+    const told: string[] = []
+    const layout = autoLayoutModuleGraph({
+      input,
+      engines: sourceOf({ start: freshElk, isReady: true }).engines,
+      onEngineReady: () => told.push('up')
+    }).then((laidOut) => {
+      told.push('laid out')
+      return laidOut
+    })
+
+    assert.equal((await layout).engine, 'elk')
+    assert.deepEqual(told, ['up', 'laid out'])
+  })
+
+  test('once its warm-up answers, before this graph is laid out', async () => {
+    const worker = standInWorker()
+    const engines = sharedSourceOver([worker])
+    const told: string[] = []
+    engines.warmUp()
+
+    const pending = autoLayoutModuleGraph({ input, engines, onEngineReady: () => told.push('up') })
+    await settle()
+    assert.deepEqual(told, [])
+
+    await worker.answerNext()
+    assert.deepEqual(told, ['up'])
+    assert.equal(await hasSettled(pending), false)
+
+    await worker.answerNext()
+    const layout = await pending
+    assert.equal(layout.engine === 'elk' && layout.warm, false)
+    // Told once, however many layouts ELK then answers.
+    assert.deepEqual(told, ['up'])
+  })
+
+  test('never, when ELK fails before it is up', async () => {
+    const worker = standInWorker()
+    const told: string[] = []
+
+    const pending = autoLayoutModuleGraph({
+      input,
+      engines: sharedSourceOver([worker]),
+      onEngineReady: () => told.push('up')
+    })
+    await settle()
+    worker.die()
+
+    assert.equal((await pending).engine, 'rows')
+    await settle()
+    assert.deepEqual(told, [])
   })
 })
 
@@ -819,26 +1057,75 @@ describe('the warm-up graph', () => {
   })
 })
 
-describe('the rows', () => {
-  test('are the one long row the viewer drew before: the root, then all it imports', () => {
-    const positions = layoutModuleRows(shopApp())
-    const [top, imported, unreached] = layers(positions)
+describe('the simple arrangement', () => {
+  test('puts the root alone on top, then what it imports, and what it does not reach at the bottom', () => {
+    const input = shopApp()
+    const rows = rowsOf(input, layoutModuleRows(input))
 
-    assert.deepEqual(top, ['AppModule'])
-    assert.equal(imported?.length, SHOP_APP_IMPORTS.AppModule?.length)
-    assert.deepEqual(unreached, ['NestJSCoreModule'])
+    assert.deepEqual(rows[0]?.names, ['AppModule'])
+    assert.deepEqual(rows.at(-1)?.names, ['NestJSCoreModule'])
+    assert.deepEqual(rows.slice(1, -1).flatMap(row => row.names), SHOP_APP_IMPORTS.AppModule)
   })
 
-  test('centre each row under the root', () => {
+  test('wraps a layer of many modules into rows, in the graph\'s order, none the whole layer', () => {
     const input = shopApp()
+    const rows = rowsOf(input, layoutModuleRows(input))
+    const imported = rows.slice(1, -1)
+
+    assert.ok(imported.length > 1, 'the root\'s imports take more than one row')
+    assert.ok(Math.max(...rows.map(widthOf)) <= SHOP_APP_ROW_WIDTH_LIMIT)
+    for (const row of imported) {
+      assert.ok(row.names.length < (SHOP_APP_IMPORTS.AppModule?.length ?? 0))
+    }
+  })
+
+  test('comes out a little wider than tall, open modules or collapsed, large graph or small', () => {
+    const wide = Object.fromEntries([
+      ['AppModule', Array.from({ length: 60 }, (_, index) => `Feature${index}Module`)],
+      ...Array.from({ length: 60 }, (_, index) => [`Feature${index}Module`, []])
+    ])
+    const inputs = [
+      shopApp(),
+      shopApp(variedSize),
+      graphInput({ imports: wide, root: 'AppModule' }),
+      graphInput({ imports: wide, root: 'AppModule', sizeOf: variedSize })
+    ]
+
+    for (const input of inputs) {
+      const drawn = boxes(input, layoutModuleRows(input))
+      const width = Math.max(...drawn.map(box => box.x + box.width)) - Math.min(...drawn.map(box => box.x))
+      const height = Math.max(...drawn.map(box => box.y + box.height)) - Math.min(...drawn.map(box => box.y))
+      assert.ok(width / height > 1 && width / height < 2.6, `${width} × ${height}`)
+    }
+  })
+
+  test('overlaps no two modules, and centres every row under the root', () => {
+    for (const input of [shopApp(), shopApp(variedSize)]) {
+      const positions = layoutModuleRows(input)
+
+      assertNoOverlap(boxes(input, positions))
+      for (const row of rowsOf(input, positions)) {
+        assert.equal(row.left + row.right, 0, row.names.join(', '))
+      }
+    }
+  })
+
+  test('is the same every time', () => {
+    assert.deepEqual(
+      [...layoutModuleRows(shopApp(variedSize))],
+      [...layoutModuleRows(shopApp(variedSize))]
+    )
+  })
+
+  test('places every module it has when the root is not among them', () => {
+    const input = graphInput({
+      imports: { FeatureModule: ['SharedModule'], SharedModule: [] },
+      root: 'AppModule'
+    })
     const positions = layoutModuleRows(input)
 
-    for (const row of layers(positions)) {
-      const placed = row.map(name => boxOf(input, positions, name))
-      const left = Math.min(...placed.map(box => box.x))
-      const right = Math.max(...placed.map(box => box.x + box.width))
-      assert.equal(left + right, 0)
-    }
+    assert.deepEqual([...positions.keys()].sort(), ['FeatureModule', 'SharedModule'])
+    assertNoOverlap(boxes(input, positions))
   })
 })
 

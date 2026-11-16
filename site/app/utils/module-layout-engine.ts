@@ -7,6 +7,7 @@ import {
 } from './elk-engine-source.ts'
 import {
   AUTO_LAYOUT_ENGINE_READY_MEASURE,
+  ElkEngineFailure,
   WARM_UP_LAYOUT_INPUT,
   loadBundledElk,
   recordUserTiming,
@@ -34,11 +35,10 @@ import {
 export const moduleLayoutEngine = createSharedElkEngineSource({
   startWorker: startElkWorker,
   // Where no worker can be made, the same ELK lays out on this thread, as it
-  // did before it had a worker: slower to start, and nothing can stop it part
-  // way, but the graph is still drawn as it should be.
+  // did before it had a worker: slower to start, and the page waits on each
+  // layout, but the graph is still drawn as it should be.
   startOnThisThread: async (): Promise<RunningElk> => ({
-    engine: await loadBundledElk(),
-    stop: () => undefined
+    engine: await loadBundledElk()
   }),
   warmUpGraph: toElkGraph(WARM_UP_LAYOUT_INPUT),
   // Measured in a fresh engine on the demo's graph: no warm-up leaves its
@@ -56,8 +56,9 @@ export const moduleLayoutEngine = createSharedElkEngineSource({
 /**
  * ELK in a worker of its own. elkjs answers a worker's layouts but never
  * hears of the worker failing, so a worker whose script will not load — a
- * broken deploy, a policy against it — would leave its layouts waiting
- * forever; here they fail at once, and the source starts another next time.
+ * dropped connection, a broken deploy, a policy against it — would leave its
+ * layouts waiting forever; here its `error` event fails them at once, and the
+ * source starts another worker, fetching the script again, next time.
  */
 function startElkWorker(): RunningElk | undefined {
   if (typeof Worker === 'undefined') {
@@ -70,7 +71,7 @@ function startElkWorker(): RunningElk | undefined {
     // An error the worker did not catch can leave it running, but nothing
     // will use it again, so it is stopped rather than left idle.
     worker.terminate()
-    fail(new Error(`ELK's worker failed: ${event.message || 'its script did not load'}`))
+    fail(new ElkEngineFailure(`ELK's worker failed: ${event.message || 'its script did not load'}`))
   }, { once: true })
   const elk = new ELK({ algorithms: ['layered'], workerFactory: () => worker })
 
@@ -80,10 +81,6 @@ function startElkWorker(): RunningElk | undefined {
       // Fails with the worker, and is let go of once it settles, so the
       // worker's failure holds on to none of its finished layouts.
       layout: graph => guard(() => elk.layout(graph))
-    },
-    stop: () => {
-      worker.terminate()
-      fail(new Error('ELK\'s worker was stopped'))
     },
     failure
   }

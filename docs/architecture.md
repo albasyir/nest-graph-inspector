@@ -934,8 +934,8 @@ layout never holds up the page's own thread. The worker runs elkjs's own
 `elk-worker.min.js`, emitted as-is by a `?url` import under the site's base
 path, driven through `elkjs/lib/elk-api.js` from
 `app/utils/module-layout-engine.ts`; `app/utils/elk-engine-source.ts` keeps the
-one engine — starting it, warming it, stopping it — and is what the tests
-drive. The script is a megabyte and a half, so it is fetched only by a page
+one engine — starting it, warming it, letting go of one that fails — and is
+what the tests drive. The script is a megabyte and a half, so it is fetched only by a page
 that lays a graph out, never preloaded or prefetched (`build:manifest` in
 `nuxt.config.ts` drops ELK's files from every page's hints), and warmed early
 where a graph is coming: `plugins/module-layout-warm-up.client.ts` starts it on
@@ -943,29 +943,69 @@ arriving at the navigator or `/view?preview=true` — while the page itself
 loads — and on any navigation to the navigator, and the in-browser demo starts
 it while its payload downloads and boots. A warm-up lays a small graph shaped
 like a real one out three times, so the first real layout finds ELK compiled
-and optimised. Until the first layout lands the canvas is drawn but hidden, so
-the modules appear already in place; that layout is asked for once Vue Flow
-has measured the hidden canvas, since its answer could not be drawn sooner.
-Meanwhile the layout toolbar's Auto layout, Download and Save wait for it —
-there is no arrangement on screen yet to keep — and a layout that takes over
-before it lands is drawn and shown in its place. A
-layout still running after `AUTO_LAYOUT_TIMEOUT_MS` is abandoned and the
-worker with it — terminated, and started afresh by the next layout; one still
-waiting for ELK to load or start is dropped before ELK sees it — and the
-modules fall back to the rows the viewer drew before ELK: breadth-first layers
-from the root, each one centred row. So do they when ELK throws or its worker
-fails to load. Where no worker can be made at all, ELK's bundled build lays
-out on the page's own thread instead, which nothing can stop part way. With
-**Auto Re-position** on, opening or closing a module on a canvas nobody has
-arranged lays it out again; a saved or dragged arrangement is never re-laid
+and optimised. Where no worker can be made at all, ELK's bundled build lays
+out on the page's own thread instead.
+
+**The layout's state comes from signals, never from timers.** Each viewer
+keeps where its layout stands in a small pure state machine,
+`app/utils/module-layout-state.ts`, and says it on its root as
+`data-layout-state`: `loading-engine` until ELK's module has loaded and its
+worker has answered a first layout — a warm-up's, or this one — then
+`arranging` while ELK lays this graph out, `ready` once a final arrangement is
+drawn and fitted, and `failed` when ELK failed and the simple arrangement is
+drawn in its place. A saved layout starts `ready`. The first layout is asked
+for on mount: its input is each module's box, which `resolveModuleSizes`
+computes from the graph rather than the DOM, so nothing needs measuring first
+and ELK works in its worker while Vue Flow mounts. Until that layout is drawn
+and fitted the canvas is drawn but hidden (`visibility`, so Vue Flow still
+measures it), so the modules appear already in place; the fit waits for Vue
+Flow's `nodes-initialized`, the signal that every node has a size to fit to —
+waited for again whenever a redraw adds nodes — and a saved arrangement is
+fitted on the same signal, with the same padding.
+A status line says "Loading layout engine…" or "Arranging graph…"
+(`role="status"`, faded in after 400 ms by CSS, which is presentation only),
+and the canvas is `aria-busy` while a layout is still to land — the canvas,
+not the root, so the status line and the failure notice beside it are not
+held back as part of a busy region. A later layout — **Auto layout**, or
+opening or closing a module on a canvas nobody has arranged — keeps the
+drawing on screen until its own lands. Until the first arrangement is on
+screen the layout toolbar's Auto layout, Download and Save wait — there is
+nothing yet to keep — and a layout that takes over before it lands is drawn
+and shown in its place.
+
+**There is no deadline, and the fallback is for real failures only.** A layout
+waits for ELK however long ELK takes — no timeout, and no hang guard, since no
+fixed time tells a slow ELK on a slow connection from a stuck one. The modules
+fall back only when the engine's module fails to import, its worker fires
+`error`, `elk.layout` rejects, or ELK's answer cannot be drawn; the first two
+are engine failures (`ElkEngineFailure`, reason `engine`), the others the
+graph's (`layout`). The simple arrangement, `layoutModuleRows`, is the
+viewer's old breadth-first layers from the root — the modules it does not
+reach together in one layer at the bottom — with each layer wrapped, in the
+graph's order, into rows no wider than the drawing needs to come out about
+16:10 — the modules as far apart as ELK sets them, 100 px — so it is never
+one row thousands of pixels wide; the hidden canvas is drawn in it before the
+first layout lands, too. The viewer shows it with a one-line notice and **Try
+again**, which every viewer offers, the landing page's non-interactive
+previews included; focus moves from the button to the status line as it
+goes. An engine that fails is let go of
+the moment it does, so Try again starts a fresh one — importing ELK's module
+again, which a browser fetches afresh after a failed fetch (checked in
+Chromium 156 and 159), or making a new worker, which fetches its script again;
+an engine that refused a graph is healthy and is not stopped, since the other
+viewers on the page share it.
+
+With **Auto Re-position** on, opening or closing a module on a canvas nobody
+has arranged lays it out again; a saved or dragged arrangement is never re-laid
 out. Layouts run one at a time: one asked for while another runs waits for it,
 and is skipped if a later one has been asked for by then, so a burst of clicks
 lays the graph out at most twice. Each layout is recorded as the User Timing
-measure `ngi:auto-layout`, from
-asking for the layout to the modules drawn, whose `detail` says which engine
+measure `ngi:auto-layout`, from the moment it starts — after any layout it
+waited for — to the modules drawn, whose `detail` says which engine
 placed the modules, whether ELK was warm when asked, where it ran, and why it
-did not place them when it did not; and each engine records
-`ngi:auto-layout:engine-ready`, from being started to its first layout done.
+did not place them when it did not (`engine` or `layout`); and each engine
+records `ngi:auto-layout:engine-ready`, from being started to its first layout
+done.
 
 **The graph carries the application's own documentation.** Every module,
 provider and controller in `GraphOutput` may hold a `jsdoc` string —
@@ -1518,10 +1558,18 @@ Facts a code change can invalidate, and the file to check:
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
   `demo/scripts/build-nodepod-payload.ts`
 - How the automatic layout lays a graph out, how far its routes keep from
-  modules and from each other (24 px, 16 px), and how long it waits for ELK
-  before falling back to rows (5 s) — `MODULE_GRAPH_ELK_OPTIONS`,
-  `ROUTE_MODULE_CLEARANCE`, `ROUTE_GAP` and `AUTO_LAYOUT_TIMEOUT_MS` in
-  `site/app/utils/module-graph-auto-layout.ts`; how
+  modules and from each other (24 px, 16 px), and the shape its simple
+  arrangement aims for (16:10) — `MODULE_GRAPH_ELK_OPTIONS`,
+  `ROUTE_MODULE_CLEARANCE`, `ROUTE_GAP` and `ROWS_ASPECT_RATIO` in
+  `site/app/utils/module-graph-auto-layout.ts`; the layout states a viewer
+  says in `data-layout-state` — `site/app/utils/module-layout-state.ts`; that
+  a browser fetches afresh a module whose fetch failed, which Try again relies
+  on (Chromium 156 and 159 checked) — `lazyElkEngineSource` in
+  `site/app/utils/elk-engine-source.ts`; that Vue Flow shows each node it has
+  measured with an inline `visibility: visible`, which the hidden canvas
+  overrides with an `!important` rule — `.graph-viewer--canvas-hidden` in
+  `GraphViewer.vue`, against the node wrapper in the installed
+  `@vue-flow/core`; how
   often a warm-up lays its graph out (3) — `warmUpRuns` in
   `site/app/utils/module-layout-engine.ts`; which arrivals warm ELK —
   `drawsModuleGraphOnArrival` in `site/app/utils/module-layout-warm-up.ts`, and

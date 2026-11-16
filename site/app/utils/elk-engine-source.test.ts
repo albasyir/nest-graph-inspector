@@ -8,7 +8,11 @@ import {
   type ElkEngineReadyTiming,
   type RunningElk
 } from './elk-engine-source.ts'
-import type { ElkEngineSource, ElkRuntime } from './module-graph-auto-layout.ts'
+import {
+  ElkEngineFailure,
+  type ElkEngineSource,
+  type ElkRuntime
+} from './module-graph-auto-layout.ts'
 
 const WARM_UP_GRAPH: ElkNode = { id: 'warm-up' }
 const GRAPH: ElkNode = { id: 'graph' }
@@ -18,15 +22,26 @@ function settle(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve))
 }
 
+/** Whether a promise has settled, waiting only for what is already queued. */
+async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false
+  promise.then(() => {
+    settled = true
+  }, () => {
+    settled = true
+  })
+  await settle()
+  return settled
+}
+
 /**
  * A stand-in ELK, as a worker would be: its layouts answer only when told to,
- * and it can be stopped, or die on its own.
+ * and it can die on its own.
  */
 function standIn(runtime: ElkRuntime = 'worker') {
   const requested: ElkNode[] = []
   const unanswered: (() => void)[] = []
   const { failure, fail, guard } = failureSignal()
-  let isStopped = false
   const running: RunningElk = {
     engine: {
       runtime,
@@ -36,10 +51,6 @@ function standIn(runtime: ElkRuntime = 'worker') {
           unanswered.push(() => resolve(graph))
         })
       })
-    },
-    stop: () => {
-      isStopped = true
-      fail(new Error('stopped'))
     },
     failure
   }
@@ -53,7 +64,6 @@ function standIn(runtime: ElkRuntime = 'worker') {
       }
       await settle()
     },
-    isStopped: () => isStopped,
     die: () => fail(new Error('the worker\'s script did not load'))
   }
 }
@@ -155,57 +165,51 @@ describe('a layout with nothing warmed', () => {
   })
 })
 
-describe('aborting', () => {
-  test('stops the engine, fails what it was laying out, and starts another next time', async () => {
-    const workers = [standIn(), standIn()]
-    const { engines, starts } = sourceOver(workers)
+describe('saying when ELK is ready', () => {
+  test('once the engine has finished its first layout — a warm-up\'s — and not before', async () => {
+    const worker = standIn()
+    const { engines } = sourceOver([worker])
 
-    // Awaited as a layout awaits it, from before the abort.
-    const abandoned = assert.rejects(
-      (await engines.acquire()).layout(GRAPH),
-      /stopped/
-    )
-    engines.abort()
+    engines.warmUp()
     await settle()
+    const ready = engines.whenReady()
+    assert.equal(await hasSettled(ready), false)
 
-    await abandoned
-    assert.equal(workers[0]?.isStopped(), true)
-    assert.equal(engines.isReady(), false)
+    await worker.answerAll()
 
-    const next = (await engines.acquire()).layout(GRAPH)
-    await workers[1]?.answerAll()
-
-    assert.deepEqual(await next, GRAPH)
-    assert.equal(starts(), 2)
+    assert.equal(await hasSettled(ready), true)
+    await ready
   })
 
-  test('drops a layout still waiting for ELK to start, which ELK never lays out', async () => {
-    const [abandonedElk, nextElk] = [standIn('main-thread'), standIn('main-thread')]
-    const starting: ((running: RunningElk) => void)[] = []
-    const engines = createSharedElkEngineSource({
-      startWorker: () => undefined,
-      startOnThisThread: () => new Promise((resolve) => {
-        starting.push(resolve)
-      }),
-      warmUpGraph: WARM_UP_GRAPH
-    })
+  test('at once for an engine already up', async () => {
+    const worker = standIn()
+    const { engines } = sourceOver([worker])
 
-    const abandoned = assert.rejects(engines.acquire(), /stopped before it had started/)
-    engines.abort()
-    starting[0]?.(abandonedElk.running)
-    await abandoned
+    engines.warmUp()
     await settle()
-    assert.deepEqual(abandonedElk.requested, [])
-    assert.equal(abandonedElk.isStopped(), true)
+    await worker.answerAll()
 
-    // The next layout starts ELK afresh, and is laid out.
-    const next = engines.acquire().then(engine => engine.layout(GRAPH))
-    await settle()
-    starting[1]?.(nextElk.running)
-    await settle()
-    await nextElk.answerAll()
-    assert.deepEqual(await next, GRAPH)
-    assert.equal(starting.length, 2)
+    await engines.whenReady()
+  })
+
+  test('never, but failing, when the engine dies first', async () => {
+    const worker = standIn()
+    const { engines } = sourceOver([worker])
+
+    const layout = (await engines.acquire()).layout(GRAPH)
+    const ready = engines.whenReady()
+    worker.die()
+
+    await assert.rejects(ready, ElkEngineFailure)
+    await assert.rejects(layout, ElkEngineFailure)
+    assert.equal(engines.isReady(), false)
+  })
+
+  test('failing at once when no engine is running', async () => {
+    const { engines, starts } = sourceOver([standIn()])
+
+    await assert.rejects(engines.whenReady(), ElkEngineFailure)
+    assert.equal(starts(), 0)
   })
 })
 
@@ -235,17 +239,23 @@ describe('without a worker', () => {
 })
 
 describe('an engine that fails', () => {
-  test('a worker that dies fails its layouts, and is replaced by the next one', async () => {
+  test('a worker that dies fails its layouts as an engine failure, and the next layout gets a fresh one', async () => {
     const workers = [standIn(), standIn()]
     const { engines, starts } = sourceOver(workers)
 
     const failed = (await engines.acquire()).layout(GRAPH)
     workers[0]?.die()
 
-    await assert.rejects(failed, /did not load/)
+    await assert.rejects(failed, (error: unknown) =>
+      error instanceof ElkEngineFailure && /did not load/.test(error.message)
+    )
     await settle()
-    await engines.acquire()
+    const retried = (await engines.acquire()).layout(GRAPH)
+    await workers[1]?.answerAll()
+
+    assert.deepEqual(await retried, GRAPH)
     assert.equal(starts(), 2)
+    assert.deepEqual(workers[1]?.requested, [GRAPH])
   })
 
   test('one that could not start is tried again by the next layout', async () => {
@@ -275,26 +285,32 @@ describe('a source in a module of its own', () => {
   /** The source the module holds: warm or not, counting what it is asked. */
   function inner(isReady: boolean) {
     let acquired = 0
-    let aborted = 0
+    let askedWhenReady = 0
     const source: ElkEngineSource = {
       isReady: () => isReady,
       acquire: () => {
         acquired += 1
         return Promise.resolve({ runtime: 'worker', layout: graph => Promise.resolve(graph) })
       },
-      abort: () => {
-        aborted += 1
+      whenReady: () => {
+        askedWhenReady += 1
+        return Promise.resolve()
       }
     }
 
-    return { source, acquired: () => acquired, aborted: () => aborted }
+    return { source, acquired: () => acquired, askedWhenReady: () => askedWhenReady }
   }
 
-  test('is not ready, and aborts nothing, before its module is imported', () => {
-    const engines = lazyElkEngineSource(() => Promise.resolve(inner(true).source))
+  test('is not ready before its module is imported, and has no engine to wait on', async () => {
+    let imports = 0
+    const engines = lazyElkEngineSource(() => {
+      imports += 1
+      return Promise.resolve(inner(true).source)
+    })
 
     assert.equal(engines.isReady(), false)
-    engines.abort()
+    await assert.rejects(engines.whenReady(), ElkEngineFailure)
+    assert.equal(imports, 0)
   })
 
   test('once loaded, says what the source in it says, without starting ELK', async () => {
@@ -311,8 +327,8 @@ describe('a source in a module of its own', () => {
     assert.equal(engines.isReady(), true)
     assert.equal(module.acquired(), 0)
     assert.equal(imports, 1)
-    engines.abort()
-    assert.equal(module.aborted(), 1)
+    await engines.whenReady()
+    assert.equal(module.askedWhenReady(), 1)
   })
 
   test('imports its module for the first layout, and once only', async () => {
@@ -336,42 +352,56 @@ describe('a source in a module of its own', () => {
     const engines = lazyElkEngineSource(() => {
       imports += 1
       return imports === 1
-        ? Promise.reject(new Error('the chunk failed to load'))
+        ? Promise.reject(new TypeError('Failed to fetch dynamically imported module'))
         : Promise.resolve(module.source)
     })
 
-    await assert.rejects(engines.acquire(), /failed to load/)
+    await assert.rejects(engines.acquire(), /Failed to fetch dynamically imported module/)
     await engines.acquire()
 
     assert.equal(imports, 2)
+    assert.equal(module.acquired(), 1)
   })
 
-  test('drops a layout still waiting for its module when it aborts, never starting ELK for it', async () => {
-    const module = inner(false)
-    let finishImport: (source: ElkEngineSource) => void = () => undefined
-    const engines = lazyElkEngineSource(() => new Promise((resolve) => {
-      finishImport = resolve
-    }))
+  test('shares one import between layouts asked for while it is under way, failing them together', async () => {
+    let imports = 0
+    let failImport: (error: Error) => void = () => undefined
+    const engines = lazyElkEngineSource(() => {
+      imports += 1
+      return new Promise((_, reject) => {
+        failImport = reject
+      })
+    })
 
-    const abandoned = assert.rejects(engines.acquire(), /stopped before it had loaded/)
-    engines.abort()
-    finishImport(module.source)
-    await abandoned
+    const layouts = [engines.acquire(), engines.acquire()]
+    failImport(new TypeError('Failed to fetch dynamically imported module'))
 
-    assert.equal(module.acquired(), 0)
-    // A layout asked for after the abort is served as any other.
-    await engines.acquire()
-    assert.equal(module.acquired(), 1)
+    for (const layout of layouts) {
+      await assert.rejects(layout, /Failed to fetch/)
+    }
+    assert.equal(imports, 1)
   })
 })
 
 describe('failureSignal', () => {
-  test('fails when told to, with what it was told', async () => {
+  test('fails when told to, with what it was told, as an engine failure', async () => {
     const { failure, fail } = failureSignal()
+    const cause = new Error('gone')
 
-    fail(new Error('gone'))
+    fail(cause)
 
-    await assert.rejects(failure, /gone/)
+    await assert.rejects(failure, (error: unknown) =>
+      error instanceof ElkEngineFailure && error.message === 'gone' && error.cause === cause
+    )
+  })
+
+  test('keeps an engine failure it is told as it is', async () => {
+    const { failure, fail } = failureSignal()
+    const told = new ElkEngineFailure('the worker died')
+
+    fail(told)
+
+    await assert.rejects(failure, (error: unknown) => error === told)
   })
 
   test('fails quietly with nobody waiting', async () => {
