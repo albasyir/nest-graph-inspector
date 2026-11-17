@@ -395,20 +395,25 @@ async function viewerLayouts(page: Page): Promise<ViewerLayout[]> {
 /**
  * Waits until every graph viewer on the page has settled its layout — on
  * `ready`, or on `failed` with the simple arrangement in its place — then
- * requires at least one viewer, and none that failed. The simple arrangement
- * draws every node too, so a node on screen cannot tell a laid-out graph from
- * one whose layout broke; the viewer's own `data-layout-state` can. Waits on
- * that signal, never on time.
+ * requires, of that settled snapshot, at least one viewer and none that
+ * failed. The simple arrangement draws every node too, so a node on screen
+ * cannot tell a laid-out graph from one whose layout broke; the viewer's own
+ * `data-layout-state` can. Waits on that signal, never on time.
  */
 export async function expectGraphLayoutsReady(page: Page): Promise<void> {
+  // The poll's latest read. Once the poll passes, it is the snapshot found
+  // settled, and both checks below judge that one: a fresh read could catch a
+  // layout begun since, `arranging`, which is not `failed`.
+  let snapshot: readonly ViewerLayout[] = [];
+
   await expect
     .poll(
       async () => {
-        const layouts = await viewerLayouts(page);
+        snapshot = await viewerLayouts(page);
 
-        return layouts.length === 0
+        return snapshot.length === 0
           ? ['no graph viewer on the page yet']
-          : layouts
+          : snapshot
               .filter(({ state }) => !SETTLED_LAYOUT_STATES.has(state))
               .map(({ description }) => description);
       },
@@ -419,14 +424,12 @@ export async function expectGraphLayoutsReady(page: Page): Promise<void> {
     )
     .toEqual([]);
 
-  const layouts = await viewerLayouts(page);
-
-  expect(layouts.length, 'Graph viewers on the page').toBeGreaterThan(0);
+  expect(snapshot.length, 'Graph viewers on the page').toBeGreaterThan(0);
   expect(
-    layouts
+    snapshot
       .filter(({ state }) => state === FAILED_LAYOUT_STATE)
       .map(({ description }) => description),
-    `Graph viewers whose layout failed and fell back to the simple arrangement, of: ${layouts
+    `Graph viewers whose layout failed and fell back to the simple arrangement, of: ${snapshot
       .map(({ description }) => description)
       .join('; ')}`,
   ).toEqual([]);
