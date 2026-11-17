@@ -353,6 +353,86 @@ export function graphNode(page: Page, nodeId: string): Locator {
 }
 
 /**
+ * A graph viewer's root, which says where its automatic layout stands in
+ * `data-layout-state` (`site/app/utils/module-layout-state.ts`).
+ */
+const GRAPH_VIEWER = '.graph-viewer[data-layout-state]';
+
+/**
+ * Where a viewer's layout comes to rest: an arrangement drawn (`ready`), or
+ * ELK failed and the simple arrangement is drawn in its place (`failed`).
+ */
+const SETTLED_LAYOUT_STATES: ReadonlySet<string> = new Set(['ready', 'failed']);
+const FAILED_LAYOUT_STATE = 'failed';
+
+/** One viewer's layout as its root says it, and the notice a failed one shows. */
+type ViewerLayout = {
+  readonly state: string;
+  readonly notice: string;
+  /** The viewer as a failure message names it: its place on the page, its state. */
+  readonly description: string;
+};
+
+/** Every graph viewer on the page, in document order, and where its layout stands. */
+async function viewerLayouts(page: Page): Promise<ViewerLayout[]> {
+  const viewers = await page.locator(GRAPH_VIEWER).evaluateAll((roots) =>
+    roots.map((root) => ({
+      state: root.getAttribute('data-layout-state') ?? '',
+      notice:
+        root
+          .querySelector('.graph-viewer-layout-failure__text')
+          ?.textContent?.trim() ?? '',
+    })),
+  );
+
+  return viewers.map(({ state, notice }, index) => ({
+    state,
+    notice,
+    description: `viewer ${index + 1} of ${viewers.length}: ${state}${notice ? ` (${notice})` : ''}`,
+  }));
+}
+
+/**
+ * Waits until every graph viewer on the page has settled its layout — on
+ * `ready`, or on `failed` with the simple arrangement in its place — then
+ * requires at least one viewer, and none that failed. The simple arrangement
+ * draws every node too, so a node on screen cannot tell a laid-out graph from
+ * one whose layout broke; the viewer's own `data-layout-state` can. Waits on
+ * that signal, never on time.
+ */
+export async function expectGraphLayoutsReady(page: Page): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const layouts = await viewerLayouts(page);
+
+        return layouts.length === 0
+          ? ['no graph viewer on the page yet']
+          : layouts
+              .filter(({ state }) => !SETTLED_LAYOUT_STATES.has(state))
+              .map(({ description }) => description);
+      },
+      {
+        message:
+          'Every graph viewer on the page settles its layout, on ready or failed',
+      },
+    )
+    .toEqual([]);
+
+  const layouts = await viewerLayouts(page);
+
+  expect(layouts.length, 'Graph viewers on the page').toBeGreaterThan(0);
+  expect(
+    layouts
+      .filter(({ state }) => state === FAILED_LAYOUT_STATE)
+      .map(({ description }) => description),
+    `Graph viewers whose layout failed and fell back to the simple arrangement, of: ${layouts
+      .map(({ description }) => description)
+      .join('; ')}`,
+  ).toEqual([]);
+}
+
+/**
  * The viewer's version gate. An endpoint that does not confirm it runs the
  * latest published inspector — the workspace build never does — is shown
  * only once the visitor acknowledges the difference, which this does, after

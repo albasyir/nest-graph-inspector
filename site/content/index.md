@@ -145,7 +145,7 @@ Warnings mark circular dependencies. Click one to see the loop.
   Provider Loops
 
   #description
-  See when providers loop inside one module.
+  See when providers loop, inside one module or across several.
   :::
 
   :::u-page-feature

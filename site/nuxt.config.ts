@@ -160,9 +160,28 @@ export default defineNuxtConfig({
     // idle. Dropping it from the manifest's prefetch and preload sets does not
     // make it unreachable: the `import()` in `useWebLlmEngine` still fetches it
     // the moment someone actually asks for a model.
+    //
+    // ELK, which lays the module graph out, is the same story at 1.6 MB: its
+    // worker script, the bundled build kept for a page that cannot make a
+    // worker, and the module that starts them. They load when a page lays a
+    // graph out, or warms ELK because it is about to
+    // (`plugins/module-layout-warm-up.client.ts`), never as a hint on every
+    // page — the docs among them. The worker script is emitted as an asset,
+    // and an asset has a manifest entry of its own, keyed by the file it was
+    // emitted as rather than by its source, so files are matched as well.
     'build:manifest'(manifest) {
-      for (const resource of Object.values(manifest)) {
-        if (resource.src?.includes('@mlc-ai/web-llm')) {
+      const resources = Object.values(manifest)
+      const elkFiles = new Set(
+        resources
+          .filter(resource =>
+            resource.src?.includes('elkjs/lib/')
+            || resource.src?.includes('utils/module-layout-engine')
+          )
+          .flatMap(resource => [resource.file, ...(resource.assets ?? [])])
+      )
+
+      for (const resource of resources) {
+        if (resource.src?.includes('@mlc-ai/web-llm') || elkFiles.has(resource.file)) {
           resource.prefetch = false
           resource.preload = false
         }

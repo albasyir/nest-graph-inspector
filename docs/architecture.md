@@ -692,35 +692,72 @@ the demo's export to equal the running demo's `/output.json` byte for byte.
 
 ## `demo/` — development host and showcase
 
-`demo/src` is an ordinary NestJS application with four feature modules — User,
-Product, Order, Mobile — and an inspector running all four output types at once
-(viewer on `localhost:53371`, a second plain `http` output on
-`localhost:53372/graph`, Markdown and JSON into `demo/tmp/graph/`).
+`demo/src` is an ordinary NestJS application, the Shop App: a REST API for a
+small chain of stores, with ten feature modules — Auth, Customer,
+CustomerLoyalty, Order, Payment, Product, Recommendation, Store, StoreProduct
+and Voucher — on a global `DatabaseModule`, serving on port 8889, and an
+inspector running all four output types at once (viewer on `localhost:53371`,
+a second plain `http` output on `localhost:53372/graph`, Markdown and JSON
+into `demo/tmp/graph/`).
+
+It needs nothing else running. `DatabaseModule` keeps every table in memory
+(`InMemoryTable`, in `demo/src/database/`), seeded at start-up with stores,
+products and their shelves, vouchers, a reward catalogue, and two customers
+with paid orders, so "frequently bought together" has history from the first
+request. Every read and write waits one simulated database round trip of
+100–200 ms, in one place (`simulated-latency.ts`), so a Direct Run trace has
+time worth looking at. Every route is private unless marked `@Public()`:
+`AuthModule` provides a global `AuthGuard` as `APP_GUARD`, sessions are opaque
+bearer tokens stored only as SHA-256 digests, and passwords only as scrypt
+hashes. The seed customers sign in with `shop-demo-password`, published on
+purpose.
 
 Its module graph is deliberately awkward, because a graph tool needs something
 worth graphing:
 
-- **A module-level cycle**: `OrderModule` ⇄ `UserModule` via `forwardRef`.
-- **A provider-level cycle**: `OrderService` ⇄ `OrderNotificationService`,
-  resolved with `forwardRef` inside `@Inject()`.
-- **A second cycle through Mobile**: `ProductModule` ⇄ `MobileModule`.
-- **A useless import**: `ProductModule` imports `UserModule` and uses nothing
-  from it, on purpose, to check the inspector reports it.
-- **A third-party module**: `ConfigModule.forRoot()` inside `MobileModule`, so
-  the graph contains something the repository does not own.
+- **A direct module cycle**: `OrderModule` ⇄ `PaymentModule`, both imports
+  `forwardRef()` — an order is billed through Payment, and Payment reports the
+  outcome back to Order.
+- **An indirect module cycle**: `ProductModule` → `RecommendationModule` →
+  `OrderModule` → `StoreProductModule` → `ProductModule`, of which only the
+  first two imports are `forwardRef()`.
+- **The same two cycles between providers**: `OrderService` ⇄
+  `PaymentService`, and `ProductService` → `RecommendationService` →
+  `OrderService` → `StoreProductService` → `ProductService`, with
+  `forwardRef()` inside `@Inject()` on exactly the constructor parameters that
+  cross a `forwardRef()` import.
+- **A global module**: no feature module imports `DatabaseModule`, and every
+  repository injects its `DatabaseService`. Nest itself adds a global module to
+  every module's `imports`, so the graph lists it under each of them.
+- **A global enhancer**: `AuthGuard`, provided as `APP_GUARD`, which the graph
+  names by its class.
+
+**Its import order is load-bearing.** Two imports of the indirect cycle are
+plain, so the class each one names must already be defined when the file
+naming it is evaluated: the cycle has to be entered at `OrderModule`, which
+`app.module.ts` imports before `ProductModule`, `RecommendationModule` and
+`StoreProductModule`, and which imports its own files before the modules it
+imports. Entered at `ProductModule` instead, `StoreProductModule` would read
+`ProductModule` — and `StoreProductService` read `ProductService` — while it is
+still undefined, and Nest would refuse to start. Comments in `app.module.ts`
+and `order/order.module.ts` mark the order where it lives.
 
 **A known false positive.** For the demo, the Issues page reports
-`ConfigService` as registered in 2 modules. `ConfigModule` registers a
-`ConfigService` provider whose factory returns `ConfigHostModule`'s instance,
-so there is one instance, not two, but the graph does not say that a factory
-hands back another module's instance. The static `graph.json` and the demo run
-by Node show it; the in-browser demo, which keeps to `src/`, does not. Teaching
-the duplicate check about such factories is a follow-up.
+`RecommendationModule imports DatabaseModule but never uses it`.
+RecommendationModule stores nothing — it reads paid orders through
+OrderService — and never imported DatabaseModule: Nest put the global module
+in its `imports`, and the graph does not say which imports are global, so the
+remedy the page offers, removing the import, does not apply. The static
+`graph.json`, the demo run by Node and the in-browser demo all show it.
+Teaching the unused-import check about global modules is a follow-up.
 
-`demo/test/` holds four Jest e2e suites: an application-level one exercising
-the demo's own REST routes *and* then reading the token-gated graph endpoint
-over TCP; the network-level security suite described above, which boots the
-real module and probes it over real sockets; the export suite, which requires
+`demo/test/` holds four Jest e2e suites: an application-level one that walks
+one customer through the shop's REST routes — sign-up, checkout, payment,
+loyalty points, a reward voucher, a second checkout paid with it — checks that
+two simultaneous checkouts cannot both take one voucher, *and* then reads the
+token-gated graph endpoint over TCP, checking every module's imports and both
+cycles; the network-level security suite described above, which boots the real
+module and probes it over real sockets; the export suite, which requires
 `nest-graph-inspector export` of the demo's `nest build` output — and of its
 TypeScript sources, through `ts-node` — to equal the `/output.json` the running
 demo serves, byte for byte; and the process suite
@@ -735,7 +772,11 @@ on its own port — every argument-free `GET` the graph lists, none failing and
 at least one answering, since a guard may turn an anonymous caller away — and
 an export equal to what it serves. Beside them, `demo/test/browser/` drives
 the viewer in Chromium with Playwright against the same kind of process and
-the generated site, served the way GitHub Pages serves it.
+the generated site, served the way GitHub Pages serves it. Before it checks
+the modules a viewer draws, it waits until every viewer on the page has
+settled its `data-layout-state` (see the automatic layout, below), and fails
+if any settled on `failed`: the simple arrangement draws every node too, so a
+node on screen cannot tell a laid-out graph from one whose layout broke.
 
 Neither the process suite nor the browser suite names a module, a route or a
 provider of the demo: their expectations come from the graph it serves, and
@@ -895,9 +936,110 @@ outside the body is its `<title>`, so no viewer page names the graph there —
 the deep dive is "Module Deep Dive" — and `session_recording.maskTextSelector`
 in `nuxt.config.ts` masks titles in replays besides.
 
-Rendering stack: Vue Flow for the graph, Mermaid for sequence diagrams, Monaco
-for JSON editing, ApexCharts for timings, and LangChain over `@mlc-ai/web-llm`
-for the AI chat panel.
+Rendering stack: Vue Flow for the graph, ELK (`elkjs`) for its automatic
+layout, Mermaid for sequence diagrams, Monaco for JSON editing, ApexCharts for
+timings, and LangChain over `@mlc-ai/web-llm` for the AI chat panel.
+
+**The automatic layout.** A graph with no saved layout, and every **Auto
+layout**, is laid out by `app/utils/module-graph-auto-layout.ts` with ELK's
+layered algorithm, top-down as a Mermaid flowchart of the imports would be:
+the root module pinned to the top layer, each module one layer below the
+deepest module importing it, crossings minimised layer by layer, and each cycle
+broken where a depth-first walk of the imports from the root first comes back
+on itself — so the import closing it is the one edge pointing back up. A module
+that imports nothing and that nothing imports is pinned to the bottom layer
+rather than sitting beside the root. Imports between modules are drawn along
+ELK's routes, through the gaps it leaves between modules — 24 px clear of
+every module, 16 px clear of each other, and each meeting its modules at a
+point of its own — for as long as both ends stand where ELK put them at the
+size it gave them. A cycle's imports take ELK's routes too, in the cycle
+colour, so the two imports of a mutual pair are two paths, and each ⚠ label
+sits on its route where it covers no module and no other label — at the
+largest size a label is ever drawn where its route has room for that, at a
+smaller one where it has not, in the middle of its route where nothing is
+clear — and, where its route leaves room, no other cycle's line, so no label
+hides where one turns (`placeRouteLabels` in
+`app/utils/circular-dependency-edge.ts`). Once either end is dragged or
+resized, an import falls back to Vue Flow's step edge between the handles, and
+a cycle's import to its own curved, labelled edge.
+
+ELK runs in a Web Worker, one per page and shared by every viewer on it, so a
+layout never holds up the page's own thread. The worker runs elkjs's own
+`elk-worker.min.js`, emitted as-is by a `?url` import under the site's base
+path, driven through `elkjs/lib/elk-api.js` from
+`app/utils/module-layout-engine.ts`; `app/utils/elk-engine-source.ts` keeps the
+one engine — starting it, warming it, letting go of one that fails — and is
+what the tests drive. The script is a megabyte and a half, so it is fetched only by a page
+that lays a graph out, never preloaded or prefetched (`build:manifest` in
+`nuxt.config.ts` drops ELK's files from every page's hints), and warmed early
+where a graph is coming: `plugins/module-layout-warm-up.client.ts` starts it on
+arriving at the navigator or `/view?preview=true` — while the page itself
+loads — and on any navigation to the navigator, and the in-browser demo starts
+it while its payload downloads and boots. A warm-up lays a small graph shaped
+like a real one out three times, so the first real layout finds ELK compiled
+and optimised. Where no worker can be made at all, ELK's bundled build lays
+out on the page's own thread instead.
+
+**The layout's state comes from signals, never from timers.** Each viewer
+keeps where its layout stands in a small pure state machine,
+`app/utils/module-layout-state.ts`, and says it on its root as
+`data-layout-state`: `loading-engine` until ELK's module has loaded and its
+worker has answered a first layout — a warm-up's, or this one — then
+`arranging` while ELK lays this graph out, `ready` once a final arrangement is
+drawn and fitted, and `failed` when ELK failed and the simple arrangement is
+drawn in its place. A saved layout starts `ready`. The first layout is asked
+for on mount: its input is each module's box, which `resolveModuleSizes`
+computes from the graph rather than the DOM, so nothing needs measuring first
+and ELK works in its worker while Vue Flow mounts. Until that layout is drawn
+and fitted the canvas is drawn but hidden (`visibility`, so Vue Flow still
+measures it), so the modules appear already in place; the fit waits for Vue
+Flow's `nodes-initialized`, the signal that every node has a size to fit to —
+waited for again whenever a redraw adds nodes — and a saved arrangement is
+fitted on the same signal, with the same padding.
+A status line says "Loading layout engine…" or "Arranging graph…"
+(`role="status"`, faded in after 400 ms by CSS, which is presentation only),
+and the canvas is `aria-busy` while a layout is still to land — the canvas,
+not the root, so the status line and the failure notice beside it are not
+held back as part of a busy region. A later layout — **Auto layout**, or
+opening or closing a module on a canvas nobody has arranged — keeps the
+drawing on screen until its own lands. Until the first arrangement is on
+screen the layout toolbar's Auto layout, Download and Save wait — there is
+nothing yet to keep — and a layout that takes over before it lands is drawn
+and shown in its place.
+
+**There is no deadline, and the fallback is for real failures only.** A layout
+waits for ELK however long ELK takes — no timeout, and no hang guard, since no
+fixed time tells a slow ELK on a slow connection from a stuck one. The modules
+fall back only when the engine's module fails to import, its worker fires
+`error`, `elk.layout` rejects, or ELK's answer cannot be drawn; the first two
+are engine failures (`ElkEngineFailure`, reason `engine`), the others the
+graph's (`layout`). The simple arrangement, `layoutModuleRows`, is the
+viewer's old breadth-first layers from the root — the modules it does not
+reach together in one layer at the bottom — with each layer wrapped, in the
+graph's order, into rows no wider than the drawing needs to come out about
+16:10 — the modules as far apart as ELK sets them, 100 px — so it is never
+one row thousands of pixels wide; the hidden canvas is drawn in it before the
+first layout lands, too. The viewer shows it with a one-line notice and **Try
+again**, which every viewer offers, the landing page's non-interactive
+previews included; focus moves from the button to the status line as it
+goes. An engine that fails is let go of
+the moment it does, so Try again starts a fresh one — importing ELK's module
+again, which a browser fetches afresh after a failed fetch (checked in
+Chromium 156 and 159), or making a new worker, which fetches its script again;
+an engine that refused a graph is healthy and is not stopped, since the other
+viewers on the page share it.
+
+With **Auto Re-position** on, opening or closing a module on a canvas nobody
+has arranged lays it out again; a saved or dragged arrangement is never re-laid
+out. Layouts run one at a time: one asked for while another runs waits for it,
+and is skipped if a later one has been asked for by then, so a burst of clicks
+lays the graph out at most twice. Each layout is recorded as the User Timing
+measure `ngi:auto-layout`, from the moment it starts — after any layout it
+waited for — to the modules drawn, whose `detail` says which engine
+placed the modules, whether ELK was warm when asked, where it ran, and why it
+did not place them when it did not (`engine` or `layout`); and each engine
+records `ngi:auto-layout:engine-ready`, from being started to its first layout
+done.
 
 **The graph carries the application's own documentation.** Every module,
 provider and controller in `GraphOutput` may hold a `jsdoc` string —
@@ -949,9 +1091,9 @@ build patches the bundled discovery adapter so the in-browser demo shows only
 what is declared under the demo's own `src/` (`DISCOVERY_PATCHES` in
 `demo/scripts/build-nodepod-payload.ts`), while `export:graph` runs the
 library as it is published. The static graph therefore also has
-`ConfigModule`, `ConfigHostModule` and `NestJSCoreModule`, and the providers
-they declare — the third-party module the demo imports on purpose — and the
-landing previews show them until "Load Example" swaps in the live graph. Generated with the payload and gitignored
+`NestJSCoreModule`, the virtual module the library gathers Nest's own
+providers into — for the demo, the `Reflector` its `AuthGuard` injects — and
+the landing previews show it until "Load Example" swaps in the live graph. Generated with the payload and gitignored
 with it, it cannot go stale. `build:graph` regenerates it alone.
 
 **Two constraints shape this design.**
@@ -1147,7 +1289,8 @@ Known limitations, accepted deliberately:
 - `SharedArrayBuffer` is unavailable without COOP/COEP headers, so nodepod
   falls back to full per-spawn snapshots.
 - The payload is a few megabytes, downloaded once per visit that presses "Load
-  Example". The static graph the landing page draws until then is about 8 KB.
+  Example". The static graph the landing page draws until then is about 33 KB,
+  under 7 KB gzipped.
 - The pod lives as long as the page: nothing tears it down on a route change,
   and the keep-alive timer means it never idles out either.
 - If the application stops after the graph has loaded, the viewer keeps showing
@@ -1421,6 +1564,11 @@ Facts a code change can invalidate, and the file to check:
 - That the static demo graph holds more than the in-browser demo serves — the
   `src/`-only filter in `DISCOVERY_PATCHES`
   (`demo/scripts/build-nodepod-payload.ts`), which the export does not apply
+- That the demo starts only because its indirect cycle is entered at
+  `OrderModule` — the import order in `demo/src/app.module.ts` and
+  `demo/src/order/order.module.ts`
+- The demo's simulated database latency, 100–200 ms per operation —
+  `SIMULATED_LATENCY_MS` in `demo/src/database/simulated-latency.ts`
 - The newest graph format the viewer knows, `3` —
   `NEWEST_KNOWN_GRAPH_OUTPUT_VERSION` in `site/app/utils/graph-output-support.ts`
   (checked against the library's by `graph-output-support.test.ts`)
@@ -1447,6 +1595,25 @@ Facts a code change can invalidate, and the file to check:
   `site/assets/nodepod-demo/vendor-snapshot.json.gz`, rebuilt by
   `site/scripts/build-raw-spike-snapshot.ts`; also quoted in
   `demo/scripts/build-nodepod-payload.ts`
+- How the automatic layout lays a graph out, how far its routes keep from
+  modules and from each other (24 px, 16 px), and the shape its simple
+  arrangement aims for (16:10) — `MODULE_GRAPH_ELK_OPTIONS`,
+  `ROUTE_MODULE_CLEARANCE`, `ROUTE_GAP` and `ROWS_ASPECT_RATIO` in
+  `site/app/utils/module-graph-auto-layout.ts`; the layout states a viewer
+  says in `data-layout-state` — `site/app/utils/module-layout-state.ts`; that
+  a browser fetches afresh a module whose fetch failed, which Try again relies
+  on (Chromium 156 and 159 checked) — `lazyElkEngineSource` in
+  `site/app/utils/elk-engine-source.ts`; that Vue Flow shows each node it has
+  measured with an inline `visibility: visible`, which the hidden canvas
+  overrides with an `!important` rule — `.graph-viewer--canvas-hidden` in
+  `GraphViewer.vue`, against the node wrapper in the installed
+  `@vue-flow/core`; how
+  often a warm-up lays its graph out (3) — `warmUpRuns` in
+  `site/app/utils/module-layout-engine.ts`; which arrivals warm ELK —
+  `drawsModuleGraphOnArrival` in `site/app/utils/module-layout-warm-up.ts`, and
+  `start()` in `site/app/stores/nodepod-demo.ts`; the size of ELK's worker
+  script, `~1.6 MB` (`~477 KB` gzipped) — the `elkjs` version in
+  `site/package.json`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
@@ -1455,3 +1622,8 @@ Facts a code change can invalidate, and the file to check:
 - What the browser suite answers off the machine, and the console errors it
   expects — `OFF_MACHINE_ANSWERS` and `EXPECTED_CONSOLE_ERRORS` in
   `demo/test/browser/viewer.fixtures.ts`
+- Which layout states the browser suite waits for and fails on (`ready`,
+  `failed`), the root it reads them from, `.graph-viewer[data-layout-state]`,
+  and the failure notice it quotes, `.graph-viewer-layout-failure__text` —
+  `expectGraphLayoutsReady` in `demo/test/browser/viewer.fixtures.ts`, against
+  `site/app/utils/module-layout-state.ts` and `GraphViewer.vue`

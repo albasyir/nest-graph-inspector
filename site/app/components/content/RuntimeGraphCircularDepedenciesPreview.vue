@@ -2,8 +2,8 @@
   <RuntimeGraphPreview
     preview-id="home-circular-depedencies"
     :show-bright-line="false"
-    collapsed-modules="PaymentModule,MobileModule,ProductModule"
-    exclude-modules="NestJSCoreModule,AppModule,UserModule"
+    collapsed-modules="ProductModule,RecommendationModule,StoreProductModule"
+    exclude-modules="NestJSCoreModule,AppModule,DatabaseModule,AuthModule,CustomerModule,CustomerLoyaltyModule,StoreModule,VoucherModule"
     height="clamp(18rem, 58vh, 34rem)"
     caption="Click a Warning chip to reveal the loop story."
   />

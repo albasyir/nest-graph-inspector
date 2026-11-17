@@ -39,6 +39,7 @@
     "@vueuse/core": "^14.3.0",
     "apexcharts": "^5.16.0",
     "better-sqlite3": "^12.11.1",
+    "elkjs": "^0.12.1",
     "h3": "1.15.11",
     "langchain": "^1.5.10",
     "mermaid": "^11.17.0",

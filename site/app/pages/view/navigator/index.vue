@@ -77,30 +77,18 @@ type GraphViewerInstance = {
 }
 const graphViewerRef = ref<GraphViewerInstance | null>(null)
 
-// GraphViewer centres the whole graph once after mounting (200 ms) and again
-// on its first resize (debounced 250 ms, animated 200 ms); focusing before
-// both have run would be undone by them.
-const FOCUS_MODULE_SETTLE_MS = 600
-let focusModuleTimer: ReturnType<typeof setTimeout> | undefined
-
+// Asked for at once: GraphViewer's focus waits for the canvas to be laid out,
+// measured and fitted — the fit it would otherwise undo — and the viewer only
+// re-centres after that when it is resized.
 watch(
   [graphViewerRef, focusModuleName],
   ([viewer, moduleName]) => {
-    clearTimeout(focusModuleTimer)
-    if (!viewer || !moduleName) {
-      return
-    }
-
-    focusModuleTimer = setTimeout(() => {
+    if (viewer && moduleName) {
       void viewer.focusModule(moduleName)
-    }, FOCUS_MODULE_SETTLE_MS)
+    }
   },
   { immediate: true }
 )
-
-onBeforeUnmount(() => {
-  clearTimeout(focusModuleTimer)
-})
 </script>
 
 <template>

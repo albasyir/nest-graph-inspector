@@ -1,8 +1,8 @@
 <template>
   <RuntimeGraphPreview
     preview-id="home-brigh-line"
-    fix-bightline="UserRepository"
-    exclude-modules="NestJSCoreModule,ProductModule,AppModule,MobileModule"
+    fix-bightline="CustomerRepository"
+    exclude-modules="NestJSCoreModule,AppModule,DatabaseModule,ProductModule,RecommendationModule,StoreModule,StoreProductModule,OrderModule,PaymentModule"
     :show-circular-dependencies="false"
     height="clamp(18rem, 58vh, 34rem)"
   />

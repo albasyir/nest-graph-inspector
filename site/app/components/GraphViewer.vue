@@ -6,19 +6,21 @@ import {
   Handle,
   MarkerType,
   BaseEdge,
-  EdgeLabelRenderer
+  EdgeLabelRenderer,
+  getSmoothStepPath
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { NodeResizer } from '@vue-flow/node-resizer'
-import { useDebounceFn, useResizeObserver } from '@vueuse/core'
+import { until, useDebounceFn, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
 import type {
   Node,
   Edge,
   EdgeMarker,
   EdgeProps,
+  GraphNode,
   NodeMouseEvent
 } from '@vue-flow/core'
 import type {
@@ -42,7 +44,10 @@ import {
   getCircularEdgeGeometry,
   getCircularLabelPlacement,
   getCircularLabelScale,
-  type CircularEdgeGeometry
+  placeRouteLabels,
+  type CircularEdgeGeometry,
+  type CircularEdgeRect,
+  type CircularLabelSpot
 } from '~/utils/circular-dependency-edge'
 import { resolveCircularDependencyEndpoints } from '~/utils/circular-dependency-issues'
 import { findDirectRunTarget } from '~/utils/direct-run-provider'
@@ -57,11 +62,36 @@ import {
   getEdgeColor,
   getEdgeRelationClass,
   isEdgeNormallyVisible,
+  pickModuleEdgeHandles,
   placeDependencyEdge,
   resolveEdgeRelationship,
+  roundedPolylinePath,
+  type EdgeHandles,
   type EdgeRelationship,
+  type ModuleEdgeBox,
   type RedirectedDependencyEdge
 } from '~/utils/graph-viewer-edges'
+import {
+  AUTO_LAYOUT_MEASURE,
+  autoLayoutModuleGraph,
+  autoLayoutTimingDetail,
+  importRouteKey,
+  layoutModuleRows,
+  moduleGraphLayoutInput,
+  recordUserTiming,
+  type ModuleImportRoutes,
+  type ModulePositions
+} from '~/utils/module-graph-auto-layout'
+import { lazyElkEngineSource } from '~/utils/elk-engine-source'
+import {
+  initialModuleLayoutStatus,
+  isModuleLayoutPending,
+  moduleLayoutFailureText,
+  moduleLayoutProgressText,
+  nextModuleLayoutStatus,
+  type ModuleLayoutEvent,
+  type ModuleLayoutStatus
+} from '~/utils/module-layout-state'
 import {
   buildModuleFocusFitViewOptions,
   resolveModuleFocusTargetNodeIds,
@@ -141,11 +171,36 @@ type CircularEdgeData = {
   circularIds: number[]
   circularReason: string
   circularDetails: CircularEdgeInfo[]
+  /** For an edge between two modules, the automatic layout's route for it. */
+  route?: ModuleEdgeRoute
 }
 
 type StandardEdgeData = {
   isNormallyVisible: boolean
   relationship: EdgeRelationship
+  /** For an edge between two modules, the automatic layout's route for it. */
+  route?: ModuleEdgeRoute
+}
+
+/**
+ * The way the automatic layout ran an import, from the module imported to its
+ * importer, and the boxes the two had then. It is drawn only while they keep
+ * them: a drag or a resize leaves the route behind for the usual step path —
+ * or, for an edge closing a cycle, for its curve.
+ */
+type ModuleEdgeRoute = {
+  points: NodePosition[]
+  sourceBox: ModuleEdgeBox
+  targetBox: ModuleEdgeBox
+  /** For an edge closing a cycle, where its label sits on the route. */
+  label?: CircularLabelSpot
+}
+
+/** What the automatic layout worked out, and for which boxes. */
+type AutoLayoutResult = {
+  positions: ModulePositions
+  routes: ModuleImportRoutes
+  sizes: Map<string, { width: number, height: number }>
 }
 
 type FlowEdgeData = CircularEdgeData | StandardEdgeData
@@ -161,12 +216,12 @@ type CircularEdgePairAggregate = {
   sizeByEdgeKey: Map<string, number>
 }
 
-type EdgeHandles = { sourceHandle: string, targetHandle: string }
-
 /** A dependency edge redrawn onto a collapsed module, and what it stands for. */
 type RedirectedDependencyEdgeGroup = {
   edge: RedirectedDependencyEdge
   handles?: EdgeHandles
+  /** The route of the import it runs alongside, so the two still blend. */
+  route?: ModuleEdgeRoute
   /** Every item edge drawn as this one, whose cycles it carries. */
   itemEdgeKeys: string[]
 }
@@ -177,10 +232,12 @@ type FlowNode
 type FlowEdge = Edge<
   FlowEdgeData,
   Record<string, never>,
-  'smoothstep' | 'warning'
+  'smoothstep' | 'warning' | 'routed'
 >
 /** Every edge closing a cycle; only one per pair of nodes carries the label. */
 type WarningEdgeProps = EdgeProps<FlowEdgeData>
+/** An import drawn along the automatic layout's route. */
+type RoutedEdgeProps = EdgeProps<FlowEdgeData>
 type NodePosition = { x: number, y: number }
 
 const props = withDefaults(
@@ -295,11 +352,9 @@ const MODULE_PADDING = 20
 const MODULE_TITLE_HEIGHT = 36
 const MODULE_COLLAPSED_HEIGHT = 40
 const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
-const MODULE_GAP_X = 320
-const MODULE_GAP_Y = 100
 const GRAPH_FIT_PADDING = 0.12
 const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
-const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'UserRepository'
+const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'CustomerRepository'
 const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
 const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
 const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
@@ -440,54 +495,6 @@ async function centerGraph(duration = 200) {
 const debouncedCenterGraph = useDebounceFn(() => {
   void centerGraph()
 }, GRAPH_RESIZE_CENTER_DEBOUNCE_MS)
-
-function assignLayers(moduleMap: GraphOutput): Map<number, string[]> {
-  const layers = new Map<number, string[]>()
-  const visited = new Set<string>()
-  const queue: { name: string, depth: number }[] = [
-    { name: moduleMap.root, depth: 0 }
-  ]
-  visited.add(moduleMap.root)
-
-  while (queue.length > 0) {
-    const next = queue.shift()
-    if (!next) {
-      continue
-    }
-
-    const { name, depth } = next
-    let layer = layers.get(depth)
-    if (!layer) {
-      layer = []
-      layers.set(depth, layer)
-    }
-    layer.push(name)
-
-    const mod = moduleMap.modules[name]
-    if (mod) {
-      for (const imp of mod.imports) {
-        if (!visited.has(imp) && moduleMap.modules[imp]) {
-          visited.add(imp)
-          queue.push({ name: imp, depth: depth + 1 })
-        }
-      }
-    }
-  }
-
-  for (const name of Object.keys(moduleMap.modules)) {
-    if (!visited.has(name)) {
-      const maxDepth = Math.max(...Array.from(layers.keys()), 0) + 1
-      let layer = layers.get(maxDepth)
-      if (!layer) {
-        layer = []
-        layers.set(maxDepth, layer)
-      }
-      layer.push(name)
-    }
-  }
-
-  return layers
-}
 
 function getDefaultCollapsedModuleNames(moduleMap: GraphOutput): Set<string> {
   return new Set(Object.keys(moduleMap.modules))
@@ -827,6 +834,64 @@ function getEdgeDataProps(
   }
 }
 
+/** An edge's data, carrying the automatic layout's route when it has one. */
+function withRoute(
+  props: { data: FlowEdgeData },
+  route: ModuleEdgeRoute | undefined
+): { data: FlowEdgeData } {
+  return route ? { data: { ...props.data, route } } : props
+}
+
+/** How far a routed edge's corners are rounded: as far as a smooth step edge's. */
+const ROUTED_EDGE_CORNER_RADIUS = 5
+
+/**
+ * An edge's route from the automatic layout, while both its modules keep the
+ * boxes that layout gave them; once either is dragged away or resized, none.
+ */
+function standingRoute(edgeProps: EdgeProps<FlowEdgeData>): ModuleEdgeRoute | undefined {
+  const route = edgeProps.data?.route
+  const isStanding = route
+    && hasNodeBox(edgeProps.sourceNode, route.sourceBox)
+    && hasNodeBox(edgeProps.targetNode, route.targetBox)
+
+  return isStanding ? route : undefined
+}
+
+/**
+ * A routed edge's path: the automatic layout's route while it stands, and
+ * otherwise the step path between the handles that Vue Flow draws for any
+ * other edge.
+ */
+function getRoutedEdgePath(edgeProps: RoutedEdgeProps): string {
+  const route = standingRoute(edgeProps)
+  if (route) {
+    return roundedPolylinePath(route.points, ROUTED_EDGE_CORNER_RADIUS)
+  }
+
+  const [path] = getSmoothStepPath({
+    sourceX: edgeProps.sourceX,
+    sourceY: edgeProps.sourceY,
+    sourcePosition: edgeProps.sourcePosition,
+    targetX: edgeProps.targetX,
+    targetY: edgeProps.targetY,
+    targetPosition: edgeProps.targetPosition
+  })
+  return path
+}
+
+/**
+ * Whether a node is still at `box`'s corner and measures `box`'s size. Vue
+ * Flow measures a module node as the size it is drawn at, and a resize sets
+ * the size it is dragged to.
+ */
+function hasNodeBox(node: GraphNode, box: ModuleEdgeBox): boolean {
+  return node.position.x === box.x
+    && node.position.y === box.y
+    && node.dimensions.width === box.width
+    && node.dimensions.height === box.height
+}
+
 /**
  * The arrowhead an edge points with. Vue Flow defines one shared `<marker>`
  * per configuration, outside every edge, so no rule scoped to an edge can
@@ -946,22 +1011,80 @@ function getWarningEdgeGeometry(edgeProps: WarningEdgeProps): CircularEdgeGeomet
   })
 }
 
+/**
+ * A cycle edge's path: the automatic layout's route while it stands, so the
+ * edge goes around modules as every other import does, and otherwise its
+ * curve.
+ */
 function getWarningEdgePath(edgeProps: WarningEdgeProps): string {
-  return getWarningEdgeGeometry(edgeProps).path
+  const route = standingRoute(edgeProps)
+
+  return route
+    ? roundedPolylinePath(route.points, ROUTED_EDGE_CORNER_RADIUS)
+    : getWarningEdgeGeometry(edgeProps).path
 }
 
 /** Labels keep their own size on a zoomed-out canvas, so a phone can read them. */
 const circularLabelScale = computed(() => getCircularLabelScale(viewport.value.zoom))
 
+/** Where a cycle edge's label sits: on its route while that stands, else on its curve. */
 function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
   return {
     position: 'absolute',
     ...getCircularLabelPlacement(
-      getWarningEdgeGeometry(edgeProps),
+      standingRoute(edgeProps)?.label ?? getWarningEdgeGeometry(edgeProps),
       circularLabelScale.value
     ),
     pointerEvents: 'all'
   }
+}
+
+/**
+ * Every cycle edge drawn along a route gets its label on that route, clear of
+ * every module and of every label placed before it: the labels always shown
+ * first, then those Bright Line shows only while it lights their edge, so
+ * lighting one never moves a label already on screen. Where it can, a label
+ * also keeps off the other cycle edges on screen, so it hides none of their
+ * turns.
+ */
+function withRouteLabels(
+  edges: FlowEdge[],
+  obstacles: readonly CircularEdgeRect[]
+): FlowEdge[] {
+  const labelled = edges.flatMap((edge) => {
+    const data = edge.data
+    return edge.type === 'warning' && hasCircularEdgeLabel(data) && data.route
+      ? [{ id: edge.id, data, points: data.route.points }]
+      : []
+  })
+  if (labelled.length === 0) {
+    return edges
+  }
+
+  const placements = placeRouteLabels({
+    labels: [
+      ...labelled.filter(({ data }) => data.isNormallyVisible),
+      ...labelled.filter(({ data }) => !data.isNormallyVisible)
+    ].map(({ id, data, points }) => ({
+      key: id,
+      route: points,
+      text: formatCircularEdgeLabel(data.circularIds)
+    })),
+    obstacles,
+    lines: edges.flatMap(edge =>
+      edge.type === 'warning' && edge.data?.isNormallyVisible && edge.data.route
+        ? [edge.data.route.points]
+        : []
+    )
+  })
+
+  return edges.map((edge) => {
+    const label = placements.get(edge.id)
+    const data = edge.data
+    return label && data?.route
+      ? { ...edge, data: { ...data, route: { ...data.route, label } } }
+      : edge
+  })
 }
 
 /** Whether an edge carries the label for the cycles between its two nodes. */
@@ -1262,28 +1385,45 @@ const ITEM_SELF_LOOP_HANDLES: EdgeHandles = {
   targetHandle: 'target-bottom'
 }
 
-function pickHandles(
-  sourcePos: { x: number, y: number },
-  targetPos: { x: number, y: number }
-): { sourceHandle: string, targetHandle: string } {
-  const dx = targetPos.x - sourcePos.x
-  const dy = targetPos.y - sourcePos.y
-
-  if (dx === 0 && dy === 0) {
-    return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+/**
+ * Every module's box as drawn: collapsed, open around its items, or at the
+ * size a layout gave it. The automatic layout is handed the same boxes the
+ * canvas then draws, so what it keeps apart stays apart.
+ */
+function resolveModuleSizes(
+  moduleMap: GraphOutput,
+  collapsedModules: Set<string>,
+  layoutSizes?: Map<string, { width: number, height: number }>
+): Map<string, { width: number, height: number }> {
+  const moduleSizes = new Map<string, { width: number, height: number }>()
+  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
+    const isCollapsed
+      = collapsedModules.has(moduleName) || !hasModuleComponents(mod)
+    moduleSizes.set(
+      moduleName,
+      layoutSizes?.get(moduleName)
+      ?? calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
+    )
   }
 
-  if (Math.abs(dy) >= Math.abs(dx)) {
-    if (dy > 0) {
-      return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
-    }
-    return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
-  }
+  return moduleSizes
+}
 
-  if (dx > 0) {
-    return { sourceHandle: 'source-right', targetHandle: 'target-left' }
-  }
-  return { sourceHandle: 'source-left', targetHandle: 'target-right' }
+/** Which sides an edge between two modules leaves and enters by. */
+function pickModuleHandles(
+  moduleSizes: Map<string, { width: number, height: number }>,
+  source: { name: string, position: NodePosition },
+  target: { name: string, position: NodePosition }
+): EdgeHandles {
+  const boxOf = ({ name, position }: { name: string, position: NodePosition }) => ({
+    ...position,
+    ...(moduleSizes.get(name) ?? {
+      width: MODULE_MIN_WIDTH,
+      height: MODULE_COLLAPSED_HEIGHT
+    })
+  })
+
+  return pickModuleEdgeHandles({ source: boxOf(source), target: boxOf(target) })
 }
 
 function pickDependencyHandles(
@@ -1317,12 +1457,16 @@ function buildGraph(
     nodePositions?: Map<string, NodePosition>
     /** Overrides the computed size of a module, e.g. to fit placed items. */
     moduleSizes?: Map<string, { width: number, height: number }>
+    /**
+     * The automatic layout: where it put each module, for any module
+     * `nodePositions` does not place, and the routes of the imports between
+     * modules it still stands for. Without it, modules go in rows.
+     */
+    autoLayout?: AutoLayoutResult
   } = {}
 ): { nodes: FlowNode[], edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
-  const layers = assignLayers(moduleMap)
-  const sortedLayers = Array.from(layers.entries()).sort((a, b) => a[0] - b[0])
   const showCircularDependencies = options.showCircularDependencies ?? true
   const showModuleToModuleLine = options.showModuleToModuleLine ?? true
   const showProviderToProviderInsideModule
@@ -1345,42 +1489,58 @@ function buildGraph(
     ? deduplicateCircularEdgeLabels(circularDependencyEdges)
     : new Map<string, CircularEdgeInfo[]>()
 
-  const moduleSizes = new Map<string, { width: number, height: number }>()
-  for (const [moduleName, mod] of Object.entries(moduleMap.modules)) {
-    const isCollapsed
-      = collapsedModules.has(moduleName) || !hasModuleComponents(mod)
-    moduleSizes.set(
-      moduleName,
-      options.moduleSizes?.get(moduleName)
-      ?? calcModuleSize(moduleName, mod, moduleMap, isCollapsed)
-    )
-  }
-
-  const modulePositions = new Map<string, { x: number, y: number }>()
+  const moduleSizes = resolveModuleSizes(
+    moduleMap,
+    collapsedModules,
+    options.moduleSizes
+  )
+  // The automatic layout's positions while they place every module: a graph
+  // reloaded since then is drawn in rows until its own layout lands.
+  const autoPositions = options.autoLayout?.positions
+  const modulePositions = new Map<string, NodePosition>(
+    autoPositions && Object.keys(moduleMap.modules).every(name => autoPositions.has(name))
+      ? autoPositions
+      : layoutModuleRows(moduleGraphLayoutInput({ moduleMap, sizes: moduleSizes }))
+  )
   const nodeAbsPositions = new Map<string, { x: number, y: number }>()
-  let currentY = 0
 
-  for (const [, moduleNames] of sortedLayers) {
-    const layerWidth = moduleNames.reduce(
-      (sum, name) => {
-        const size = moduleSizes.get(name)
-        return sum + (size?.width || MODULE_MIN_WIDTH)
-      },
-      Math.max(moduleNames.length - 1, 0) * MODULE_GAP_X
-    )
-    let currentX = -(layerWidth / 2)
-
-    let maxHeight = 0
-    for (const name of moduleNames) {
-      const size = moduleSizes.get(name) || {
-        width: MODULE_MIN_WIDTH,
-        height: MODULE_COLLAPSED_HEIGHT
-      }
-      modulePositions.set(name, { x: currentX, y: currentY })
-      maxHeight = Math.max(maxHeight, size.height)
-      currentX += size.width + MODULE_GAP_X
+  /**
+   * The automatic layout's route for `importer` importing `imported`, turned
+   * to run as the edge does, from the module imported to its importer — but
+   * only while both stand where that layout put them, at the size it gave
+   * them; anywhere else the route would no longer meet them.
+   */
+  function autoRoute(importer: string, imported: string): ModuleEdgeRoute | undefined {
+    const laidOut = options.autoLayout
+    const points = laidOut?.routes.get(importRouteKey({ importer, imported }))
+    if (!laidOut || !points) {
+      return undefined
     }
-    currentY += maxHeight + MODULE_GAP_Y
+
+    /** The module's box as drawn now, when it is the one the layout gave it. */
+    const boxAsLaidOut = (moduleName: string): ModuleEdgeBox | undefined => {
+      const at = modulePositions.get(moduleName)
+      const size = moduleSizes.get(moduleName)
+      const laidOutAt = laidOut.positions.get(moduleName)
+      const laidOutSize = laidOut.sizes.get(moduleName)
+      const isAsLaidOut = at && size
+        && at.x === laidOutAt?.x
+        && at.y === laidOutAt.y
+        && size.width === laidOutSize?.width
+        && size.height === laidOutSize.height
+      return isAsLaidOut ? { ...at, ...size } : undefined
+    }
+    const importerBox = boxAsLaidOut(importer)
+    const importedBox = boxAsLaidOut(imported)
+    if (!importerBox || !importedBox) {
+      return undefined
+    }
+
+    return {
+      points: [...points].reverse(),
+      sourceBox: importedBox,
+      targetBox: importerBox
+    }
   }
 
   for (const moduleName of Object.keys(moduleMap.modules)) {
@@ -1494,7 +1654,11 @@ function buildGraph(
 
         const { sourceHandle, targetHandle } = imp === moduleName
           ? MODULE_SELF_LOOP_HANDLES
-          : pickHandles(sourcePos, targetPos)
+          : pickModuleHandles(
+              moduleSizes,
+              { name: imp, position: sourcePos },
+              { name: moduleName, position: targetPos }
+            )
         const circularInfo = circularModuleEdges.get(`${imp}->${moduleName}`)
         const circularLabelInfo = circularModuleEdgeLabels.get(
           `${imp}->${moduleName}`
@@ -1508,6 +1672,7 @@ function buildGraph(
         })
         const edgeColor = getEdgeColor(relationship)
         const edgeRelationClass = getEdgeRelationClass(relationship)
+        const route = autoRoute(moduleName, imp)
 
         edges.push({
           id: `e-mod-${imp}->${moduleName}`,
@@ -1515,9 +1680,11 @@ function buildGraph(
           target,
           sourceHandle,
           targetHandle,
-          // Every edge closing a cycle is curved, labelled or not, so the
-          // two directions of a mutual import stay apart.
-          type: circularInfo ? 'warning' : 'smoothstep',
+          // Every import takes the automatic layout's route while it still
+          // has one — an edge closing a cycle too, in its own colour and with
+          // its label on the route. Without a route, an edge closing a cycle
+          // is curved, so the two directions of a mutual import stay apart.
+          type: circularInfo ? 'warning' : route ? 'routed' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
           class: edge => [
             edgeRelationClass,
@@ -1528,10 +1695,13 @@ function buildGraph(
             )
           ],
           markerEnd: getEdgeMarkerEnd(relationship, false),
-          ...getEdgeDataProps(
-            circularLabelInfo,
-            showModuleToModuleLine,
-            relationship
+          ...withRoute(
+            getEdgeDataProps(
+              circularLabelInfo,
+              showModuleToModuleLine,
+              relationship
+            ),
+            route
           )
         })
       }
@@ -1551,6 +1721,7 @@ function buildGraph(
       relationship?: EdgeRelationship
       id?: string
       handles?: EdgeHandles
+      route?: ModuleEdgeRoute
       circularEdgeKeys?: string[]
     } = {}
   ): void {
@@ -1593,13 +1764,14 @@ function buildGraph(
       relationship: overrides.relationship
     })
 
+    const route = overrides.route
     edges.push({
       id: overrides.id ?? `e-dep-${sourceId}->${targetId}`,
       source: sourceId,
       target: targetId,
       sourceHandle,
       targetHandle,
-      type: isCircular ? 'warning' : 'smoothstep',
+      type: isCircular ? 'warning' : route ? 'routed' : 'smoothstep',
       style: {
         stroke: edgeColor,
         strokeWidth: isCircular ? 2.2 : 1.5
@@ -1613,10 +1785,13 @@ function buildGraph(
         )
       ],
       markerEnd: getEdgeMarkerEnd(relationship, false),
-      ...getEdgeDataProps(
-        circularLabelInfo,
-        effectiveNormallyVisible,
-        relationship
+      ...withRoute(
+        getEdgeDataProps(
+          circularLabelInfo,
+          effectiveNormallyVisible,
+          relationship
+        ),
+        route
       )
     })
   }
@@ -1683,15 +1858,23 @@ function buildGraph(
       }
 
       // The import between two collapsed modules is drawn from the same
-      // handles, so where it exists both lines run along one path and blend.
+      // handles, and along the same route, so where it exists both lines run
+      // along one path and blend.
       const sourcePos = modulePositions.get(sourceModuleName)
       const targetPos = modulePositions.get(targetModuleName)
       const handles = placement.isBetweenModules && sourcePos && targetPos
-        ? pickHandles(sourcePos, targetPos)
+        ? pickModuleHandles(
+            moduleSizes,
+            { name: sourceModuleName, position: sourcePos },
+            { name: targetModuleName, position: targetPos }
+          )
         : undefined
       redirectedEdgeGroups.set(placement.key, {
         edge: placement,
         handles,
+        route: placement.isBetweenModules
+          ? autoRoute(targetModuleName, sourceModuleName)
+          : undefined,
         itemEdgeKeys: [placement.itemEdgeKey]
       })
     }
@@ -1718,7 +1901,7 @@ function buildGraph(
       }
     }
 
-    for (const { edge, handles, itemEdgeKeys } of redirectedEdgeGroups.values()) {
+    for (const { edge, handles, route, itemEdgeKeys } of redirectedEdgeGroups.values()) {
       addDependencyEdge(
         edge.source,
         edge.target,
@@ -1727,6 +1910,7 @@ function buildGraph(
           relationship: edge.relationship,
           id: edge.id,
           handles,
+          route,
           circularEdgeKeys: itemEdgeKeys
         }
       )
@@ -1735,7 +1919,14 @@ function buildGraph(
 
   addModuleItemDependencyEdges()
 
-  return { nodes, edges }
+  // Labels go on routes clear of every module, wherever each is drawn now.
+  const moduleBoxes = Object.keys(moduleMap.modules).flatMap((moduleName) => {
+    const at = modulePositions.get(moduleName) ?? { x: 0, y: 0 }
+    const size = moduleSizes.get(moduleName)
+    return size ? [{ ...at, ...size }] : []
+  })
+
+  return { nodes, edges: withRouteLabels(edges, moduleBoxes) }
 }
 
 /**
@@ -1747,6 +1938,73 @@ const layoutDraft = shallowRef<GraphLayout | null>(props.layoutData ?? null)
 const collapsedModuleNames = ref<Set<string>>(
   getLayoutCollapsedModuleNames(graphData.value, layoutDraft.value)
 )
+/**
+ * The last automatic layout — where it put the modules, worked out for them
+ * as they were then drawn, open or collapsed, and how it ran each import —
+ * for any refresh drawing without a layout. Until the first one lands,
+ * modules are drawn in rows.
+ */
+let autoLayout: AutoLayoutResult | undefined
+/**
+ * Where the automatic layout stands — the root's `data-layout-state` — and
+ * whether the canvas is shown yet. Until its first arrangement is drawn and
+ * fitted the canvas is drawn hidden, so Vue Flow can measure it and the
+ * modules first appear in place, never in rows that then jump; a saved
+ * arrangement is drawn at once.
+ */
+const moduleLayoutStatus = shallowRef<ModuleLayoutStatus>(
+  initialModuleLayoutStatus({ hasArrangement: layoutDraft.value !== null })
+)
+const isCanvasShown = computed(() => moduleLayoutStatus.value.isCanvasShown)
+const isLayoutPending = computed(() => isModuleLayoutPending(moduleLayoutStatus.value))
+const layoutProgressText = computed(() => moduleLayoutProgressText(moduleLayoutStatus.value))
+const layoutFailureText = computed(() => {
+  const status = moduleLayoutStatus.value
+  return status.state === 'failed' ? moduleLayoutFailureText(status.failure) : undefined
+})
+function updateLayoutStatus(event: ModuleLayoutEvent): void {
+  moduleLayoutStatus.value = nextModuleLayoutStatus(moduleLayoutStatus.value, event)
+}
+/**
+ * Whether Vue Flow has measured every node now on the canvas, as it says with
+ * `nodes-initialized`. A redraw that adds nodes it has not seen clears it, and
+ * Vue Flow says so again once it has measured those. A fit needs every size,
+ * so the hidden canvas is fitted — and shown — no sooner.
+ */
+const isCanvasMeasured = ref(false)
+/** Whether the canvas has had its first fit: a saved arrangement's, or a layout's on being shown. */
+let hasFittedCanvas = false
+/** The status line, where focus goes when Try again takes its own button away. */
+const layoutStatusRef = ref<HTMLElement | null>(null)
+/** The failure notice, which holds Try again. */
+const layoutFailureRef = ref<HTMLElement | null>(null)
+/** Ties Try again to the sentence saying what failed. */
+const layoutFailureTextId = useId()
+/**
+ * The page's one ELK, in a worker — started early on a page that knew it
+ * would draw a graph, or by the first layout on one that did not. Its module
+ * is imported, never bundled in: with a static import, every page with a
+ * viewer would preload ELK's worker script, laid out or not.
+ */
+const moduleLayoutEngine = lazyElkEngineSource(
+  () => import('~/utils/module-layout-engine').then(engine => engine.moduleLayoutEngine)
+)
+if (import.meta.client && layoutDraft.value === null) {
+  // The module is small; importing it now lets the first layout tell whether
+  // the ELK it finds was already warm.
+  void moduleLayoutEngine.load()
+}
+/** Counts automatic layouts asked for, so only the latest one is drawn. */
+let autoLayoutRun = 0
+/**
+ * The automatic layouts asked for, one after another: each starts once the
+ * one before it is done, and only if nothing has been asked for since — so a
+ * burst of requests lays out at most twice, rather than queueing every one in
+ * ELK's worker with the last waiting on all the rest. Never rejects.
+ */
+let autoLayoutDone: Promise<void> = Promise.resolve()
+/** Set once the viewer is unmounted: nothing is drawn or emitted after that. */
+const isUnmounted = ref(false)
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
@@ -1799,6 +2057,12 @@ const initialGraph = buildGraph(graphData.value, collapsedModuleNames.value, {
 })
 
 const flowNodes = shallowRef<FlowNode[]>(initialGraph.nodes)
+/**
+ * Whether every node on the canvas has a size to fit to: measured by Vue
+ * Flow, or none there to measure, as Vue Flow never says it has measured an
+ * empty canvas.
+ */
+const hasCanvasSizes = computed(() => isCanvasMeasured.value || flowNodes.value.length === 0)
 const flowEdges = shallowRef<FlowEdge[]>(initialGraph.edges)
 const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
@@ -2270,11 +2534,211 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
     nodePositions:
       layoutPositions?.nodePositions
       ?? (preservePositions ? nodePositionOverrides : undefined),
-    moduleSizes: layoutPositions?.moduleSizes
+    moduleSizes: layoutPositions?.moduleSizes,
+    autoLayout
   })
+  // Nodes the canvas has not had before have no size yet.
+  const drawnNodeIds = new Set(flowNodes.value.map(node => node.id))
+  if (graph.nodes.some(node => !drawnNodeIds.has(node.id))) {
+    isCanvasMeasured.value = false
+  }
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
   syncFixedBrightLineNode()
+}
+
+/**
+ * Lays the modules out automatically, as they are drawn now — open or
+ * collapsed — then redraws the canvas there and centres it. Nothing moves
+ * until the positions are known, so the canvas is redrawn once, already in
+ * place, and the drawing on screen stays until then; a canvas still hidden
+ * for its first layout is fitted and shown once Vue Flow has measured it. A
+ * layout waits for the one before it to finish, and one that a later layout,
+ * or a loaded layout, has overtaken is dropped. Resolves once the modules are
+ * in place: after this layout and any asked for while it ran.
+ */
+function arrangeModules(): Promise<void> {
+  autoLayoutRun += 1
+  const run = autoLayoutRun
+  updateLayoutStatus({ type: 'requested', isEngineReady: moduleLayoutEngine.isReady() })
+  autoLayoutDone = autoLayoutDone.then(async () => {
+    if (run !== autoLayoutRun) {
+      return
+    }
+
+    try {
+      await runAutoLayout(run)
+    } catch (error) {
+      // Reported like any other error, without leaving the canvas hidden or
+      // stopping the layouts asked for after this one.
+      if (run === autoLayoutRun) {
+        updateLayoutStatus({ type: 'fell-back', failure: 'layout' })
+      }
+      reportError(error)
+    }
+  })
+
+  return settleAutoLayouts()
+}
+
+/** Resolves once every automatic layout asked for has been drawn or dropped. */
+async function settleAutoLayouts(): Promise<void> {
+  let done: Promise<void>
+  do {
+    done = autoLayoutDone
+    await done
+  } while (done !== autoLayoutDone)
+}
+
+async function runAutoLayout(run: number): Promise<void> {
+  if (!import.meta.client) {
+    return
+  }
+
+  // Said again now the layout starts, rather than when it was asked for: a
+  // layout that waited behind another may find the engine that came up for
+  // that one gone, and a fresh one to load.
+  updateLayoutStatus({ type: 'requested', isEngineReady: moduleLayoutEngine.isReady() })
+  const startedAt = performance.now()
+  const moduleMap = graphData.value
+  const sizes = resolveModuleSizes(moduleMap, collapsedModuleNames.value)
+  const layout = await autoLayoutModuleGraph({
+    input: moduleGraphLayoutInput({ moduleMap, sizes }),
+    engines: moduleLayoutEngine,
+    onEngineReady: () => updateLayoutStatus({ type: 'engine-ready' })
+  })
+  if (run !== autoLayoutRun) {
+    return
+  }
+
+  if (layoutDraft.value) {
+    // A layout took over while this one ran. It is the arrangement now, so a
+    // canvas still held for this layout is drawn from it and shown rather
+    // than left hidden.
+    if (isCanvasShown.value) {
+      updateLayoutStatus({ type: 'arrangement-drawn' })
+    } else {
+      await drawLayoutDraft()
+    }
+    return
+  }
+
+  autoLayout = {
+    positions: layout.positions,
+    routes: layout.engine === 'elk' ? layout.routes : new Map(),
+    sizes
+  }
+  refreshGraph({ preservePositions: false })
+  await nextTick()
+  recordUserTiming({
+    name: AUTO_LAYOUT_MEASURE,
+    start: startedAt,
+    end: performance.now(),
+    detail: autoLayoutTimingDetail(layout)
+  })
+
+  if (isCanvasShown.value) {
+    void centerGraph()
+  } else if (!await fitHiddenCanvas(
+    // Not once a later layout has been asked for, nor once a saved
+    // arrangement has taken over while the canvas waited to be measured:
+    // drawing that one says so itself.
+    () => run === autoLayoutRun && layoutDraft.value === null
+  )) {
+    return
+  }
+
+  updateLayoutStatus(
+    layout.engine === 'rows'
+      ? { type: 'fell-back', failure: layout.reason }
+      : { type: 'laid-out' }
+  )
+}
+
+/**
+ * Fits the hidden canvas to what is drawn on it, once Vue Flow has taken the
+ * drawing in and measured every node there; a canvas with no nodes has
+ * nothing to measure. Resolves whether the drawing was fitted to be shown:
+ * not once the viewer has gone, nor once `isStillToShow` says another drawing
+ * has taken its place. Without a duration the fit is applied at once, so it
+ * always settles.
+ */
+async function fitHiddenCanvas(isStillToShow: () => boolean): Promise<boolean> {
+  await nextTick()
+  await until(() => isUnmounted.value || hasCanvasSizes.value).toBe(true)
+  if (isUnmounted.value || !isStillToShow()) {
+    return false
+  }
+
+  await fitView({ padding: GRAPH_FIT_PADDING, duration: 0 })
+  hasFittedCanvas = true
+  return true
+}
+
+function handleNodesInitialized(): void {
+  isCanvasMeasured.value = true
+  // A saved arrangement is on screen from the start, so it is fitted the
+  // moment its nodes have sizes, as a laid-out canvas is before it is shown.
+  if (!hasFittedCanvas && isCanvasShown.value) {
+    hasFittedCanvas = true
+    void fitView({ padding: GRAPH_FIT_PADDING, duration: 0 })
+  }
+}
+
+/**
+ * Tries the automatic layout again after ELK failed. An engine that failed is
+ * already let go of, so this starts a fresh one — importing ELK's module or
+ * fetching its worker's script again — and the engine a refused graph ran on
+ * is left running, since other viewers on the page may be using it. Modules
+ * the visitor dragged around the simple arrangement go back with the rest, as
+ * Auto layout puts them.
+ */
+function retryAutoLayout(): void {
+  // The notice goes as the layout starts, the button with it: focus moves to
+  // the status line, which says what happens next, rather than to the page.
+  if (layoutFailureRef.value?.contains(document.activeElement)) {
+    layoutStatusRef.value?.focus({ preventScroll: true })
+  }
+
+  if (layoutDraft.value) {
+    resetToAutoLayout()
+    return
+  }
+
+  void arrangeModules()
+}
+
+/**
+ * Draws the canvas afresh and centres it: as the layout draft has it, or —
+ * with none — laid out automatically.
+ */
+function redrawCanvas(): void {
+  if (!layoutDraft.value) {
+    void arrangeModules()
+    return
+  }
+
+  void drawLayoutDraft()
+}
+
+/**
+ * Draws the canvas from the layout draft and centres it — at once, then
+ * shows it, when the canvas is still held for a first automatic layout that
+ * the draft has overtaken.
+ */
+async function drawLayoutDraft(): Promise<void> {
+  refreshGraph({ preservePositions: false })
+  if (isCanvasShown.value) {
+    void centerGraph()
+  } else if (!await fitHiddenCanvas(
+    // Not once the arrangement has been dropped again, for an automatic
+    // layout that shows itself.
+    () => layoutDraft.value !== null
+  )) {
+    return
+  }
+
+  updateLayoutStatus({ type: 'arrangement-drawn' })
 }
 
 /**
@@ -2387,9 +2851,13 @@ function resetToAutoLayout(): void {
   layoutDraft.value = null
   nodePositionOverrides.clear()
   collapsedModuleNames.value = getInitialCollapsedModuleNames(graphData.value)
-  refreshGraph({ preservePositions: false })
-  void centerGraph()
-  emit('layoutChange', snapshotCanvasLayout())
+  void arrangeModules().then(() => {
+    // The arrangement the canvas settled on — unless a layout has taken over
+    // since, which the page has heard of already.
+    if (!layoutDraft.value && !isUnmounted.value) {
+      emit('layoutChange', snapshotCanvasLayout())
+    }
+  })
 }
 
 const layoutStatus = computed<'saving' | 'error' | 'unsaved' | 'clean'>(() => {
@@ -2457,11 +2925,26 @@ function toggleModule(moduleName: string) {
     return
   }
 
-  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
-  if (autoAdjustGraphView.value) {
-    void centerGraph()
-  }
+  rearrangeUntouchedCanvas()
 }
+
+/**
+ * After a module opens or closes on a canvas nobody has arranged: with Auto
+ * Re-position on, the modules are laid out again around their new sizes, so
+ * an opened module pushes the others aside instead of covering them; with it
+ * off, everything stays where it is.
+ */
+function rearrangeUntouchedCanvas(): void {
+  if (autoAdjustGraphView.value) {
+    void arrangeModules()
+    return
+  }
+
+  refreshGraph()
+}
+
+/** Counts focuses asked for, so only the latest one moves the camera. */
+let focusRequest = 0
 
 /**
  * Moves the camera onto one module — its node, and the items inside it while
@@ -2477,7 +2960,22 @@ async function focusModule(moduleName: string, duration?: number) {
     return
   }
 
+  focusRequest += 1
+  const request = focusRequest
+  // Modules move when an automatic layout lands, and the canvas is fitted to
+  // them: the first time once Vue Flow has measured the canvas — a saved
+  // arrangement is fitted then too — and before that the canvas is not
+  // shown. A focus any sooner would be undone.
+  await until(() =>
+    isUnmounted.value || (isCanvasShown.value && hasCanvasSizes.value)
+  ).toBe(true)
+  await settleAutoLayouts()
   await nextTick()
+  // A focus asked for while this one waited goes instead.
+  if (isUnmounted.value || request !== focusRequest) {
+    return
+  }
+
   const targetNodeIds = resolveModuleFocusTargetNodeIds(
     moduleName,
     flowNodes.value
@@ -2516,10 +3014,7 @@ function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
     return
   }
 
-  refreshGraph({ preservePositions: !autoAdjustGraphView.value })
-  if (autoAdjustGraphView.value) {
-    void centerGraph()
-  }
+  rearrangeUntouchedCanvas()
 }
 
 watch(showCircularDependencies, () => {
@@ -2607,9 +3102,8 @@ watch(
       graphData.value,
       layoutDraft.value
     )
-    refreshGraph({ preservePositions: false })
+    redrawCanvas()
     syncDirectRunOn()
-    void centerGraph()
   },
   { deep: true }
 )
@@ -2624,8 +3118,7 @@ watch(
       graphData.value,
       layoutDraft.value
     )
-    refreshGraph({ preservePositions: false })
-    void centerGraph()
+    redrawCanvas()
   }
 )
 
@@ -2643,8 +3136,7 @@ watch(
       graphData.value,
       layoutDraft.value
     )
-    refreshGraph({ preservePositions: false })
-    void centerGraph()
+    redrawCanvas()
   }
 )
 
@@ -2654,17 +3146,40 @@ watch(showJsDocOnHover, () => {
 
 onMounted(() => {
   syncDirectRunOn()
-  setTimeout(() => {
-    void centerGraph(0)
-  }, 200)
+  // The first automatic layout is asked for as soon as the viewer is in the
+  // page. Its input is each module's box, which comes from the graph rather
+  // than the DOM, so nothing needs measuring first, and ELK lays the graph out
+  // in its worker while Vue Flow mounts and measures the canvas it will be
+  // shown on. A saved arrangement is drawn at once instead, and fitted as soon
+  // as Vue Flow has measured it (`handleNodesInitialized`).
+  if (layoutDraft.value === null) {
+    void arrangeModules()
+  }
 })
 
 onBeforeUnmount(() => {
   clearJsDocHoverTimers()
+  // A layout under way is dropped when it lands, none is asked for after, and
+  // nothing waiting on the canvas waits any longer.
+  isUnmounted.value = true
+  autoLayoutRun += 1
 })
 
-useResizeObserver(graphViewerRef, () => {
-  debouncedCenterGraph()
+/** The viewer's size when last seen, so only a change of it re-centres the graph. */
+let viewerSize: { width: number, height: number } | undefined
+useResizeObserver(graphViewerRef, ([entry]) => {
+  if (!entry) {
+    return
+  }
+
+  const { width, height } = entry.contentRect
+  const previous = viewerSize
+  viewerSize = { width, height }
+  // The first observation is the size the viewer mounted at, which the
+  // canvas's first fit is made for already.
+  if (previous && (previous.width !== width || previous.height !== height)) {
+    debouncedCenterGraph()
+  }
 })
 
 defineExpose({ centerGraph, focusModule })
@@ -2674,8 +3189,12 @@ defineExpose({ centerGraph, focusModule })
   <div
     ref="graphViewerRef"
     class="graph-viewer"
-    :class="{ 'graph-viewer--flush': props.flush }"
+    :class="{
+      'graph-viewer--flush': props.flush,
+      'graph-viewer--canvas-hidden': !isCanvasShown
+    }"
     :style="{ height: props.height }"
+    :data-layout-state="moduleLayoutStatus.state"
   >
     <div
       v-if="props.interactive && props.canSaveLayout"
@@ -2690,6 +3209,10 @@ defineExpose({ centerGraph, focusModule })
         :title="props.layoutSaveError || undefined"
         class="graph-viewer-layout__status"
       />
+      <!--
+        Until the first automatic layout lands there is no arrangement on
+        screen: saving or downloading would keep the hidden rows it replaces.
+      -->
       <UButton
         type="button"
         icon="i-lucide-rotate-ccw"
@@ -2698,6 +3221,7 @@ defineExpose({ centerGraph, focusModule })
         variant="soft"
         size="sm"
         title="Reset to the automatic layout"
+        :disabled="!isCanvasShown"
         @click="resetToAutoLayout"
       />
       <UButton
@@ -2710,6 +3234,7 @@ defineExpose({ centerGraph, focusModule })
         square
         aria-label="Download layout"
         title="Download nest-graph-layout.json — rename it to .muse in the project root for a running inspector to read"
+        :disabled="!isCanvasShown"
         @click="downloadCurrentLayout"
       />
       <UButton
@@ -2717,7 +3242,7 @@ defineExpose({ centerGraph, focusModule })
         :icon="layoutSaveButton.icon"
         :label="layoutSaveButton.label"
         :title="layoutSaveTitle"
-        :disabled="props.layoutSaving"
+        :disabled="props.layoutSaving || !isCanvasShown"
         color="primary"
         variant="soft"
         size="sm"
@@ -2962,15 +3487,83 @@ defineExpose({ centerGraph, focusModule })
       />
     </div>
 
+    <!--
+      Always in the page, so a screen reader hears each phase as its text
+      changes; empty once the layout has landed.
+    -->
+    <div
+      ref="layoutStatusRef"
+      class="graph-viewer-layout-status"
+      :class="{ 'graph-viewer-layout-status--over-canvas': isCanvasShown }"
+      role="status"
+      aria-live="polite"
+      tabindex="-1"
+    >
+      <span
+        v-if="layoutProgressText"
+        class="graph-viewer-layout-status__text"
+      >
+        <UIcon
+          name="i-lucide-loader-2"
+          class="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        {{ layoutProgressText }}
+      </span>
+    </div>
+
+    <!--
+      Outside the canvas, so it answers a click in every viewer, the ones that
+      cannot be panned or dragged included.
+    -->
+    <div
+      v-if="layoutFailureText"
+      ref="layoutFailureRef"
+      class="graph-viewer-layout-failure"
+      :class="{
+        'graph-viewer-layout-failure--above-panels':
+          props.interactive && (props.showControls || props.showMiniMap)
+      }"
+      role="alert"
+    >
+      <UIcon
+        name="i-lucide-triangle-alert"
+        class="size-4 shrink-0 text-error"
+        aria-hidden="true"
+      />
+      <p
+        :id="layoutFailureTextId"
+        class="graph-viewer-layout-failure__text"
+      >
+        {{ layoutFailureText }}
+      </p>
+      <UButton
+        type="button"
+        icon="i-lucide-refresh-cw"
+        label="Try again"
+        color="neutral"
+        variant="outline"
+        size="xs"
+        class="shrink-0 cursor-pointer"
+        :aria-describedby="layoutFailureTextId"
+        @click="retryAutoLayout"
+      />
+    </div>
+
+    <!--
+      The canvas is what a layout is busy with. Its progress and its failure
+      are said beside it rather than inside it, where some screen readers hold
+      back a busy region's announcements until it is done.
+    -->
     <VueFlow
       :id="flowId"
       v-model:nodes="flowNodes"
       v-model:edges="flowEdges"
+      :aria-busy="isLayoutPending || undefined"
       :default-viewport="{ zoom: 0.8, x: 0, y: 0 }"
       :min-zoom="0.05"
       :max-zoom="2"
       fit-view-on-init
-      :fit-view-on-init-options="{ padding: GRAPH_FIT_PADDING }"
       :nodes-draggable="props.interactive"
       :nodes-connectable="props.interactive"
       :elements-selectable="props.interactive"
@@ -2987,7 +3580,18 @@ defineExpose({ centerGraph, focusModule })
       @node-drag-stop="handleNodeDragStop"
       @move-start="closeJsDocHoverCard"
       @pane-click="handlePaneClick"
+      @nodes-initialized="handleNodesInitialized"
     >
+      <template #edge-routed="edgeProps">
+        <BaseEdge
+          :id="edgeProps.id"
+          :path="getRoutedEdgePath(edgeProps)"
+          :marker-end="edgeProps.markerEnd"
+          :style="edgeProps.style"
+          :interaction-width="edgeProps.interactionWidth"
+        />
+      </template>
+
       <template #edge-warning="edgeProps">
         <BaseEdge
           :id="edgeProps.id"
@@ -3413,6 +4017,126 @@ defineExpose({ centerGraph, focusModule })
 .graph-viewer--flush {
   border: 0;
   border-radius: 0;
+}
+
+/*
+ * Held back until the first arrangement is drawn and fitted, so the modules
+ * appear in place. Hidden rather than removed: Vue Flow still measures every
+ * node. Hidden down to every node, too: Vue Flow shows each node it has
+ * measured with an inline `visibility: visible`, which would otherwise draw
+ * them where they stand before the layout lands — in rows.
+ */
+.graph-viewer--canvas-hidden .graph-flow,
+.graph-viewer--canvas-hidden .graph-flow * {
+  visibility: hidden !important;
+}
+
+/*
+ * The layout's progress: centred on the empty viewer while the canvas is held
+ * back, and a small note at its foot while a later layout is on its way to
+ * replace a drawing still on screen.
+ */
+.graph-viewer-layout-status {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.graph-viewer-layout-status--over-canvas {
+  inset: auto 12px 12px;
+}
+
+/*
+ * Focus lands here when Try again takes its own button away; ringed inside
+ * the viewer, which hides its overflow.
+ */
+.graph-viewer-layout-status:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+/*
+ * Said only once a layout takes long enough to notice. The 400 ms fade-in is
+ * presentation only: which drawing is shown never waits on a timer.
+ */
+.graph-viewer-layout-status__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ui-text-muted);
+  font-size: 14px;
+  animation: graph-viewer-layout-status-in 160ms ease-out 400ms both;
+}
+
+.graph-viewer-layout-status--over-canvas .graph-viewer-layout-status__text {
+  padding: 4px 10px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
+  font-size: 13px;
+}
+
+@keyframes graph-viewer-layout-status-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-viewer-layout-status__text {
+    animation-duration: 1ms;
+  }
+}
+
+/*
+ * ELK failed: said on the graph, at its foot — clear of the legend at the top
+ * left and the toolbar at the top right — with the one thing to do about it.
+ * Only the icon carries the error colour.
+ */
+.graph-viewer-layout-failure {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--mg-subgraph-title-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  color: var(--ui-text);
+  font-size: 13px;
+  line-height: 1.4;
+  transform: translateX(-50%);
+}
+
+.graph-viewer-layout-failure__text {
+  min-width: 0;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/*
+ * Vue Flow's controls and minimap sit at the foot of the viewer too; where
+ * there is no room beside them, the notice goes above them.
+ */
+@media (max-width: 960px) {
+  .graph-viewer-layout-failure--above-panels {
+    bottom: 180px;
+  }
 }
 
 .graph-viewer-settings {

@@ -11,7 +11,13 @@ import {
   type RecordedTrace,
   traceHistorySchema,
 } from '../support/inspector-api';
-import { expect, graphNode, openPrintedLink, test } from './viewer.fixtures';
+import {
+  expect,
+  expectGraphLayoutsReady,
+  graphNode,
+  openPrintedLink,
+  test,
+} from './viewer.fixtures';
 
 /**
  * The viewer in Chromium, against the demo running as a process of its own:
@@ -105,6 +111,7 @@ test('opening the printed link draws every module of the graph on the navigator'
   information,
 }) => {
   await openPrintedLink({ page, state, information });
+  await expectGraphLayoutsReady(page);
 
   for (const moduleName of Object.keys(graph.modules)) {
     await expect(graphNode(page, `module-${moduleName}`)).toBeVisible();
@@ -253,6 +260,7 @@ test('/view opens an exported graph file and draws every module in it', async ({
   await expect(page).toHaveURL(
     new URL('view/navigator', state.siteBaseUrl).href,
   );
+  await expectGraphLayoutsReady(page);
 
   for (const moduleName of Object.keys(fileGraph.modules)) {
     await expect(graphNode(page, `module-${moduleName}`)).toBeVisible();
@@ -284,6 +292,9 @@ test('the landing page draws the static demo graph, and Load Example runs the de
   await expect(
     page.getByText('Static graph of the demo project').first(),
   ).toBeVisible();
+  // Every preview draws the same static graph, so every one of them is on
+  // the page by now, and each is waited for.
+  await expectGraphLayoutsReady(page);
   await expect(graphNode(page, `module-${root}`).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Load Example' }).first().click();
@@ -292,5 +303,8 @@ test('the landing page draws the static demo graph, and Load Example runs the de
       .getByText('Live graph of the demo application running in your browser.')
       .first(),
   ).toBeVisible({ timeout: IN_BROWSER_DEMO_TIMEOUT_MS });
+  // Each preview draws the live graph in a viewer of its own, mounted in
+  // place of the static one, so these are new layouts to wait for.
+  await expectGraphLayoutsReady(page);
   await expect(graphNode(page, `module-${root}`).first()).toBeVisible();
 });

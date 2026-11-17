@@ -354,21 +354,31 @@ Contains `NestGraphInspectorModuleOptions`, `NestGraphInspectorOutput` (the unio
 
 **Purpose:** Demo / development application. Simulates a realistic consumer of the library.
 
-**Structure:**
+**Structure:** the Shop App, a REST API for a small chain of stores.
 ```
 src/
-├── main.ts           — bootstrap (NestFactory, listens on port 8889)
-├── app.module.ts     — root module; imports NestGraphInspectorModule.forRoot()
-├── user/             — User feature (UserModule, UserService, UserController, UserRepository, UserSchedule)
-├── product/          — Product feature (circular dep with MobileModule)
-├── order/            — Order feature (intentional forwardRef circular dep)
-└── mobile/           — Mobile feature (cross-feature dep)
+├── main.ts             — bootstrap (NestFactory, listens on port 8889)
+├── app.module.ts       — root module: NestGraphInspectorModule.forRoot(), DatabaseModule, the ten feature modules (their import order is load-bearing)
+├── database/           — global DatabaseModule: InMemoryTable, the schema, the seed data, and the 100–200 ms simulated latency every operation pays
+├── common/             — request parsing (400s that name the field), @Public(), @CurrentCustomerId(), orConflict()
+├── auth/               — AuthModule: register, sign in, sessions, the scrypt PasswordHasher, and the global AuthGuard (APP_GUARD)
+├── customer/           — CustomerModule: profiles, lookup by id and email
+├── customer-loyalty/   — CustomerLoyaltyModule: points, Bronze/Silver/Gold tiers, tier discounts
+├── voucher/            — VoucherModule: public vouchers, the reward catalogue, claiming, quoting, redemption
+├── store/              — StoreModule: store locations
+├── product/            — ProductModule: the catalogue; a product's detail carries "frequently bought together"
+├── store-product/      — StoreProductModule: per-store price and stock, reserving and releasing it
+├── recommendation/     — RecommendationModule: "frequently bought together", worked out from paid orders
+├── order/              — OrderModule: checkout, the order's states, history, co-purchase data
+└── payment/            — PaymentModule: bills and the simulated payment gateway
 ```
 
+Each feature folder has one layout: `<feature>.module.ts`; a thin `.controller.ts` that parses the request and calls the service; a `.service.ts` holding the rules, with JSDoc the viewer shows; a `.repository.ts` for the tables it owns; a `.dto.ts` for its request and response types and their parsers; and pure rule files where the rules are worth isolating (`order-pricing.ts`, `voucher-discount.ts`, `loyalty-rules.ts`). There is no `class-validator`: the payload build leaves Nest's optional peers external, so request bodies are parsed by hand at the controller.
+
 The demo intentionally includes:
-- Cross-module dependencies (UserService → MobileService → ProductService).
-- A circular import between ProductModule and MobileModule.
-- A `forwardRef` circular dependency between OrderService and OrderNotificationService.
+- Two module cycles — OrderModule ⇄ PaymentModule, and ProductModule → RecommendationModule → OrderModule → StoreProductModule → ProductModule — and the same two between their services, with `forwardRef()` only where an edge closes a cycle.
+- A global module, DatabaseModule, that every repository injects and no feature module imports, and a global guard, AuthGuard, provided as `APP_GUARD`.
+- Seed data and a simulated latency on every storage operation, so Direct Run calls do real work and their traces show where the time goes.
 
 This makes the demo useful for verifying cycle detection, dependency enrichment, and Direct Run metadata.
 
@@ -379,10 +389,10 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 - Modules that demonstrate specific scenarios (circular deps, forwardRef, JSDoc extraction).
 
 **What does NOT belong here:**
-- Reusable library implementation. If logic could be used by a real consumer, it belongs in `libs/`.
+- Reusable library implementation. If logic could be used by a real consumer, it belongs in `lib/`.
 - Production code.
 
-**Important:** `demo/src/app.module.ts` uses the path alias `nest-graph-inspector/nest-graph-inspector` which maps to `libs/nest-graph-inspector/src` via `tsconfig.json` paths.
+**Important:** `demo/src/app.module.ts` imports the package as `nest-graph-inspector`, the `workspace:*` dependency, which resolves through `lib/dist` — build the library before anything type-aware runs against the demo.
 
 **Related:** `demo/tmp/graph/` (runtime output), `demo/scripts/build-nodepod-payload.ts` (packages this application for the site).
 
@@ -393,17 +403,17 @@ This makes the demo useful for verifying cycle detection, dependency enrichment,
 **Purpose:** E2E tests for the demo application.
 
 **Contents:**
-- `app.e2e-spec.ts` — Jest + Supertest test that imports `AppModule`, exercises the demo's product routes, and reads the token-gated graph over TCP.
-- `graph-inspector-security.e2e-spec.ts` — the network-level security suite: the token guard, preflight, lockout, and Direct Run's strict and permissive modes, over real sockets.
+- `app.e2e-spec.ts` — boots `AppModule` and walks one customer through the shop over HTTP with Supertest — register, sign in, check out, pay, earn points, claim a reward voucher, check out with it, pay — checks that of two simultaneous checkouts with one voucher only one gets it, then reads the token-gated `/output.json` and checks every module's imports and both cycles. Generous timeouts: every storage operation waits 100–200 ms.
 - `graph-export.e2e-spec.ts` — requires `nest-graph-inspector export` of the demo to equal the running demo's `/output.json`, byte for byte.
+- `graph-inspector-security.e2e-spec.ts` — boots the inspector over real sockets and checks the token guard, the lockout, CORS preflight and Direct Run's method rules.
 - `demo-process.e2e-spec.ts` — builds the demo and starts it as a process of its own in a scratch directory, then checks every surface a user reaches through the viewer link it prints.
 - `support/` — what the process suite and the browser suite share: `demo.fixture.ts`, the only file that names facts of the demo (its ports, route prefix and outputs); `demo-process.ts`, which builds, starts and stops the demo; and the port, log, inspector-API and graph helpers. Nothing here declares a class: the demo's TypeScript project spans `test/`, and a class name declared twice loses its Direct Run methods.
-- `browser/` — the viewer in Chromium (Playwright): `playwright.config.ts`, the global setup that starts the demo and serves the generated site the way GitHub Pages does, and `viewer.browser-spec.ts`. Run with `test:e2e:browser`.
+- `browser/` — the viewer in Chromium (Playwright): `playwright.config.ts`, the global setup that starts the demo and serves the generated site the way GitHub Pages does, `viewer.fixtures.ts` — the fixtures and helpers the tests share, among them `expectGraphLayoutsReady`, which waits for every viewer on the page to settle its `data-layout-state` and fails on one that settled on `failed` — and `viewer.browser-spec.ts`, which calls it before it checks the modules a viewer draws. Run with `test:e2e:browser`.
 - `jest-e2e.json` — Jest config for e2e; uses `testRegex: ".e2e-spec.ts$"`, a 60 s `testTimeout`, and `e2e-global-setup.ts`, which refuses the run while another process listens on one of the demo's ports. `test:e2e` runs the suites in band, since they bind the same fixed ports.
 
 **What belongs here:** Integration tests that boot the full demo app via `AppModule`, or build it and run it as a process of its own, and the viewer's browser tests against it.
 
-**What does NOT belong here:** Unit tests (those live co-located with source in `libs/`).
+**What does NOT belong here:** Unit tests (those live co-located with source in `lib/`).
 
 ---
 
@@ -462,7 +472,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 **Key config files:**
 - `nuxt.config.ts` — Nuxt configuration; defines the `@library` alias, Nitro prerender rules, module registrations, analytics config.
 - `content.config.ts` — `@nuxt/content` collection definitions (`landing` and `docs`).
-- `package.json` — site-specific dependencies (Vue Flow, Monaco, `@mlc-ai/web-llm`, LangChain, Pinia, Posthog, `@scelar/nodepod` for the in-browser demo, etc.).
+- `package.json` — site-specific dependencies (Vue Flow, `elkjs` for the graph's automatic layout, Monaco, `@mlc-ai/web-llm`, LangChain, Pinia, Posthog, `@scelar/nodepod` for the in-browser demo, etc.).
 - `tsconfig.json` — extends `.nuxt/tsconfig.json` (generated by Nuxt).
 - `eslint.config.mjs` — extends auto-generated Nuxt ESLint config.
 - `.editorconfig` — LF line endings, 2-space indent.
@@ -719,12 +729,23 @@ that cannot reach into a Pinia setup store.
 | `graph-output-support.test.ts` | Assert-based test for `graph-output-support.ts` |
 | `graph-layout-placement.ts` | Incremental layout: `resolveIncrementalLayout` keeps every saved module and item exactly where the layout says, places items the layout has not seen in the first free slot of their module (growing it to fit), and places new modules beside a module they import or are imported by, else in the nearest free slot — never displacing anything saved. `LAYOUT_GEOMETRY` mirrors the sizes `GraphViewer.vue` draws with; item keys are the viewer's node ids (`provider-<Module>-<Name>`) |
 | `graph-layout-placement.test.ts` | Assert-based test for `graph-layout-placement.ts` |
+| `module-graph-auto-layout.ts` | The automatic layout for a graph with no saved layout: ELK's layered algorithm over the module imports — the root on top, every importer above what it imports, the import closing a cycle pointing back up — and each import's route, laid out by whatever `ElkEngineSource` it is handed, with no deadline. Only a real failure — an engine failure (`ElkEngineFailure`) or ELK refusing the graph — falls back to the simple arrangement (`layoutModuleRows`): layers from the root, each wrapped into rows of a bounded width. Also the bundled build on this thread for scripts and tests (`bundledElkSource`), the warm-up graph, and the names and details of the `ngi:auto-layout` measures |
+| `module-graph-auto-layout.test.ts` | Test for `module-graph-auto-layout.ts` on the Shop App's module graph, run through the real ELK — including its geometry: no route through a module it does not join, routes clear of modules and of each other, each with ends of its own, and the cycle labels clear of modules and of each other — and through broken, dying and slow stand-ins for the fallback, the retry, and the absence of a deadline |
+| `elk-engine-source.ts` | The page's one ELK: started once, warmed, saying when it is ready (`whenReady`), let go of when it fails so the next layout starts afresh, and on this thread where no worker can be made (`createSharedElkEngineSource`); and a source imported on first use, imported again after a failed import (`lazyElkEngineSource`) |
+| `elk-engine-source.test.ts` | Test for `elk-engine-source.ts`, with stand-in workers that answer when told |
+| `module-layout-state.ts` | Where a viewer's automatic layout stands — `loading-engine`, `arranging`, `ready`, `failed` — as its root says it in `data-layout-state`, whether its canvas is shown yet, and what its status line and failure notice say; pure, driven by `GraphViewer.vue` |
+| `module-layout-state.test.ts` | Test for `module-layout-state.ts`: each transition, the retry included |
+| `module-layout-engine.ts` | Browser-only: the worker itself — elkjs's `elk-worker.min.js` by a `?url` import, driven through `elk-api.js` — and the shared source over it. Only ever imported dynamically: a static import would have every page with a viewer preload the worker script |
+| `module-layout-warm-up.ts` | Which arrivals draw the module graph at once (`drawsModuleGraphOnArrival`), and the one way to start ELK warming ahead of a graph (`startModuleLayoutWarmUp`), which imports `module-layout-engine.ts` without bundling it: what `plugins/module-layout-warm-up.client.ts` calls on those arrivals, and the in-browser demo when it starts |
+| `module-layout-warm-up.test.ts` | Test for `module-layout-warm-up.ts` |
 | `graph-layout-persistence.ts` | Where a layout lives when the inspector cannot keep it — static graphs, the in-browser demo, and libraries without a layout route keep it per endpoint in memory and `sessionStorage`. Also the shape check for a layout the viewer receives, and the file serialization a download uses (byte-for-byte the library's) |
 | `graph-layout-persistence.test.ts` | Assert-based test for `graph-layout-persistence.ts`, with an injected fake `Storage` |
 | `http-error.ts` | Reads the status out of a failed request, and words a failure from that status alone — never from a transport message or a response body, either of which can quote the URL and what it carries |
 | `http-error.test.ts` | Assert-based test for `http-error.ts` |
 | `circular-dependency-issues.ts` | Derives `CircularDependencyIssue[]` from raw `GraphOutput.cycles` |
 | `circular-dependency-flow.ts` | Builds Vue Flow node/edge data for circular dependency diagrams |
+| `circular-dependency-edge.ts` | Where an edge closing a cycle is drawn: its curve, bowed so a mutual pair stays apart, a self-loop, and the label on either; its label's size on a zoomed-out canvas; and, where the automatic layout routed it, its label's spot on the route (`placeRouteLabels`), clear of every module and earlier label and, where it can, of the other cycles' lines |
+| `circular-dependency-edge.test.ts` | Assert-based test for `circular-dependency-edge.ts` |
 | `direct-run-provider.ts` | Helper types and functions for Direct Run UI (request building, result summarising, snapshot building, resolving a provider or controller by its node id, and which trace spans may be re-run) |
 | `direct-run-provider.test.ts` | Assert-based test for `direct-run-provider.ts` (no framework) |
 | `nodepod-demo-endpoint.ts` | Address space for the in-browser demo: reads the endpoint out of the printed viewer link, rewrites it under `__nodepod__/<port>/`, resolves the mount base its sibling endpoints hang off, and tells the demo's endpoint from others (`isDemoEndpoint`: the segment and a port directly under the site's base URL, which `resolveSiteBaseUrl` defines) |
@@ -817,7 +838,7 @@ resolves the import graph itself.
 | `main.js` | The demo application bundled into one CommonJS file (~13.9 MB, ~2.2 MB gzipped), with the NestJS runtime packages left to the vendor snapshot |
 | `sources.json` | The demo's `.ts` sources plus a flattened `tsconfig.json`, so the library's ts-morph source reader still produces JSDoc and Direct Run parameter types |
 | `manifest.json` | `payloadVersion`, `revision`, build timestamp, demo and library versions, `workdir`, `entry`, and the environment the application starts with |
-| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps the third-party `ConfigModule` too |
+| `graph.json` | Not part of the payload: the demo's graph exported by `nest-graph-inspector export --compact` (the demo's `export:graph`, run last by `build:nodepod`), byte for byte what the demo serves at `/output.json` when Node runs it. The site reads it — `stores/example-graph.ts` fetches it for the landing page's previews and `/view?preview=true` — so every site build has to publish it; `test:demo-payload` checks that it is there and holds every module the payload serves. It holds more: the payload build's `DISCOVERY_PATCHES` keep the in-browser demo to what `src/` declares, and the export keeps `NestJSCoreModule` too — the `Reflector` the demo's `AuthGuard` injects |
 
 **How it's generated:** `pnpm --filter nest-graph-inspector-demo run build:nodepod`, which runs `nest build` and then `demo/scripts/build-nodepod-payload.ts`. The root `dev`, `build`, and `build:site` scripts and every CI workflow that generates the site run it first.
 

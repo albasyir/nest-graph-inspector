@@ -10,9 +10,12 @@ import {
   getEdgeRelationClass,
   isControllerEdge,
   isEdgeNormallyVisible,
+  pickModuleEdgeHandles,
   placeDependencyEdge,
   resolveEdgeRelationship,
-  type EdgeRelationship
+  roundedPolylinePath,
+  type EdgeRelationship,
+  type ModuleEdgeBox
 } from './graph-viewer-edges.ts'
 
 const RELATIONSHIPS: EdgeRelationship[] = [
@@ -578,5 +581,77 @@ describe('collectCircularEdgeInfo', () => {
       }),
       'circular'
     )
+  })
+})
+
+describe('roundedPolylinePath', () => {
+  test('draws a straight route as one line', () => {
+    assert.equal(
+      roundedPolylinePath([{ x: 0, y: 100 }, { x: 0, y: 0 }], 5),
+      'M 0,100 L 0,0'
+    )
+  })
+
+  test('rounds each corner off by the radius', () => {
+    assert.equal(
+      roundedPolylinePath([{ x: 0, y: 100 }, { x: 0, y: 50 }, { x: 80, y: 50 }, { x: 80, y: 0 }], 5),
+      'M 0,100 L 0,55 Q 0,50 5,50 L 75,50 Q 80,50 80,45 L 80,0'
+    )
+  })
+
+  test('rounds a corner on a short leg by no more than half of it', () => {
+    assert.equal(
+      roundedPolylinePath([{ x: 0, y: 4 }, { x: 0, y: 0 }, { x: 20, y: 0 }], 5),
+      'M 0,4 L 0,2 Q 0,0 2,0 L 20,0'
+    )
+  })
+
+  test('draws nothing for no points', () => {
+    assert.equal(roundedPolylinePath([], 5), '')
+  })
+})
+
+describe('pickModuleEdgeHandles', () => {
+  // An import edge runs from the module imported to its importer.
+  const importer: ModuleEdgeBox = { x: 500, y: 0, width: 240, height: 40 }
+
+  test('an import leaves the top of the module imported for the bottom of its importer above', () => {
+    const imported: ModuleEdgeBox = { x: 520, y: 140, width: 240, height: 40 }
+
+    assert.deepEqual(pickModuleEdgeHandles({ source: imported, target: importer }), {
+      sourceHandle: 'source-top',
+      targetHandle: 'target-bottom'
+    })
+  })
+
+  test('the import closing a cycle, its importer below, leaves the bottom for the importer\'s top', () => {
+    const importerBelow: ModuleEdgeBox = { x: 900, y: 420, width: 240, height: 40 }
+
+    assert.deepEqual(pickModuleEdgeHandles({ source: importer, target: importerBelow }), {
+      sourceHandle: 'source-bottom',
+      targetHandle: 'target-top'
+    })
+  })
+
+  test('joins two modules in different layers bottom to top, however far apart across', () => {
+    const farAside: ModuleEdgeBox = { x: -1400, y: 140, width: 240, height: 40 }
+
+    assert.deepEqual(pickModuleEdgeHandles({ source: farAside, target: importer }), {
+      sourceHandle: 'source-top',
+      targetHandle: 'target-bottom'
+    })
+  })
+
+  test('joins two modules level with each other side to side, towards each other', () => {
+    const tallBeside: ModuleEdgeBox = { x: 900, y: -100, width: 492, height: 352 }
+
+    assert.deepEqual(pickModuleEdgeHandles({ source: importer, target: tallBeside }), {
+      sourceHandle: 'source-right',
+      targetHandle: 'target-left'
+    })
+    assert.deepEqual(pickModuleEdgeHandles({ source: tallBeside, target: importer }), {
+      sourceHandle: 'source-left',
+      targetHandle: 'target-right'
+    })
   })
 })

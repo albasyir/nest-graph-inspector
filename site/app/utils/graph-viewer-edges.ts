@@ -236,3 +236,99 @@ export function collectCircularEdgeInfo<Info extends { id: number }>(
 
   return Array.from(infoById.values())
 }
+
+/** A point in flow coordinates. */
+export type EdgePoint = { x: number, y: number }
+
+/**
+ * SVG path data along `points`, each corner rounded off by `radius` as a
+ * smooth step edge rounds its own — less where a leg is too short to take it,
+ * so the path never doubles back on itself.
+ */
+export function roundedPolylinePath(
+  points: readonly EdgePoint[],
+  radius: number
+): string {
+  const [start, ...rest] = points
+  if (!start) {
+    return ''
+  }
+
+  const commands = [`M ${start.x},${start.y}`]
+  for (const [index, corner] of rest.entries()) {
+    const before = points[index]
+    const after = rest[index + 1]
+    if (!before || !after) {
+      commands.push(`L ${corner.x},${corner.y}`)
+      continue
+    }
+
+    const rounding = Math.min(
+      radius,
+      distance(before, corner) / 2,
+      distance(corner, after) / 2
+    )
+    const entry = towards(corner, before, rounding)
+    const exit = towards(corner, after, rounding)
+    commands.push(
+      `L ${entry.x},${entry.y}`,
+      `Q ${corner.x},${corner.y} ${exit.x},${exit.y}`
+    )
+  }
+
+  return commands.join(' ')
+}
+
+function distance(from: EdgePoint, to: EdgePoint): number {
+  return Math.hypot(to.x - from.x, to.y - from.y)
+}
+
+/** The point `length` along the way from `from` to `to`. */
+function towards(from: EdgePoint, to: EdgePoint, length: number): EdgePoint {
+  const span = distance(from, to)
+  if (span === 0) {
+    return from
+  }
+
+  return {
+    x: from.x + ((to.x - from.x) * length) / span,
+    y: from.y + ((to.y - from.y) * length) / span
+  }
+}
+
+/** The handles an edge leaves and enters by, named as the viewer's nodes name them. */
+export type EdgeHandles = { sourceHandle: string, targetHandle: string }
+
+/** A module's box on the canvas: its top-left corner and its size. */
+export type ModuleEdgeBox = { x: number, y: number, width: number, height: number }
+
+/**
+ * Which sides an edge between two modules leaves and enters by.
+ *
+ * Two modules level with each other, side by side in a row, are joined side to
+ * side, as two items in a row are. Any other two are joined bottom to top,
+ * whichever is higher: in the layered layout every import crosses from one
+ * layer to another, so it leaves the top of the module imported for the
+ * bottom of its importer above, and the import closing a cycle, whose
+ * importer is the lower one, leaves its module's bottom for the importer's top
+ * instead of cutting sideways across a layer, however far apart the two are.
+ */
+export function pickModuleEdgeHandles({
+  source,
+  target
+}: {
+  source: ModuleEdgeBox
+  target: ModuleEdgeBox
+}): EdgeHandles {
+  const isLevel
+    = source.y < target.y + target.height && target.y < source.y + source.height
+  if (isLevel) {
+    return target.x + target.width / 2 >= source.x + source.width / 2
+      ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
+      : { sourceHandle: 'source-left', targetHandle: 'target-right' }
+  }
+
+  return target.y > source.y
+    ? { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+    : { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
+}

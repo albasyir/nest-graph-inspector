@@ -1,33 +1,54 @@
 import { Injectable } from '@nestjs/common';
+import type { ProductCategory, ProductRow } from '../database/database.schema';
+import { DatabaseService } from '../database/database.service';
+import type { InMemoryTable } from '../database/in-memory-table';
+import type { NewProduct } from './product.dto';
 
-export interface Product {
-  id: number;
-  name: string;
-  price: number;
-  ownerId: number;
-}
-
+/** Reads and writes the products table. */
 @Injectable()
 export class ProductRepository {
-  private products: Product[] = [];
-  private nextId = 1;
+  private readonly products: InMemoryTable<ProductRow>;
 
-  create(name: string, price: number, ownerId: number): Product {
-    const product: Product = { id: this.nextId++, name, price, ownerId };
-    this.products.push(product);
-    return product;
+  constructor(database: DatabaseService) {
+    this.products = database.products;
   }
 
-  findById(id: number): Product | undefined {
-    return this.products.find((p) => p.id === id);
+  findById(productId: string): Promise<ProductRow | null> {
+    return this.products.findById(productId);
   }
 
-  async findAll(): Promise<Product[]> {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    return [...this.products];
+  /** Products still sold, optionally only those in one category. */
+  listActive(category?: ProductCategory): Promise<ProductRow[]> {
+    return this.products.findMany(
+      (product) =>
+        product.archivedAt === null &&
+        (category === undefined || product.category === category),
+    );
   }
 
-  findByOwnerId(ownerId: number): Product[] {
-    return this.products.filter((p) => p.ownerId === ownerId);
+  /** The products among `productIds` that are still sold. */
+  findActiveByIds(productIds: readonly string[]): Promise<ProductRow[]> {
+    const wanted = new Set(productIds);
+
+    return this.products.findMany(
+      (product) => product.archivedAt === null && wanted.has(product.id),
+    );
+  }
+
+  /** @throws UniqueConstraintViolationError when the SKU is taken */
+  insert(product: NewProduct): Promise<ProductRow> {
+    return this.products.insert((metadata) => ({
+      ...metadata,
+      ...product,
+      archivedAt: null,
+    }));
+  }
+
+  /** Replaces a product with what `change` makes of it; `null` when there is none. */
+  update<N extends ProductRow>(
+    productId: string,
+    change: (current: ProductRow) => N,
+  ): Promise<N | null> {
+    return this.products.update(productId, change);
   }
 }
