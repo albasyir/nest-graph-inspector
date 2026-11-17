@@ -110,3 +110,88 @@ jobs:
         env:
           NITRO_PRESET: github_pages
           NUXT_APP_BASE_URL: /nest-graph-inspector/
+
+  demo-e2e:
+    name: Demo e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The demo imports nest-graph-inspector through its published entry
+      # points, and the export suites run its built CLI.
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
+
+      # Every suite here runs the demo on its fixed ports — in the test
+      # process, or built and started as a process of its own — so the script
+      # runs them in band, one after another. Jest fails when it finds no test.
+      - name: Demo e2e
+        run: pnpm --filter nest-graph-inspector-demo run test:e2e
+
+  viewer-e2e:
+    name: Viewer e2e (browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build library
+        run: pnpm --filter nest-graph-inspector run build
+
+      # The landing page draws the demo's static graph and "Load Example"
+      # boots this payload in the browser, both of which the tests open.
+      - name: Build demo payload
+        run: pnpm --filter nest-graph-inspector-demo run build:nodepod
+
+      # Built exactly as the site job builds it, and served by the tests the
+      # way GitHub Pages serves it, under /nest-graph-inspector/.
+      - name: Generate static site
+        working-directory: site
+        run: pnpm exec nuxt generate
+        env:
+          NITRO_PRESET: github_pages
+          NUXT_APP_BASE_URL: /nest-graph-inspector/
+
+      # Not cached: restoring Chromium from a cache takes about as long as
+      # downloading it, and its system libraries cannot be cached at all.
+      - name: Install Chromium
+        run: pnpm --filter nest-graph-inspector-demo exec playwright install --with-deps chromium
+
+      # Starts the demo as a process of its own and the site build beside it,
+      # then drives the viewer through the link the demo prints. One worker,
+      # no retries; Playwright fails when it finds no test.
+      - name: Viewer e2e
+        run: pnpm --filter nest-graph-inspector-demo run test:e2e:browser
+
+      # The traces hold the access token of a demo that stopped with the job,
+      # on a runner that is gone with it.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            demo/playwright-report/
+            demo/test-results/
+          retention-days: 14

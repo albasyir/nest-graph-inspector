@@ -8,6 +8,8 @@ dist
 
 # Test output
 coverage
+playwright-report/
+test-results/
 
 # Nuxt / Nitro output
 .nuxt

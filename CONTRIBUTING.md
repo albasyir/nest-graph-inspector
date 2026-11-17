@@ -45,10 +45,26 @@ pnpm --filter nest-graph-inspector run test:cov
 pnpm --filter nest-graph-inspector-demo run dev
 pnpm --filter nest-graph-inspector-demo run build:nodepod   # rebuild the demo the site runs in the browser, and its graph.json
 pnpm --filter nest-graph-inspector-demo run build:graph     # export the demo's graph without running it (nest-graph-inspector export)
-pnpm --filter nest-graph-inspector-demo run test:e2e        # demo e2e suites: security, REST, and export vs. live /output.json
+pnpm --filter nest-graph-inspector-demo run test:e2e        # demo e2e suites: security, REST, export vs. live /output.json, and the built demo run as a process
+pnpm --filter nest-graph-inspector-demo run test:e2e:browser  # the viewer in Chromium against the demo run as a process (see below)
 pnpm --filter nest-graph-inspector-site run test:demo-payload  # boot that payload and check it answers
 pnpm --filter nest-graph-inspector-site run dev
 ```
+
+The browser suite opens the viewer from the site's static build, built the
+way CI builds it, so build that first — and install Chromium once:
+
+```bash
+pnpm --filter nest-graph-inspector run build
+pnpm --filter nest-graph-inspector-demo run build:nodepod
+NITRO_PRESET=github_pages NUXT_APP_BASE_URL=/nest-graph-inspector/ pnpm --filter nest-graph-inspector-site exec nuxt generate
+pnpm --filter nest-graph-inspector-demo exec playwright install chromium
+pnpm --filter nest-graph-inspector-demo run test:e2e:browser
+```
+
+Both e2e commands start the demo on its fixed ports (8889, 53371 and 53372),
+and refuse to while another process listens on one — another checkout running
+its demo, say. Neither runs under `verify`; CI runs both on every pull request.
 
 The site's demo is the demo application itself, running in the visitor's
 browser. It is served from `site/public/nodepod-demo/`, which is generated and
@@ -89,7 +105,8 @@ Scopes in use: `lib`, `demo`, `site`, `deps`, or omit it for repo-wide changes.
 1. Branch from `main`.
 2. Run `pnpm run verify`.
 3. Open the PR and fill in the template.
-4. CI runs lint, typecheck, tests on Node 20/22/24, and a full site build.
+4. CI runs lint, typecheck, tests on Node 20/22/24, a full site build, the
+   demo's e2e suites, and the viewer's browser suite.
 
 ## Releasing
 

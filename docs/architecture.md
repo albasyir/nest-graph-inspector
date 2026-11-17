@@ -46,7 +46,8 @@ nest-graph-inspector/        ← monorepo root (pnpm workspace)
 ├── demo/                    ← private NestJS app: development host and showcase
 │   ├── src/                 ← an ordinary NestJS application
 │   ├── scripts/             ← packages that application for the browser
-│   ├── test/                ← e2e tests, including network-level security tests
+│   ├── test/                ← e2e tests: network-level security, the demo run as a
+│   │                          process, and the viewer in a browser (test/browser/)
 │   └── docs/                ← legacy demo documentation
 ├── site/                    ← Nuxt 4 documentation site + interactive viewer
 │   ├── app/                 ← Nuxt app directory (pages, stores, components)
@@ -750,24 +751,57 @@ remedy the page offers, removing the import, does not apply. The static
 `graph.json`, the demo run by Node and the in-browser demo all show it.
 Teaching the unused-import check about global modules is a follow-up.
 
-`demo/test/` holds three e2e suites: an application-level one that walks one
-customer through the shop's REST routes — sign-up, checkout, payment, loyalty
-points, a reward voucher, a second checkout paid with it — checks that two
-simultaneous checkouts cannot both take one voucher, *and* then reads the
+`demo/test/` holds four Jest e2e suites: an application-level one that walks
+one customer through the shop's REST routes — sign-up, checkout, payment,
+loyalty points, a reward voucher, a second checkout paid with it — checks that
+two simultaneous checkouts cannot both take one voucher, *and* then reads the
 token-gated graph endpoint over TCP, checking every module's imports and both
 cycles; the network-level security suite described above, which boots the real
-module and probes it over real sockets; and the export suite, which requires
+module and probes it over real sockets; the export suite, which requires
 `nest-graph-inspector export` of the demo's `nest build` output — and of its
 TypeScript sources, through `ts-node` — to equal the `/output.json` the running
-demo serves, byte for byte.
+demo serves, byte for byte; and the process suite
+(`demo-process.e2e-spec.ts`), which builds the demo and starts it as a user
+does — `node` on the compiled `main.js`, a process of its own, in a scratch
+working directory — and reaches it only through the viewer link it prints:
+the handshake, the graph against the schema served beside it, the Markdown
+report, the token's transports and refusals, a layout saved and read back,
+Direct Run on a controller and on a provider with the traces they leave, the
+plain `http` output, the files the outputs write, the application's own routes
+on its own port — every argument-free `GET` the graph lists, none failing and
+at least one answering, since a guard may turn an anonymous caller away — and
+an export equal to what it serves. Beside them, `demo/test/browser/` drives
+the viewer in Chromium with Playwright against the same kind of process and
+the generated site, served the way GitHub Pages serves it. Before it checks
+the modules a viewer draws, it waits until every viewer on the page has
+settled its `data-layout-state` (see the automatic layout, below), and fails
+if any settled on `failed`: the simple arrangement draws every node too, so a
+node on screen cannot tell a laid-out graph from one whose layout broke.
 
-**None runs by default.** They live behind `pnpm --filter
-nest-graph-inspector-demo run test:e2e` with their own Jest config, while the
-demo's plain `test` script is scoped to `src/` and passes with no tests. Root
-`pnpm run test` — and therefore CI — does not reach them. Change anything in
-the security surface and you must run `test:e2e` yourself; nothing else will.
-They run in band: the application-level and export suites both boot the
-demo's `AppModule`, whose inspector binds fixed ports.
+Neither the process suite nor the browser suite names a module, a route or a
+provider of the demo: their expectations come from the graph it serves, and
+the few facts no running demo can tell — its ports, route prefix and outputs —
+live in `demo/test/support/demo.fixture.ts`. The harness that starts it
+(`demo/test/support/demo-process.ts`) refuses while another process listens on
+one of those ports, counts the demo ready only on signals from its own child —
+the printed link, its own sockets listening, and the printed token accepted —
+reading who listens from procfs where there is one, and fails with the demo's
+output, credentials redacted, when it exits early or is not ready in time.
+Since the inspector reads source metadata from `<cwd>/tsconfig.json`, the
+harness writes one into the scratch directory describing the demo's own
+project, and the export comparison holds it to that.
+
+**Neither `test` nor `verify` runs them.** The Jest suites live behind `pnpm
+--filter nest-graph-inspector-demo run test:e2e` with their own Jest config,
+and the browser suite behind `run test:e2e:browser`, which needs the library,
+the demo payload and the generated site built first; the demo's plain `test`
+script is scoped to `src/` and passes with no tests. CI runs them in jobs of
+their own, Demo e2e and Viewer e2e (browser) — locally, change anything in the
+security surface and run `test:e2e` yourself before you push. The Jest suites
+run in band: the application-level and export suites boot the demo's
+`AppModule`, and the process suite starts the built demo, all on the same
+fixed ports — which is why the run refuses to start, before any of them,
+while another process listens on one (`demo/test/e2e-global-setup.ts`).
 
 The application knows nothing about the documentation site, deliberately: it is
 a NestJS project you could copy elsewhere and run unchanged. Everything the
@@ -1087,10 +1121,12 @@ with it, it cannot go stale. `build:graph` regenerates it alone.
 test:demo-payload` (`site/scripts/verify-nodepod-payload.ts`) boots the built
 payload on the same runtime — headless, on `worker_threads` instead of Web
 Workers — spawns it, and reads the graph endpoint out of the startup log with
-the site's own parser. It is the only thing exercising the two couplings this
-design rests on: that the bundle starts at all, and that the viewer link the
-library prints is still in a shape the site can read. Every workflow that
-generates the site runs it right after building the payload.
+the site's own parser. It exercises the two couplings this design rests on:
+that the bundle starts at all, and that the viewer link the library prints is
+still in a shape the site can read. Every workflow that generates the site
+runs it right after building the payload. The viewer's browser suite
+(`demo/test/browser/`) checks the first in a real browser too: it presses
+"Load Example" in Chromium and waits for the live graph.
 
 **Boot sequence.**
 
@@ -1352,14 +1388,14 @@ a temporary project and runs its bin with `node`, so the CLI is tested as
 installed rather than through `lib/dist`, which can be stale and, in the
 library matrix job that tests before it builds, is absent; `site/` uses `node --test` with
 `--experimental-strip-types` over `app/**/*.test.ts`, no framework. The demo's
-e2e suites sit outside all of it under `test:e2e`, so the library's own specs
-are what CI actually gates the security behaviour on.
+e2e suites sit outside all of it — Jest under `test:e2e`, Playwright under
+`test:e2e:browser` — and CI runs them in jobs of their own; `verify` does not.
 
 Workflows:
 
 | Workflow | Trigger | What it gates |
 |---|---|---|
-| `ci.yml` | PR, push to `main` | `verify` job; library on Node 20/22/24; a full site build including the payload boot check |
+| `ci.yml` | PR, push to `main` | `verify` job; library on Node 20/22/24; a full site build including the payload boot check; Demo e2e, the demo's Jest e2e suites (`test:e2e`); Viewer e2e (browser), the viewer in Chromium against the demo run as a process (`test:e2e:browser`) |
 | `deploy-site.yml` | GitHub release published | Re-runs lint/typecheck/test, stamps the version from the release tag, publishes to npm with provenance, then builds and deploys the site to Pages |
 | `publish-test-package.yml` | manual | Publishes a prerelease under the `test` dist-tag |
 | `redeploy-site-on-tag.yml` | manual | Rebuilds and redeploys the site from any ref |
@@ -1424,7 +1460,8 @@ that is never the default.
    guard. Widening CORS, changing the bind interface, or bypassing the guard is
    a security change: add a case to
    `demo/test/graph-inspector-security.e2e-spec.ts` **and run it yourself**
-   (`pnpm --filter nest-graph-inspector-demo run test:e2e`) — CI does not.
+   (`pnpm --filter nest-graph-inspector-demo run test:e2e`) — `verify` does
+   not, though CI's Demo e2e job does.
 8. **The demo payload is bundled from compiled JavaScript.**
    `demo/scripts/build-nodepod-payload.ts` must keep its entry point on the
    `nest build` output; pointing the bundler at `demo/src/**` drops the
@@ -1434,7 +1471,8 @@ that is never the default.
    `site/app/utils/nodepod-demo-endpoint.ts` reads the endpoint out of the
    startup log; change the shape of that line in `viewer-output.adapter.ts` and
    the in-browser demo stops finding its own graph — `test:demo-payload` catches
-   it.
+   it, and so do the demo's process suite, which takes its token from that
+   line, and the browser suite, which opens it.
 10. **`lib/` and `demo/` compile under `strict`, spec files included.** Do not
     weaken `tsconfig.base.json` to make a change compile.
 11. **An export runs nothing.** `nest-graph-inspector export` boots in preview
@@ -1576,3 +1614,16 @@ Facts a code change can invalidate, and the file to check:
   `start()` in `site/app/stores/nodepod-demo.ts`; the size of ELK's worker
   script, `~1.6 MB` (`~477 KB` gzipped) — the `elkjs` version in
   `site/package.json`
+- The facts the e2e suites cannot read from the running demo — its ports,
+  route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
+- Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
+  run them — `demo/package.json`, `demo/test/jest-e2e.json`,
+  `demo/test/browser/playwright.config.ts`, and `.github/workflows/ci.yml`
+- What the browser suite answers off the machine, and the console errors it
+  expects — `OFF_MACHINE_ANSWERS` and `EXPECTED_CONSOLE_ERRORS` in
+  `demo/test/browser/viewer.fixtures.ts`
+- Which layout states the browser suite waits for and fails on (`ready`,
+  `failed`), the root it reads them from, `.graph-viewer[data-layout-state]`,
+  and the failure notice it quotes, `.graph-viewer-layout-failure__text` —
+  `expectGraphLayoutsReady` in `demo/test/browser/viewer.fixtures.ts`, against
+  `site/app/utils/module-layout-state.ts` and `GraphViewer.vue`

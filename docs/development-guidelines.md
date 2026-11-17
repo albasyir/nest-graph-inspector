@@ -116,16 +116,17 @@ pnpm test:cov        # coverage report
 Test files live alongside the source they test (`*.spec.ts` co-located in
 `lib/src/adapters/` and at `lib/src/`).
 
-### Library e2e tests
+### Demo e2e tests
 
 ```bash
-cd library
-pnpm test:e2e        # Jest with test/jest-e2e.json config
+pnpm --filter nest-graph-inspector-demo run test:e2e          # Jest, test/jest-e2e.json: security, REST, export, and the demo run as a process
+pnpm --filter nest-graph-inspector-demo run test:e2e:browser  # Playwright: the viewer in Chromium against the demo run as a process
 ```
 
-> **Note:** `demo/test/app.e2e-spec.ts` appears to be a leftover NestJS
-> scaffold (`GET /` expects `"Hello World!"`).  No controller serving that
-> route exists in `demo/src`.  This test may fail without modification.
+The browser suite needs the library, the demo payload and the generated site
+built first — see `CONTRIBUTING.md`. Both start the demo on its fixed ports.
+`verify` runs neither; CI runs them in its Demo e2e and Viewer e2e (browser)
+jobs.
 
 ### Library linting and formatting
 
@@ -273,8 +274,3 @@ Update `docs/graph-contract.md` if the contract changed.
 - There is no monorepo-level `pnpm-workspace.yaml`; workspace membership is
   inferred by convention. Confirm whether `lib/`, `demo/`, and `site/` are
   officially in the same pnpm workspace.
-- The `demo/test/app.e2e-spec.ts` e2e test appears to be a scaffold
-  remnant.  It should either be updated to test the real demo app behaviour or
-  removed.
-- No CI pipeline runs the library unit tests automatically (`.github/workflows/`
-  only contains `deploy-site.yml`).  Contributors must run `pnpm test` locally.
