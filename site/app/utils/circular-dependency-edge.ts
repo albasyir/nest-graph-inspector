@@ -17,7 +17,13 @@
  * its handle faces. Each comes with where its label goes: on the curve, or
  * just past a self-loop, so the label never covers the loop it names.
  *
- * Pure geometry over what Vue Flow measured, so both viewers draw cycles alike.
+ * Where the module graph's automatic layout has routed a cycle edge between
+ * two modules, the edge is drawn along that route instead, like any other
+ * import, and its label goes on the route: `placeRouteLabels` finds it a spot
+ * that covers no module and no other label.
+ *
+ * Pure geometry over what Vue Flow measured, so every viewer draws a cycle's
+ * curve alike.
  */
 
 /** A side of a node, named as Vue Flow's `Position` values are. */
@@ -60,6 +66,34 @@ export type CircularEdgeGeometry = {
 
 /** A box in flow coordinates. */
 export type CircularEdgeRect = { x: number, y: number, width: number, height: number }
+
+/** Where a label sits, and how it is set against that point — as a curve's is. */
+export type CircularLabelSpot = Pick<
+  CircularEdgeGeometry,
+  'labelX' | 'labelY' | 'labelTransform' | 'labelAnchor'
+>
+
+/** A label to place on the route its edge is drawn along. */
+export type RouteLabelRequest = {
+  /** What its placement is returned under: its edge's id. */
+  key: string
+  /** The route, start to end, in flow coordinates. */
+  route: readonly CircularEdgePoint[]
+  /** Its text, which sets how wide it is. */
+  text: string
+}
+
+/** Where a label goes on its route, and how far that spot stays clear. */
+export type RouteLabelPlacement = CircularLabelSpot & {
+  /**
+   * The largest scale the label is drawn at that still clears every obstacle
+   * and every label placed before it: `CIRCULAR_LABEL_MAX_SCALE` when it is
+   * clear however far the canvas zooms out, a smaller one when it is clear
+   * only once the canvas is zoomed in that far, and 0 when no spot on its
+   * route is clear at all.
+   */
+  clearScale: number
+}
 
 /**
  * The most a label is enlarged to stay readable on a zoomed-out canvas: past
@@ -121,6 +155,19 @@ const LABEL_ANCHOR_BESIDE: Readonly<Record<CircularEdgeSide, CircularEdgePoint>>
 
 /** How many cycle ids a label lists before it counts the rest. */
 const LABEL_MAX_LISTED_IDS = 2
+
+/**
+ * The sizes a route label is tried at, largest first: at the largest a label
+ * is ever drawn it is clear at every zoom, and a smaller one is the fallback
+ * where the route has no room for that.
+ */
+const ROUTE_LABEL_SCALES = [CIRCULAR_LABEL_MAX_SCALE, 2, 1.5, 1] as const
+/** Room kept between a route label and anything it must not cover. */
+const ROUTE_LABEL_CLEARANCE = 6
+/** How far apart the spots tried along a stretch of route are. */
+const ROUTE_LABEL_STEP = 8
+/** Half the width a line a label keeps off is taken to have. */
+const ROUTE_LINE_HALF_WIDTH = 1.5
 
 /**
  * The curve a cycle edge is drawn along, and where its label goes.
@@ -266,6 +313,188 @@ function getPointsBounds(points: readonly CircularEdgePoint[]): CircularEdgeRect
     width: Math.max(...points.map(point => point.x)) - left,
     height: Math.max(...points.map(point => point.y)) - top
   }
+}
+
+/**
+ * Where each label goes on the route its edge is drawn along: centred on the
+ * route, on its longest stretch where the label covers no obstacle — a module
+ * — and no label placed before it, as near that stretch's middle as it can
+ * be. A label is tried at the largest size it is ever drawn first, so it
+ * stays clear however far the canvas zooms out, and only where its route has
+ * no room for that at a smaller size. At each size it would rather not cover
+ * any of `lines` either — the other cycle edges, whose turns a label would
+ * hide — and covers one only where no clear spot on its route avoids them all.
+ * Labels are placed in the order given, the ones that matter most first; one
+ * with no clear spot at all sits in the middle of its route's longest stretch.
+ */
+export function placeRouteLabels(params: {
+  labels: readonly RouteLabelRequest[]
+  obstacles: readonly CircularEdgeRect[]
+  /** Routes a label had rather not cover; its own, and any just like it, aside. */
+  lines?: readonly (readonly CircularEdgePoint[])[]
+}): Map<string, RouteLabelPlacement> {
+  const taken: CircularEdgeRect[] = [...params.obstacles]
+  const placements = new Map<string, RouteLabelPlacement>()
+  const lines = (params.lines ?? []).map(line => ({ line, boxes: lineBoxes(line) }))
+
+  for (const { key, route, text } of params.labels) {
+    const candidates = routeLabelCandidates(route)
+    const [fallback] = candidates
+    if (!fallback) {
+      continue
+    }
+
+    // Only what a label anywhere on this route could cover is worth trying it
+    // against — on a large graph, a small part of everything there is.
+    const reach = routeLabelReach(route, text)
+    const isNear = (box: CircularEdgeRect) => overlaps(box, reach)
+    const avoid = lines
+      .filter(({ line }) => !isSameRoute(line, route))
+      .flatMap(({ boxes }) => boxes.filter(isNear))
+    const clear = findClearRouteLabelSpot({ candidates, text, taken: taken.filter(isNear), avoid })
+    const point = clear?.point ?? fallback
+    // Kept clear of from now on — at the size it was found clear at, or, with
+    // no clear spot, at its own size, so labels after it still keep away.
+    taken.push(getCircularLabelBox(centredLabelAt(point), text, clear?.scale ?? 1))
+    placements.set(key, { ...centredLabelAt(point), clearScale: clear?.scale ?? 0 })
+  }
+
+  return placements
+}
+
+/**
+ * The spots along a route a label may be centred on, best first: the longest
+ * stretch before the shorter ones, and along each, its middle first and then
+ * every `ROUTE_LABEL_STEP` towards its ends, alternately one way and the
+ * other. A route with no length offers only its one point.
+ */
+function routeLabelCandidates(route: readonly CircularEdgePoint[]): CircularEdgePoint[] {
+  const stretches = route
+    .slice(1)
+    .map((end, index) => {
+      const start = route[index] ?? end
+      return { start, end, length: Math.hypot(end.x - start.x, end.y - start.y) }
+    })
+    .filter(stretch => stretch.length > 0)
+    .sort((left, right) => right.length - left.length)
+
+  const candidates = stretches.flatMap(({ start, end, length }) => {
+    const along = [0]
+    for (let offset = ROUTE_LABEL_STEP; offset <= length / 2; offset += ROUTE_LABEL_STEP) {
+      along.push(offset, -offset)
+    }
+
+    return along.map((offset) => {
+      const t = 0.5 + offset / length
+      return { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t }
+    })
+  })
+  const [first] = route
+
+  return candidates.length > 0 || !first ? candidates : [first]
+}
+
+/**
+ * The first candidate a label is clear of everything `taken` at, at the
+ * largest scale any is — every candidate is tried at one scale before any is
+ * tried at the next — and, at that scale, one that also covers nothing it was
+ * asked to `avoid` where there is such a candidate.
+ */
+function findClearRouteLabelSpot(params: {
+  candidates: readonly CircularEdgePoint[]
+  text: string
+  taken: readonly CircularEdgeRect[]
+  avoid: readonly CircularEdgeRect[]
+}): { point: CircularEdgePoint, scale: number } | undefined {
+  const { candidates, text, taken, avoid } = params
+  const preferences = avoid.length > 0 ? [[...taken, ...avoid], taken] : [taken]
+  for (const scale of ROUTE_LABEL_SCALES) {
+    for (const blocked of preferences) {
+      for (const point of candidates) {
+        const box = grow(getCircularLabelBox(centredLabelAt(point), text, scale), ROUTE_LABEL_CLEARANCE)
+        if (!blocked.some(other => overlaps(box, other))) {
+          return { point, scale }
+        }
+      }
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * The box every spot a label could take on `route` stays inside: the route's
+ * own box, grown by half the label at its largest and the clearance it keeps.
+ */
+function routeLabelReach(
+  route: readonly CircularEdgePoint[],
+  text: string
+): CircularEdgeRect {
+  const largest = getCircularLabelBox(centredLabelAt({ x: 0, y: 0 }), text, CIRCULAR_LABEL_MAX_SCALE)
+  const left = Math.min(...route.map(point => point.x))
+  const top = Math.min(...route.map(point => point.y))
+
+  return grow({
+    x: left - largest.width / 2,
+    y: top - largest.height / 2,
+    width: Math.max(...route.map(point => point.x)) - left + largest.width,
+    height: Math.max(...route.map(point => point.y)) - top + largest.height
+  }, ROUTE_LABEL_CLEARANCE)
+}
+
+/** Each straight stretch of a line, as the thin box its stroke covers. */
+function lineBoxes(line: readonly CircularEdgePoint[]): CircularEdgeRect[] {
+  return line.slice(1).flatMap((end, index) => {
+    const start = line[index]
+    return start
+      ? [grow({
+          x: Math.min(start.x, end.x),
+          y: Math.min(start.y, end.y),
+          width: Math.abs(end.x - start.x),
+          height: Math.abs(end.y - start.y)
+        }, ROUTE_LINE_HALF_WIDTH)]
+      : []
+  })
+}
+
+/** Whether two routes run through the same points, in the same order. */
+function isSameRoute(
+  left: readonly CircularEdgePoint[],
+  right: readonly CircularEdgePoint[]
+): boolean {
+  return left.length === right.length
+    && left.every((point, index) => {
+      const other = right[index]
+      return other !== undefined && point.x === other.x && point.y === other.y
+    })
+}
+
+/** A label centred on a point, as a curve's label is on its midpoint. */
+function centredLabelAt(point: CircularEdgePoint): CircularLabelSpot {
+  return {
+    labelX: point.x,
+    labelY: point.y,
+    labelTransform: LABEL_TRANSFORM_CENTERED,
+    labelAnchor: LABEL_ANCHOR_CENTERED
+  }
+}
+
+/** A box with `by` more room on every side. */
+function grow(rect: CircularEdgeRect, by: number): CircularEdgeRect {
+  return {
+    x: rect.x - by,
+    y: rect.y - by,
+    width: rect.width + by * 2,
+    height: rect.height + by * 2
+  }
+}
+
+/** Whether two boxes share any area — touching edges do not count. */
+function overlaps(left: CircularEdgeRect, right: CircularEdgeRect): boolean {
+  return left.x < right.x + right.width
+    && right.x < left.x + left.width
+    && left.y < right.y + right.height
+    && right.y < left.y + left.height
 }
 
 /**
