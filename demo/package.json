@@ -23,9 +23,9 @@
     "test:e2e:browser": "playwright test --config test/browser/playwright.config.ts"
   },
   "dependencies": {
-    "@nestjs/common": "^12.4.0",
-    "@nestjs/core": "^12.4.0",
-    "@nestjs/platform-express": "^12.4.0",
+    "@nestjs/common": "^12.5.0",
+    "@nestjs/core": "^12.5.0",
+    "@nestjs/platform-express": "^12.5.0",
     "nest-graph-inspector": "workspace:*",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
@@ -33,9 +33,9 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
     "@eslint/js": "^10.0.1",
-    "@nestjs/cli": "^12.0.12",
+    "@nestjs/cli": "^12.0.13",
     "@nestjs/schematics": "^12.0.13",
-    "@nestjs/testing": "^12.4.0",
+    "@nestjs/testing": "^12.5.0",
     "@playwright/test": "1.65.1",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",

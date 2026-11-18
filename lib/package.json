@@ -67,9 +67,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@nestjs/common": "^12.4.0",
-    "@nestjs/core": "^12.4.0",
-    "@nestjs/testing": "^12.4.0",
+    "@nestjs/common": "^12.5.0",
+    "@nestjs/core": "^12.5.0",
+    "@nestjs/testing": "^12.5.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
