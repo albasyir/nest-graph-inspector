@@ -1,6 +1,10 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
+    // commonjs on purpose: cli.ts and export-command.ts load their next step
+    // with `await import("./...")`, which only works compiled to require().
+    // TypeScript 6 deprecates node10 resolution, and node16/nodenext would
+    // force module node16/nodenext, so resolution is bundler.
     "module": "commonjs",
     "moduleResolution": "bundler",
     "incremental": false,
