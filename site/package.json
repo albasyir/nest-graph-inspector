@@ -36,7 +36,7 @@
     "@vue-flow/core": "^1.48.2",
     "@vue-flow/minimap": "^1.5.4",
     "@vue-flow/node-resizer": "^1.5.1",
-    "@vueuse/core": "^14.4.0",
+    "@vueuse/core": "^15.0.0",
     "apexcharts": "^8.8.2",
     "better-sqlite3": "^12.11.1",
     "elkjs": "^0.12.1",
