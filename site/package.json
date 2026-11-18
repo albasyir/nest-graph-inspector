@@ -52,7 +52,7 @@
     "pinia": "^4.1.0",
     "posthog-node": "^5.74.0",
     "reka-ui": "^2.11.0",
-    "tailwind-variants": "^3.3.1",
+    "tailwind-variants": "^4.0.2",
     "tailwindcss": "^4.3.5",
     "ufo": "^1.6.4",
     "unist-util-visit": "^5.2.0",
