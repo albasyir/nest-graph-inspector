@@ -47,7 +47,7 @@
     "monaco-editor": "^0.55.1",
     "nest-graph-inspector": "workspace:*",
     "nuxt": "^4.6.4",
-    "nuxt-llms": "0.2.0",
+    "nuxt-llms": "0.3.2",
     "nuxt-og-image": "^7.0.7",
     "pinia": "^4.1.0",
     "posthog-node": "^5.74.0",
