@@ -71,7 +71,7 @@
     "@nestjs/core": "^12.4.0",
     "@nestjs/testing": "^12.4.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
     "jest": "^30.5.2",
     "ts-jest": "^29.4.15",

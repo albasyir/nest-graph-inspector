@@ -39,7 +39,7 @@
     "@playwright/test": "1.65.1",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.10.7",
+    "@types/node": "^26.6.6",
     "@types/supertest": "^7.2.1",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
