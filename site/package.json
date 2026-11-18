@@ -26,7 +26,7 @@
     "@nuxt/ui": "^4.11.2",
     "@nuxtjs/device": "^4.0.0",
     "@nuxtjs/mcp-toolkit": "^0.24.3",
-    "@nuxtjs/mdc": "^0.23.2",
+    "@nuxtjs/mdc": "^0.23.3",
     "@pinia/nuxt": "^1.0.3",
     "@posthog/nuxt": "^1.7.76",
     "@scelar/nodepod": "^1.9.20",
