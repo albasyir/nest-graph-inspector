@@ -327,14 +327,16 @@ function handleTraceOpen() {
   gap: 6px;
   height: 30px;
   padding: 0 12px;
+  border: 1px solid transparent;
   border-radius: 6px;
-  color: var(--ui-text-muted);
+  color: var(--ui-text-toned);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
   transition:
     background-color 120ms ease,
+    border-color 120ms ease,
     color 120ms ease;
 }
 
@@ -347,10 +349,11 @@ function handleTraceOpen() {
   outline-offset: 1px;
 }
 
+/* Lifted out of the track by a tone step and a hairline, never a shadow. */
 .module-page__view--active {
+  border-color: var(--ui-border);
   background: var(--ui-bg);
   color: var(--ui-text-highlighted);
-  box-shadow: 0 0 0 1px var(--ui-border);
 }
 
 @media (max-width: 639.98px) {
