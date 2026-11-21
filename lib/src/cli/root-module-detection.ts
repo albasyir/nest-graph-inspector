@@ -396,7 +396,8 @@ export function forRootWarning(
 
 /**
  * The command line as given, with the loaders loading the TypeScript source
- * needs — ts-node, which emits the decorator metadata Nest reads, and
+ * needs — ts-node, which emits the decorator metadata Nest reads when the
+ * tsconfig it reads sets `emitDecoratorMetadata`, and
  * tsconfig-paths when the tsconfig maps `paths`. Both read the project's
  * `tsconfig.json` unless `TS_NODE_PROJECT` names another, so the command sets
  * it for an application built with another tsconfig. Only ever suggested.

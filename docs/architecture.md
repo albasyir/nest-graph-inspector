@@ -669,8 +669,9 @@ Why each step is the way it is:
   root module's file, so under an explicit `rootDir` only the path tsc writes.
   Which of them exist is settled first: more than one means all but one are
   stale, and none is taken (below). The one there is is taken only when no
-  other application's build could write its own `app.module.js` there too.
-  Failing that, that application's main.ts decides. A bundled application
+  other application's build could write its own `app.module.js` there too —
+  from its conventional path, or from a source of its elsewhere, that build
+  read backwards as below. Failing that, that application's main.ts decides. A bundled application
   writes no `app.module.js` at all. Without `--app`, the whole outDir is still
   searched, as it always has been. The file main.ts's root module is
   compiled to is held to the same rule, with or without `--app`: when another
@@ -725,8 +726,9 @@ Why each step is the way it is:
   root module main.ts computes, or a bootstrap function imported from
   another file — is out of its reach. When main.ts boots another root module
   the export can follow, that one decides, and a note on stderr names each
-  boot passed over by file and line; otherwise the convention's error
-  stands.
+  `NestFactory` call in main.ts passed over by file and line — a boot inside
+  a function main.ts imports is never seen, so no note names it; otherwise
+  the convention's error stands.
 - **Compiled output is probed, not assumed — except where the compiler
   says.** `cli/build-output.ts` decides it. With no `outDir`, tsc writes beside the source, and only there is
   looked; with an explicit `rootDir`, only the path under it — anywhere else
@@ -785,9 +787,10 @@ Why each step is the way it is:
   another, resolved from the working directory — the project, by the time
   the loaders load — so when the application builds with another tsconfig,
   the printed command sets `TS_NODE_PROJECT` to it, POSIX shell style. When
-  a TypeScript file the `--require` loaders were to load fails to, the error
-  says so, and what a loader must do: register the file's extension and emit
-  the decorator metadata Nest reads, as `ts-node/register` does.
+  a TypeScript file loaded with `--require` preloads fails to load, the error
+  says so, and what a preload must do: register the file's extension and emit
+  the decorator metadata Nest reads, as `ts-node/register` does when the
+  tsconfig it reads sets `emitDecoratorMetadata`.
 - **Nest from the project, never from beside the CLI.** Under `npx` the CLI can
   live in a temporary directory holding its own copy of the peers. A second
   `@nestjs/core` would build a second, empty container, and the application's
@@ -1712,7 +1715,7 @@ without knowing what it buys.
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
 | The export loads the application's module files | Preview mode is Nest's own resolution: dynamic modules, `forwardRef`, global modules, and missing providers come out exactly as they do at runtime, which parsing the sources would only approximate | Code at the top level of those files runs — `.env` reads, `forRoot()` calls. A file that starts the application, `main.js` above all, is refused rather than loaded when it is the file the export loads (below) |
-| The root module is found by parsing main.ts, never by running it | Loading main.ts is what starts the application; what it passes to `NestFactory` is the root module in every project written the usual way | A root module main.ts only computes at runtime, or one booted by a function main.ts imports, is not found — the convention's error stands and `--entry`/`--module` are needed; when main.ts also boots one it can follow, that one is exported, with a note naming the boot passed over. `RootModule.forRoot(options)` is exported without its options, with a warning |
+| The root module is found by parsing main.ts, never by running it | Loading main.ts is what starts the application; what it passes to `NestFactory` is the root module in every project written the usual way | A root module main.ts only computes at runtime, or one booted by a function main.ts imports, is not found — the convention's error stands and `--entry`/`--module` are needed; when main.ts also boots one it can follow, that one is exported, with a note naming each `NestFactory` call in main.ts passed over (a boot inside an imported function gets none). `RootModule.forRoot(options)` is exported without its options, with a warning |
 | The file the export is about to load is checked for `NestFactory` calls, `--entry`'s included — that file alone | Loading `main.js`, compiled or bundled, runs the bootstrap: it listens on a port and connects to a database. A file name proves nothing; a call does. Checking every module it imports would mean resolving the application's import graph as Node does, before anything loads | A module file that also holds a bootstrap — even a function nobody calls as the file loads — is refused, and the module has to move to a file of its own. A root module file that imports main.ts, or a file that boots the application, still starts it: the modules it imports are not read. `--entry` no longer loads whatever it is given |
 | No TypeScript loader is installed or chosen | A loader decides whether decorator metadata is emitted, and with it whether Nest sees every dependency; a silently chosen one could give a silently wrong graph | A bundled or unbuilt project needs `--require ts-node/register` typed; the error prints the exact command |
 | The export boots with `snapshot: true` | It is the boot the CLI was specified with: `preview` together with `snapshot`, as Nest documents preview mode for graph tooling | Nest then builds each dynamic module's key with an unguarded `JSON.stringify` of its metadata, so a `forRoot()` whose options hold a circular object or a `BigInt` fails the export though the application starts; the CLI's hint says so |

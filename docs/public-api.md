@@ -306,9 +306,10 @@ deep; past that, or wherever the trail cannot be read, no warning is given,
 so pass `--entry` and `--module` where it matters — which is
 still the one exported, and when main.ts boots it through
 `forRoot()`-style calls whose options the export goes without. When a
-TypeScript entry loaded through `--require` fails to load, the error names
-those `--require`s and adds that the loader must register the file's
-extension and emit decorator metadata, as `--require ts-node/register` does.
+TypeScript entry loaded with `--require` preloads fails to load, the error
+names those preloads and adds that a preload must register the file's
+extension and emit decorator metadata, as `--require ts-node/register` does
+when the tsconfig it reads sets `emitDecoratorMetadata`.
 Where only the
 TypeScript source could be loaded and no `--require` was given, it fails with
 the command line to run, the user's own plus

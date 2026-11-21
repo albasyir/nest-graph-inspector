@@ -6,8 +6,10 @@ import type { Type } from "@nestjs/common";
 import {
   buildAdvice,
   conventionalEntryCandidates,
+  conventionalEntrySource,
   outDirOf,
   pickCompiled,
+  sharedWith,
   staleBuildsReason,
 } from "./build-output";
 import { CliError } from "./cli-error";
@@ -373,7 +375,10 @@ function conventionNotes(found: {
 /**
  * `--app`'s own `app.module.js`. Which candidates exist is settled first —
  * more than one means all but one are stale — and only then whose the one
- * there is. When none is taken, the reason stands for main.ts to fall back on.
+ * there is: not another application's conventional path, nor a file its build
+ * compiles a source outside its sourceRoot to (`sharedWith`, as for main.ts's
+ * root module). When none is taken, the reason stands for main.ts to fall
+ * back on.
  */
 function detectApplicationEntry(
   layout: ApplicationLayout,
@@ -389,7 +394,9 @@ function detectApplicationEntry(
     case "found":
       return ownedConventionalEntries(layout, config, cwd).some((owned) =>
         samePath(owned, compiled.path),
-      )
+      ) &&
+        sharedWith(compiled.path, conventionalEntrySource(layout), otherApplicationLayouts(layout, config, cwd)) ===
+          undefined
         ? { kind: "found", path: compiled.path }
         : failed(
             `${displayPath(compiled.path, cwd)} is where ${app}'s build writes its ${ROOT_MODULE_FILE}, but another application's build writes its own there too, so whose it is cannot be told. Pass --entry <file>.`,

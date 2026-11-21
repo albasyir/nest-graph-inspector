@@ -246,12 +246,15 @@ function sourcesBuiltTo(compiled: string, layout: ApplicationLayout): string[] {
   return [...new Set(roots.flatMap((root) => fromOutDirs.flatMap((path) => asSources(join(root, path)))))];
 }
 
+export function conventionalEntrySource({ application, projectDir }: ApplicationLayout): string {
+  return resolve(projectDir, application.sourceRoot, CONVENTIONAL_ROOT_MODULE);
+}
+
 /** Where an application's own build writes `<sourceRoot>/app.module.ts`; a bundle writes none. */
 export function conventionalEntryCandidates(layout: ApplicationLayout): string[] {
-  const { application, projectDir } = layout;
-  return application.build.kind === "bundled"
+  return layout.application.build.kind === "bundled"
     ? []
-    : compiledCandidates(resolve(projectDir, application.sourceRoot, CONVENTIONAL_ROOT_MODULE), layout);
+    : compiledCandidates(conventionalEntrySource(layout), layout);
 }
 
 export function entryFileSources({ application, projectDir }: ApplicationLayout): string[] {

@@ -194,8 +194,8 @@ export function loadFailedMessage(
     return failed;
   }
 
-  const loaders = requires.map((request) => `--require ${request}`).join(" ");
-  return `${failed}\n${file} is TypeScript, loaded through ${loaders}: the loader must register ${extname(entryPath)} files and emit the decorator metadata Nest reads (--require ts-node/register does both).`;
+  const preloads = requires.map((request) => `--require ${request}`).join(" ");
+  return `${failed}\n${file} is TypeScript, preloaded with ${preloads}: a preload must register ${extname(entryPath)} files and emit the decorator metadata Nest reads (--require ts-node/register does both when the tsconfig it reads sets emitDecoratorMetadata).`;
 }
 
 /**

@@ -1312,6 +1312,50 @@ void bootstrap();
         );
       });
     });
+
+    describe("--app's app.module.js, which another application's build can compile a source outside its sourceRoot to", () => {
+      // worker's tsc, its rootDir ".", writes src/app.module.ts to dist/src/;
+      // api's sourceRoot is apps/api/server, but its rootDir, apps/api, puts
+      // apps/api/src/app.module.ts at dist/src/app.module.js as well.
+      beforeEach(() => {
+        write(
+          "nest-cli.json",
+          JSON.stringify({
+            monorepo: true,
+            root: "",
+            sourceRoot: "src",
+            projects: {
+              worker: { type: "application", root: "", sourceRoot: "src" },
+              api: {
+                type: "application",
+                root: "apps/api",
+                sourceRoot: "apps/api/server",
+                compilerOptions: { tsConfigPath: "apps/api/tsconfig.app.json" },
+              },
+            },
+          }),
+        );
+        write("tsconfig.json", JSON.stringify({ compilerOptions: { module: "commonjs", rootDir: ".", outDir: "dist" } }));
+        write("apps/api/tsconfig.app.json", JSON.stringify({ extends: "../../tsconfig.json", compilerOptions: { rootDir: "." } }));
+        write("src/main.ts", mainSource('import { WorkerModule } from "./worker.module";', "NestFactory.create(WorkerModule)"));
+        write("src/worker.module.ts", moduleSource("WorkerModule"));
+        write("dist/src/worker.module.js", compiledModule("WorkerModule"));
+        write("dist/src/app.module.js", compiledModule("AppModule"));
+      });
+
+      it.each<[string, Record<string, string>, { origin: string; path: string }]>([
+        [
+          "falls back on main.ts while api's apps/api/src/app.module.ts compiles to it too",
+          { "apps/api/src/app.module.ts": moduleSource("AppModule") },
+          { origin: "main", path: "dist/src/worker.module.js" },
+        ],
+        ["still takes it while nothing of api's compiles to it", {}, { origin: "convention", path: "dist/src/app.module.js" }],
+      ])("%s", (_case, files, expected) => {
+        writeAll(files);
+
+        expect(detect({ app: "worker" })).toMatchObject({ origin: expected.origin, path: at(expected.path) });
+      });
+    });
   });
 
   describe("a bundled build", () => {

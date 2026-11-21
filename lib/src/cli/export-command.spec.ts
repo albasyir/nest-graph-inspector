@@ -15,7 +15,7 @@ describe(loadFailedMessage.name, () => {
     ).toBe("Loading dist/app.module.js failed: FIXTURE_DATABASE_URL is not set");
   });
 
-  it("says what the loader must do, for a TypeScript file loaded through --require", () => {
+  it("says what a preload must do, for a TypeScript file loaded with --require preloads", () => {
     expect(
       loadFailedMessage(
         join(cwd, "src", "root.module.ts"),
@@ -25,13 +25,13 @@ describe(loadFailedMessage.name, () => {
       ),
     ).toBe(
       "Loading src/root.module.ts failed: Invalid or unexpected token\n" +
-        "src/root.module.ts is TypeScript, loaded through --require dotenv/config --require ./loader.cjs: the loader must register .ts files and emit the decorator metadata Nest reads (--require ts-node/register does both).",
+        "src/root.module.ts is TypeScript, preloaded with --require dotenv/config --require ./loader.cjs: a preload must register .ts files and emit the decorator metadata Nest reads (--require ts-node/register does both when the tsconfig it reads sets emitDecoratorMetadata).",
     );
   });
 
-  it("names the extension the loader must register", () => {
+  it("names the extension a preload must register", () => {
     expect(
       loadFailedMessage(join(cwd, "src", "root.module.cts"), new Error("boom"), ["./loader.cjs"], cwd),
-    ).toContain("the loader must register .cts files");
+    ).toContain("a preload must register .cts files");
   });
 });

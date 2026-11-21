@@ -1300,7 +1300,7 @@ export default function RootModule(): void {}
 
     expectRefused(result, 1, "nest-graph-inspector: Loading src/unbuilt-root.module.ts failed: ");
     expect(result.stderr).toContain(
-      "\nsrc/unbuilt-root.module.ts is TypeScript, loaded through --require ./no-loader.cjs: the loader must register .ts files and emit the decorator metadata Nest reads (--require ts-node/register does both).\n",
+      "\nsrc/unbuilt-root.module.ts is TypeScript, preloaded with --require ./no-loader.cjs: a preload must register .ts files and emit the decorator metadata Nest reads (--require ts-node/register does both when the tsconfig it reads sets emitDecoratorMetadata).\n",
     );
   }, SPAWN_TIMEOUT_MS);
 
