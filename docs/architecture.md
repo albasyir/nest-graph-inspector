@@ -639,12 +639,15 @@ Why each step is the way it is:
   worked changes; main.ts is consulted for that project only to warn, after
   the root module export is chosen, when it boots a different module — main.ts's
   import followed through static re-exports (`export { X } from`,
-  `export { X as Y } from`, an import exported again, `export * from`, at most
-  three files on) to the file that declares the class. They are read as
-  JavaScript reads them: a module's explicit export of a name hides any
-  `export *` that has it too, and a file a lookup has been through for one
-  name is still looked in for another — only the same file and name, met
-  again on one trail, ends it. Only where the convention finds nothing, or
+  `export { X as Y } from`, an import exported again, `export const X = Y`,
+  `export * from`, at most three files on) to the file that declares the
+  class; past three files, or where the trail cannot be read, there is no
+  warning. They are read as JavaScript reads them: a module's explicit export
+  of a name — `export const X = …` included, followed only through a plain
+  alias and otherwise not at all — hides any `export *` that has it too, and
+  a file a lookup has been through for one name is still looked in for
+  another — only the same file and name, met again on one trail, ends it.
+  Only where the convention finds nothing, or
   several files, does main.ts decide. The convention reads the tsconfig it
   always has, from the top level of nest-cli.json: the builder's
   `options.configPath`, whatever the builder, else `tsConfigPath`; one it
@@ -662,7 +665,12 @@ Why each step is the way it is:
   — less any path another application's build could write its own to;
   failing those, that application's main.ts decides. A bundled application
   writes no `app.module.js` at all. Without `--app`, the whole outDir is still
-  searched, as it always has been.
+  searched, as it always has been. The file main.ts's root module is
+  compiled to is held to the same rule, with or without `--app`: when another
+  application's source at the same path in its own source root builds to it
+  as well, it is not loaded — a `--require` loads the application's own
+  TypeScript source instead, and without one the export fails, naming both.
+  When nothing is built, the message names `nest build <app>` for `--app`.
 - **An application is read as `nest build` reads it.** `nest build <app>`
   takes each setting from the project, else the top level; `nest build`
   without a name takes the top level alone, so the default project is the
@@ -689,7 +697,12 @@ Why each step is the way it is:
   that shares the name does not, and neither does a parameter, a catch
   clause's variable or a local declaration that shadows the import: each
   name is resolved in its own scope, by a TypeScript checker over main.ts
-  alone (no lib, no import resolved). A `--module` that names several of the root
+  alone (no lib, no import resolved) — the module passed to `NestFactory`
+  as well, so a local `RootModule` shadowing an import of that name is the
+  local's. A variable is followed to what it was declared with only while it
+  holds that — a `const`, or a `let` or `var` declared once and never
+  assigned again — and `require()` counts only as CommonJS's own, not a
+  local of that name. A `--module` that names several of the root
   modules main.ts boots — one export name from two files — chooses none, and
   `--entry` with `--module` is asked for. What only exists at runtime — a
   root module main.ts computes, or a bootstrap function imported from
@@ -701,10 +714,13 @@ Why each step is the way it is:
   files: under the `swc` builder's `options.outDir`, which the Nest CLI lets
   override the tsconfig's, else the tsconfig's `outDir`, else `dist`, at the
   source's path from the project, its first directory stripped under
-  `stripLeadingPaths`. The builder's own `stripLeadingPaths` decides when it
-  sets one; otherwise Nest CLI 12 strips a one-directory source root unless
-  the tsconfig's `rootDir` lies above it, and Nest CLI 11 always strips, so
-  both layouts are candidates, 12's first. Otherwise — tsc inferring its root
+  `stripLeadingPaths`, with the builder's `outFileExtension` when it sets
+  one. The builder's own `stripLeadingPaths` decides when it sets one;
+  otherwise Nest CLI 12 strips a one-directory source root unless the
+  tsconfig's `rootDir` lies above it, and Nest CLI 11 always strips, so both
+  layouts are candidates — and when both exist, one is left from the other
+  CLI's build, so neither is taken: the export fails, naming both, unless a
+  `--require` loads the source. Otherwise — tsc inferring its root
   directory — where a source file lands depends on that root, on the project
   layout, and on the TypeScript version: a Nest CLI monorepo compiled by tsc
   lands in `dist/apps/<app>/apps/<app>/src/`. The candidates are tried in a
@@ -714,7 +730,8 @@ Why each step is the way it is:
   it is loaded, the file is parsed and refused when it calls a method of
   `NestFactory` — however it is reached: `core_1.NestFactory.create`, a
   webpack bundle's `_nestjs_core__WEBPACK_IMPORTED_MODULE_0__.NestFactory`,
-  an alias — or when it is an application's entry file, which can start the
+  an alias, declared with it or assigned it later — or when it is an
+  application's entry file, which can start the
   application through a function it imports: its source, what tsc or SWC
   compiles it to, and, for a bundled build only, the bundle. Paths are
   compared as the file system resolves them — symlinks followed, case folded
@@ -1696,26 +1713,33 @@ Facts a code change can invalidate, and the file to check:
 - How main.ts is found and read: the extensions it is looked for with
   (`ENTRY_FILE_EXTENSIONS`), the `NestFactory` methods that count as booting a
   root module (`BOOT_METHODS`), the `@nestjs/core` declarations that count as
-  its `NestFactory`, each name resolved in its scope by a checker over main.ts
-  alone (`parseWithScopes`, `declaredReference`, `MAX_ALIAS_DEPTH`), how many
-  `const` declarations a root module argument is followed through
-  (`MAX_CONSTANT_DEPTH`), how the convention's warning follows re-exports —
-  explicit before `export *`, a trail of files and names, `MAX_REEXPORT_DEPTH`
-  files deep (`declaringExport`, `explicitExport`) — where compiled output is
-  looked for — tsc's beside the source without an `outDir`, under an explicit
-  `rootDir` alone, else the directories probed, in order; SWC's under its
-  builder's `outDir` with the Nest CLI 12 and 11 `stripLeadingPaths` layouts
-  (`compiledCandidates`, `swcCandidates`, `nestCli12StripsLeadingPaths`) — the
-  `app.module.js` paths an application's build writes
-  (`conventionalEntryCandidates`), and when the printed command sets
+  its `NestFactory` and what the module passed to it names, each name
+  resolved in its scope by a checker over main.ts alone (`parseWithScopes`,
+  `declaredReference`, `nameReference`, `MAX_ALIAS_DEPTH`), when a variable
+  still holds what it was declared with (`holdsItsInitializer`) and when
+  `require` is CommonJS's own (`freeRequireSpecifier`), how many declarations
+  a root module argument is followed through (`MAX_CONSTANT_DEPTH`), how the
+  convention's warning follows re-exports — explicit, `export const`
+  included, before `export *`, a trail of files and names,
+  `MAX_REEXPORT_DEPTH` files deep (`declaringExport`, `explicitExport`,
+  `constantExport`) — where compiled output is looked for — tsc's beside the
+  source without an `outDir`, under an explicit `rootDir` alone, else the
+  directories probed, in order; SWC's under its builder's `outDir` with its
+  `outFileExtension` and the Nest CLI 12 and 11 `stripLeadingPaths` layouts,
+  neither taken when both exist (`compiledCandidates`, `swcCandidates`,
+  `nestCli12StripsLeadingPaths`, `pickCompiled`) — when a compiled file is
+  another application's too (`sharedWith`), the `app.module.js` paths an
+  application's build writes (`conventionalEntryCandidates`), the build
+  command a message names (`buildAdvice`), and when the printed command sets
   `TS_NODE_PROJECT` (`loaderCommand`) — `lib/src/cli/root-module-detection.ts`;
   what nest-cli.json settings make a build a bundle or an SWC build, which
   project is the default and which of its settings it takes, and which
   tsconfig an application and the convention read — `buildOf`, `parseBuilder`,
   `selectApplication`, `resolveApplication` and
   `legacyConventionTsConfigPath` in `lib/src/cli/nest-cli-config.ts`; which
-  `app.module.js` files `--app` takes as its own, and when the convention's
-  note names the default project — `ownedConventionalEntries` and
+  `app.module.js` files `--app` takes as its own, which applications' builds
+  count as another's, and when the convention's note names the default
+  project — `ownedConventionalEntries`, `otherApplicationLayouts` and
   `conventionNotes` in `lib/src/cli/project.ts`
 - Which files the export refuses to load, and that it checks no file but the
   one it loads — `assertLoadableEntry` and `applicationEntryFiles` (a bundle's
@@ -1726,9 +1750,10 @@ Facts a code change can invalidate, and the file to check:
   builder) — `DEFAULT_*` and `buildOf` in `lib/src/cli/nest-cli-config.ts`,
   against `getBuilder` and `actions/build.action.ts` in the installed
   `@nestjs/cli`; the `@swc/cli` options the Nest CLI sets and lets an `swc`
-  builder's `options` override (`outDir`, `stripLeadingPaths`, the source
-  root as its input) — `lib/compiler/defaults/swc-defaults.ts` there, and
-  `getDest` in `@swc/cli`; and what `nest g app` writes when it makes a
+  builder's `options` override (`outDir`, `stripLeadingPaths`,
+  `outFileExtension`, the source root as its input) —
+  `lib/compiler/defaults/swc-defaults.ts` there, and `getDest` and the
+  `dirWorker` extension in `@swc/cli`; and what `nest g app` writes when it makes a
   monorepo (`"builder": "rspack"`; older versions `"webpack": true`) —
   `src/lib/sub-app/sub-app.factory.ts` in `@nestjs/schematics`
 - That the CLI export e2e job runs `root-module-detection.e2e.spec.ts` alone,

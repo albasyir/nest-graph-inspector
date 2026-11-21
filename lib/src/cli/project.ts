@@ -25,6 +25,8 @@ import {
 import {
   analyseMainFile,
   assertLoadableEntry,
+  bothLayoutsMessage,
+  buildAdvice,
   bundledMessage,
   chooseRootModule,
   conventionCheck,
@@ -35,8 +37,12 @@ import {
   loaderCommand,
   locateRootModule,
   notBuiltMessage,
+  pickCompiled,
   samePath,
+  sharedOutputMessage,
+  type BootedRootModule,
   type ConventionCheck,
+  type RootModuleEntry,
 } from "./root-module-detection";
 
 export const PACKAGE_NAME = "nest-graph-inspector";
@@ -301,7 +307,7 @@ function resolveApplicationEntry(
   }
 
   const layout = readApplicationLayout(projectDir, selection.application, cwd);
-  const convention = detectApplicationEntry(layout, config, cwd);
+  const convention = detectApplicationEntry(layout, config, cwd, app);
   if (convention.kind === "found") {
     return {
       origin: "convention",
@@ -355,28 +361,15 @@ function resolveFromMainFile({
   }
 
   const { root, moduleName } = choice;
-  const located = locateRootModule(root, layout, request.hasLoader);
-  if (located.kind === "not-built") {
+  const located = locateRootModule(
+    root,
+    layout,
+    request.hasLoader,
+    otherApplicationLayouts(layout, config, cwd),
+  );
+  if (located.kind !== "compiled" && located.kind !== "source") {
     throw new CliError(
-      notBuiltMessage({
-        mainFile: analysis.mainFile,
-        root,
-        candidates: located.candidates,
-        command: loaderCommand(request.argv, layout),
-        cwd,
-      }),
-    );
-  }
-
-  if (located.kind === "bundled") {
-    throw new CliError(
-      bundledMessage({
-        application: layout.application,
-        bundler: located.bundler,
-        root,
-        command: loaderCommand(request.argv, layout),
-        cwd,
-      }),
+      unlocatedMessage(located, { request, layout, mainFile: analysis.mainFile, root }),
     );
   }
 
@@ -401,6 +394,55 @@ function resolveFromMainFile({
     ],
     warnings: forRoot === undefined ? [] : [forRoot],
   };
+}
+
+/** Why the root module main.ts boots has no file the export will load, and what to do. */
+function unlocatedMessage(
+  located: Exclude<RootModuleEntry, { kind: "compiled" | "source" }>,
+  context: {
+    request: EntryRequest;
+    layout: ApplicationLayout;
+    mainFile: string;
+    root: BootedRootModule;
+  },
+): string {
+  const { request, layout, mainFile, root } = context;
+  const { cwd } = request;
+  const command = loaderCommand(request.argv, layout);
+  switch (located.kind) {
+    case "not-built":
+      return notBuiltMessage({
+        mainFile,
+        root,
+        candidates: located.candidates,
+        command,
+        app: request.app,
+        cwd,
+      });
+    case "bundled":
+      return bundledMessage({
+        application: layout.application,
+        bundler: located.bundler,
+        root,
+        command,
+        cwd,
+      });
+    case "both-layouts":
+      return bothLayoutsMessage({ mainFile, root, paths: located.paths, command, cwd });
+    case "shared":
+      return sharedOutputMessage({
+        mainFile,
+        root,
+        path: located.path,
+        otherSource: located.otherSource,
+        command,
+        cwd,
+      });
+    default: {
+      const _exhaustive: never = located;
+      return _exhaustive;
+    }
+  }
 }
 
 function detect(find: () => string): Detection {
@@ -466,30 +508,44 @@ function conventionNotes(found: {
 }
 
 /**
- * `--app`'s conventional `app.module.js`: the first of its own that exists.
- * When there is none, why — for main.ts's analysis to fall back on.
+ * `--app`'s conventional `app.module.js`: the first of its own that exists —
+ * unless SWC has built it in both Nest CLIs' layouts. When there is none,
+ * why — for main.ts's analysis to fall back on.
  */
 function detectApplicationEntry(
   layout: ApplicationLayout,
   config: NestCliConfig,
   cwd: string,
+  app: string,
 ): Detection {
   const candidates = ownedConventionalEntries(layout, config, cwd);
-  const found = candidates.find(isFile);
-  if (found !== undefined) {
-    return { kind: "found", path: found };
+  const show = (paths: readonly string[], separator: string) =>
+    paths.map((path) => displayPath(path, cwd)).join(separator);
+  const compiled = pickCompiled(candidates, layout);
+  switch (compiled.kind) {
+    case "found":
+      return { kind: "found", path: compiled.path };
+    case "both-layouts":
+      return {
+        kind: "failed",
+        error: new CliError(
+          `SWC has built ${app}'s ${ROOT_MODULE_FILE} to both ${show(compiled.paths, " and ")}: Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build. Pass --entry with the current one, or build again into an emptied outDir.`,
+        ),
+      };
+    case "missing": {
+      const lookedFor = candidates.length ? ` (looked for ${show(candidates, ", ")})` : "";
+      return {
+        kind: "failed",
+        error: new CliError(
+          `No compiled ${ROOT_MODULE_FILE} found for ${app}${lookedFor}. ${buildAdvice(app)}, or pass --entry <file>.`,
+        ),
+      };
+    }
+    default: {
+      const _exhaustive: never = compiled;
+      return _exhaustive;
+    }
   }
-
-  const name = layout.application.name ?? "the application";
-  const lookedFor = candidates.length
-    ? ` (looked for ${candidates.map((path) => displayPath(path, cwd)).join(", ")})`
-    : "";
-  return {
-    kind: "failed",
-    error: new CliError(
-      `No compiled ${ROOT_MODULE_FILE} found for ${name}${lookedFor}. ${BUILD_HINT}`,
-    ),
-  };
 }
 
 /**
@@ -503,16 +559,28 @@ function ownedConventionalEntries(
   config: NestCliConfig,
   cwd: string,
 ): string[] {
-  const { application, projectDir } = layout;
-  const sources = resolve(projectDir, application.sourceRoot);
-  const others = readEveryLayout(projectDir, config, cwd)
-    .filter(
-      (other) => !samePath(resolve(projectDir, other.application.sourceRoot), sources),
-    )
-    .flatMap(conventionalEntryCandidates);
+  const others = otherApplicationLayouts(layout, config, cwd).flatMap(
+    conventionalEntryCandidates,
+  );
 
   return conventionalEntryCandidates(layout).filter(
     (candidate) => !others.some((other) => samePath(other, candidate)),
+  );
+}
+
+/**
+ * The project's applications other than `layout`'s — those with sources of
+ * their own — whose builds could write where its build does.
+ */
+function otherApplicationLayouts(
+  layout: ApplicationLayout,
+  config: NestCliConfig,
+  cwd: string,
+): ApplicationLayout[] {
+  const { application, projectDir } = layout;
+  const sources = resolve(projectDir, application.sourceRoot);
+  return readEveryLayout(projectDir, config, cwd).filter(
+    (other) => !samePath(resolve(projectDir, other.application.sourceRoot), sources),
   );
 }
 

@@ -37,11 +37,13 @@ export type NestBuilderSetting = {
    */
   configPath: string | undefined;
   /**
-   * `options.outDir` and `options.stripLeadingPaths`: for `swc`, `@swc/cli`
-   * options the Nest CLI lets override its own (`swc-defaults.ts`).
+   * `options.outDir`, `options.stripLeadingPaths` and
+   * `options.outFileExtension`: for `swc`, `@swc/cli` options the Nest CLI
+   * lets override its own (`swc-defaults.ts`).
    */
   outDir: string | undefined;
   stripLeadingPaths: boolean | undefined;
+  outFileExtension: string | undefined;
 };
 
 /** The `compilerOptions` that decide where and how an application is built. */
@@ -92,10 +94,16 @@ export type ApplicationBuild =
   /**
    * `swc`, run through `@swc/cli`: a JavaScript file per file of the source
    * root, in the builder's `options.outDir`, else the tsconfig's, at its path
-   * from the project — less its first directory under `stripLeadingPaths`.
-   * Either is undefined where the builder leaves it to the Nest CLI.
+   * from the project — less its first directory under `stripLeadingPaths` —
+   * with the extension `outFileExtension` names. Each is undefined where the
+   * builder leaves it to the Nest CLI and `@swc/cli`.
    */
-  | { kind: "swc"; outDir: string | undefined; stripLeadingPaths: boolean | undefined }
+  | {
+      kind: "swc";
+      outDir: string | undefined;
+      stripLeadingPaths: boolean | undefined;
+      outFileExtension: string | undefined;
+    }
   /** A builder the export does not know: its output is looked for as tsc's is. */
   | { kind: "other"; builder: string }
   /**
@@ -243,6 +251,7 @@ function parseBuilder(value: unknown): NestBuilderSetting | undefined {
       configPath: undefined,
       outDir: undefined,
       stripLeadingPaths: undefined,
+      outFileExtension: undefined,
     };
   }
 
@@ -258,6 +267,7 @@ function parseBuilder(value: unknown): NestBuilderSetting | undefined {
     outDir: stringField(options, "outDir"),
     stripLeadingPaths:
       typeof stripLeadingPaths === "boolean" ? stripLeadingPaths : undefined,
+    outFileExtension: stringField(options, "outFileExtension"),
   };
 }
 
@@ -464,6 +474,7 @@ function buildOf(
         kind: "swc",
         outDir: builder?.outDir,
         stripLeadingPaths: builder?.stripLeadingPaths,
+        outFileExtension: builder?.outFileExtension,
       };
     default:
       return { kind: "other", builder: type };

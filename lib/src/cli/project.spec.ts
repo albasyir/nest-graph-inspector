@@ -284,6 +284,39 @@ describe("project", () => {
         expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
       });
 
+      it("takes export const RootModule = AppModule over an export * that has a RootModule too", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write(
+          "src/modules/index.ts",
+          'import { AppModule } from "../app.module";\n\nexport * from "./other";\nexport const RootModule = AppModule;\n',
+        );
+        write("src/modules/other.ts", ROOT_MODULE);
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        const resolved = resolveEntry(request());
+
+        expect(resolved.origin === "convention" && resolved.check?.root).toMatchObject({
+          sourceFile: join(projectDir, "src/app.module.ts"),
+          exportName: "AppModule",
+        });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
+      });
+
+      it("stops at an exported value it cannot trace, rather than look through export *", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write(
+          "src/modules/index.ts",
+          'import { forRoot } from "./factory";\n\nexport * from "./other";\nexport const RootModule = forRoot();\n',
+        );
+        write("src/modules/other.ts", ROOT_MODULE);
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        const resolved = resolveEntry(request());
+
+        expect(resolved).toMatchObject({ origin: "convention", check: undefined });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
+      });
+
       it("looks again, for another name, in a file one export * has been through", () => {
         write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
         write("src/modules/index.ts", 'export * from "./plain";\nexport * from "./renamed";\n');
