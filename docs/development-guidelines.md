@@ -116,6 +116,16 @@ pnpm test:cov        # coverage report
 Test files live alongside the source they test (`*.spec.ts` co-located in
 `lib/src/adapters/` and at `lib/src/`).
 
+### Library CLI export e2e
+
+```bash
+pnpm --filter nest-graph-inspector run test:e2e:cli   # the export CLI compiled and run with node against fixture projects
+```
+
+`lib/src/cli/root-module-detection.e2e.spec.ts` matches Jest's `*.spec.ts`
+pattern, so the library's `test` — and `verify` — run it too. CI also runs it
+alone, in its CLI export e2e job on Node 20, 22 and 24.
+
 ### Demo e2e tests
 
 ```bash

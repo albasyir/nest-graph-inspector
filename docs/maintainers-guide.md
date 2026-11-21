@@ -260,10 +260,18 @@ Responsibilities:
 | `bin.ts` | The executable: runs the CLI and exits explicitly once output is flushed |
 | `cli.ts` | Argument parsing (`node:util` `parseArgs`), help, version, exit codes |
 | `export-command.ts` | The export: delegation to the project's own copy, load order, the stdout guard, writing the file |
-| `project.ts` | Entry detection, loading the project's own `@nestjs/core`, picking the root module export |
+| `project.ts` | Entry resolution — `--entry`, the `app.module.js` convention (for `--app`, only the application's own), then main.ts — and the notes saying which application; loading the project's own `@nestjs/core`, picking the root module export |
+| `nest-cli-config.ts` | Reads and validates `nest-cli.json` and the build tsconfig; which application (`--app`, the default project), its settings and tsconfig as `nest build` reads them, and how it is built (compiled or bundled) |
+| `root-module-detection.ts` | Parses main.ts, rather than loading it, for the root module `@nestjs/core`'s `NestFactory` boots, and traces it to the file to load, or says why there is none |
+| `convention-check.ts` | Checks an `app.module.js` the convention found against what main.ts boots, through barrels, for a warning |
+| `build-output.ts` | Where `nest build` — tsc, SWC, a bundler — writes a file, and each application's entry files |
+| `load-guard.ts` | Refuses the file about to be loaded when it would start the application (the modules it imports are not checked); what it lets through is the only file type `loadModule` takes |
+| `source-syntax.ts` | Parsing helpers, and the one walk for calls through `NestFactory` that the analysis and the load guard read |
+| `files.ts` | Path display, file checks and path comparison the modules above share |
 | `export-graph.ts` | The preview-mode boot, the inspector options read from the container, and the graph build |
 | `stderr-logger.ts` | The logger the application is booted with: warnings and errors to stderr |
 | `__fixtures__/` | The application `export-graph.spec.ts` boots; excluded from the build |
+| `test-support/` | Compiling the package into a temporary project and running its bin, for `bin.spec.ts` and `root-module-detection.e2e.spec.ts`; excluded from the build |
 
 **What does NOT belong here:** Graph building — the export must use `GraphOutputBuilder`, never its own.
 

@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -12,9 +11,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
-import ts from "typescript";
+import { dirname, join, sep } from "node:path";
 import type { GraphOutput } from "../types/graph-output.type";
+import {
+  APPLICATION_COMPILER_OPTIONS,
+  LIB_DIR,
+  SPAWN_TIMEOUT_MS,
+  compile,
+  installPackage,
+  linkDependencies,
+  readGraph,
+  runBin,
+  type Run,
+} from "./test-support/installed-cli";
 
 /**
  * The CLI as a user runs it: the package compiled from these sources and
@@ -22,8 +31,6 @@ import type { GraphOutput } from "../types/graph-output.type";
  * project's own `nest build`-style output. Compiling here, rather than
  * reading lib/dist, keeps the spec from ever testing a stale build.
  */
-
-const LIB_DIR = resolve(__dirname, "..", "..");
 
 /** The fixture application, as a user would write it. */
 const APPLICATION_SOURCES: Record<string, string> = {
@@ -186,21 +193,6 @@ void bootstrap();
 `,
 };
 
-const APPLICATION_COMPILER_OPTIONS: ts.CompilerOptions = {
-  target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.CommonJS,
-  moduleResolution: ts.ModuleResolutionKind.Bundler,
-  experimentalDecorators: true,
-  emitDecoratorMetadata: true,
-  strict: true,
-  skipLibCheck: true,
-  types: ["node"],
-};
-
-type Run = { status: number | string | null; stdout: string; stderr: string };
-
-/** Generous: a busy CI runner may boot two Node processes for one export. */
-const SPAWN_TIMEOUT_MS = 60_000;
 /** Whether this Node.js can load an --env-file: 20.12 and later. */
 const hasLoadEnvFile =
   typeof (process as { loadEnvFile?: unknown }).loadEnvFile === "function";
@@ -221,90 +213,7 @@ function run(
   cwd = projectDir,
   extraEnv: Record<string, string> = {},
 ): Promise<Run> {
-  const env = { ...process.env, ...extraEnv };
-  delete env.NEST_GRAPH_INSPECTOR_CLI_DELEGATED;
-  // pnpm's bin shims export a NODE_PATH into its whole store, which would let
-  // the CLI find packages a user's installation would not have beside it.
-  delete env.NODE_PATH;
-
-  return new Promise((done, fail) => {
-    // A CLI that does not exit by itself is a failure, not a hung suite.
-    const child = spawn(process.execPath, [binPath, ...args], {
-      cwd,
-      env,
-      timeout: SPAWN_TIMEOUT_MS - 5_000,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    child.on("error", fail);
-    child.on("close", (status, signal) =>
-      done({ status: signal ? `killed by ${signal}` : status, stdout, stderr }),
-    );
-  });
-}
-
-function compile(fileNames: string[], options: ts.CompilerOptions): void {
-  const program = ts.createProgram(fileNames, options);
-  const { diagnostics } = program.emit();
-  const problems = [...ts.getPreEmitDiagnostics(program), ...diagnostics];
-  if (problems.length) {
-    throw new Error(
-      ts.formatDiagnostics(problems, {
-        getCanonicalFileName: (fileName) => fileName,
-        getCurrentDirectory: () => LIB_DIR,
-        getNewLine: () => "\n",
-      }),
-    );
-  }
-}
-
-/** Installs the package's runtime dependencies into `nodeModules` as links. */
-function linkDependencies(nodeModules: string): void {
-  const nestCommon = realpathSync(join(LIB_DIR, "node_modules/@nestjs/common"));
-  const dependencies: Record<string, string> = {
-    "@nestjs/common": nestCommon,
-    "@nestjs/core": realpathSync(join(LIB_DIR, "node_modules/@nestjs/core")),
-    // Its main file sits at the package root; its exports hide package.json.
-    "reflect-metadata": dirname(
-      require.resolve("reflect-metadata", { paths: [nestCommon] }),
-    ),
-    "ts-morph": realpathSync(join(LIB_DIR, "node_modules/ts-morph")),
-    "@types/node": realpathSync(join(LIB_DIR, "node_modules/@types/node")),
-  };
-
-  for (const [name, target] of Object.entries(dependencies)) {
-    mkdirSync(dirname(join(nodeModules, name)), { recursive: true });
-    symlinkSync(target, join(nodeModules, name), "junction");
-  }
-}
-
-/** The package as npm would install it: package.json plus a fresh build. */
-function installPackage(nodeModules: string): string {
-  const packageDir = join(nodeModules, "nest-graph-inspector");
-  const config = ts.getParsedCommandLineOfConfigFile(
-    join(LIB_DIR, "tsconfig.lib.json"),
-    { outDir: join(packageDir, "dist"), declarationMap: false, sourceMap: false },
-    {
-      ...ts.sys,
-      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
-      },
-    },
-  );
-  if (!config) {
-    throw new Error("Cannot read tsconfig.lib.json");
-  }
-
-  compile(config.fileNames, config.options);
-  cpSync(join(LIB_DIR, "package.json"), join(packageDir, "package.json"));
-
-  return packageDir;
-}
-
-function readGraph(path: string): GraphOutput {
-  return JSON.parse(readFileSync(path, "utf8")) as GraphOutput;
+  return runBin(binPath, args, { cwd, env: extraEnv });
 }
 
 describe("nest-graph-inspector bin", () => {

@@ -73,6 +73,35 @@ jobs:
       - name: Build library
         run: pnpm --filter nest-graph-inspector run build
 
+  cli-e2e:
+    name: CLI export e2e (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Compiles the package from source into a temporary project and runs
+      # its bin with node against fixture applications laid out as nest build,
+      # SWC, webpack and a Nest CLI monorepo leave them, failing if any export
+      # finds the wrong root module, loads main.ts, or listens. Run by path:
+      # Jest fails when it finds no test.
+      - name: CLI export e2e
+        run: pnpm --filter nest-graph-inspector exec jest --config jest.config.cjs --ci --runTestsByPath src/cli/root-module-detection.e2e.spec.ts
+
   site:
     name: Site build
     runs-on: ubuntu-latest

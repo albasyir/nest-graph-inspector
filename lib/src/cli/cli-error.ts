@@ -11,6 +11,14 @@ export class CliError extends Error {
   }
 }
 
+/** Exit code 2: a command line that parsed but names nothing usable, such as an unknown `--app`. */
+export class CliUsageError extends CliError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CliUsageError";
+  }
+}
+
 export function describeError(error: unknown): string {
   return isErrorLike(error) ? error.message : String(error);
 }
