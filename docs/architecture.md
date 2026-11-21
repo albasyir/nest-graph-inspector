@@ -1097,21 +1097,23 @@ through what the visitor did:
 
 The page keeps itself from one module to the next — its page key is fixed —
 so re-centring on another module does not load the graph again; it loads one
-only when the tab moved to another graph on the way. A click on a module in
-the navigator opens its page, and one on a provider or controller its module's
-inside view open on it (`module-page-navigation` on `GraphViewer.vue`, which
-then draws no Direct Run drawer; a drag never counts as a click, since Vue Flow
-reports one only for a press that did not move the node). The navigator's own
-`direct-run-on`, from before, is sent on to that target's page. The landing
-page's hero preview does the same through `/view`: its link is
-`/view?preview=true&module=<name>`, with the page's query beside it, and `/view`
-hands over the preview's graph — the static one, or the running demo — as it
-does for "Open full-screen demo", then replaces itself with the module's page,
-so Back returns to the landing page. The documentation's Direct Run preview
-keeps its drawer (`DirectRunDrawer.vue`, the same panel in a drawer).
-`nuxt.config.ts` renders `/view/**` client-side only — neither the tab's
-session nor the developer's local endpoint exists on a server — while `/view`
-itself keeps SSR so it still unfurls as a link.
+only when the tab moved to another graph on the way, and then forgets what
+Direct Run recorded on the last one, a node id there being free to name
+another class. A click on a module in the navigator opens its page, and one
+on a provider or controller its module's inside view open on it
+(`module-page-navigation` on `GraphViewer.vue`, which then draws no Direct Run
+drawer; a drag never counts as a click, since Vue Flow reports one only for a
+press that did not move the node). The navigator's own `direct-run-on`, from
+before, is sent on to that target's page. The landing page's hero preview does
+the same through `/view`: its link is `/view?preview=true&module=<name>`, with
+the page's query beside it, and `/view` hands over the preview's graph — the
+static one, or the running demo — as it does for "Open full-screen demo", then
+replaces itself with the module's page, so Back returns to the landing page.
+The documentation's Direct Run preview keeps its drawer
+(`DirectRunDrawer.vue`, the same panel in a drawer). `nuxt.config.ts` renders
+`/view/**` client-side only — neither the tab's session nor the developer's
+local endpoint exists on a server — while `/view` itself keeps SSR so it still
+unfurls as a link.
 
 **The graph file source.** The viewer has a second kind of graph besides an
 endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the

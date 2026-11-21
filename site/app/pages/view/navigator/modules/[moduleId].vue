@@ -85,8 +85,11 @@ const directRunRecords = useDirectRunRecords()
 
 // The page stays mounted from one module to the next, so it loads a graph the
 // tab moved to on the way — the running demo, which the bootstrap middleware
-// puts in place of the demo's static graph — itself.
+// puts in place of the demo's static graph — itself. What Direct Run recorded
+// stays with the graph it was recorded on: a node id in the next one can name
+// another class.
 watch(graphRevision, () => {
+  directRunRecords.clear()
   if (!graphData.value && !isGraphLoading.value) {
     reload()
   }

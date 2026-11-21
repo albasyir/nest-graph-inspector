@@ -81,7 +81,8 @@ const {
   runErrorByNodeId,
   argsInputByKey,
   argsErrorByKey,
-  argsInvalidByKey
+  argsInvalidByKey,
+  generation
 } = props.records ?? useDirectRunRecords()
 const activeMethod = ref('')
 
@@ -222,6 +223,10 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
   }
 
   const { nodeId } = current
+  // The records' owner clears them when the tab moves to another graph; what
+  // a call made before that brings back is no longer this node's to record.
+  const startedIn = generation.value
+  const isStillCurrent = () => generation.value === startedIn
   const key = argsKey(method.name)
   const parsedArgs = parseDirectRunArgs(method, argsInputByKey.value[key] ?? '')
   if (!parsedArgs.ok) {
@@ -256,7 +261,7 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
     const failure = resolveDirectRunFailure(error)
     if (failure.answered) {
       response = failure.payload
-    } else {
+    } else if (isStillCurrent()) {
       // Nothing ran, so there is no run to record — only why it did not.
       runErrorByNodeId.value = {
         ...runErrorByNodeId.value,
@@ -264,10 +269,12 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
       }
     }
   } finally {
-    pendingByNodeId.value = without(pendingByNodeId.value, nodeId)
+    if (isStillCurrent()) {
+      pendingByNodeId.value = without(pendingByNodeId.value, nodeId)
+    }
   }
 
-  if (!response) {
+  if (!response || !isStillCurrent()) {
     return
   }
 

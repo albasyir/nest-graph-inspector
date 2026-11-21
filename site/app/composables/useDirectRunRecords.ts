@@ -21,13 +21,42 @@ export type DirectRunPendingCall = { method: string, mode: DirectRunMode }
  * a controller and a same-named provider never share one.
  */
 export function useDirectRunRecords() {
+  const snapshotByNodeId = ref<Record<string, DirectRunExecutionSnapshot>>({})
+  const pendingByNodeId = ref<Record<string, DirectRunPendingCall>>({})
+  const runErrorByNodeId = ref<Record<string, string>>({})
+  const argsInputByKey = ref<Record<string, string>>({})
+  const argsErrorByKey = ref<Record<string, string>>({})
+  const argsInvalidByKey = ref<Record<string, boolean>>({})
+  const generation = ref(0)
+
+  /**
+   * Forgets every record, for an owner whose tab moved to another graph: a
+   * node id there can name another class, which must not show the last run of
+   * this one. A call still on its way is forgotten with them.
+   */
+  function clear(): void {
+    generation.value += 1
+    snapshotByNodeId.value = {}
+    pendingByNodeId.value = {}
+    runErrorByNodeId.value = {}
+    argsInputByKey.value = {}
+    argsErrorByKey.value = {}
+    argsInvalidByKey.value = {}
+  }
+
   return {
-    snapshotByNodeId: ref<Record<string, DirectRunExecutionSnapshot>>({}),
-    pendingByNodeId: ref<Record<string, DirectRunPendingCall>>({}),
-    runErrorByNodeId: ref<Record<string, string>>({}),
-    argsInputByKey: ref<Record<string, string>>({}),
-    argsErrorByKey: ref<Record<string, string>>({}),
-    argsInvalidByKey: ref<Record<string, boolean>>({})
+    snapshotByNodeId,
+    pendingByNodeId,
+    runErrorByNodeId,
+    argsInputByKey,
+    argsErrorByKey,
+    argsInvalidByKey,
+    /**
+     * How many times the records were cleared. A call notes it as it starts
+     * and records what it brings back only if it has not moved since.
+     */
+    generation: readonly(generation),
+    clear
   }
 }
 
