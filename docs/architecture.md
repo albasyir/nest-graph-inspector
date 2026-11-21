@@ -670,18 +670,18 @@ Why each step is the way it is:
   Which of them exist is settled first: more than one means all but one are
   stale, and none is taken (below). The one there is is taken only when no
   other application's build could write its own `app.module.js` there too —
-  from its conventional path, or from a source of its elsewhere, that build
-  read backwards as below. Failing that, that application's main.ts decides. A bundled application
-  writes no `app.module.js` at all. Without `--app`, the whole outDir is still
-  searched, as it always has been. The file main.ts's root module is
-  compiled to is held to the same rule, with or without `--app`: when another
-  application's build writes it as well — that build read backwards, through
-  its own outDir and the root directories it can compile from, so a source of
-  its at another path counts, while a webpack or rspack build, which writes
-  no such file, never does — it is not loaded. A `--require` loads the
-  application's own TypeScript source instead, and without one the export
-  fails, naming both. When nothing is built, the message names
-  `nest build <app>` for `--app`.
+  from its conventional path, or from a source of its own elsewhere, that
+  build read backwards as below. Failing that, that application's main.ts
+  decides. A bundled application writes no `app.module.js` at all. Without
+  `--app`, the whole outDir is still searched, as it always has been. The
+  file main.ts's root module is compiled to is held to the same rule, with
+  or without `--app`: when another application's build writes it as well —
+  that build read backwards, through its own outDir and the root directories
+  it can compile from, so a source of its at another path counts, while a
+  webpack or rspack build, which writes no such file, never does — it is not
+  loaded. A `--require` loads the application's own TypeScript source
+  instead, and without one the export fails, naming both. When nothing is
+  built, the message names `nest build <app>` for `--app`.
 - **An application is read as `nest build` reads it.** `nest build <app>`
   takes each setting from the project, else the top level; `nest build`
   without a name takes the top level alone, so the default project is the
