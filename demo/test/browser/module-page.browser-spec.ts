@@ -426,6 +426,31 @@ test('a module on a cycle draws every level of both sides, quickly, and says it 
   }
 });
 
+test("the landing page's graph opens a module's page on the example, and Back returns to the landing page", async ({
+  page,
+  state,
+  graph,
+}) => {
+  // The example the landing page draws is exported from the same build as
+  // the demo these tests run, so it holds the same modules.
+  const moduleName = moduleWithDeepDependencies(graph, DEFAULT_DEPTH);
+
+  await page.goto(state.siteBaseUrl);
+  await expectGraphLayoutsReady(page);
+  // The hero preview is the first graph on the page.
+  await graphNode(page, `module-${moduleName}`)
+    .first()
+    .locator('.module-subgraph__label')
+    .click();
+
+  await expect(page).toHaveURL(modulePageUrl(state, moduleName));
+  await expect(center(page)).toContainText(moduleName);
+  await expectDepth(page, 'left', DEFAULT_DEPTH);
+
+  await page.goBack();
+  await expect(page).toHaveURL(state.siteBaseUrl);
+});
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
