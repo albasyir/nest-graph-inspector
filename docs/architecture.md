@@ -766,8 +766,9 @@ Why each step is the way it is:
   starts the application. `cli/load-guard.ts` does it with the same walk
   main.ts's analysis uses (`cli/source-syntax.ts`), read leniently — by
   syntax alone, any base taken for `@nestjs/core`, a name bound to
-  `NestFactory` anywhere counting everywhere — so it refuses at least every
-  call the analysis counts, in compiled and bundled files too. Only that one file is checked: the modules it
+  `NestFactory` anywhere, above or below its use, counting everywhere — so it
+  refuses at least every call the analysis counts, in compiled and bundled
+  files too. Only that one file is checked: the modules it
   imports load with it, unread, so a root module file must not import
   main.ts, or a file that boots the application. Checking them would mean
   resolving the application's whole import graph as Node does before
@@ -1749,8 +1750,9 @@ Facts a code change can invalidate, and the file to check:
   variable still holds what it was declared with (`holdsItsInitializer`), the
   mode an import resolves in (`resolveImport`), how far names are followed
   (`MAX_ALIAS_DEPTH`, `MAX_CONSTANT_DEPTH`), the note for a boot passed over
-  (`skippedBoot`), and the messages and `--require` command for a root module
-  it will not load (`locateRootModule`, `loaderCommand`) —
+  (`skippedBoot` quotes the call, `entryFromMainFile` words the note), and the
+  messages and `--require` command for a root module it will not load
+  (`unlocatedMessage`, `loaderCommand`) —
   `lib/src/cli/root-module-detection.ts`; the one walk and fold for calls
   through `NestFactory` it shares with the load guard — `factoryCalls` and
   `memberOf` in `lib/src/cli/source-syntax.ts`
@@ -1766,23 +1768,27 @@ Facts a code change can invalidate, and the file to check:
   (`swcCandidates`, `nestCli12StripsLeadingPaths`); none taken when more than
   one exists (`pickCompiled`), and the reason a message gives, which names
   Nest CLI 12 and 11 (`staleBuildsReason`); another application's build read
-  backwards, and a bundle never, for a file both could write (`sharedWith`); each
-  application's entry files and bundle paths (`applicationEntryFiles`) —
-  `lib/src/cli/build-output.ts`
+  backwards, and a bundle never, for a file both could write (`sharedWith`);
+  the `app.module.js` paths an application's build writes
+  (`conventionalEntryCandidates`); the build command a message names
+  (`buildAdvice`); each application's entry files and bundle paths
+  (`applicationEntryFiles`) — `lib/src/cli/build-output.ts`
 - What nest-cli.json settings make a build a bundle or an SWC build, which
   project is the default and which of its settings it takes, and which
   tsconfig an application and the convention read — `buildOf`, `parseBuilder`,
   `selectApplication`, `resolveApplication` and
   `legacyConventionTsConfigPath` in `lib/src/cli/nest-cli-config.ts`; which
   `app.module.js` files `--app` takes as its own — which exist settled
-  before whose the one there is — and when the convention's note names the
-  default project — `detectApplicationEntry`, `ownedConventionalEntries`,
-  `otherApplicationLayouts` and `conventionNotes` in
+  before whose the one there is — when the convention's note names the
+  default project, and the note naming the file main.ts led to —
+  `detectApplicationEntry`, `ownedConventionalEntries`,
+  `otherApplicationLayouts`, `conventionNotes` and `resolveFromMainFile` in
   `lib/src/cli/project.ts`; what a TypeScript entry that fails to load says
   of its loader — `loadFailedMessage` in `lib/src/cli/export-command.ts`
 - Which files the export refuses to load, and that it checks no file but the
   one it loads — `assertLoadableEntry` and the lenient reading of
-  `NestFactory` calls (`findNestFactoryCall`) in `lib/src/cli/load-guard.ts`;
+  `NestFactory` calls, aliases bound in any order (`findNestFactoryCall`,
+  `factoryAliases`) in `lib/src/cli/load-guard.ts`;
   that only what it lets through loads — `LoadableFile` there, the type
   `loadModule` in `lib/src/cli/project.ts` takes; paths compared as the file
   system resolves them — `samePath` in

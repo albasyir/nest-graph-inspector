@@ -310,6 +310,10 @@ void bootstrap();
         `import { NestFactory } from "@nestjs/core";\n${ROOT_IMPORT}\n\nconst { create } = NestFactory;\nvoid create(RootModule);\n`,
       ],
       [
+        "through an alias of an alias that is declared below its use",
+        `import { NestFactory } from "@nestjs/core";\n${ROOT_IMPORT}\n\nconst boot = () => {\n  const Factory = Core;\n  return Factory.create(RootModule);\n};\nconst Core = NestFactory;\nvoid boot();\n`,
+      ],
+      [
         "twice, counted once",
         mainSource(
           ROOT_IMPORT,
@@ -1649,6 +1653,8 @@ void bootstrap();
       ["const create = NestFactory.create.bind(NestFactory);\ncreate(AppModule);", "NestFactory.create"],
       ["let F;\nF = NestFactory;\nF.createApplicationContext(AppModule);", "NestFactory.createApplicationContext"],
       ["let create;\ncreate = core_1.NestFactory.create;\ncreate(AppModule);", "NestFactory.create"],
+      ["const get = () => { const B = A; return B.create(AppModule); };\nconst A = NestFactory;\nget();", "NestFactory.create"],
+      ["const boot = () => C.createMicroservice(AppModule, {});\nconst C = B;\nconst B = A;\nconst A = core_1.NestFactory;\nboot();", "NestFactory.createMicroservice"],
     ])("finds %s", (text, expected) => {
       expect(call(text)).toBe(expected);
     });

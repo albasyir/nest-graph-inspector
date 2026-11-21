@@ -79,9 +79,9 @@ const FACTORY: FactoryReference = { kind: "factory" };
  * syntax alone, unlike main.ts's analysis, because the file may be compiled
  * or bundled — `core_1.NestFactory.create`,
  * `_nestjs_core__WEBPACK_IMPORTED_MODULE_0__.NestFactory.create` — so any base
- * may be `@nestjs/core`, and a name bound to `NestFactory` anywhere counts
- * everywhere. A false refusal costs a `--entry`; a missed bootstrap starts
- * the application.
+ * may be `@nestjs/core`, and a name bound to `NestFactory` anywhere, above or
+ * below its use, counts everywhere. A false refusal costs a `--entry`; a
+ * missed bootstrap starts the application.
  */
 export function findNestFactoryCall(sourceFile: ts.SourceFile): string | undefined {
   const [first] = factoryCalls(sourceFile, leniently(factoryAliases(sourceFile)));
@@ -102,17 +102,23 @@ function leniently(aliases: ReadonlyMap<string, FactoryReference>): FactoryReadi
  * The names bound to `NestFactory` or to one of its methods: imported under
  * another name, declared or assigned with it, destructured from it. Scopes
  * are not told apart, and a name bound both ways stays a method, which every
- * call through it is — either way the guard only refuses more.
+ * call through it is — either way the guard only refuses more. The file is
+ * walked again while a walk binds anything new, so an alias used above the
+ * line that binds it, or bound from one bound further down, still counts.
+ * Each such walk moves a name up from unbound to `NestFactory` to a method,
+ * never down, so the walks end: at most two per name bound, and one more.
  */
 function factoryAliases(sourceFile: ts.SourceFile): ReadonlyMap<string, FactoryReference> {
   const aliases = new Map<string, FactoryReference>();
   const reading = leniently(aliases);
+  let boundMore = true;
   const bind = (name: string, reference: FactoryReference | undefined) => {
-    if (
-      reference?.kind === "method" ||
-      (reference?.kind === "factory" && aliases.get(name)?.kind !== "method")
-    ) {
+    const bound = aliases.get(name)?.kind;
+    if (reference?.kind === "method" || (reference?.kind === "factory" && bound !== "method")) {
       aliases.set(name, reference);
+      if (reference.kind !== bound) {
+        boundMore = true;
+      }
     }
   };
   const visit = (node: ts.Node): void => {
@@ -144,7 +150,10 @@ function factoryAliases(sourceFile: ts.SourceFile): ReadonlyMap<string, FactoryR
 
     ts.forEachChild(node, visit);
   };
-  visit(sourceFile);
+  while (boundMore) {
+    boundMore = false;
+    visit(sourceFile);
+  }
 
   return aliases;
 }

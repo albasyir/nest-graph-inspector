@@ -65,9 +65,17 @@ describe(runCli.name, () => {
     [["export", "extra"], 'Unexpected argument "extra".'],
     [["export", "--entrypoint", "x"], "Unknown option '--entrypoint'"],
     [["export", "--out"], "Option '-o, --out <value>' argument missing"],
-    [["export", "--app", "nope"], 'nest-cli.json has no project "nope". Pass --app with one of: api, worker.'],
-    [["export", "--app", "shared"], '"shared" is a library, which has no main.ts. Pass --app with one of: api, worker.'],
   ])("rejects %j as a usage error", async (argv, message) => {
+    await expect(run(...argv)).resolves.toBe(2);
+
+    expect(stderr).toContain(`nest-graph-inspector: ${message}`);
+    expect(stderr).toContain('Run "nest-graph-inspector --help" for usage.');
+  });
+
+  it.each([
+    ["nope", 'nest-cli.json has no project "nope". Pass --app with one of: api, worker.'],
+    ["shared", '"shared" is a library, which has no main.ts. Pass --app with one of: api, worker.'],
+  ])("rejects --app %s, which names no application in nest-cli.json, as a usage error", async (app, message) => {
     writeFileSync(
       join(cwd, "nest-cli.json"),
       JSON.stringify({
@@ -82,10 +90,11 @@ describe(runCli.name, () => {
       }),
     );
 
-    await expect(run(...argv)).resolves.toBe(2);
+    await expect(run("export", "--app", app)).resolves.toBe(2);
 
-    expect(stderr).toContain(`nest-graph-inspector: ${message}`);
-    expect(stderr).toContain('Run "nest-graph-inspector --help" for usage.');
+    expect(stderr).toBe(
+      `nest-graph-inspector: ${message}\nRun "nest-graph-inspector --help" for usage.\n`,
+    );
   });
 
   it("fails when the project directory does not exist", async () => {
@@ -175,7 +184,6 @@ describe(runCli.name, () => {
       `nest-graph-inspector: --env-file needs Node.js 20.12 or later, which has process.loadEnvFile(); this is Node.js ${process.versions.node}. Use --require dotenv/config instead.\n`,
     );
   });
-
 
   it("asks for a loader before loading a TypeScript entry", async () => {
     mkdirSync(join(cwd, "src"));
