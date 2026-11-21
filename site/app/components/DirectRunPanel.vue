@@ -394,10 +394,11 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
           color="primary"
           variant="pill"
           :ui="{
-            root: 'gap-4',
-            list: 'w-full overflow-x-auto',
-            trigger: 'shrink-0',
-            content: 'outline-none'
+            root: 'gap-4 min-w-0',
+            list: 'w-full flex-wrap',
+            indicator: 'hidden',
+            trigger: 'flex-none max-w-full data-[state=active]:bg-primary data-[state=active]:text-inverted',
+            content: 'min-w-0 outline-none'
           }"
         >
           <template #content="{ item }">
@@ -607,6 +608,12 @@ async function runMethod(method: DirectRunAnyMethod, mode: DirectRunMode): Promi
   padding: 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* The body scrolls; nothing in it is squeezed to fit — an alert that clips
+   its own overflow would otherwise lose the end of its sentence. */
+.direct-run-panel__body > * {
+  flex-shrink: 0;
 }
 
 .direct-run-panel__method,

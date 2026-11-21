@@ -599,7 +599,8 @@ function handlePaneClick(): void {
                 `module-graph-node--${itemProps.data.kind}`,
                 {
                   'module-graph-node--documented': hasJsDocPreview(itemProps.data.jsdoc),
-                  'module-graph-node--runnable': itemProps.data.isRunnable
+                  'module-graph-node--runnable': itemProps.data.isRunnable,
+                  'module-graph-node--selected': itemProps.id === selectedNodeId
                 }
               ]"
               @mouseenter="openJsDocHoverCard($event, itemProps.data)"
@@ -979,6 +980,13 @@ function handlePaneClick(): void {
 
 .module-graph-node--runnable {
   cursor: pointer;
+}
+
+/* The provider or controller the Direct Run panel is open on, ringed in the
+   colour of the panel's selected method, so the two read as one. */
+.module-graph-node--selected {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 3px;
 }
 
 .module-graph-node__badge {
