@@ -1,21 +1,19 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import type { GraphOutput } from "../types/graph-output.type";
 import { CliError, describeError } from "./cli-error";
 import type { CliIo } from "./cli";
+import { displayPath, isDirectory, isFile } from "./files";
 import {
-  detectEntry,
-  displayPath,
   findProjectPackage,
-  isDirectory,
-  isFile,
   isTypeScriptFile,
   loadModule,
   loadNestCore,
   readOwnPackage,
-  selectEntryModule,
+  resolveEntry,
+  selectRootModule,
 } from "./project";
 import { createStderrLogger } from "./stderr-logger";
 
@@ -27,6 +25,7 @@ export const DELEGATED_ENV = "NEST_GRAPH_INSPECTOR_CLI_DELEGATED";
 export type ExportCommandOptions = {
   entry?: string;
   module?: string;
+  app?: string;
   out?: string;
   project?: string;
   require?: string[];
@@ -56,7 +55,26 @@ export async function runExportCommand(
   }
 
   loadEnvFiles(options["env-file"] ?? [], io.cwd);
-  const entryPath = resolveEntry(options, projectDir, io.cwd);
+  const entry = resolveEntry({
+    projectDir,
+    cwd: io.cwd,
+    entry: options.entry,
+    module: options.module,
+    app: options.app,
+    hasLoader: Boolean(options.require?.length),
+    argv,
+  });
+  // How the export came to the entry it found, said before anything loads.
+  const notes = entry.origin === "entry" ? [] : entry.notes;
+  const warnings = entry.origin === "main" ? entry.warnings : [];
+  for (const note of notes) {
+    io.stderr.write(`nest-graph-inspector: ${note}\n`);
+  }
+  for (const warning of warnings) {
+    io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
+  }
+
+  const entryPath = entry.path;
   const out = options.out ?? DEFAULT_OUT_FILE;
   const outPath = out === "-" ? undefined : resolve(io.cwd, out);
 
@@ -85,18 +103,16 @@ export async function runExportCommand(
     try {
       moduleExports = await loadModule(entryPath, projectRequire);
     } catch (error) {
-      throw new CliError(
-        `Loading ${displayPath(entryPath, io.cwd)} failed: ${describeError(error)}`,
-        { cause: error },
-      );
+      throw new CliError(loadFailedMessage(entryPath, error, options.require ?? [], io.cwd), {
+        cause: error,
+      });
     }
 
-    const entry = selectEntryModule(
-      moduleExports,
-      options.module,
-      entryPath,
-      io.cwd,
-    );
+    const rootModule = selectRootModule(entry, moduleExports, io.cwd);
+    for (const warning of rootModule.warnings) {
+      io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
+    }
+
     // Loaded only now, after the project's own reflect-metadata.
     let exportGraphModule: typeof import("./export-graph");
     try {
@@ -112,10 +128,10 @@ export async function runExportCommand(
 
     try {
       return {
-        entryName: entry.name,
+        entryName: rootModule.name,
         result: await exportGraph({
           nestCore,
-          entryModule: entry.module,
+          entryModule: rootModule.module,
           boot,
           logger: createStderrLogger((text) => io.stderr.write(text)),
         }),
@@ -133,7 +149,7 @@ export async function runExportCommand(
       }
 
       throw new CliError(
-        `Building the graph of ${entry.name} failed: ${describeError(error)}`,
+        `Building the graph of ${rootModule.name} failed: ${describeError(error)}`,
         { cause: error },
       );
     }
@@ -166,6 +182,26 @@ export async function runExportCommand(
   );
 
   return 0;
+}
+
+/**
+ * Why loading the entry failed — and, for a TypeScript file the `--require`
+ * loaders were meant to load, what such a loader has to do.
+ */
+export function loadFailedMessage(
+  entryPath: string,
+  error: unknown,
+  requires: readonly string[],
+  cwd: string,
+): string {
+  const file = displayPath(entryPath, cwd);
+  const failed = `Loading ${file} failed: ${describeError(error)}`;
+  if (!isTypeScriptFile(entryPath) || !requires.length) {
+    return failed;
+  }
+
+  const loaders = requires.map((request) => `--require ${request}`).join(" ");
+  return `${failed}\n${file} is TypeScript, loaded through ${loaders}: the loader must register ${extname(entryPath)} files and emit the decorator metadata Nest reads (--require ts-node/register does both).`;
 }
 
 /**
@@ -230,10 +266,12 @@ function delegateToProjectPackage(
 /**
  * Loads `--env-file`s into `process.env` before any of the application's
  * code runs, as a `main.ts` that loads its environment before importing
- * `AppModule` would — and the export never loads `main.ts`. Precedence is
- * `node --env-file`'s: a variable already set in the environment keeps its
- * value, and of two files the later one wins. `process.loadEnvFile()` never
- * overrides a variable, so the files are loaded from the last to the first.
+ * `AppModule` would — and the export never selects `main.ts` to load (a
+ * module the entry imports could still load it: imports are not checked).
+ * Precedence is `node --env-file`'s: a variable already set in the
+ * environment keeps its value, and of two files the later one wins.
+ * `process.loadEnvFile()` never overrides a variable, so the files are loaded
+ * from the last to the first.
  */
 function loadEnvFiles(paths: readonly string[], cwd: string): void {
   if (!paths.length) {
@@ -257,32 +295,6 @@ function loadEnvFiles(paths: readonly string[], cwd: string): void {
       );
     }
   }
-}
-
-function resolveEntry(
-  options: ExportCommandOptions,
-  projectDir: string,
-  cwd: string,
-): string {
-  const entryPath = options.entry
-    ? resolve(cwd, options.entry)
-    : detectEntry(projectDir, cwd);
-
-  if (!isFile(entryPath)) {
-    throw new CliError(
-      `Entry file not found: ${displayPath(entryPath, cwd)}. Check the --entry path, and build your project first (nest build) if it points at compiled output.`,
-    );
-  }
-
-  if (isTypeScriptFile(entryPath) && !options.require?.length) {
-    throw new CliError(
-      `${displayPath(entryPath, cwd)} is TypeScript, which Node cannot load on its own. ` +
-        "Build your project and pass the compiled file, or add a loader that emits decorator metadata: " +
-        "--require ts-node/register (and --require tsconfig-paths/register for path aliases).",
-    );
-  }
-
-  return entryPath;
 }
 
 /**

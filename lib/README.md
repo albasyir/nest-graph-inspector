@@ -38,10 +38,15 @@ npx nest-graph-inspector export --out -  # or to stdout
 
 The file is the `GraphOutput` a running inspector serves at `/output.json`,
 built with the options the application passes to
-`NestGraphInspectorModule.forRoot()`. The root module file is found from
-`nest-cli.json` and the tsconfig `outDir`; `--entry`, `--module`, `--project`,
-`--require` (for example `ts-node/register`, to export TypeScript sources
-without building) and `--compact` are listed by
+`NestGraphInspectorModule.forRoot()`. The root module is found by itself: the
+compiled `app.module.js`, from `nest-cli.json` and the tsconfig `outDir`, or
+else the module `main.ts` passes to `NestFactory.create()` — read from
+`main.ts` as text: the export never selects `main.ts` to load. `--app` picks
+an application of a Nest CLI monorepo; the file the export loads is refused
+if it would start the application, as `main.js` would — the modules it
+imports are not checked, so it must not import `main.ts`. `--entry`, `--module`, `--project`, `--require`
+(for example `ts-node/register`, to export TypeScript sources without
+building, or a webpack build) and `--compact` are listed by
 `npx nest-graph-inspector --help`. If your `main.ts` loads environment
 variables before it imports `AppModule` (`import 'dotenv/config'`), pass them
 with `--env-file .env` (Node.js 20.12+) or `--require dotenv/config`. Your

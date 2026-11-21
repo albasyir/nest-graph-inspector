@@ -260,10 +260,14 @@ Responsibilities:
 | `bin.ts` | The executable: runs the CLI and exits explicitly once output is flushed |
 | `cli.ts` | Argument parsing (`node:util` `parseArgs`), help, version, exit codes |
 | `export-command.ts` | The export: delegation to the project's own copy, load order, the stdout guard, writing the file |
-| `project.ts` | Entry detection, loading the project's own `@nestjs/core`, picking the root module export |
+| `project.ts` | Entry resolution — `--entry`, the `app.module.js` convention (for `--app`, only the application's own), then main.ts — and the notes saying which application; loading the project's own `@nestjs/core`, picking the root module export |
+| `nest-cli-config.ts` | Reads and validates `nest-cli.json` and the build tsconfig; which application (`--app`, the default project), its settings and tsconfig as `nest build` reads them, and how it is built (compiled or bundled) |
+| `root-module-detection.ts` | Parses main.ts, rather than loading it, for the root module `@nestjs/core`'s `NestFactory` boots, traces it to the compiled file or TypeScript source, and refuses to load the file the export is about to load when it would start the application (the modules it imports are not checked) |
+| `files.ts` | Path display and file checks the modules above share |
 | `export-graph.ts` | The preview-mode boot, the inspector options read from the container, and the graph build |
 | `stderr-logger.ts` | The logger the application is booted with: warnings and errors to stderr |
 | `__fixtures__/` | The application `export-graph.spec.ts` boots; excluded from the build |
+| `test-support/` | Compiling the package into a temporary project and running its bin, for `bin.spec.ts` and `root-module-detection.e2e.spec.ts`; excluded from the build |
 
 **What does NOT belong here:** Graph building — the export must use `GraphOutputBuilder`, never its own.
 

@@ -36,6 +36,7 @@
     "lint:fix": "eslint src --fix",
     "test": "jest --config jest.config.cjs",
     "test:cov": "jest --config jest.config.cjs --coverage",
+    "test:e2e:cli": "jest --config jest.config.cjs --ci --runTestsByPath src/cli/root-module-detection.e2e.spec.ts",
     "prepack": "pnpm run build"
   },
   "keywords": [
