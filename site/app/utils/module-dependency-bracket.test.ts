@@ -226,41 +226,56 @@ function cardsCrossed(bracket: ModuleDependencyBracket, edge: BracketEdge): stri
  * share the stretch beside it by design.
  */
 function sharedStretches(bracket: ModuleDependencyBracket): string[] {
-  const routed = bracket.edges
-    .filter(edge => edge.kind !== 'self')
-    .map((edge) => {
-      const route = routeOf(edge.path)
-      return { edge, stretches: route.slice(1).map((end, index) => [route[index] ?? end, end] as const) }
-    })
-  const shared = new Set<string>()
+  const edges = bracket.edges.filter(edge => edge.kind !== 'self')
+  const shared: string[] = []
 
-  for (const [index, first] of routed.entries()) {
-    const ends = new Set([first.edge.source, first.edge.target])
-    for (const second of routed.slice(index + 1)) {
-      if (ends.has(second.edge.source) || ends.has(second.edge.target)) {
-        continue
-      }
-
-      for (const [a, b] of first.stretches) {
-        for (const [c, d] of second.stretches) {
-          const along = a.y === b.y && c.y === d.y && a.y === c.y
-            ? 'x'
-            : a.x === b.x && c.x === d.x && a.x === c.x ? 'y' : null
-          if (!along) {
-            continue
-          }
-
-          const overlap = Math.min(Math.max(a[along], b[along]), Math.max(c[along], d[along]))
-            - Math.max(Math.min(a[along], b[along]), Math.min(c[along], d[along]))
-          if (overlap > 1) {
-            shared.add(`${first.edge.id} and ${second.edge.id}`)
-          }
-        }
+  for (const [index, first] of edges.entries()) {
+    const ends = new Set([first.source, first.target])
+    for (const second of edges.slice(index + 1)) {
+      if (!ends.has(second.source) && !ends.has(second.target) && runAlongEachOther(first, second)) {
+        shared.push(`${first.id} and ${second.id}`)
       }
     }
   }
 
-  return [...shared]
+  return shared
+}
+
+/** Each straight stretch of an edge's route, as its two ends. */
+function stretchesOf(edge: BracketEdge): Array<readonly [Point, Point]> {
+  const route = routeOf(edge.path)
+  return route.slice(1).map((end, index) => [route[index] ?? end, end] as const)
+}
+
+/** Whether two edges run along one straight stretch for more than a pixel. */
+function runAlongEachOther(first: BracketEdge, second: BracketEdge): boolean {
+  const theirs = stretchesOf(second)
+  return stretchesOf(first).some(([a, b]) => theirs.some(([c, d]) => {
+    const along = a.y === b.y && c.y === d.y && a.y === c.y
+      ? 'x'
+      : a.x === b.x && c.x === d.x && a.x === c.x ? 'y' : null
+    if (!along) {
+      return false
+    }
+
+    const overlap = Math.min(Math.max(a[along], b[along]), Math.max(c[along], d[along]))
+      - Math.max(Math.min(a[along], b[along]), Math.min(c[along], d[along]))
+    return overlap > 1
+  }))
+}
+
+/** Whether a straight stretch of one edge cuts across one of the other's, away from their ends. */
+function crossEachOther(first: BracketEdge, second: BracketEdge): boolean {
+  const cuts = (across: readonly [Point, Point], down: readonly [Point, Point]) => {
+    const [a, b] = across
+    const [c, d] = down
+    return a.y === b.y && c.x === d.x
+      && c.x > Math.min(a.x, b.x) && c.x < Math.max(a.x, b.x)
+      && a.y > Math.min(c.y, d.y) && a.y < Math.max(c.y, d.y)
+  }
+  const ours = stretchesOf(first)
+  const theirs = stretchesOf(second)
+  return ours.some(stretch => theirs.some(other => cuts(stretch, other) || cuts(other, stretch)))
 }
 
 function middleOf(bracket: ModuleDependencyBracket): BracketCenterNode {
@@ -674,6 +689,48 @@ describe('the bracket', () => {
         assert.deepEqual(cardsCrossed(wide, edge), [], `${edge.id} (centre ${center})`)
       }
     }
+  })
+
+  test('a cycle keeps its own line from module to module: its own port, off the shared upright', () => {
+    let cycleStepsSeen = 0
+
+    for (const center of Object.keys(SHOP.modules)) {
+      for (const depth of [1, 3, 99]) {
+        const bracket = build(SHOP, center, { left: depth, right: depth })
+        const byId = new Map(bracket.nodes.map(node => [node.id, node]))
+        const branches = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length === 0)
+        const cycleSteps = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length > 0)
+        cycleStepsSeen += cycleSteps.length
+
+        for (const step of cycleSteps) {
+          // It comes into the module nearer the middle by a port of its own,
+          // up or down that module's side, never the middle the bracket's
+          // connectors share.
+          const route = routeOf(step.path)
+          const parent = byId.get(step.side === 'left' ? step.target : step.source)
+          const port = step.side === 'left' ? route.at(-1) : route[0]
+          assert.ok(parent && port, step.id)
+          assert.notEqual(port.y, centerY(parent), `${step.id} comes in by the shared port (centre ${center})`)
+          assert.ok(Math.abs(port.y - centerY(parent)) < parent.height / 2, `${step.id} comes in on its module's side`)
+
+          // Nowhere does it run along a blue connector, even one meeting it at a card.
+          for (const branch of branches) {
+            assert.ok(!runAlongEachOther(step, branch), `${step.id} runs along ${branch.id} (centre ${center}, depth ${depth})`)
+          }
+
+          // And the steps coming into one module nest: none cuts across another.
+          for (const other of cycleSteps.filter(candidate => candidate !== step)) {
+            const sameModule = (step.side === 'left' ? step.target : step.source)
+              === (other.side === 'left' ? other.target : other.source)
+            if (sameModule && step.side === other.side) {
+              assert.ok(!crossEachOther(step, other), `${step.id} cuts across ${other.id} (centre ${center})`)
+            }
+          }
+        }
+      }
+    }
+
+    assert.ok(cycleStepsSeen > 0, 'the shop graph puts connectors on its cycles')
   })
 
   test('no two edges joining no card in common run along one stretch', () => {

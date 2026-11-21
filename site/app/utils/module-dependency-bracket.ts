@@ -205,25 +205,30 @@ export type ModuleDependencyBracket = {
   bounds: CircularEdgeRect
 }
 
-const BRACKET_CENTER_WIDTH = 320
-const BRACKET_CENTER_HEIGHT = 156
-const BRACKET_MODULE_WIDTH = 244
-const BRACKET_MODULE_HEIGHT = 40
-const BRACKET_STUB_WIDTH = 136
+/**
+ * The module in the middle is the page's subject, so its card is the largest
+ * thing on the canvas: about one and a half module cards wide, and tall enough
+ * for its name, its four counts and the Direct Run button.
+ */
+const BRACKET_CENTER_WIDTH = 360
+const BRACKET_CENTER_HEIGHT = 196
+const BRACKET_MODULE_WIDTH = 264
+const BRACKET_MODULE_HEIGHT = 44
+const BRACKET_STUB_WIDTH = 148
 const STUB_HEIGHT = BRACKET_MODULE_HEIGHT
 const EMPTY_WIDTH = BRACKET_MODULE_WIDTH
-const EMPTY_HEIGHT = 64
-const LEVEL_LABEL_HEIGHT = 24
+const EMPTY_HEIGHT = 72
+const LEVEL_LABEL_HEIGHT = 28
 /** Between the top of the tallest column and the column headings. */
 const LEVEL_LABEL_GAP = 20
 /**
  * Between two columns: room for the bracket's connectors, which turn halfway
- * across, for the dashed links' lanes either side of that, and for a cycle
- * label on a connector's own stretch.
+ * across, for the lanes either side of that — a cycle's own way into its
+ * module, and the links — and for a cycle label on a connector's own stretch.
  */
-const COLUMN_GAP = 128
-/** Between the rows a column's modules stand on. */
-const ROW_PITCH = BRACKET_MODULE_HEIGHT + 16
+const COLUMN_GAP = 112
+/** Between the rows a column's modules stand on: room to breathe, and for a channel. */
+const ROW_PITCH = BRACKET_MODULE_HEIGHT + 24
 /** How far out of its column a link's first lane runs, and how far apart lanes are. */
 const LANE_START = 16
 const LANE_STEP = 8
@@ -233,6 +238,14 @@ const LANE_COUNT = 5
 const LANE_CLEARANCE = 8
 /** How round an edge's corners are. */
 const CORNER_RADIUS = 8
+/**
+ * How far apart the ports a cycle's connectors come into a module by are, up
+ * or down from the middle of its side, where the bracket's own connector
+ * comes in; and how near its corner the last one may be.
+ */
+const PORT_STEP_MODULE = 8
+const PORT_STEP_CENTER = 14
+const PORT_CORNER_CLEARANCE = 6
 /** How far along its own stretch of connector a tree edge's label sits. */
 const TREE_LABEL_INSET = COLUMN_GAP / 4
 
@@ -786,7 +799,15 @@ function routeEdges(params: {
   for (const side of BRACKET_SIDES) {
     const { modules, stubs } = layouts[side]
     const walk = walks[side]
+    // On the left the parent imports the module; on the right the module
+    // imports its parent.
+    const routeStep = (step: CycleStep, cyclePort?: number) => side === 'left'
+      ? router.route({ kind: 'tree', side, source: step.node, target: step.parent, cycleIds: step.cycleIds, cyclePort })
+      : router.route({ kind: 'tree', side, source: step.parent, target: step.node, cycleIds: step.cycleIds, cyclePort })
 
+    // The bracket's own connectors first; those on a reported cycle after
+    // them, each into a port of its own.
+    const cycleSteps: CycleStep[] = []
     for (const node of modules.values()) {
       const parentName = walk.parent.get(node.moduleName)
       const parent = parentName === center.moduleName
@@ -796,23 +817,18 @@ function routeEdges(params: {
         continue
       }
 
-      // On the left the parent imports the module; on the right the module
-      // imports its parent.
-      edges.push(side === 'left'
-        ? router.route({
-            kind: 'tree',
-            side,
-            source: node,
-            target: parent,
-            cycleIds: cycleIdsOf(parent.moduleName, node.moduleName)
-          })
-        : router.route({
-            kind: 'tree',
-            side,
-            source: parent,
-            target: node,
-            cycleIds: cycleIdsOf(node.moduleName, parent.moduleName)
-          }))
+      const cycleIds = side === 'left'
+        ? cycleIdsOf(parent.moduleName, node.moduleName)
+        : cycleIdsOf(node.moduleName, parent.moduleName)
+      if (cycleIds.length > 0) {
+        cycleSteps.push({ node, parent, cycleIds })
+      } else {
+        edges.push(routeStep({ node, parent, cycleIds }))
+      }
+    }
+
+    for (const step of assignCyclePorts(cycleSteps)) {
+      edges.push(routeStep(step, step.port))
     }
 
     for (const node of modules.values()) {
@@ -855,6 +871,58 @@ function routeEdges(params: {
   }
 
   return labelEdges(edges, params.nodes)
+}
+
+/** A connector of the bracket on a reported cycle: a module and the one the walk came from. */
+type CycleStep = {
+  node: BracketModuleNode
+  parent: BracketCenterNode | BracketModuleNode
+  cycleIds: number[]
+}
+
+/**
+ * Where each step of a cycle comes into the module nearer the middle: a port
+ * of its own up that module's side for a module standing higher, down it for
+ * one standing level or lower, clear of the middle the bracket's own
+ * connector comes in by. The module furthest away takes the port furthest
+ * out, and is routed first, to the lane nearest the module it comes into —
+ * so a module's cycle connectors nest, and never cross one another.
+ */
+function assignCyclePorts(steps: readonly CycleStep[]): Array<CycleStep & { port: number }> {
+  const byParent = new Map<string, CycleStep[]>()
+  for (const step of steps) {
+    const group = byParent.get(step.parent.id) ?? []
+    group.push(step)
+    byParent.set(step.parent.id, group)
+  }
+
+  const placed: Array<CycleStep & { port: number }> = []
+  for (const group of byParent.values()) {
+    const parent = group[0]?.parent
+    if (!parent) {
+      continue
+    }
+
+    const middle = parent.position.y + parent.height / 2
+    const step = parent.kind === 'center' ? PORT_STEP_CENTER : PORT_STEP_MODULE
+    const reach = parent.height / 2 - PORT_CORNER_CLEARANCE
+    const distanceOf = (entry: CycleStep) => entry.node.position.y + entry.node.height / 2 - middle
+
+    for (const isAbove of [true, false]) {
+      const half = group
+        .filter(entry => (distanceOf(entry) < 0) === isAbove)
+        .sort((first, second) =>
+          Math.abs(distanceOf(second)) - Math.abs(distanceOf(first))
+          || compareText(first.node.id, second.node.id))
+
+      for (const [index, entry] of half.entries()) {
+        const offset = Math.min((half.length - index) * step, reach)
+        placed.push({ ...entry, port: isAbove ? -offset : offset })
+      }
+    }
+  }
+
+  return placed
 }
 
 /**
@@ -1201,7 +1269,10 @@ function getColumn(node: RoutedNode): number {
  *
  * - A tree or stub edge into the next column out turns halfway across the
  *   gap, so the branches of one module share one upright, the way a bracket
- *   joins them.
+ *   joins them. A tree edge on a reported cycle is the exception: it turns in
+ *   a lane beside the module nearer the middle and comes into a port of its
+ *   own on that module's side (`assignCyclePorts`), so the cycle's colour
+ *   runs unbroken from one module to the next.
  * - A link into the next column out turns in a lane beside that column
  *   instead — halfway across it would run along another module's upright —
  *   and crosses the gap level with the module nearer the middle, where only
@@ -1298,8 +1369,13 @@ function createRouter(
     source: RoutedNode
     target: RoutedNode
     cycleIds: number[]
+    /**
+     * For a connector of the bracket on a reported cycle: how far up (less
+     * than 0) or down its port is on the side of the module nearer the middle.
+     */
+    cyclePort?: number
   }): RoutedEdge {
-    const { kind, side, source, target, cycleIds } = params
+    const { kind, side, source, target, cycleIds, cyclePort } = params
     const sourceColumn = getColumn(source)
     const targetColumn = getColumn(target)
     let points: EdgePoint[]
@@ -1328,6 +1404,43 @@ function createRouter(
         : [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = ['right-source', 'left-target']
       lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+    } else if (sourceColumn < targetColumn && cyclePort !== undefined) {
+      // A step of a reported cycle leaves the bracket's shared upright, so its
+      // colour is not lost in the branches' own: it turns in a lane beside the
+      // module nearer the middle and comes into a port of its own on that
+      // module's side. Its label sits on the stretch beside the module further
+      // out, which only it runs along.
+      handles = ['right-source', 'left-target']
+      const isLevel = rightOf(source).y === leftOf(target).y
+      if (isLevel) {
+        // Level with the module it comes into, it would run along the middle
+        // the bracket's connectors share: it runs straight across instead, as
+        // far down both sides as its port is.
+        const from = { x: rightOf(source).x, y: rightOf(source).y + cyclePort }
+        const to = { x: leftOf(target).x, y: leftOf(target).y + cyclePort }
+        points = [from, to]
+        label = side === 'left'
+          ? { labelX: from.x + TREE_LABEL_INSET, labelY: from.y, ...LABEL_CENTERED }
+          : { labelX: to.x - TREE_LABEL_INSET, labelY: to.y, ...LABEL_CENTERED }
+      } else if (side === 'left') {
+        // The module nearer the middle is the one importing: the target.
+        const from = rightOf(source)
+        const port = { x: leftOf(target).x, y: leftOf(target).y + cyclePort }
+        const turn = port.x - takeLane(`same:${side}:${targetColumn}`, from.y, port.y)
+        points = from.y === port.y
+          ? [from, port]
+          : [from, { x: turn, y: from.y }, { x: turn, y: port.y }, port]
+        label = { labelX: from.x + TREE_LABEL_INSET, labelY: from.y, ...LABEL_CENTERED }
+      } else {
+        // The module nearer the middle is the one imported: the source.
+        const port = { x: rightOf(source).x, y: rightOf(source).y + cyclePort }
+        const to = leftOf(target)
+        const turn = port.x + takeLane(`same:${side}:${sourceColumn}`, port.y, to.y)
+        points = port.y === to.y
+          ? [port, to]
+          : [port, { x: turn, y: port.y }, { x: turn, y: to.y }, to]
+        label = { labelX: to.x - TREE_LABEL_INSET, labelY: to.y, ...LABEL_CENTERED }
+      }
     } else if (sourceColumn < targetColumn) {
       const from = rightOf(source)
       const to = leftOf(target)
