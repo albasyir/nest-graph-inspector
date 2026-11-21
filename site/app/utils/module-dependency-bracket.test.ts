@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import type { GraphOutputCycle, GraphOutputModule } from 'nest-graph-inspector'
+import { formatCircularEdgeLabel, getCircularLabelBox } from './circular-dependency-edge.ts'
 import {
   BRACKET_CENTER_ID,
   DEFAULT_BRACKET_DEPTH,
@@ -151,6 +152,16 @@ function edgeBetween(bracket: ModuleDependencyBracket, source: string, target: s
 
 function centerY(node: BracketNode): number {
   return node.position.y + node.height / 2
+}
+
+function boxesOverlap(
+  left: { x: number, y: number, width: number, height: number },
+  right: { x: number, y: number, width: number, height: number }
+): boolean {
+  return left.x < right.x + right.width
+    && right.x < left.x + left.width
+    && left.y < right.y + right.height
+    && right.y < left.y + left.height
 }
 
 function middleOf(bracket: ModuleDependencyBracket): BracketCenterNode {
@@ -491,6 +502,25 @@ describe('the bracket', () => {
         for (const edge of bracket.edges) {
           assert.ok(ids.has(edge.source) && ids.has(edge.target), `${edge.id} joins drawn nodes`)
           assert.ok(edge.path.startsWith('M '), `${edge.id} has a path`)
+        }
+
+        // Cycle labels cover no card, and no other label.
+        const labels = bracket.edges.flatMap(edge => edge.label
+          ? [{ id: edge.id, box: getCircularLabelBox(edge.label, formatCircularEdgeLabel(edge.cycleIds)) }]
+          : [])
+        for (const [index, label] of labels.entries()) {
+          for (const other of labels.slice(index + 1)) {
+            assert.equal(
+              boxesOverlap(label.box, other.box), false,
+              `${label.id}'s label overlaps ${other.id}'s (centre ${center}, depth ${depth})`
+            )
+          }
+          for (const node of boxes) {
+            assert.equal(
+              boxesOverlap(label.box, { ...node.position, width: node.width, height: node.height }), false,
+              `${label.id}'s label covers ${node.id} (centre ${center}, depth ${depth})`
+            )
+          }
         }
 
         const { bounds } = bracket

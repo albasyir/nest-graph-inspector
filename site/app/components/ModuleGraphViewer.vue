@@ -10,11 +10,11 @@ import {
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { useDebounceFn, useResizeObserver } from '@vueuse/core'
+import { useDebounceFn, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import type { CSSProperties } from 'vue'
 import type { Edge, EdgeProps, Node, NodeMouseEvent } from '@vue-flow/core'
-import type { BreadcrumbItem } from '@nuxt/ui'
 import type { GraphOutput } from 'nest-graph-inspector'
+import type { DirectRunRecords } from '~/composables/useDirectRunRecords'
 import { buildCircularIssueFlow } from '~/utils/circular-dependency-flow'
 import {
   formatCircularEdgeLabel,
@@ -50,13 +50,18 @@ import {
 
 /**
  * One module on its own canvas: what it declares, how its items inject one
- * another, and every dependency it reaches outside itself.
+ * another, and every dependency it reaches outside itself — the inside view of
+ * a module's page — with Direct Run docked beside it.
  *
  * The navigator answers "how do the modules fit together"; this answers "what
  * does this one module need, and from where" without tracing lines across the
  * whole application. The layout comes from `utils/module-deep-dive.ts`, so a
  * dependency always sits to the left of whatever injects it — or above it on
  * a phone, where the deep dive runs top to bottom.
+ *
+ * Clicking a provider or controller opens Direct Run on it: a panel beside the
+ * canvas, or below it on a narrow screen, never over it, so the graph stays in
+ * view while a method runs. It says why when the target has nothing to run.
  */
 const props = withDefaults(
   defineProps<{
@@ -68,24 +73,32 @@ const props = withDefaults(
     directRunDisabled?: boolean
     /** Why Direct Run is off, for a graph with no trace history either. */
     directRunDisabledReason?: string
-    /** Node id of the provider or controller whose Direct Run drawer is open. */
+    /** Node id of the provider or controller whose Direct Run panel is open. */
     directRunOn?: string
+    /**
+     * What each target ran, kept by the page so it outlives this view; this
+     * keeps its own without it.
+     */
+    directRunRecords?: DirectRunRecords
   }>(),
   {
     directRunUrl: undefined,
     directRunHeaders: undefined,
     directRunDisabled: false,
     directRunDisabledReason: undefined,
-    directRunOn: undefined
+    directRunOn: undefined,
+    directRunRecords: undefined
   }
 )
 
 const emit = defineEmits<{
   // The node id, not the class name: only the id says provider or controller.
-  directRunDrawerOpen: [nodeId: string]
-  directRunDrawerClose: []
+  directRunOpen: [nodeId: string]
+  directRunClose: []
   traceOpen: []
 }>()
+
+const directRunRecords = props.directRunRecords ?? useDirectRunRecords()
 
 /** Direct Run cannot run anything on this graph: a static or file graph. */
 const isDirectRunOff = computed(() =>
@@ -100,7 +113,6 @@ type FlowNode
 type FlowEdgeData = { cycleIds: number[] }
 type CircularEdgeProps = EdgeProps<FlowEdgeData>
 
-const NAVIGATOR_PATH = '/view/navigator'
 /** How long a pointer has to rest on a node before its JSDoc appears. */
 const JSDOC_HOVER_OPEN_DELAY_MS = 240
 /** How long the card survives the pointer leaving its node, so it can be reached. */
@@ -115,11 +127,6 @@ const EDGE_COLOR_BY_KIND: Readonly<Record<ModuleDeepDiveEdgeKind, string>> = {
 const flowId = `module-graph-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
 
-const mod = computed(() =>
-  Object.hasOwn(props.graphData.modules, props.moduleName)
-    ? props.graphData.modules[props.moduleName]
-    : undefined
-)
 // A phone held upright reads the deep dive top to bottom: dependencies above,
 // whatever injects them below.
 const { isMobile } = useMobileDevice()
@@ -128,14 +135,6 @@ const deepDive = computed(() =>
     orientation: isMobile.value ? 'vertical' : 'horizontal'
   })
 )
-const isRoot = computed(() => props.moduleName === props.graphData.root)
-const moduleJsDoc = computed(() => parseJsDocPreview(mod.value?.jsdoc))
-
-const breadcrumbItems = computed<BreadcrumbItem[]>(() => [
-  { label: 'Navigator', icon: 'i-lucide-map', to: NAVIGATOR_PATH },
-  { label: 'Modules' },
-  { label: props.moduleName }
-])
 
 const overviewStats = computed(() => {
   const stats = deepDive.value?.stats
@@ -352,34 +351,6 @@ function describeCycles(cycleIds: readonly number[]): string {
     : `Circular dependency ${formatCircularEdgeLabel(cycleIds)}`
 }
 
-// The module's JSDoc shows one line until asked for the rest, so a long
-// comment never pushes the canvas down the page.
-
-const jsDocId = `${flowId}-jsdoc`
-const jsDocBodyRef = ref<HTMLElement | null>(null)
-const isJsDocExpanded = ref(false)
-const isJsDocClipped = ref(false)
-
-/** Whether the one collapsed line hides any of the comment. */
-function measureJsDocClipping(): void {
-  const body = jsDocBodyRef.value
-  if (!body || isJsDocExpanded.value) {
-    return
-  }
-
-  const firstBlock = body.firstElementChild
-  isJsDocClipped.value = body.scrollHeight > body.clientHeight + 1
-    || (firstBlock instanceof HTMLElement
-      && firstBlock.scrollWidth > firstBlock.clientWidth + 1)
-}
-
-useResizeObserver(jsDocBodyRef, measureJsDocClipping)
-
-watch(moduleJsDoc, () => {
-  isJsDocExpanded.value = false
-  void nextTick(measureJsDocClipping)
-})
-
 // JSDoc hover card — the navigator's behaviour: open after a short rest, and
 // survive the pointer leaving the node long enough to be reached and scrolled.
 
@@ -481,348 +452,313 @@ function holdJsDocHoverCard(): void {
 
 onBeforeUnmount(closeJsDocHoverCard)
 
-// Direct Run — the same drawer the navigator opens, on a runnable item of
-// this module.
+// Direct Run, docked: beside the canvas, or below it on a narrow screen.
 
-/** Node id of the provider or controller whose Direct Run drawer is open. */
+/** Node id of the provider or controller whose Direct Run panel is open. */
 const selectedNodeId = ref<string | null>(null)
+const directRunPanelRef = ref<{ $el: HTMLElement } | null>(null)
+/** The panel stands below the canvas rather than beside it. */
+const isPanelStacked = useMediaQuery('(max-width: 767.98px)')
 
 function selectNode(nodeId: string | null): void {
   const hadSelection = Boolean(selectedNodeId.value)
   selectedNodeId.value = nodeId
 
   if (nodeId) {
-    emit('directRunDrawerOpen', nodeId)
+    emit('directRunOpen', nodeId)
   } else if (hadSelection) {
-    emit('directRunDrawerClose')
+    emit('directRunClose')
   }
 }
 
 // Follow the page's `direct-run-on`, so a reload or a shared link reopens the
-// drawer — but only onto a runnable item of this module.
+// panel — but only onto a provider or controller of this module. One with
+// nothing to run opens it too: the panel says why.
 watch(
   [() => props.directRunOn, deepDive],
   ([nodeId]) => {
     const node = deepDive.value?.nodes.find(candidate => candidate.id === nodeId)
-    selectedNodeId.value = node?.type === 'item' && node.isRunnable ? node.id : null
+    selectedNodeId.value = node?.type === 'item' ? node.id : null
   },
   { immediate: true }
+)
+
+// Below the canvas, a panel opening is out of sight: bring it into view.
+watch(
+  selectedNodeId,
+  async (nodeId, previous) => {
+    if (!nodeId || nodeId === previous || !isPanelStacked.value) {
+      return
+    }
+
+    await nextTick()
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    directRunPanelRef.value?.$el.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start'
+    })
+  },
+  { immediate: true, flush: 'post' }
 )
 
 function handleNodeClick(event: NodeMouseEvent): void {
   closeJsDocHoverCard()
   const node = event.node.data as ModuleDeepDiveItemNode | ModuleDeepDiveExternalNode
-  selectNode(node.type === 'item' && node.isRunnable ? node.id : null)
+  if (node.type === 'item') {
+    selectNode(node.id)
+  }
 }
 
+/**
+ * A click on the canvas closes what floats over it, and leaves the docked
+ * panel be: it stands beside the graph, and closes with its own button.
+ */
 function handlePaneClick(): void {
   closeJsDocHoverCard()
-  selectNode(null)
 }
 </script>
 
 <template>
   <div class="module-graph flex h-full min-h-0 flex-col">
-    <header class="relative z-10 border-b border-default bg-default px-4 py-2">
-      <div class="flex items-center justify-between gap-3">
-        <UBreadcrumb
-          :items="breadcrumbItems"
-          class="min-w-0"
-        />
-        <UButton
-          icon="i-lucide-arrow-left"
-          label="Back to Application Graph"
-          color="neutral"
-          variant="outline"
-          size="xs"
-          class="shrink-0"
-          :ui="{ label: 'max-sm:sr-only' }"
-          :to="NAVIGATOR_PATH"
-        />
-      </div>
-
-      <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div class="flex min-w-0 items-center gap-2">
-          <UIcon
-            name="i-lucide-package"
-            class="size-4 shrink-0 text-primary"
-            aria-hidden="true"
-          />
-          <h1 class="truncate font-mono text-base font-semibold">
-            {{ props.moduleName }}
-          </h1>
-          <UBadge
-            v-if="isRoot"
-            label="Root"
-            color="error"
-            variant="subtle"
-            size="sm"
-          />
-        </div>
-
-        <ul
-          class="module-graph__stats"
-          aria-label="Module overview"
+    <div class="relative z-10 shrink-0 border-b border-default bg-default px-4 py-2">
+      <ul
+        class="module-graph__stats"
+        aria-label="Module overview"
+      >
+        <li
+          v-for="stat in overviewStats"
+          :key="stat.label"
+          class="module-graph__stat"
         >
-          <li
-            v-for="stat in overviewStats"
-            :key="stat.label"
-            class="module-graph__stat"
-          >
-            <span class="font-semibold tabular-nums">{{ stat.value }}</span>
-            <span class="text-muted">{{ stat.label }}</span>
-          </li>
-        </ul>
-      </div>
-
-      <div
-        v-if="moduleJsDoc.length"
-        class="module-graph__jsdoc text-sm text-muted"
-        :class="{ 'module-graph__jsdoc--expanded': isJsDocExpanded }"
-      >
-        <div
-          :id="jsDocId"
-          ref="jsDocBodyRef"
-          class="module-graph__jsdoc-body"
-        >
-          <template
-            v-for="(block, index) in moduleJsDoc"
-            :key="index"
-          >
-            <p v-if="block.kind === 'paragraph'">
-              {{ block.text }}
-            </p>
-            <ul
-              v-else
-              class="list-disc ps-5"
-            >
-              <li
-                v-for="(listItem, itemIndex) in block.items"
-                :key="itemIndex"
-              >
-                {{ listItem }}
-              </li>
-            </ul>
-          </template>
-        </div>
-        <UButton
-          v-if="isJsDocExpanded || isJsDocClipped"
-          :label="isJsDocExpanded ? 'Show less' : 'Show more'"
-          color="neutral"
-          variant="link"
-          size="xs"
-          class="shrink-0 py-0"
-          :aria-expanded="isJsDocExpanded"
-          :aria-controls="jsDocId"
-          @click="isJsDocExpanded = !isJsDocExpanded"
-        />
-      </div>
-    </header>
-
-    <div
-      ref="containerRef"
-      class="relative min-h-0 flex-1 overflow-hidden"
-    >
-      <VueFlow
-        :id="flowId"
-        :nodes="flowNodes"
-        :edges="flowEdges"
-        :nodes-connectable="false"
-        :min-zoom="0.2"
-        @nodes-initialized="fitDeepDive"
-        @node-click="handleNodeClick"
-        @pane-click="handlePaneClick"
-        @move-start="closeJsDocHoverCard"
-        @move-end="noteReaderMove"
-      >
-        <template #edge-circular="edgeProps">
-          <BaseEdge
-            :id="edgeProps.id"
-            :path="getCircularGeometry(edgeProps).path"
-            :marker-end="edgeProps.markerEnd"
-            :style="edgeProps.style"
-            :interaction-width="edgeProps.interactionWidth"
-          />
-
-          <EdgeLabelRenderer v-if="edgeProps.data?.cycleIds.length">
-            <UTooltip
-              text="Click for the whole cycle"
-              :delay-duration="0"
-            >
-              <button
-                type="button"
-                class="module-graph__cycle nodrag nopan"
-                :style="getCircularEdgeLabelStyle(edgeProps)"
-                :aria-label="describeCycles(edgeProps.data.cycleIds)"
-                @click.stop="openCycleDetails(edgeProps.data.cycleIds)"
-              >
-                <UIcon
-                  name="i-lucide-triangle-alert"
-                  class="module-graph__cycle-icon"
-                  aria-hidden="true"
-                />
-                {{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}
-              </button>
-            </UTooltip>
-          </EdgeLabelRenderer>
-        </template>
-
-        <template #node-item="itemProps">
-          <Handle
-            type="target"
-            :position="isMobile ? Position.Top : Position.Left"
-          />
-          <div
-            class="module-graph-node"
-            :class="[
-              `module-graph-node--${itemProps.data.kind}`,
-              {
-                'module-graph-node--documented': hasJsDocPreview(itemProps.data.jsdoc),
-                'module-graph-node--runnable': itemProps.data.isRunnable
-              }
-            ]"
-            @mouseenter="openJsDocHoverCard($event, itemProps.data)"
-            @mouseleave="scheduleJsDocHoverClose(itemProps.id)"
-          >
-            <span class="module-graph-node__badge module-graph-node__kind">
-              {{ itemProps.data.kind === 'controller' ? 'C' : 'P' }}
-            </span>
-            <span
-              v-if="itemProps.data.isExported"
-              class="module-graph-node__badge module-graph-node__export"
-              title="Exported"
-            >
-              E
-            </span>
-            <span class="module-graph-node__label">
-              {{ itemProps.data.label }}
-            </span>
-            <!-- The item still opens its drawer, which says why Direct Run
-                 is off; only the promise that it can run goes. -->
-            <UIcon
-              v-if="itemProps.data.isRunnable && !isDirectRunOff"
-              name="i-lucide-play"
-              class="module-graph-node__run"
-              aria-label="Direct Run available"
-            />
-          </div>
-          <Handle
-            type="source"
-            :position="isMobile ? Position.Bottom : Position.Right"
-          />
-        </template>
-
-        <template #node-external="externalProps">
-          <Handle
-            type="target"
-            :position="isMobile ? Position.Top : Position.Left"
-          />
-          <div class="module-graph-node module-graph-node--external">
-            <span
-              class="module-graph-node__badge module-graph-node__ext"
-              title="Imported"
-            >
-              EXT
-            </span>
-            <span class="module-graph-node__stack">
-              <span class="module-graph-node__label">
-                {{ externalProps.data.label }}
-              </span>
-              <span class="module-graph-node__from">
-                from {{ externalProps.data.moduleName }}
-              </span>
-            </span>
-          </div>
-          <Handle
-            type="source"
-            :position="isMobile ? Position.Bottom : Position.Right"
-          />
-        </template>
-
-        <Background />
-        <Controls
-          @zoom-in="noteReaderMove"
-          @zoom-out="noteReaderMove"
-          @fit-view="refitDeepDive"
-        />
-      </VueFlow>
-
-      <div
-        v-if="jsDocHoverCard"
-        ref="jsDocHoverCardRef"
-        class="module-graph__jsdoc-card"
-        :class="{ 'module-graph__jsdoc-card--positioned': jsDocHoverCard.isPositioned }"
-        :style="{ left: `${jsDocHoverCard.left}px`, top: `${jsDocHoverCard.top}px` }"
-        @mouseenter="holdJsDocHoverCard"
-        @mouseleave="closeJsDocHoverCard"
-      >
-        <JsDocHoverCard
-          :title="jsDocHoverCard.title"
-          :kind="jsDocHoverCard.kind"
-          :subtitle="props.moduleName"
-          :blocks="jsDocHoverCard.blocks"
-        />
-      </div>
-
-      <p
-        v-if="!flowNodes.length"
-        class="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-muted"
-      >
-        This module declares no providers or controllers.
-      </p>
+          <span class="font-semibold tabular-nums">{{ stat.value }}</span>
+          <span class="text-muted">{{ stat.label }}</span>
+        </li>
+      </ul>
     </div>
 
-    <footer
-      class="module-graph__legend border-t border-default px-4 py-2 text-xs text-muted"
-      aria-label="Legend"
+    <div
+      class="module-graph__workspace"
+      :class="{ 'module-graph__workspace--with-panel': selectedNodeId }"
     >
-      <span class="module-graph__legend-item">
-        <span class="module-graph__swatch module-graph__swatch--provider" />
-        Internal Provider
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph__swatch module-graph__swatch--controller" />
-        Controller
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph__swatch module-graph__swatch--external" />
-        External Dependency
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph-node__badge module-graph-node__export">E</span>
-        Exported
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph__line module-graph__line--provider" />
-        Provider injection
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph__line module-graph__line--controller" />
-        Controller injection
-      </span>
-      <span class="module-graph__legend-item">
-        <span class="module-graph__line module-graph__line--external" />
-        External import
-      </span>
-      <span
-        v-if="hasCircularEdges"
-        class="module-graph__legend-item"
+      <div
+        ref="containerRef"
+        class="module-graph__canvas"
       >
-        <span class="module-graph__line module-graph__line--circular" />
-        Circular dependency (#id)
-      </span>
-    </footer>
+        <VueFlow
+          :id="flowId"
+          :nodes="flowNodes"
+          :edges="flowEdges"
+          :nodes-connectable="false"
+          :min-zoom="0.2"
+          @nodes-initialized="fitDeepDive"
+          @node-click="handleNodeClick"
+          @pane-click="handlePaneClick"
+          @move-start="closeJsDocHoverCard"
+          @move-end="noteReaderMove"
+        >
+          <template #edge-circular="edgeProps">
+            <BaseEdge
+              :id="edgeProps.id"
+              :path="getCircularGeometry(edgeProps).path"
+              :marker-end="edgeProps.markerEnd"
+              :style="edgeProps.style"
+              :interaction-width="edgeProps.interactionWidth"
+            />
 
-    <DirectRunDrawer
-      :graph="props.graphData"
-      :node-id="selectedNodeId"
-      :direct-run-url="props.directRunUrl"
-      :direct-run-headers="props.directRunHeaders"
-      :direct-run-disabled="props.directRunDisabled"
-      :direct-run-disabled-reason="props.directRunDisabledReason"
-      @close="selectNode(null)"
-      @trace-open="emit('traceOpen')"
-    />
+            <EdgeLabelRenderer v-if="edgeProps.data?.cycleIds.length">
+              <UTooltip
+                text="Click for the whole cycle"
+                :delay-duration="0"
+              >
+                <button
+                  type="button"
+                  class="module-graph__cycle nodrag nopan"
+                  :style="getCircularEdgeLabelStyle(edgeProps)"
+                  :aria-label="describeCycles(edgeProps.data.cycleIds)"
+                  @click.stop="openCycleDetails(edgeProps.data.cycleIds)"
+                >
+                  <UIcon
+                    name="i-lucide-triangle-alert"
+                    class="module-graph__cycle-icon"
+                    aria-hidden="true"
+                  />
+                  {{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}
+                </button>
+              </UTooltip>
+            </EdgeLabelRenderer>
+          </template>
+
+          <template #node-item="itemProps">
+            <Handle
+              type="target"
+              :position="isMobile ? Position.Top : Position.Left"
+            />
+            <div
+              class="module-graph-node"
+              :class="[
+                `module-graph-node--${itemProps.data.kind}`,
+                {
+                  'module-graph-node--documented': hasJsDocPreview(itemProps.data.jsdoc),
+                  'module-graph-node--runnable': itemProps.data.isRunnable
+                }
+              ]"
+              @mouseenter="openJsDocHoverCard($event, itemProps.data)"
+              @mouseleave="scheduleJsDocHoverClose(itemProps.id)"
+            >
+              <span class="module-graph-node__badge module-graph-node__kind">
+                {{ itemProps.data.kind === 'controller' ? 'C' : 'P' }}
+              </span>
+              <span
+                v-if="itemProps.data.isExported"
+                class="module-graph-node__badge module-graph-node__export"
+                title="Exported"
+              >
+                E
+              </span>
+              <span class="module-graph-node__label">
+                {{ itemProps.data.label }}
+              </span>
+              <!-- The item still opens its panel, which says why Direct Run
+                   is off; only the promise that it can run goes. -->
+              <UIcon
+                v-if="itemProps.data.isRunnable && !isDirectRunOff"
+                name="i-lucide-play"
+                class="module-graph-node__run"
+                aria-label="Direct Run available"
+              />
+            </div>
+            <Handle
+              type="source"
+              :position="isMobile ? Position.Bottom : Position.Right"
+            />
+          </template>
+
+          <template #node-external="externalProps">
+            <Handle
+              type="target"
+              :position="isMobile ? Position.Top : Position.Left"
+            />
+            <div class="module-graph-node module-graph-node--external">
+              <span
+                class="module-graph-node__badge module-graph-node__ext"
+                title="Imported"
+              >
+                EXT
+              </span>
+              <span class="module-graph-node__stack">
+                <span class="module-graph-node__label">
+                  {{ externalProps.data.label }}
+                </span>
+                <span class="module-graph-node__from">
+                  from {{ externalProps.data.moduleName }}
+                </span>
+              </span>
+            </div>
+            <Handle
+              type="source"
+              :position="isMobile ? Position.Bottom : Position.Right"
+            />
+          </template>
+
+          <Background />
+          <Controls
+            @zoom-in="noteReaderMove"
+            @zoom-out="noteReaderMove"
+            @fit-view="refitDeepDive"
+          />
+        </VueFlow>
+
+        <div
+          v-if="jsDocHoverCard"
+          ref="jsDocHoverCardRef"
+          class="module-graph__jsdoc-card"
+          :class="{ 'module-graph__jsdoc-card--positioned': jsDocHoverCard.isPositioned }"
+          :style="{ left: `${jsDocHoverCard.left}px`, top: `${jsDocHoverCard.top}px` }"
+          @mouseenter="holdJsDocHoverCard"
+          @mouseleave="closeJsDocHoverCard"
+        >
+          <JsDocHoverCard
+            :title="jsDocHoverCard.title"
+            :kind="jsDocHoverCard.kind"
+            :subtitle="props.moduleName"
+            :blocks="jsDocHoverCard.blocks"
+          />
+        </div>
+
+        <p
+          v-if="!flowNodes.length"
+          class="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-muted"
+        >
+          This module declares no providers or controllers.
+        </p>
+      </div>
+
+      <!-- Beside the canvas from `md`, below it on a narrow screen, ahead of
+           the legend: Direct Run is what the visitor came for. -->
+      <DirectRunPanel
+        v-if="selectedNodeId"
+        ref="directRunPanelRef"
+        class="module-graph__direct-run"
+        :graph="props.graphData"
+        :node-id="selectedNodeId"
+        :direct-run-url="props.directRunUrl"
+        :direct-run-headers="props.directRunHeaders"
+        :direct-run-disabled="props.directRunDisabled"
+        :direct-run-disabled-reason="props.directRunDisabledReason"
+        :records="directRunRecords"
+        @close="selectNode(null)"
+        @trace-open="emit('traceOpen')"
+      />
+
+      <footer
+        class="module-graph__legend border-t border-default px-4 py-2 text-xs text-muted"
+        aria-label="Legend"
+      >
+        <span class="module-graph__legend-item">
+          <span class="module-graph__swatch module-graph__swatch--provider" />
+          Internal Provider
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph__swatch module-graph__swatch--controller" />
+          Controller
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph__swatch module-graph__swatch--external" />
+          External Dependency
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph-node__badge module-graph-node__export">E</span>
+          Exported
+        </span>
+        <span class="module-graph__legend-item">
+          <UIcon
+            name="i-lucide-play"
+            class="module-graph__legend-run"
+            aria-hidden="true"
+          />
+          Direct Run available
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph__line module-graph__line--provider" />
+          Provider injection
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph__line module-graph__line--controller" />
+          Controller injection
+        </span>
+        <span class="module-graph__legend-item">
+          <span class="module-graph__line module-graph__line--external" />
+          External import
+        </span>
+        <span
+          v-if="hasCircularEdges"
+          class="module-graph__legend-item"
+        >
+          <span class="module-graph__line module-graph__line--circular" />
+          Circular dependency (#id)
+        </span>
+      </footer>
+    </div>
 
     <UDrawer
       v-model:open="showCycleDetails"
@@ -932,35 +868,80 @@ function handlePaneClick(): void {
   white-space: nowrap;
 }
 
-.module-graph__jsdoc {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-  line-height: 1.25rem;
+/*
+ * The canvas and its legend, and Direct Run docked beside them from `md` —
+ * the full height, so a long result scrolls inside the panel and the graph
+ * keeps its place. Below `md` the three stack — canvas, Direct Run, legend —
+ * and the view scrolls instead, the canvas keeping most of a phone's screen.
+ */
+.module-graph__workspace {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "canvas"
+    "legend";
 }
 
-/* Collapsed, the comment is its first line; the button opens the rest. */
-.module-graph__jsdoc-body {
-  flex: 1;
-  min-width: 0;
-  max-height: 1.25rem;
+.module-graph__canvas {
+  position: relative;
+  grid-area: canvas;
+  min-height: 0;
   overflow: hidden;
 }
 
-.module-graph__jsdoc:not(.module-graph__jsdoc--expanded) .module-graph__jsdoc-body > p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.module-graph__legend {
+  grid-area: legend;
 }
 
-.module-graph__jsdoc--expanded .module-graph__jsdoc-body {
-  max-height: 6.5rem;
-  overflow-y: auto;
+.module-graph__direct-run {
+  grid-area: panel;
+  min-height: 0;
 }
 
-.module-graph__jsdoc-body > * + * {
-  margin-top: 0.375rem;
+@media (min-width: 768px) {
+  .module-graph__workspace--with-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
+    grid-template-areas:
+      "canvas panel"
+      "legend panel";
+  }
+
+  .module-graph__direct-run {
+    border-left: 1px solid var(--ui-border);
+  }
+}
+
+@media (max-width: 767.98px) {
+  .module-graph__workspace {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /*
+   * Each row as tall as what it holds: the view has a height of its own, so
+   * `auto` rows would shrink to fit it and the panel would spill over the
+   * legend instead of the view scrolling.
+   */
+  .module-graph__workspace--with-panel {
+    grid-template-rows: 62svh max-content max-content;
+    grid-template-areas:
+      "canvas"
+      "panel"
+      "legend";
+  }
+
+  .module-graph__direct-run {
+    border-top: 1px solid var(--ui-border);
+  }
+}
+
+.module-graph__legend-run {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
 }
 
 .module-graph-node {

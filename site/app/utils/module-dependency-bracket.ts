@@ -205,9 +205,9 @@ export type ModuleDependencyBracket = {
   bounds: CircularEdgeRect
 }
 
-export const BRACKET_CENTER_WIDTH = 296
+export const BRACKET_CENTER_WIDTH = 320
 export const BRACKET_CENTER_HEIGHT = 156
-export const BRACKET_MODULE_WIDTH = 216
+export const BRACKET_MODULE_WIDTH = 244
 export const BRACKET_MODULE_HEIGHT = 40
 export const BRACKET_STUB_WIDTH = 136
 const STUB_HEIGHT = BRACKET_MODULE_HEIGHT
@@ -325,6 +325,7 @@ export function buildModuleDependencyBracket(
     walks,
     adjacency,
     cycleIdsByImport: indexModuleCycles(graph.cycles?.modules),
+    nodes,
     routePoints
   })
 
@@ -738,7 +739,7 @@ function indexModuleCycles(
 }
 
 /**
- * Every edge of the bracket, routed.
+ * Every edge of the bracket, routed and labelled.
  *
  * Each import is drawn once per side it shows on. On the left a module's
  * imports are the side's next level; on the right the modules importing it
@@ -754,12 +755,14 @@ function routeEdges(params: {
   walks: Readonly<Record<BracketSide, SideWalk>>
   adjacency: Adjacency
   cycleIdsByImport: ReadonlyMap<string, number[]>
+  /** Every node drawn, which a link's label must not cover. */
+  nodes: readonly BracketNode[]
   /** Collects every point a route turns at or passes, for the bounds. */
   routePoints: EdgePoint[]
 }): BracketEdge[] {
   const { center, layouts, walks, adjacency, cycleIdsByImport } = params
   const router = createRouter(params.routePoints)
-  const edges: BracketEdge[] = []
+  const edges: RoutedEdge[] = []
   const cycleIdsOf = (importer: string, imported: string) =>
     [...(cycleIdsByImport.get(getImportKey(importer, imported)) ?? [])]
 
@@ -838,10 +841,174 @@ function routeEdges(params: {
     }
   }
 
-  return edges
+  return labelEdges(edges, params.nodes)
+}
+
+/**
+ * Labels every edge on a reported cycle with its `#ids`.
+ *
+ * A tree edge's label goes where it settled while routing: on the stretch
+ * beside the module further out, which only that edge runs along. A loop's
+ * goes beside the loop. A dashed link turns in a lane beside other lanes and
+ * close to a column of cards, so its label is placed after those: on its own
+ * upright, reaching from it into the open gap — away from the cards the lane
+ * hugs — at the first height, from the middle out, where it covers no card and
+ * no label placed before it.
+ */
+function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[]): BracketEdge[] {
+  const taken: CircularEdgeRect[] = nodes.map(node => ({
+    x: node.position.x,
+    y: node.position.y,
+    width: node.width,
+    height: node.height
+  }))
+
+  for (const { edge, label } of routed) {
+    if (edge.cycleIds.length > 0 && label) {
+      edge.label = label
+      taken.push(getCircularLabelBox(label, formatCircularEdgeLabel(edge.cycleIds)))
+    }
+  }
+
+  for (const { edge, lane, points } of routed) {
+    if (edge.cycleIds.length === 0 || !lane) {
+      continue
+    }
+
+    const text = formatCircularEdgeLabel(edge.cycleIds)
+    edge.label = placeLaneLabel({ lane, route: points, text, taken })
+    taken.push(getCircularLabelBox(edge.label, text))
+  }
+
+  return routed.map(({ edge }) => edge)
 }
 
 type RoutedNode = BracketCenterNode | BracketModuleNode | BracketStubNode
+
+/**
+ * An edge as the router leaves it: the points its route runs through, and
+ * where its label goes — settled already, for a route with a stretch only it
+ * runs along, or to be placed along its `lane`.
+ */
+type RoutedEdge = {
+  edge: BracketEdge
+  points: EdgePoint[]
+  label: CircularLabelSpot | null
+  lane: LabelLane | null
+}
+
+/**
+ * A link's upright: where along it a label may sit, and which way the label
+ * reaches from it — away from the cards the lane runs beside, or both ways
+ * from an upright halfway across a gap.
+ */
+type LabelLane = {
+  x: number
+  top: number
+  bottom: number
+  reach: 'left' | 'right' | 'both'
+}
+
+/** Between a label and the lane it reaches from, and around a label it must clear. */
+const LANE_LABEL_GAP = 3
+const LANE_LABEL_CLEARANCE = 3
+/** How far apart the heights a label is tried at along its lane are. */
+const LANE_LABEL_STEP = 6
+
+/**
+ * A link's label: beside its lane, reaching away from the cards the lane
+ * hugs, at the first height from the lane's middle out that is clear; else
+ * centred on the first clear spot along the rest of its route — a lane with
+ * both ends on one row has no height to offer — longest stretch first, each
+ * from its middle out; else at the lane's middle, covering what it must.
+ */
+function placeLaneLabel(params: {
+  lane: LabelLane
+  route: readonly EdgePoint[]
+  text: string
+  taken: readonly CircularEdgeRect[]
+}): CircularLabelSpot {
+  const { lane, route, text, taken } = params
+  const spotAt = (y: number): CircularLabelSpot => {
+    switch (lane.reach) {
+      case 'left':
+        return {
+          labelX: lane.x - LANE_LABEL_GAP,
+          labelY: y,
+          labelTransform: 'translate(-100%, -50%)',
+          labelAnchor: { x: 1, y: 0.5 }
+        }
+      case 'right':
+        return {
+          labelX: lane.x + LANE_LABEL_GAP,
+          labelY: y,
+          labelTransform: 'translate(0, -50%)',
+          labelAnchor: { x: 0, y: 0.5 }
+        }
+      case 'both':
+        return { labelX: lane.x, labelY: y, ...LABEL_CENTERED }
+      default: {
+        const _exhaustive: never = lane.reach
+        return _exhaustive
+      }
+    }
+  }
+
+  const middle = (lane.top + lane.bottom) / 2
+  const heights = [middle]
+  for (let step = LANE_LABEL_STEP; middle - step >= lane.top; step += LANE_LABEL_STEP) {
+    heights.push(middle - step, middle + step)
+  }
+
+  const candidates = [
+    ...heights.map(spotAt),
+    ...getStretchSpots(route).map(point => ({ labelX: point.x, labelY: point.y, ...LABEL_CENTERED }))
+  ]
+  for (const spot of candidates) {
+    const box = grow(getCircularLabelBox(spot, text), LANE_LABEL_CLEARANCE)
+    if (!taken.some(other => boxesOverlap(box, other))) {
+      return spot
+    }
+  }
+
+  return spotAt(middle)
+}
+
+/** Points along a route a label may be centred on: longest stretch first, each from its middle out. */
+function getStretchSpots(route: readonly EdgePoint[]): EdgePoint[] {
+  const stretches = route
+    .slice(1)
+    .map((end, index) => {
+      const start = route[index] ?? end
+      return { start, end, length: Math.hypot(end.x - start.x, end.y - start.y) }
+    })
+    .filter(stretch => stretch.length > 0)
+    .sort((left, right) => right.length - left.length)
+
+  return stretches.flatMap(({ start, end, length }) => {
+    const offsets = [0]
+    for (let offset = LANE_LABEL_STEP; offset <= length / 2; offset += LANE_LABEL_STEP) {
+      offsets.push(offset, -offset)
+    }
+
+    return offsets.map((offset) => {
+      const t = 0.5 + offset / length
+      return { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t }
+    })
+  })
+}
+
+function grow(rect: CircularEdgeRect, by: number): CircularEdgeRect {
+  return { x: rect.x - by, y: rect.y - by, width: rect.width + by * 2, height: rect.height + by * 2 }
+}
+
+/** Whether two boxes share any area: touching edges do not count. */
+function boxesOverlap(left: CircularEdgeRect, right: CircularEdgeRect): boolean {
+  return left.x < right.x + right.width
+    && right.x < left.x + left.width
+    && left.y < right.y + right.height
+    && right.y < left.y + left.height
+}
 
 /** A node's column: 0 for the middle, negative to its left. */
 function getColumn(node: RoutedNode): number {
@@ -883,13 +1050,20 @@ function createRouter(routePoints: EdgePoint[]) {
     source: RoutedNode
     target: RoutedNode
     cycleIds: number[]
-  }): BracketEdge {
+  }): RoutedEdge {
     const { kind, side, source, target, cycleIds } = params
     const sourceColumn = getColumn(source)
     const targetColumn = getColumn(target)
     let points: EdgePoint[]
     let handles: readonly [BracketHandle, BracketHandle]
-    let label: EdgePoint
+    let label: CircularLabelSpot | null = null
+    let lane: LabelLane | null = null
+    const upright = (x: number, from: EdgePoint, to: EdgePoint, reach: LabelLane['reach']): LabelLane => ({
+      x,
+      top: Math.min(from.y, to.y),
+      bottom: Math.max(from.y, to.y),
+      reach
+    })
 
     if (sourceColumn < targetColumn) {
       const from = rightOf(source)
@@ -899,19 +1073,28 @@ function createRouter(routePoints: EdgePoint[]) {
         ? [from, to]
         : [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = ['right-source', 'left-target']
-      // On the stretch only this edge runs along: beside the module further
-      // out, before the branches of its parent join.
-      label = side === 'left'
-        ? { x: from.x + TREE_LABEL_INSET, y: from.y }
-        : { x: to.x - TREE_LABEL_INSET, y: to.y }
+      // A tree edge's label goes on the stretch only it runs along: beside the
+      // module further out, before the branches of its parent join. A link
+      // leaves by the same stretch as that module's tree edge, so its label
+      // is placed later, along the upright, clear of the tree edge's.
+      if (kind === 'tree') {
+        const spot = side === 'left'
+          ? { x: from.x + TREE_LABEL_INSET, y: from.y }
+          : { x: to.x - TREE_LABEL_INSET, y: to.y }
+        label = { labelX: spot.x, labelY: spot.y, ...LABEL_CENTERED }
+      } else if (kind === 'link') {
+        lane = upright(turn, from, to, 'both')
+      }
     } else if (sourceColumn > targetColumn) {
       const from = leftOf(source)
       const to = rightOf(target)
       const offset = nextLane(`back:${side}:${targetColumn}`)
+      // On the left the lane hugs the column it ends in, on the right the
+      // column across the gap from it: its label reaches away from either.
       const turn = side === 'left' ? to.x + offset : to.x + COLUMN_GAP - offset
       points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = ['left-source', 'right-target']
-      label = { x: turn, y: (from.y + to.y) / 2 }
+      lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
     } else {
       const from = side === 'left' ? leftOf(source) : rightOf(source)
       const to = side === 'left' ? leftOf(target) : rightOf(target)
@@ -921,22 +1104,27 @@ function createRouter(routePoints: EdgePoint[]) {
       handles = side === 'left'
         ? ['left-source', 'left-target']
         : ['right-source', 'right-target']
-      label = { x: turn, y: (from.y + to.y) / 2 }
+      lane = upright(turn, from, to, side)
     }
 
     routePoints.push(...points)
 
     return {
-      id: getEdgeId(kind, source.id, target.id),
-      source: source.id,
-      target: target.id,
-      sourceHandle: handles[0],
-      targetHandle: handles[1],
-      kind,
-      side,
-      cycleIds,
-      path: roundedPolylinePath(points, CORNER_RADIUS),
-      label: cycleIds.length > 0 ? { labelX: label.x, labelY: label.y, ...LABEL_CENTERED } : null
+      edge: {
+        id: getEdgeId(kind, source.id, target.id),
+        source: source.id,
+        target: target.id,
+        sourceHandle: handles[0],
+        targetHandle: handles[1],
+        kind,
+        side,
+        cycleIds,
+        path: roundedPolylinePath(points, CORNER_RADIUS),
+        label: null
+      },
+      points,
+      label,
+      lane
     }
   }
 
@@ -949,7 +1137,7 @@ function createRouter(routePoints: EdgePoint[]) {
     node: BracketCenterNode | BracketModuleNode,
     side: BracketSide | null,
     cycleIds: number[]
-  ): BracketEdge {
+  ): RoutedEdge {
     const loopSide: CircularEdgeSide = side ?? 'top'
     const anchor = loopSide === 'top'
       ? { x: node.position.x + node.width / 2, y: node.position.y }
@@ -968,23 +1156,26 @@ function createRouter(routePoints: EdgePoint[]) {
     routePoints.push(...geometry.points)
 
     return {
-      id: getEdgeId('self', node.id, node.id),
-      source: node.id,
-      target: node.id,
-      sourceHandle: 'right-source',
-      targetHandle: 'right-target',
-      kind: 'self',
-      side,
-      cycleIds,
-      path: geometry.path,
-      label: cycleIds.length > 0
-        ? {
-            labelX: geometry.labelX,
-            labelY: geometry.labelY,
-            labelTransform: geometry.labelTransform,
-            labelAnchor: geometry.labelAnchor
-          }
-        : null
+      edge: {
+        id: getEdgeId('self', node.id, node.id),
+        source: node.id,
+        target: node.id,
+        sourceHandle: 'right-source',
+        targetHandle: 'right-target',
+        kind: 'self',
+        side,
+        cycleIds,
+        path: geometry.path,
+        label: null
+      },
+      points: geometry.points,
+      label: {
+        labelX: geometry.labelX,
+        labelY: geometry.labelY,
+        labelTransform: geometry.labelTransform,
+        labelAnchor: geometry.labelAnchor
+      },
+      lane: null
     }
   }
 
