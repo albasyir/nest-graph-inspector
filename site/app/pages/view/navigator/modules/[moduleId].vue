@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BreadcrumbItem } from '@nuxt/ui'
+import { useMediaQuery } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import type { BracketSide } from '~/utils/module-dependency-bracket'
 import { decodeModuleId } from '~/utils/module-id'
@@ -66,6 +67,17 @@ const graphModule = computed(() =>
     : undefined
 )
 const isRoot = computed(() => graphData.value?.root === moduleName.value)
+const hasJsDoc = computed(() => Boolean(graphModule.value?.jsdoc?.trim()))
+
+// On a phone the header keeps to two rows — the module with its back and
+// about buttons, then the view switch — and the module's JSDoc opens from the
+// about button, so the canvas starts high enough to be the screen.
+const isPhone = useMediaQuery('(max-width: 639.98px)')
+const isAboutOpen = ref(false)
+const aboutId = `module-about-${useId()}`
+watch(moduleName, () => {
+  isAboutOpen.value = false
+})
 
 /** The view, each side's depth and the Direct Run target, as the address says them. */
 const pageState = computed(() => parseModulePageQuery(route.query))
@@ -163,10 +175,11 @@ function handleTraceOpen() {
 
   <ClientOnly v-else-if="graphData && graphModule && moduleName !== null">
     <div class="flex h-full min-h-0 flex-col">
-      <header class="relative z-10 shrink-0 border-b border-default bg-default px-4 py-2">
-        <div class="flex items-center justify-between gap-3">
+      <header class="module-page__header">
+        <div class="module-page__crumbs">
           <UBreadcrumb
             :items="breadcrumbItems"
+            color="neutral"
             class="min-w-0"
           />
           <UButton
@@ -175,14 +188,22 @@ function handleTraceOpen() {
             color="neutral"
             variant="outline"
             size="xs"
-            class="shrink-0 max-sm:size-10 max-sm:justify-center"
-            :ui="{ label: 'max-sm:sr-only' }"
+            class="shrink-0"
             :to="NAVIGATOR_PATH"
           />
         </div>
 
-        <div class="mt-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div class="flex min-w-0 items-center gap-2">
+        <div class="module-page__title-row">
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <UButton
+              icon="i-lucide-arrow-left"
+              color="neutral"
+              variant="ghost"
+              square
+              aria-label="Back to Application Graph"
+              class="module-page__phone-only size-10 shrink-0 justify-center"
+              :to="NAVIGATOR_PATH"
+            />
             <UIcon
               name="i-lucide-package"
               class="size-4 shrink-0 text-primary"
@@ -197,9 +218,22 @@ function handleTraceOpen() {
             <UBadge
               v-if="isRoot"
               label="Root"
-              color="error"
-              variant="subtle"
+              color="neutral"
+              variant="outline"
               size="sm"
+              class="shrink-0"
+            />
+            <UButton
+              v-if="hasJsDoc"
+              icon="i-lucide-info"
+              color="neutral"
+              variant="ghost"
+              square
+              :aria-label="`About ${moduleName}`"
+              :aria-expanded="isAboutOpen"
+              :aria-controls="aboutId"
+              class="module-page__phone-only ms-auto size-10 shrink-0 justify-center"
+              @click="isAboutOpen = !isAboutOpen"
             />
           </div>
 
@@ -235,6 +269,8 @@ function handleTraceOpen() {
         </div>
 
         <ModuleJsDocSummary
+          v-show="!isPhone || isAboutOpen"
+          :id="aboutId"
           :jsdoc="graphModule.jsdoc"
           class="mt-1"
         />
@@ -311,6 +347,63 @@ function handleTraceOpen() {
 </template>
 
 <style scoped>
+.module-page__header {
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+}
+
+.module-page__crumbs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* The trail's other steps in a grey that holds 4.5:1, not the faint default. */
+.module-page__crumbs :deep(.text-muted) {
+  color: var(--ui-text-toned);
+}
+
+.module-page__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-top: 6px;
+}
+
+.module-page__phone-only {
+  display: none;
+}
+
+/*
+ * On a phone: no breadcrumb row — the back button joins the module's name —
+ * and the JSDoc behind the about button, so the header is two rows.
+ */
+@media (max-width: 639.98px) {
+  .module-page__header {
+    padding: 4px 12px 8px;
+  }
+
+  .module-page__crumbs {
+    display: none;
+  }
+
+  .module-page__title-row {
+    gap: 4px;
+    margin-top: 0;
+  }
+
+  .module-page__phone-only {
+    display: inline-flex;
+  }
+}
+
 /*
  * The view switch: a track with the current view lifted out of it, as wide as
  * its two options — the whole row on a phone, where each is a 40px target.
