@@ -1442,8 +1442,8 @@ const isLegendOpen = ref(false)
 .module-bracket-module--twin-lit {
   border-color: var(--mg-edge-circular);
   /* A 1px inner ring thickens the border while lit without moving the card's
-     text, and leaves the outline to the focus ring. taste-skill-ignore */
-  box-shadow: inset 0 0 0 1px var(--mg-edge-circular);
+     text, and leaves the outline to the focus ring: a state, not a shadow. */
+  box-shadow: inset 0 0 0 1px var(--mg-edge-circular); /* taste-skill-ignore */
 }
 
 .module-bracket-module__name {
@@ -1582,8 +1582,8 @@ const isLegendOpen = ref(false)
 .module-bracket__cycle--lit,
 .module-bracket__cycle[aria-pressed="true"] {
   border-color: var(--mg-edge-circular);
-  /* The same inner ring as a lit card: a state, not a shadow. taste-skill-ignore */
-  box-shadow: inset 0 0 0 1px var(--mg-edge-circular);
+  /* The same inner ring as a lit card: a state, not a shadow. */
+  box-shadow: inset 0 0 0 1px var(--mg-edge-circular); /* taste-skill-ignore */
 }
 
 .module-bracket__cycle--dimmed {
