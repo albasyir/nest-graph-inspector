@@ -354,29 +354,30 @@ export class MainModule {
       sourceRoot: `apps/${app}/src`,
       compilerOptions: { tsConfigPath: `apps/${app}/tsconfig.app.json` },
     });
+    const monorepoNestCli = {
+      $schema: "https://json.schemastore.org/nest-cli",
+      collection: "@nestjs/schematics",
+      monorepo: true,
+      root: "apps/api",
+      sourceRoot: "apps/api/src",
+      compilerOptions: {
+        builder: "tsc",
+        tsConfigPath: "apps/api/tsconfig.app.json",
+      },
+      projects: {
+        api: appProject("api"),
+        worker: appProject("worker"),
+        shared: {
+          type: "library",
+          root: "libs/shared",
+          entryFile: "index",
+          sourceRoot: "libs/shared/src",
+          compilerOptions: { tsConfigPath: "libs/shared/tsconfig.lib.json" },
+        },
+      },
+    };
     const monorepo: Record<string, string> = {
-      "nest-cli.json": JSON.stringify({
-        $schema: "https://json.schemastore.org/nest-cli",
-        collection: "@nestjs/schematics",
-        monorepo: true,
-        root: "apps/api",
-        sourceRoot: "apps/api/src",
-        compilerOptions: {
-          builder: "tsc",
-          tsConfigPath: "apps/api/tsconfig.app.json",
-        },
-        projects: {
-          api: appProject("api"),
-          worker: appProject("worker"),
-          shared: {
-            type: "library",
-            root: "libs/shared",
-            entryFile: "index",
-            sourceRoot: "libs/shared/src",
-            compilerOptions: { tsConfigPath: "libs/shared/tsconfig.lib.json" },
-          },
-        },
-      }),
+      "nest-cli.json": JSON.stringify(monorepoNestCli),
       "tsconfig.json": TSCONFIG(),
       "libs/shared/src/marker.ts": MARKER,
       "libs/shared/src/shared.module.ts": moduleSource("SharedModule"),
@@ -402,19 +403,76 @@ export class MainModule {
         marker: `${shared}/marker`,
       });
     }
-    writeProject(
-      "monorepo",
-      monorepo,
+    const monorepoBuilds = (files: Record<string, string>) =>
       ["api", "worker"].map((app) => ({
         rootDir: "",
         outDir: `dist/apps/${app}`,
-        files: Object.keys(monorepo).filter(
+        files: Object.keys(files).filter(
           (file) =>
             file.endsWith(".ts") &&
             (file.startsWith(`apps/${app}/`) || file.startsWith("libs/")),
         ),
-      })),
-    );
+      }));
+    writeProject("monorepo", monorepo, monorepoBuilds(monorepo));
+
+    // E4, naming no builder: the Nest CLI builds it with tsc, as above.
+    const monorepoNoBuilder = {
+      ...monorepo,
+      "nest-cli.json": JSON.stringify({
+        ...monorepoNestCli,
+        compilerOptions: { tsConfigPath: "apps/api/tsconfig.app.json" },
+      }),
+    };
+    writeProject("monorepo-no-builder", monorepoNoBuilder, monorepoBuilds(monorepoNoBuilder));
+
+    // E4, by convention: api's root module is AppModule in app.module.ts,
+    // which nest build leaves as an app.module.js.
+    const monorepoConvention: Record<string, string> = {
+      ...Object.fromEntries(
+        Object.entries(monorepo).filter(([file]) => file !== "apps/api/src/api.module.ts"),
+      ),
+      "apps/api/src/app.module.ts": moduleSource(
+        "AppModule",
+        [["SharedModule", `${shared}/shared.module`]],
+        `${shared}/marker`,
+      ),
+      "apps/api/src/main.ts": mainSource("AppModule", "./app.module", {
+        marker: `${shared}/marker`,
+      }),
+    };
+    writeProject("monorepo-convention", monorepoConvention, monorepoBuilds(monorepoConvention));
+
+    // E4, one outDir: api and worker built with the project's own tsconfig
+    // into dist/, where only api has an app.module.js.
+    const application = (app: string) => ({
+      type: "application",
+      root: `apps/${app}`,
+      entryFile: "main",
+      sourceRoot: `apps/${app}/src`,
+    });
+    const sharedOutDir = {
+      "nest-cli.json": JSON.stringify({
+        monorepo: true,
+        root: "apps/api",
+        sourceRoot: "apps/api/src",
+        compilerOptions: { builder: "tsc" },
+        projects: { api: application("api"), worker: application("worker") },
+      }),
+      "tsconfig.json": TSCONFIG({ rootDir: ".", outDir: "dist" }),
+      "apps/api/src/marker.ts": MARKER,
+      "apps/api/src/app.module.ts": moduleSource("AppModule"),
+      "apps/api/src/main.ts": mainSource("AppModule", "./app.module"),
+      "apps/worker/src/marker.ts": MARKER,
+      "apps/worker/src/worker.module.ts": moduleSource("WorkerModule"),
+      "apps/worker/src/main.ts": mainSource("WorkerModule", "./worker.module"),
+    };
+    writeProject("monorepo-shared-out-dir", sharedOutDir, [
+      {
+        rootDir: "",
+        outDir: "dist",
+        files: Object.keys(sharedOutDir).filter((file) => file.endsWith(".ts")),
+      },
+    ]);
 
     // E5: built by webpack or rspack into one main.js that starts the
     // application; nothing else is in dist.
@@ -521,6 +579,35 @@ void bootstrap();
 `,
     };
     writeProject("two-roots", twoRoots, srcBuild(twoRoots));
+
+    // E10: main.ts also calls create() on a NestFactory of its own, which
+    // boots nothing.
+    const ownFactory = {
+      "tsconfig.json": TSCONFIG({ rootDir: "src", outDir: "dist" }),
+      "src/marker.ts": MARKER,
+      "src/helper.module.ts": moduleSource("HelperModule"),
+      "src/root.module.ts": moduleSource("RootModule"),
+      "src/tools.ts": `export const tools = {
+  NestFactory: { create: (module: unknown): unknown => module },
+};
+`,
+      "src/main.ts": `import { NestFactory } from "@nestjs/core";
+import { HelperModule } from "./helper.module";
+import { markRan } from "./marker";
+import { RootModule } from "./root.module";
+import { tools } from "./tools";
+
+async function bootstrap(): Promise<void> {
+  markRan("bootstrap");
+  tools.NestFactory.create(HelperModule);
+  const app = await NestFactory.create(RootModule);
+  await app.listen(3000);
+}
+
+void bootstrap();
+`,
+    };
+    writeProject("own-factory", ownFactory, srcBuild(ownFactory));
   }, 180_000);
 
   afterAll(() => {
@@ -563,6 +650,9 @@ void bootstrap();
   }, SPAWN_TIMEOUT_MS);
 
   describe("E4: a Nest CLI monorepo", () => {
+    const DEFAULT_PROJECT_NOTE =
+      "nest-graph-inspector: nest-cli.json defines applications api, worker; using the default project api (pass --app <name> for another)\n";
+
     it("exports the default project, and says which it is", async () => {
       const result = await exportIn("monorepo");
 
@@ -570,9 +660,52 @@ void bootstrap();
         present: ["SharedModule"],
         absent: ["WorkerModule"],
       });
+      expect(result.stderr).toContain(DEFAULT_PROJECT_NOTE);
+    }, SPAWN_TIMEOUT_MS);
+
+    it("exports a monorepo whose nest-cli.json names no builder from tsc's output, as the Nest CLI builds it", async () => {
+      const result = await exportIn("monorepo-no-builder");
+
+      expectExported(result, "ApiModule", {
+        present: ["SharedModule"],
+        absent: ["WorkerModule"],
+      });
       expect(result.stderr).toContain(
-        "nest-graph-inspector: nest-cli.json defines applications api, worker; using the default project api (pass --app <name> for another)\n",
+        "nest-graph-inspector: entry dist/apps/api/apps/api/src/api.module.js (ApiModule, from apps/api/src/main.ts)\n",
       );
+    }, SPAWN_TIMEOUT_MS);
+
+    it("says which application an app.module.js found by convention is, unless --app named it", async () => {
+      const [detected, named] = await Promise.all([
+        exportIn("monorepo-convention"),
+        exportIn("monorepo-convention", ["--app", "api"]),
+      ]);
+
+      for (const result of [detected, named]) {
+        expectExported(result, "AppModule", {
+          present: ["SharedModule"],
+          absent: ["WorkerModule"],
+        });
+        expect(result.stderr).not.toContain("nest-graph-inspector: entry ");
+      }
+      expect(detected.stderr).toContain(DEFAULT_PROJECT_NOTE);
+      expect(named.stderr).not.toContain("defines applications");
+    }, SPAWN_TIMEOUT_MS);
+
+    it("never takes another application's app.module.js from an outDir they share", async () => {
+      const [worker, detected] = await Promise.all([
+        exportIn("monorepo-shared-out-dir", ["--app", "worker"]),
+        exportIn("monorepo-shared-out-dir"),
+      ]);
+
+      expectExported(worker, "WorkerModule", { present: [], absent: ["AppModule"] });
+      expect(worker.stderr).toContain(
+        "nest-graph-inspector: entry dist/apps/worker/src/worker.module.js (WorkerModule, from apps/worker/src/main.ts)\n",
+      );
+      // Without --app, the convention finds what it always has: the default
+      // project's own.
+      expectExported(detected, "AppModule", { present: [], absent: ["WorkerModule"] });
+      expect(detected.stderr).toContain(DEFAULT_PROJECT_NOTE);
     }, SPAWN_TIMEOUT_MS);
 
     it("exports the application --app names", async () => {
@@ -649,7 +782,7 @@ void bootstrap();
     expectRefused(
       unbuilt,
       1,
-      "nest-graph-inspector: No compiled UnbuiltRootModule found: src/main.ts boots it from src/unbuilt-root.module.ts, which has not been built to dist/unbuilt-root.module.js or dist/src/unbuilt-root.module.js. Build your project first (nest build), or run: nest-graph-inspector export --out ",
+      "nest-graph-inspector: No compiled UnbuiltRootModule found: src/main.ts boots it from src/unbuilt-root.module.ts, which has not been built to dist/unbuilt-root.module.js. Build your project first (nest build), or run: nest-graph-inspector export --out ",
     );
     expect(unbuilt.stderr).toMatch(/ --require ts-node\/register\n$/);
     expectExported(loaded, "UnbuiltRootModule", { present: ["ChildModule"] });
@@ -741,4 +874,13 @@ void bootstrap();
       );
     }, SPAWN_TIMEOUT_MS);
   });
+
+  it("E10: counts only @nestjs/core's NestFactory, so another object's create() is no second root module", async () => {
+    const result = await exportIn("own-factory");
+
+    expectExported(result, "RootModule", { present: [], absent: ["HelperModule"] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: entry dist/root.module.js (RootModule, from src/main.ts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
 });

@@ -18,6 +18,8 @@ const NEST_CLI_CONFIG_FILES = ["nest-cli.json", ".nest-cli.json"];
 export const DEFAULT_SOURCE_ROOT = "src";
 const DEFAULT_ENTRY_FILE = "main";
 export const DEFAULT_OUT_DIR = "dist";
+/** In a monorepo too: `getBuilder` falls back on `tsc`, whatever the project. */
+const DEFAULT_BUILDER = "tsc";
 
 /**
  * TS18003, "No inputs were found in config file": expected, since the
@@ -40,7 +42,10 @@ export type NestBuilderSetting = {
 export type NestCompilerSettings = {
   tsConfigPath: string | undefined;
   builder: NestBuilderSetting | undefined;
-  /** The older switch for a webpack build. */
+  /**
+   * The older switch for a webpack build, which wins over `builder`; what
+   * `nest g app` wrote before it wrote `"builder": "rspack"`.
+   */
   webpack: boolean | undefined;
 };
 
@@ -65,8 +70,13 @@ export type NestProjectSettings = NestApplicationSettings & {
 export type NestCliConfig = NestApplicationSettings & {
   /** The file it was read from; undefined when the project has none. */
   file: string | undefined;
-  monorepo: boolean;
   projects: ReadonlyMap<string, NestProjectSettings>;
+  /**
+   * The tsconfig the `app.module.js` convention reads, chosen exactly as it
+   * always has been — see `legacyConventionTsConfigPath`; not the one
+   * `nest build` uses, which an application's `tsConfigPath` is.
+   */
+  conventionTsConfigPath: string | undefined;
 };
 
 /** How `nest build` turns an application's sources into JavaScript. */
@@ -77,7 +87,7 @@ export type ApplicationBuild =
    * `webpack` or `rspack`: the application and every module it imports in one
    * `main.js`, which starts the application when it is loaded.
    */
-  | { kind: "bundled"; bundler: "webpack" | "rspack" | "monorepo-default" };
+  | { kind: "bundled"; bundler: "webpack" | "rspack" };
 
 /** An application `nest build` builds, each setting resolved as the Nest CLI resolves it. */
 export type NestApplication = {
@@ -167,9 +177,26 @@ export function parseNestCliConfig(
   return {
     file,
     ...parseApplicationSettings(config),
-    monorepo: config.monorepo === true,
     projects: parseProjects(config.projects),
+    conventionTsConfigPath: legacyConventionTsConfigPath(config),
   };
+}
+
+/**
+ * The tsconfig the `app.module.js` convention reads, chosen as it always has
+ * been, from the raw nest-cli.json: the builder's `options.configPath` —
+ * whatever the builder — else `compilerOptions.tsConfigPath`; a value that is
+ * not a string set aside only after that choice. Unchanged on purpose: a
+ * project the convention finds an entry for keeps finding that same entry.
+ */
+function legacyConventionTsConfigPath(
+  config: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const compilerOptions = isRecord(config.compilerOptions) ? config.compilerOptions : {};
+  const builder = isRecord(compilerOptions.builder) ? compilerOptions.builder : {};
+  const options = isRecord(builder.options) ? builder.options : {};
+  const chosen = options.configPath ?? compilerOptions.tsConfigPath;
+  return typeof chosen === "string" ? chosen : undefined;
 }
 
 function parseApplicationSettings(
@@ -256,7 +283,7 @@ export function selectApplication(
     // `nest build <name>`: the project's own setting, else the top level's.
     return {
       kind: "selected",
-      application: resolveApplication(requested, project, config, config.monorepo),
+      application: resolveApplication(requested, project, config),
       note: undefined,
     };
   }
@@ -264,7 +291,7 @@ export function selectApplication(
   if (!applications.length) {
     return {
       kind: "selected",
-      application: resolveApplication(undefined, config, undefined, config.monorepo),
+      application: resolveApplication(undefined, config, undefined),
       note: undefined,
     };
   }
@@ -281,9 +308,10 @@ export function selectApplication(
 
   return {
     kind: "selected",
-    // The top level first, as `nest build` reads it; the project it names
-    // fills in what the top level leaves unset.
-    application: resolveApplication(match?.name, config, match?.project, config.monorepo),
+    // The top level alone, as `nest build` without a name reads it: the
+    // project it matches only names it. That project's own settings apply
+    // when --app selects it.
+    application: resolveApplication(match?.name, config, undefined),
     note: others.length
       ? `${configFileName(config)} defines applications ${applications.join(", ")}; using the default project ${defaultName} (pass --app <name> for another)`
       : undefined,
@@ -291,17 +319,24 @@ export function selectApplication(
 }
 
 /**
+ * The note an entry found by convention gets, among named applications, when
+ * the file is not plainly the default project's own output: the file it is,
+ * and how to choose an application instead.
+ */
+export function conventionEntryNote(config: NestCliConfig, entry: string): string {
+  return `${configFileName(config)} defines applications ${applicationNames(config).join(", ")}; using ${entry}, found by convention (pass --app <name> for another)`;
+}
+
+/**
  * The default project and every named application: each application whose
  * entry file the export refuses to load, for an entry it did not find itself.
  */
-export function everyApplication(config: NestCliConfig): NestApplication[] {
+function everyApplication(config: NestCliConfig): NestApplication[] {
   return [
-    resolveApplication(undefined, config, undefined, config.monorepo),
+    resolveApplication(undefined, config, undefined),
     ...applicationNames(config).flatMap((name) => {
       const project = config.projects.get(name);
-      return project
-        ? [resolveApplication(name, project, config, config.monorepo)]
-        : [];
+      return project ? [resolveApplication(name, project, config)] : [];
     }),
   ];
 }
@@ -351,7 +386,6 @@ function resolveApplication(
   name: string | undefined,
   primary: NestApplicationSettings,
   fallback: NestApplicationSettings | undefined,
-  monorepo: boolean,
 ): NestApplication {
   const builder =
     primary.compilerOptions.builder ?? fallback?.compilerOptions.builder;
@@ -367,52 +401,35 @@ function resolveApplication(
     sourceRoot:
       primary.sourceRoot ?? fallback?.sourceRoot ?? DEFAULT_SOURCE_ROOT,
     entryFile: primary.entryFile ?? fallback?.entryFile ?? DEFAULT_ENTRY_FILE,
-    tsConfigPath: configuredTsConfigPath(builder, tsConfigPath),
-    build: buildOf(builder, webpack, monorepo),
+    // As `nest build` finds it (getTscConfigPath): `tsConfigPath` first; a
+    // builder's `options.configPath` only after, and only a `tsc` builder's.
+    tsConfigPath:
+      tsConfigPath ?? (builder?.type === "tsc" ? builder.configPath : undefined),
+    build: buildOf(builder, webpack),
   };
 }
 
 /**
- * The tsconfig nest-cli.json names: a tsc builder's `configPath`, read first
- * as the entry-file convention always has, else `tsConfigPath`. A webpack or
- * rspack builder's `configPath` is that bundler's own config, never a tsconfig.
- */
-function configuredTsConfigPath(
-  builder: NestBuilderSetting | undefined,
-  tsConfigPath: string | undefined,
-): string | undefined {
-  return (
-    (builder && !isBundler(builder.type) ? builder.configPath : undefined) ??
-    tsConfigPath
-  );
-}
-
-/**
- * A bundle when nest-cli.json says webpack or rspack — or says nothing, in a
- * monorepo, which the Nest CLI then bundles with webpack (rspack from CLI 12).
+ * How `nest build` builds an application, decided as the Nest CLI decides it
+ * (`build.action.ts`, `getBuilder`): `compilerOptions.webpack: true` is a
+ * webpack build, whatever the builder; otherwise the builder decides, `tsc`
+ * when nest-cli.json names none — in a monorepo as anywhere else. A `webpack`
+ * or `rspack` builder bundles; `tsc`, `swc` and any other compile. `nest g
+ * app` writes `"builder": "rspack"` when it makes a monorepo, and older Nest
+ * CLIs wrote `"webpack": true`: that is what makes a monorepo a bundle.
  */
 function buildOf(
   builder: NestBuilderSetting | undefined,
   webpack: boolean | undefined,
-  monorepo: boolean,
 ): ApplicationBuild {
-  if (webpack === true || builder?.type === "webpack") {
+  if (webpack === true) {
     return { kind: "bundled", bundler: "webpack" };
   }
 
-  if (builder?.type === "rspack") {
-    return { kind: "bundled", bundler: "rspack" };
-  }
-
-  if (monorepo && builder === undefined && webpack === undefined) {
-    return { kind: "bundled", bundler: "monorepo-default" };
-  }
-
-  return { kind: "compiled", compiler: builder?.type ?? "tsc" };
-}
-
-function isBundler(type: string | undefined): boolean {
-  return type === "webpack" || type === "rspack";
+  const type = builder?.type ?? DEFAULT_BUILDER;
+  return type === "webpack" || type === "rspack"
+    ? { kind: "bundled", bundler: type }
+    : { kind: "compiled", compiler: type };
 }
 
 /** The application project the top level describes, matched by `sourceRoot`, else by `root`. */
@@ -519,24 +536,39 @@ export function readApplicationLayout(
 }
 
 /**
- * The tsconfig the entry-file convention reads: the one the top level of
- * nest-cli.json names, as `nest build` without an application name compiles
- * with. Unlike an application's, it never falls back on a matching project's
- * settings, so the convention finds what it always has.
+ * The default project and every named application, each with the tsconfig it
+ * is built with as far as that can be read: an application whose tsconfig
+ * cannot be read is taken to build into `dist/`, never a reason to fail.
+ */
+export function readEveryLayout(
+  projectDir: string,
+  config: NestCliConfig,
+  cwd: string,
+): ApplicationLayout[] {
+  return everyApplication(config).map((application) => {
+    try {
+      return readApplicationLayout(projectDir, application, cwd);
+    } catch (error) {
+      if (!(error instanceof CliError)) {
+        throw error;
+      }
+
+      return { projectDir, application, tsconfig: undefined };
+    }
+  });
+}
+
+/**
+ * The tsconfig the entry-file convention reads, chosen as it always has been
+ * (`conventionTsConfigPath`), so a project the convention finds an entry for
+ * finds that same entry.
  */
 export function readConventionTsConfig(
   projectDir: string,
   config: NestCliConfig,
   cwd: string,
 ): BuildTsConfig | undefined {
-  return readBuildTsConfig(
-    projectDir,
-    configuredTsConfigPath(
-      config.compilerOptions.builder,
-      config.compilerOptions.tsConfigPath,
-    ),
-    cwd,
-  );
+  return readBuildTsConfig(projectDir, config.conventionTsConfigPath, cwd);
 }
 
 /** Where `nest build` writes an application: its tsconfig's outDir, else `dist`. */

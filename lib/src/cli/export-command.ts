@@ -63,13 +63,14 @@ export async function runExportCommand(
     hasLoader: Boolean(options.require?.length),
     argv,
   });
-  if (entry.origin === "main") {
-    for (const note of entry.notes) {
-      io.stderr.write(`nest-graph-inspector: ${note}\n`);
-    }
-    for (const warning of entry.warnings) {
-      io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
-    }
+  // How the export came to the entry it found, said before anything loads.
+  const notes = entry.origin === "entry" ? [] : entry.notes;
+  const warnings = entry.origin === "main" ? entry.warnings : [];
+  for (const note of notes) {
+    io.stderr.write(`nest-graph-inspector: ${note}\n`);
+  }
+  for (const warning of warnings) {
+    io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
   }
 
   const entryPath = entry.path;

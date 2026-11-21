@@ -9,13 +9,17 @@ import { displayPath, isDirectory, isFile } from "./files";
 import {
   DEFAULT_SOURCE_ROOT,
   applicationSelectionError,
+  conventionEntryNote,
   outDirOf,
   readApplicationLayout,
   readConventionTsConfig,
+  readEveryLayout,
   readNestCliConfig,
   readNestCliConfigOrDefaults,
   selectApplication,
   type ApplicationLayout,
+  type ApplicationSelection,
+  type NestApplication,
   type NestCliConfig,
 } from "./nest-cli-config";
 import {
@@ -30,6 +34,7 @@ import {
   loaderCommand,
   locateRootModule,
   notBuiltMessage,
+  samePath,
   type ConventionCheck,
 } from "./root-module-detection";
 
@@ -40,6 +45,8 @@ const ROOT_MODULE_FILE = "app.module.js";
 
 /** How deep under the output directory to look for `ROOT_MODULE_FILE`. */
 const MAX_ENTRY_SEARCH_DEPTH = 6;
+
+const BUILD_HINT = "Build your project first (nest build), or pass --entry <file>.";
 
 const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".tsx"]);
 
@@ -72,20 +79,26 @@ export type EntryRequest = {
   argv: readonly string[];
 };
 
-/** The file the export loads, the root module export to take from it, and how the export came to them. */
+/**
+ * The file the export loads — symlinks resolved, as it was checked — the root
+ * module export to take from it, and how the export came to them.
+ */
 export type ResolvedEntry =
   /** `--entry`, as given. */
   | { origin: "entry"; path: string; moduleName: string | undefined }
   /**
    * `app.module.js` under the outDir, found as the export always has found
-   * it; with what main.ts boots, when that is clear, to warn of a mismatch
-   * once the root module export has been chosen.
+   * it — or, for `--app`, the application's own; with what main.ts boots,
+   * when that is clear, to warn of a mismatch once the root module export has
+   * been chosen.
    */
   | {
       origin: "convention";
       path: string;
       moduleName: string | undefined;
       check: ConventionCheck | undefined;
+      /** Among named applications without `--app`, which one it is: said on stderr. */
+      notes: readonly string[];
     }
   /** The root module main.ts boots, traced from its import to the file to load. */
   | {
@@ -183,9 +196,10 @@ function readPackage(dir: string): InstalledPackage | undefined {
  * conventional `app.module.js` under the outDir is used when there is exactly
  * one, as it always has been; failing that, the root module main.ts passes to
  * `NestFactory`, found by parsing main.ts — never by loading it. `--app` does
- * the same within one application of a Nest CLI monorepo. However it was
- * found, a file that would start the application is refused before anything
- * is loaded.
+ * the same within one application of a Nest CLI monorepo, taking only an
+ * `app.module.js` that is plainly that application's own. However it was
+ * found, the file is checked before anything is loaded, and refused when it
+ * would start the application; the modules it imports are not checked.
  */
 export function resolveEntry(request: EntryRequest): ResolvedEntry {
   if (request.entry) {
@@ -200,14 +214,14 @@ export function resolveEntry(request: EntryRequest): ResolvedEntry {
 
 function resolveGivenEntry(request: EntryRequest, entry: string): ResolvedEntry {
   const { cwd, projectDir } = request;
-  const path = resolve(cwd, entry);
-  if (!isFile(path)) {
+  const given = resolve(cwd, entry);
+  if (!isFile(given)) {
     throw new CliError(
-      `Entry file not found: ${displayPath(path, cwd)}. Check the --entry path, and build your project first (nest build) if it points at compiled output.`,
+      `Entry file not found: ${displayPath(given, cwd)}. Check the --entry path, and build your project first (nest build) if it points at compiled output.`,
     );
   }
 
-  assertLoadableEntry(path, {
+  const path = assertLoadableEntry(given, {
     projectDir,
     cwd,
     config: readNestCliConfigOrDefaults(projectDir),
@@ -215,7 +229,7 @@ function resolveGivenEntry(request: EntryRequest, entry: string): ResolvedEntry 
 
   if (isTypeScriptFile(path) && !request.hasLoader) {
     throw new CliError(
-      `${displayPath(path, cwd)} is TypeScript, which Node cannot load on its own. ` +
+      `${displayPath(given, cwd)} is TypeScript, which Node cannot load on its own. ` +
         "Build your project and pass the compiled file, or add a loader that emits decorator metadata: " +
         "--require ts-node/register (and --require tsconfig-paths/register for path aliases).",
     );
@@ -227,27 +241,35 @@ function resolveGivenEntry(request: EntryRequest, entry: string): ResolvedEntry 
 /**
  * Without `--entry` or `--app`: the convention first, unchanged, so a project
  * it finds an entry for exports exactly what it always has; main.ts only when
- * the convention finds none, or several.
+ * the convention finds none, or several. Among named applications, an entry
+ * found by convention says which one it is.
  */
 function resolveDefaultEntry(
   request: EntryRequest,
   config: NestCliConfig,
 ): ResolvedEntry {
   const { cwd, projectDir } = request;
+  const selection = selectApplication(config, undefined);
   const convention = detect(() =>
     detectConventionalEntry(projectDir, config, cwd),
   );
   if (convention.kind === "found") {
-    assertLoadableEntry(convention.path, { projectDir, cwd, config });
+    const path = assertLoadableEntry(convention.path, { projectDir, cwd, config });
+    // Only ever for a warning or a note: a default project whose tsconfig
+    // cannot be read gives neither.
+    const layout =
+      selection.kind === "selected"
+        ? readLayoutIfReadable(projectDir, selection.application, cwd)
+        : undefined;
     return {
       origin: "convention",
-      path: convention.path,
+      path,
       moduleName: request.module,
-      check: defaultConventionCheck(projectDir, config, cwd),
+      check: layout === undefined ? undefined : conventionCheck(layout),
+      notes: conventionNotes({ config, selection, layout, path, cwd }),
     };
   }
 
-  const selection = selectApplication(config, undefined);
   if (selection.kind !== "selected") {
     throw applicationSelectionError(selection, config);
   }
@@ -261,7 +283,11 @@ function resolveDefaultEntry(
   });
 }
 
-/** `--app <name>`: the convention within that application's outDir, then its main.ts. */
+/**
+ * `--app <name>`: that application's own `app.module.js`, else its main.ts.
+ * Its outDir is not searched, as the project's is without `--app`: an
+ * `app.module.js` found there could be another application's.
+ */
 function resolveApplicationEntry(
   request: EntryRequest,
   config: NestCliConfig,
@@ -274,20 +300,14 @@ function resolveApplicationEntry(
   }
 
   const layout = readApplicationLayout(projectDir, selection.application, cwd);
-  const convention = detect(() =>
-    detectEntryUnder(
-      outDirOf(projectDir, layout.tsconfig),
-      layout.application.sourceRoot,
-      cwd,
-    ),
-  );
+  const convention = detectApplicationEntry(layout, config, cwd);
   if (convention.kind === "found") {
-    assertLoadableEntry(convention.path, { projectDir, cwd, config });
     return {
       origin: "convention",
-      path: convention.path,
+      path: assertLoadableEntry(convention.path, { projectDir, cwd, config }),
       moduleName: request.module,
       check: conventionCheck(layout),
+      notes: [],
     };
   }
 
@@ -341,7 +361,7 @@ function resolveFromMainFile({
         mainFile: analysis.mainFile,
         root,
         candidates: located.candidates,
-        command: loaderCommand(request.argv, layout.tsconfig),
+        command: loaderCommand(request.argv, layout),
         cwd,
       }),
     );
@@ -353,13 +373,17 @@ function resolveFromMainFile({
         application: layout.application,
         bundler: located.bundler,
         root,
-        command: loaderCommand(request.argv, layout.tsconfig),
+        command: loaderCommand(request.argv, layout),
         cwd,
       }),
     );
   }
 
-  assertLoadableEntry(located.path, { projectDir: layout.projectDir, cwd, config });
+  const path = assertLoadableEntry(located.path, {
+    projectDir: layout.projectDir,
+    cwd,
+    config,
+  });
   const forRoot =
     moduleName === root.exportName
       ? forRootWarning(analysis.mainFile, root, cwd)
@@ -367,12 +391,12 @@ function resolveFromMainFile({
 
   return {
     origin: "main",
-    path: located.path,
+    path,
     moduleName,
     mainFile: analysis.mainFile,
     notes: [
       ...(selectionNote === undefined ? [] : [selectionNote]),
-      `entry ${displayPath(located.path, cwd)} (${moduleName}, from ${displayPath(analysis.mainFile, cwd)})`,
+      `entry ${displayPath(path, cwd)} (${moduleName}, from ${displayPath(analysis.mainFile, cwd)})`,
     ],
     warnings: forRoot === undefined ? [] : [forRoot],
   };
@@ -390,24 +414,110 @@ function detect(find: () => string): Detection {
   }
 }
 
-/**
- * What main.ts boots in the default project, to check an entry found by
- * convention against. Only ever feeds a warning, so whatever cannot be read
- * gives none.
- */
-function defaultConventionCheck(
+/** An application with its tsconfig; undefined when that tsconfig cannot be read. */
+function readLayoutIfReadable(
   projectDir: string,
+  application: NestApplication,
+  cwd: string,
+): ApplicationLayout | undefined {
+  try {
+    return readApplicationLayout(projectDir, application, cwd);
+  } catch (error) {
+    if (error instanceof CliError) {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * What an entry found by convention without `--app` says on stderr, among
+ * named applications: the default project's note when the file is plainly
+ * that project's own output, and otherwise which file it is. Nothing when the
+ * project has one application.
+ */
+function conventionNotes(found: {
+  config: NestCliConfig;
+  selection: ApplicationSelection;
+  layout: ApplicationLayout | undefined;
+  path: string;
+  cwd: string;
+}): string[] {
+  const { config, selection, layout, path, cwd } = found;
+  if (selection.kind === "selected") {
+    const { note } = selection;
+    if (note === undefined) {
+      return [];
+    }
+
+    const owned =
+      layout !== undefined &&
+      ownedConventionalEntries(layout, config, cwd).some((candidate) =>
+        samePath(candidate, path),
+      );
+    if (owned) {
+      return [note];
+    }
+  }
+
+  return [conventionEntryNote(config, displayPath(path, cwd))];
+}
+
+/**
+ * `--app`'s conventional `app.module.js`: the first of its own that exists.
+ * When there is none, why — for main.ts's analysis to fall back on.
+ */
+function detectApplicationEntry(
+  layout: ApplicationLayout,
   config: NestCliConfig,
   cwd: string,
-): ConventionCheck | undefined {
-  try {
-    const selection = selectApplication(config, undefined);
-    return selection.kind === "selected"
-      ? conventionCheck(readApplicationLayout(projectDir, selection.application, cwd))
-      : undefined;
-  } catch {
-    return undefined;
+): Detection {
+  const candidates = ownedConventionalEntries(layout, config, cwd);
+  const found = candidates.find(isFile);
+  if (found !== undefined) {
+    return { kind: "found", path: found };
   }
+
+  const outDir = outDirOf(layout.projectDir, layout.tsconfig);
+  return {
+    kind: "failed",
+    error: new CliError(
+      isDirectory(outDir)
+        ? `No ${ROOT_MODULE_FILE} found under ${displayPath(outDir, cwd)} (looked for ${candidates
+            .map((path) => displayPath(path, cwd))
+            .join(" and ")}). ${BUILD_HINT}`
+        : `No compiled application found: ${displayPath(outDir, cwd)} does not exist. ${BUILD_HINT}`,
+    ),
+  };
+}
+
+/**
+ * The `app.module.js` files that are plainly an application's own output, in
+ * the convention's order: `<outDir>/app.module.js` — unless an application
+ * with other sources is built into that outDir too, when the file could be
+ * either's — and `<outDir>/<sourceRoot>/app.module.js`.
+ */
+function ownedConventionalEntries(
+  layout: ApplicationLayout,
+  config: NestCliConfig,
+  cwd: string,
+): string[] {
+  const { application, projectDir } = layout;
+  const outDir = outDirOf(projectDir, layout.tsconfig);
+  const sources = resolve(projectDir, application.sourceRoot);
+  const shared = readEveryLayout(projectDir, config, cwd).some(
+    (other) =>
+      !samePath(resolve(projectDir, other.application.sourceRoot), sources) &&
+      samePath(outDirOf(projectDir, other.tsconfig), outDir),
+  );
+
+  return [
+    ...new Set([
+      ...(shared ? [] : [join(outDir, ROOT_MODULE_FILE)]),
+      join(outDir, application.sourceRoot, ROOT_MODULE_FILE),
+    ]),
+  ];
 }
 
 /**
@@ -444,8 +554,6 @@ function detectEntryUnder(
       join(outDir, sourceRoot, ROOT_MODULE_FILE),
     ]),
   ];
-  const buildHint =
-    "Build your project first (nest build), or pass --entry <file>.";
 
   const candidate = candidates.find(isFile);
   if (candidate) {
@@ -454,7 +562,7 @@ function detectEntryUnder(
 
   if (!isDirectory(outDir)) {
     throw new CliError(
-      `No compiled application found: ${displayPath(outDir, cwd)} does not exist. ${buildHint}`,
+      `No compiled application found: ${displayPath(outDir, cwd)} does not exist. ${BUILD_HINT}`,
     );
   }
 
@@ -474,7 +582,7 @@ function detectEntryUnder(
   throw new CliError(
     `No ${ROOT_MODULE_FILE} found under ${displayPath(outDir, cwd)} (looked for ${candidates
       .map((path) => displayPath(path, cwd))
-      .join(" and ")}). ${buildHint}`,
+      .join(" and ")}). ${BUILD_HINT}`,
   );
 }
 

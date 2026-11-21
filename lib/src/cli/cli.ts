@@ -37,8 +37,9 @@ Options:
                       and the tsconfig outDir (dist/app.module.js,
                       dist/src/app.module.js); failing that, the module main.ts
                       passes to NestFactory, found by reading main.ts, never by
-                      running it. A file that would start the application, such
-                      as main.js, is refused
+                      running it. The file to load is refused when it would
+                      start the application, as main.js would; the modules it
+                      imports are not checked, so it must not import main.ts
   --module <name>     Export name of the root module class (default: the one
                       main.ts boots, when the entry was found from main.ts;
                       else AppModule, or the file's only exported module)

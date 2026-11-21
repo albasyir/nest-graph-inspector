@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -29,7 +35,10 @@ describe("project", () => {
   };
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), "nest-graph-inspector-project-"));
+    // Resolved, as the paths the export loads are: on macOS tmpdir() is a link.
+    projectDir = realpathSync(
+      mkdtempSync(join(tmpdir(), "nest-graph-inspector-project-")),
+    );
   });
 
   afterEach(() => {
@@ -197,6 +206,69 @@ describe("project", () => {
       expect(
         warningsFor(resolveEntry(request({ module: "RootModule" })), moduleExports),
       ).toEqual([]);
+    });
+
+    describe("a root module main.ts imports through a barrel", () => {
+      const ROOT_MODULE = "@Module({})\nexport class RootModule {}\n";
+
+      it.each([
+        ["export { RootModule } from", { "src/modules/index.ts": 'export { RootModule } from "./root.module";\n' }],
+        ["export * from", { "src/modules/index.ts": 'export * from "./root.module";\n' }],
+        [
+          "two barrels",
+          {
+            "src/modules/index.ts": 'export * from "./feature";\n',
+            "src/modules/feature/index.ts": 'export { RootModule } from "../root.module";\n',
+          },
+        ],
+      ])("follows %s to the class, and warns that the convention exports another", (_form, barrels) => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        for (const [path, content] of Object.entries(barrels)) {
+          write(path, content);
+        }
+        write("src/modules/root.module.ts", ROOT_MODULE);
+        write("dist/modules/root.module.js", "exports.RootModule = class {};\n");
+        const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        const resolved = resolveEntry(request());
+
+        expect(resolved).toMatchObject({ origin: "convention", path: entry });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([
+          "src/main.ts boots RootModule from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module RootModule to export RootModule.",
+        ]);
+      });
+
+      it("names the class as its own file exports it, through export { X as Y }", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write("src/modules/index.ts", 'export { Root as RootModule } from "./root.module";\n');
+        write("src/modules/root.module.ts", "@Module({})\nexport class Root {}\n");
+        write("dist/modules/root.module.js", "exports.Root = class {};\n");
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
+          "src/main.ts boots Root from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module Root to export Root.",
+        ]);
+      });
+
+      it("does not warn when the barrel re-exports the module the convention found", () => {
+        write("src/main.ts", main('import { AppModule } from "./modules";', "AppModule"));
+        write("src/modules/index.ts", 'export { AppModule } from "../app.module";\n');
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([]);
+      });
+
+      it("gives up, quietly, on re-exports that go round in a circle", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write("src/modules/index.ts", 'export * from "./other";\n');
+        write("src/modules/other.ts", 'export * from "./index";\n');
+        const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        const resolved = resolveEntry(request());
+
+        expect(resolved).toMatchObject({ origin: "convention", path: entry, check: undefined });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
+      });
     });
 
     it("takes --entry at its word and never reads main.ts", () => {

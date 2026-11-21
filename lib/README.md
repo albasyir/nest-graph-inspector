@@ -42,10 +42,11 @@ built with the options the application passes to
 compiled `app.module.js`, from `nest-cli.json` and the tsconfig `outDir`, or
 else the module `main.ts` passes to `NestFactory.create()` — read from
 `main.ts`, which is never run. `--app` picks an application of a Nest CLI
-monorepo; a file that would start the application, such as `main.js`, is
-refused. `--entry`, `--module`, `--project`, `--require` (for example
-`ts-node/register`, to export TypeScript sources without building, or a
-webpack build) and `--compact` are listed by
+monorepo; the file the export loads is refused if it would start the
+application, as `main.js` would — the modules it imports are not checked, so
+it must not import `main.ts`. `--entry`, `--module`, `--project`, `--require`
+(for example `ts-node/register`, to export TypeScript sources without
+building, or a webpack build) and `--compact` are listed by
 `npx nest-graph-inspector --help`. If your `main.ts` loads environment
 variables before it imports `AppModule` (`import 'dotenv/config'`), pass them
 with `--env-file .env` (Node.js 20.12+) or `--require dotenv/config`. Your
