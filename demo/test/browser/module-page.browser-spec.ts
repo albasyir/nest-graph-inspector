@@ -7,6 +7,7 @@ import {
   listEndpointOf,
   moduleOnCycle,
   moduleWithDeepDependencies,
+  moduleWithLinks,
 } from '../support/graph-facts';
 import type { InspectorInformation } from '../support/inspector-api';
 import type { BrowserState } from './browser-state';
@@ -36,6 +37,9 @@ const DEFAULT_DEPTH = 3;
 
 /** A module on a cycle draws every level of both sides in well under this. */
 const CYCLE_LAYOUT_BOUND_MS = 15_000;
+
+/** The smallest size, in CSS pixels, a name on the canvas is drawn at when the page opens. */
+const READABLE_PX = 12;
 
 const SIDE_LABELS: Record<DependencySide, string> = {
   left: 'Needs',
@@ -82,11 +86,63 @@ function bracketModule(
   return graphNode(page, `${side}:${encodeURIComponent(moduleName)}`);
 }
 
+/**
+ * Frames the whole bracket, however small that draws it. The page opens on
+ * its module at a size to read, and the canvas draws only the cards in view,
+ * so what a side holds is counted from this overview.
+ */
+async function showWholeBracket(page: Page): Promise<void> {
+  await page
+    .getByRole('button', { name: 'Show the whole bracket', exact: true })
+    .click();
+}
+
+/**
+ * Waits until a piece of text on the canvas is drawn at a size to read —
+ * once any pan the canvas is making has come to rest.
+ */
+async function expectReadable(text: Locator): Promise<void> {
+  await expect(text).toBeInViewport();
+  await expect
+    .poll(() => renderedFontSize(text), {
+      message: 'The text is drawn at a size to read',
+    })
+    .toBeGreaterThanOrEqual(READABLE_PX);
+}
+
+/** The size a piece of text on the canvas is drawn at: its font size, scaled by the zoom. */
+async function renderedFontSize(text: Locator): Promise<number> {
+  return text.evaluate((element) => {
+    const card = element.closest('.vue-flow__node');
+    if (!(card instanceof HTMLElement) || card.offsetWidth === 0) {
+      throw new Error('The text is not on a card of the canvas');
+    }
+
+    const zoom = card.getBoundingClientRect().width / card.offsetWidth;
+    return Number.parseFloat(getComputedStyle(element).fontSize) * zoom;
+  });
+}
+
+/** The chip at a side's edge of the canvas that brings that side's hidden levels into view. */
+function levelsChip(
+  page: Page,
+  side: DependencySide,
+  moduleName: string,
+): Locator {
+  return page.getByRole('button', {
+    name:
+      side === 'left'
+        ? new RegExp(`^Show levels? [\\d–]+ of what ${moduleName} needs$`)
+        : new RegExp(`^Show levels? [\\d–]+ of what needs ${moduleName}$`),
+  });
+}
+
 /** The modules drawn on a side, level by level, each level's names sorted. */
 async function drawnLevels(
   page: Page,
   side: DependencySide,
 ): Promise<string[][]> {
+  await showWholeBracket(page);
   const cards = await page
     .locator(`.vue-flow__node[data-bracket-node="module"][data-side="${side}"]`)
     .evaluateAll((nodes) =>
@@ -137,6 +193,7 @@ async function drawnStubCounts(
   page: Page,
   side: DependencySide,
 ): Promise<number[]> {
+  await showWholeBracket(page);
   const labels = await page
     .locator(`.vue-flow__node[data-bracket-node="stub"][data-side="${side}"]`)
     .allTextContents();
@@ -207,6 +264,77 @@ test('clicking a module in the navigator opens its page: three levels each side,
     side: 'left',
     depth: DEFAULT_DEPTH + 1,
   });
+});
+
+test('the page opens on its module at a size its names read at, the rest a chip away', async ({
+  page,
+  state,
+  graph,
+  information,
+}) => {
+  const moduleName = moduleWithDeepDependencies(graph, DEFAULT_DEPTH);
+  const levels = dependencyLevels(graph, moduleName, 'left');
+  const [first] = levels[0] ?? [];
+  const [deepest] = levels[DEFAULT_DEPTH - 1] ?? [];
+  if (!first || !deepest) {
+    throw new Error(`${moduleName} has no ${DEFAULT_DEPTH} levels on the left`);
+  }
+
+  await openFromNavigator({ page, state, information, moduleName });
+
+  // The module, and the first level beside it, at a size to read.
+  await expectReadable(center(page).locator('.module-bracket-center__name'));
+  await expectReadable(
+    bracketModule(page, 'left', first).locator('.module-bracket-module__name'),
+  );
+
+  // What the canvas cannot hold at that size is named at its edge, and the
+  // chip goes there, at the same size.
+  await expect(bracketModule(page, 'left', deepest)).not.toBeInViewport();
+  await levelsChip(page, 'left', moduleName).click();
+  await expectReadable(
+    bracketModule(page, 'left', deepest).locator(
+      '.module-bracket-module__name',
+    ),
+  );
+});
+
+test("imports besides the bracket's own show for the module pointed at, or all at once", async ({
+  page,
+  state,
+  graph,
+  information,
+}) => {
+  const moduleName = moduleWithLinks(graph, DEFAULT_DEPTH);
+  const links = page.locator('.vue-flow__edge.bracket-edge--link');
+
+  await openFromNavigator({ page, state, information, moduleName });
+  await showWholeBracket(page);
+
+  // The bracket reads first: no link is drawn until one is asked for.
+  await expect(links).toHaveCount(0);
+  const showAll = page.getByRole('switch', { name: 'Show all imports' });
+  await showAll.click();
+  await expect(links.first()).toBeVisible();
+
+  const linkId = (await links.first().getAttribute('data-id')) ?? '';
+  const ends: unknown = JSON.parse(linkId.slice(linkId.indexOf(':') + 1));
+  const source: unknown = Array.isArray(ends) ? ends[0] : undefined;
+  if (typeof source !== 'string') {
+    throw new Error(`The link ${linkId} names no module it starts at`);
+  }
+
+  await showAll.click();
+  await expect(links).toHaveCount(0);
+
+  // Pointing at a module draws its own links, and only while it is pointed at.
+  await graphNode(page, source).getByRole('link').hover();
+  // An edge id is JSON, in double quotes; module names hold no single quote.
+  await expect(
+    page.locator(`.vue-flow__edge[data-id='${linkId}']`),
+  ).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(links).toHaveCount(0);
 });
 
 test("each side's depth changes on its own, and the address keeps it", async ({
@@ -408,14 +536,16 @@ test('a module on a cycle draws every level of both sides, quickly, and says it 
   }
   expect(Date.now() - started).toBeLessThan(CYCLE_LAYOUT_BOUND_MS);
 
-  await expect(center(page).getByText('Cycle', { exact: true })).toBeVisible();
-  // Every module on the reported cycles through it carries the badge, on each
+  await expect(
+    center(page).getByText('On a cycle', { exact: true }),
+  ).toBeVisible();
+  // Every module on the reported cycles through it carries the mark, on each
   // side it is drawn.
+  const cycles = graph.cycles.modules.filter((cycle) =>
+    cycle.path.includes(moduleName),
+  );
   const onCycle = new Set(
-    graph.cycles.modules
-      .filter((cycle) => cycle.path.includes(moduleName))
-      .flatMap((cycle) => cycle.path)
-      .filter((name) => name !== moduleName),
+    cycles.flatMap((cycle) => cycle.path).filter((name) => name !== moduleName),
   );
   for (const name of onCycle) {
     for (const side of ['left', 'right'] as const) {
@@ -424,6 +554,34 @@ test('a module on a cycle draws every level of both sides, quickly, and says it 
       ).toBeVisible();
     }
   }
+
+  // Pressing a cycle's number traces it — its connectors lit, the rest kept
+  // back — until it is pressed again.
+  const [cycle] = cycles;
+  if (!cycle) {
+    throw new Error(`No reported cycle runs through ${moduleName}`);
+  }
+  const label = page
+    .getByRole('button', {
+      name: new RegExp(`^Trace cycle (#\\d+ )*#${cycle.id}( #\\d+)*$`),
+    })
+    .first();
+  await label.click();
+  await expect(label).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.move(1, 1);
+  await expect(
+    page.locator('.vue-flow__edge.bracket-edge--lit').first(),
+  ).toBeVisible();
+  await expect(
+    page.locator('.vue-flow__edge.bracket-edge--dimmed').first(),
+  ).toBeVisible();
+  await label.click();
+  await expect(label).toHaveAttribute('aria-pressed', 'false');
+  // Pointed at, a number traces its cycle too: away from it, nothing is lit.
+  await page.mouse.move(1, 1);
+  await expect(page.locator('.vue-flow__edge.bracket-edge--lit')).toHaveCount(
+    0,
+  );
 });
 
 test("the landing page's graph opens a module's page on the example, and Back returns to the landing page", async ({
@@ -474,6 +632,7 @@ test.describe('on a phone', () => {
     );
     expect(overflow, 'The page scrolls sideways').toBeLessThanOrEqual(0);
 
+    const canvasControls = page.locator('.vue-flow__controls');
     const controls = [
       ...(['left', 'right'] as const).flatMap((side) => [
         depthGroup(page, side).getByRole('button', {
@@ -482,10 +641,16 @@ test.describe('on a phone', () => {
         depthGroup(page, side).getByRole('button', {
           name: 'Show one level fewer',
         }),
+        levelsChip(page, side, moduleName),
       ]),
       page
         .getByRole('navigation', { name: 'Module views' })
         .getByRole('link', { name: 'Inside Module' }),
+      page.getByRole('link', { name: 'Back to Application Graph' }),
+      canvasControls.getByRole('button', { name: 'Zoom in' }),
+      canvasControls.getByRole('button', { name: 'Zoom out' }),
+      canvasControls.getByRole('button', { name: 'Show the whole bracket' }),
+      canvasControls.getByRole('button', { name: `Back to ${moduleName}` }),
     ];
     for (const control of controls) {
       await expect(control).toBeInViewport();
@@ -494,14 +659,22 @@ test.describe('on a phone', () => {
       expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
     }
 
-    // The first level each side is framed; the rest is a pan away.
+    // The module is framed at a size to read; each side is a chip away, and
+    // the chip brings its first level in at that size.
+    await expectReadable(center(page).locator('.module-bracket-center__name'));
     for (const side of ['left', 'right'] as const) {
       await expectDepth(page, side, DEFAULT_DEPTH);
-      const [first] = dependencyLevels(graph, moduleName, side)[0] ?? [];
-      if (first) {
-        await expect(bracketModule(page, side, first)).toBeInViewport();
-      }
     }
+    const [first] = dependencyLevels(graph, moduleName, 'left')[0] ?? [];
+    if (!first) {
+      throw new Error(`${moduleName} needs no module`);
+    }
+    await levelsChip(page, 'left', moduleName).tap();
+    await expectReadable(
+      bracketModule(page, 'left', first).locator(
+        '.module-bracket-module__name',
+      ),
+    );
 
     await depthGroup(page, 'right')
       .getByRole('button', { name: 'Show one more level' })

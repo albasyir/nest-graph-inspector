@@ -259,6 +259,42 @@ export function moduleWithDeepDependencies(
   return found;
 }
 
+/**
+ * The first module, by name, whose page draws a link among what it needs
+ * within `depth` levels: an import between two modules drawn there besides
+ * the one the page joins them by, which it draws only on demand. Each module
+ * drawn is joined to the level before by one import, so a side has links
+ * when the modules on it — and the module in the middle — import one another
+ * more often than there are modules drawn. Throws when there is none.
+ */
+export function moduleWithLinks(graph: GraphOutput, depth: number): string {
+  const neighbours = dependencyNeighbours(graph, 'left');
+  const found = Object.keys(graph.modules)
+    .sort(compareText)
+    .find((name) => {
+      const drawn = new Set(
+        dependencyLevels(graph, name, 'left').slice(0, depth).flat(),
+      );
+      const imports = [name, ...drawn].reduce(
+        (count, importer) =>
+          count +
+          (neighbours.get(importer) ?? []).filter(
+            (imported) => imported !== importer && drawn.has(imported),
+          ).length,
+        0,
+      );
+      return imports > drawn.size;
+    });
+
+  if (!found) {
+    throw new Error(
+      `No module of the graph imports among what it needs, within ${depth} levels, more than one way: the module page has no link to show on demand.`,
+    );
+  }
+
+  return found;
+}
+
 /** The module a reported module cycle starts from. Throws when the graph reports none. */
 export function moduleOnCycle(graph: GraphOutput): string {
   const [cycle] = graph.cycles.modules;
