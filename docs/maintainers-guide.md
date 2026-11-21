@@ -534,7 +534,7 @@ Output structure: `dist/libs/nest-graph-inspector/src/**` (compiled `.js`, `.d.t
 
 | Component | Role |
 |---|---|
-| `PackageManagerCommand.vue` | Renders install/start commands for selected package manager |
+| `PackageManagerCommand.vue` | Renders one command set — `install`, `update`, `force-install`, `start`, or `export` — as a tab per package manager, opened on the selected package manager |
 | `RuntimeGraphPreview.vue` (and variants) | Interactive graph previews embedded in docs. They draw the demo's static graph (`nodepod-demo/graph.json`, exported at build time) and boot nothing; "Load Example" — on the hero preview (`show-load-example`) and the Direct Run preview — starts the demo in the browser, and every preview then draws its live graph |
 | `RuntimeAIChatPreview.vue` | AI chat preview in docs |
 | `HeroBackground.vue` / `StarsBg.vue` | Visual elements for landing page |
@@ -653,7 +653,7 @@ fallback.
 | `graph-inspector.ts` | Core store: fetches and validates `GraphOutput`; manages the endpoint URL, the access token, graph data, markdown, endpoint info, and UI flags — or, instead of an endpoint, a graph file (`openGraphFile`, `closeGraphFile`, `restoreGraphSource`) |
 | `example-graph.ts` | The demo's static graph, `nodepod-demo/graph.json`: fetched once per document from the site, checked like a graph file |
 | `nodepod-demo.ts` | Runs the demo application in the browser: downloads the payload, boots nodepod headless, spawns `node main.js`, installs the fetch bridge, and reads the graph endpoint out of the application's startup log |
-| `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `PackageManagerCommand.vue` |
+| `package-manager.ts` | Persists the user's selected package manager (localStorage); used by `ProseCodeGroup.vue`, which `PackageManagerCommand.vue` renders |
 
 The store file holds the store. Pure helpers it used to carry — URL derivation,
 graph-output support checks, error reading — live in `site/app/utils/` instead,
@@ -754,7 +754,7 @@ that cannot reach into a Pinia setup store.
 | `nodepod-demo-bridge.test.ts` | Assert-based test for `nodepod-demo-bridge.ts` (no framework) |
 | `device-detection.ts` | The AI chat's mobile rule as a pure function over `useDevice()`'s flags: `isMobileOrTablet`, an iPad on iPadOS 13+ told apart from a Mac by its touchscreen, and the 768px viewport breakpoint. Also the copy the header and the panel show while restricted |
 | `device-detection.test.ts` | Assert-based test for `device-detection.ts`. Runs real user agents through `@nuxtjs/device`'s own flag generator, loaded beside the package entry with the `#build` crawler template stubbed by a module hook |
-| `supported-runtime.ts` | Runtime and package manager constants; install command lookup table |
+| `supported-runtime.ts` | Runtime and package manager constants; the package manager command sets (`install`, `update`, `force-install`, `start`, `export`) and their lookup |
 | `web-llm-boundary.ts` | The wire shapes the engine and the chat model both speak — messages, stream deltas, `response_format`, and the `WebLlmStreamer` handshake. One declaration on purpose: the two sides used to keep private copies and agree by inspection |
 | `web-llm-catalog.ts` | The curated list of in-browser models: which ones the viewer offers, their download size, context window, whether they can think, and how well they were tuned to pick a tool (`toolCallingQuality` — a hint to show, never a gate) |
 | `web-llm-context.ts` | Fits the graph Markdown into the model's context window — drops the Mermaid block, keeps whole module sections, and discloses what it dropped |

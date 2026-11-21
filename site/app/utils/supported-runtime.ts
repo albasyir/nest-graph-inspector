@@ -74,6 +74,12 @@ export const packageManagerCommandSets = {
     [NodeJSPackageManager.YARN]: 'yarn start',
     [NodeJSPackageManager.PNPM]: 'pnpm start',
     [BunPackageManager.BUN]: 'bun run start'
+  },
+  'export': {
+    [NodeJSPackageManager.NPM]: 'npx nest-graph-inspector export',
+    [NodeJSPackageManager.YARN]: 'yarn nest-graph-inspector export',
+    [NodeJSPackageManager.PNPM]: 'pnpm exec nest-graph-inspector export',
+    [BunPackageManager.BUN]: 'bunx nest-graph-inspector export'
   }
 } as const satisfies Record<string, Record<PackageManager, string>>
 
