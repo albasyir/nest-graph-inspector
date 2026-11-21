@@ -16,7 +16,7 @@ const NEST_CLI_CONFIG_FILES = ["nest-cli.json", ".nest-cli.json"];
 
 /** The Nest CLI's defaults for a `nest-cli.json` that leaves them unset. */
 export const DEFAULT_SOURCE_ROOT = "src";
-export const DEFAULT_ENTRY_FILE = "main";
+const DEFAULT_ENTRY_FILE = "main";
 export const DEFAULT_OUT_DIR = "dist";
 
 /**
@@ -114,6 +114,13 @@ export type BuildTsConfig = {
   options: ts.CompilerOptions;
 };
 
+/** An application, with the tsconfig `nest build` compiles it with. */
+export type ApplicationLayout = {
+  projectDir: string;
+  application: NestApplication;
+  tsconfig: BuildTsConfig | undefined;
+};
+
 /** Reads the project's `nest-cli.json` (or `.nest-cli.json`); every setting unset when there is none. */
 export function readNestCliConfig(projectDir: string): NestCliConfig {
   const file = NEST_CLI_CONFIG_FILES.map((name) => join(projectDir, name)).find(
@@ -131,6 +138,23 @@ export function readNestCliConfig(projectDir: string): NestCliConfig {
   }
 
   return parseNestCliConfig(raw, file);
+}
+
+/**
+ * `nest-cli.json` as far as it can be read: every setting unset when it
+ * cannot be. For an export that does not otherwise need the file — one given
+ * `--entry` — which a broken `nest-cli.json` must not fail.
+ */
+export function readNestCliConfigOrDefaults(projectDir: string): NestCliConfig {
+  try {
+    return readNestCliConfig(projectDir);
+  } catch (error) {
+    if (error instanceof CliError) {
+      return parseNestCliConfig(undefined, undefined);
+    }
+
+    throw error;
+  }
 }
 
 /** Validates parsed `nest-cli.json` content: what is not of the expected type is left unset. */
@@ -343,13 +367,24 @@ function resolveApplication(
     sourceRoot:
       primary.sourceRoot ?? fallback?.sourceRoot ?? DEFAULT_SOURCE_ROOT,
     entryFile: primary.entryFile ?? fallback?.entryFile ?? DEFAULT_ENTRY_FILE,
-    // A tsc builder's configPath is its tsconfig, and is read first, as the
-    // entry-file convention always has; a bundler's is its own config file.
-    tsConfigPath:
-      (builder && !isBundler(builder.type) ? builder.configPath : undefined) ??
-      tsConfigPath,
+    tsConfigPath: configuredTsConfigPath(builder, tsConfigPath),
     build: buildOf(builder, webpack, monorepo),
   };
+}
+
+/**
+ * The tsconfig nest-cli.json names: a tsc builder's `configPath`, read first
+ * as the entry-file convention always has, else `tsConfigPath`. A webpack or
+ * rspack builder's `configPath` is that bundler's own config, never a tsconfig.
+ */
+function configuredTsConfigPath(
+  builder: NestBuilderSetting | undefined,
+  tsConfigPath: string | undefined,
+): string | undefined {
+  return (
+    (builder && !isBundler(builder.type) ? builder.configPath : undefined) ??
+    tsConfigPath
+  );
 }
 
 /**
@@ -407,7 +442,7 @@ function applicationNames(config: NestCliConfig): string[] {
     .map(([name]) => name);
 }
 
-export function configFileName(config: NestCliConfig): string {
+function configFileName(config: NestCliConfig): string {
   return config.file ? basename(config.file) : NEST_CLI_CONFIG_FILES[0];
 }
 
@@ -467,13 +502,41 @@ export function readBuildTsConfig(
   return { path: configPath, options: parsed.options };
 }
 
-/** The tsconfig an application is built with, as `nest build <name>` finds it. */
-export function readApplicationTsConfig(
+/**
+ * An application with the tsconfig it is built with, as `nest build <name>`
+ * finds it; throws when that tsconfig cannot be read.
+ */
+export function readApplicationLayout(
   projectDir: string,
   application: NestApplication,
   cwd: string,
+): ApplicationLayout {
+  return {
+    projectDir,
+    application,
+    tsconfig: readBuildTsConfig(projectDir, application.tsConfigPath, cwd),
+  };
+}
+
+/**
+ * The tsconfig the entry-file convention reads: the one the top level of
+ * nest-cli.json names, as `nest build` without an application name compiles
+ * with. Unlike an application's, it never falls back on a matching project's
+ * settings, so the convention finds what it always has.
+ */
+export function readConventionTsConfig(
+  projectDir: string,
+  config: NestCliConfig,
+  cwd: string,
 ): BuildTsConfig | undefined {
-  return readBuildTsConfig(projectDir, application.tsConfigPath, cwd);
+  return readBuildTsConfig(
+    projectDir,
+    configuredTsConfigPath(
+      config.compilerOptions.builder,
+      config.compilerOptions.tsConfigPath,
+    ),
+    cwd,
+  );
 }
 
 /** Where `nest build` writes an application: its tsconfig's outDir, else `dist`. */

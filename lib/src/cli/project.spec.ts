@@ -4,19 +4,19 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Injectable, Module } from "@nestjs/common";
 import { CliError } from "./cli-error";
+import { displayPath } from "./files";
 import {
   detectEntry,
-  displayPath,
   findProjectPackage,
   isEsModule,
   loadModule,
   readOwnPackage,
   resolveEntry,
   selectEntryModule,
+  selectRootModule,
   type EntryRequest,
   type ResolvedEntry,
 } from "./project";
-import { conventionWarnings } from "./root-module-detection";
 
 describe("project", () => {
   let projectDir: string;
@@ -132,22 +132,12 @@ describe("project", () => {
     });
     const main = (imports: string, root: string) =>
       `import { NestFactory } from "@nestjs/core";\n${imports}\n\nvoid NestFactory.create(${root}).then((app) => app.listen(3000));\n`;
-    /** The warnings an entry found by convention gets, once `moduleName` is chosen from it. */
-    const warningsFor = (
-      entry: ResolvedEntry,
-      moduleName: string,
-      requestedModule?: string,
-    ) => {
-      if (entry.origin !== "convention" || !entry.check) {
-        throw new Error(`Expected an entry found by convention, checked against main.ts: ${JSON.stringify(entry)}`);
-      }
-
-      return conventionWarnings(
-        entry.check,
-        { path: entry.path, moduleName, requestedModule },
-        projectDir,
-      );
-    };
+    /**
+     * What the export warns of once it takes the root module export from the
+     * loaded entry — classes standing in for the compiled module's exports.
+     */
+    const warningsFor = (entry: ResolvedEntry, moduleExports: Record<string, unknown>) =>
+      selectRootModule(entry, moduleExports, projectDir).warnings;
 
     beforeEach(() => {
       write(
@@ -172,7 +162,7 @@ describe("project", () => {
       expect(resolved.origin === "convention" && resolved.check?.mainFile).toBe(
         join(projectDir, "src/main.ts"),
       );
-      expect(warningsFor(resolved, "AppModule")).toEqual([]);
+      expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
     });
 
     it("warns, and still keeps to the convention, when main.ts boots a module from another file", () => {
@@ -184,7 +174,7 @@ describe("project", () => {
       const resolved = resolveEntry(request());
 
       expect(resolved).toMatchObject({ origin: "convention", path: entry });
-      expect(warningsFor(resolved, "AppModule")).toEqual([
+      expect(warningsFor(resolved, { AppModule: class {} })).toEqual([
         "src/main.ts boots RootModule from src/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/root.module.js --module RootModule to export RootModule.",
       ]);
     });
@@ -196,14 +186,17 @@ describe("project", () => {
       );
       write("src/main.ts", main('import { RootModule } from "./app.module";', "RootModule"));
       write("dist/app.module.js", "exports.AppModule = class {};\n");
+      const moduleExports = { AppModule: class {}, RootModule: class {} };
 
-      const resolved = resolveEntry(request());
-
-      expect(warningsFor(resolved, "AppModule")).toEqual([
+      expect(warningsFor(resolveEntry(request()), moduleExports)).toEqual([
         "src/main.ts boots RootModule from src/app.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --module RootModule to export RootModule.",
       ]);
-      expect(warningsFor(resolved, "AppModule", "AppModule")).toEqual([]);
-      expect(warningsFor(resolved, "RootModule", "RootModule")).toEqual([]);
+      expect(
+        warningsFor(resolveEntry(request({ module: "AppModule" })), moduleExports),
+      ).toEqual([]);
+      expect(
+        warningsFor(resolveEntry(request({ module: "RootModule" })), moduleExports),
+      ).toEqual([]);
     });
 
     it("takes --entry at its word and never reads main.ts", () => {

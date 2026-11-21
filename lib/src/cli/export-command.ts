@@ -5,18 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import type { GraphOutput } from "../types/graph-output.type";
 import { CliError, describeError } from "./cli-error";
 import type { CliIo } from "./cli";
+import { displayPath, isDirectory, isFile } from "./files";
 import {
-  displayPath,
   findProjectPackage,
-  isDirectory,
-  isFile,
   loadModule,
   loadNestCore,
   readOwnPackage,
   resolveEntry,
-  selectEntryModule,
+  selectRootModule,
 } from "./project";
-import { conventionWarnings } from "./root-module-detection";
 import { createStderrLogger } from "./stderr-logger";
 
 export const DEFAULT_OUT_FILE = "nest-graph.json";
@@ -110,25 +107,9 @@ export async function runExportCommand(
       );
     }
 
-    const rootModule = selectEntryModule(
-      moduleExports,
-      entry.moduleName,
-      entryPath,
-      io.cwd,
-    );
-    if (entry.origin === "convention" && entry.check) {
-      const warnings = conventionWarnings(
-        entry.check,
-        {
-          path: entryPath,
-          moduleName: rootModule.name,
-          requestedModule: options.module,
-        },
-        io.cwd,
-      );
-      for (const warning of warnings) {
-        io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
-      }
+    const rootModule = selectRootModule(entry, moduleExports, io.cwd);
+    for (const warning of rootModule.warnings) {
+      io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
     }
 
     // Loaded only now, after the project's own reflect-metadata.

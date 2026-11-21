@@ -1,23 +1,18 @@
 import { readFileSync } from "node:fs";
-import {
-  basename,
-  dirname,
-  extname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { ts } from "ts-morph";
 import { CliError, describeError } from "./cli-error";
-import { displayPath, isFile } from "./files";
+import { displayPath, isFile, pathInside } from "./files";
 import {
   DEFAULT_OUT_DIR,
+  everyApplication,
   outDirOf,
+  readApplicationLayout,
   type ApplicationBuild,
+  type ApplicationLayout,
   type BuildTsConfig,
   type NestApplication,
+  type NestCliConfig,
 } from "./nest-cli-config";
 
 /**
@@ -39,7 +34,7 @@ const BOOT_METHODS = new Set([
 const NEST_FACTORY = "NestFactory";
 
 /** The extensions an application's entry file is looked for with, in this order. */
-export const ENTRY_FILE_EXTENSIONS = [
+const ENTRY_FILE_EXTENSIONS = [
   ".ts",
   ".mts",
   ".cts",
@@ -77,11 +72,12 @@ function isNonEmpty<T>(items: readonly T[]): items is NonEmptyArray<T> {
   return items.length > 0;
 }
 
-/** An application, with the tsconfig `nest build` compiles it with. */
-export type ApplicationLayout = {
+/** The project a file is about to be loaded from. */
+export type LoadingProject = {
   projectDir: string;
-  application: NestApplication;
-  tsconfig: BuildTsConfig | undefined;
+  cwd: string;
+  /** Every application nest-cli.json defines has its entry files refused. */
+  config: NestCliConfig;
 };
 
 /** A root module main.ts boots, as main.ts names it. */
@@ -161,16 +157,13 @@ type NestFactoryCall = {
 
 /**
  * Parses the application's entry file — `<sourceRoot>/<entryFile>.ts`, or
- * `.mts`, `.cts`, `.js` — and traces the root module each `NestFactory.create`,
- * `createApplicationContext` or `createMicroservice` call boots to the file
- * that declares it. The file is parsed, never loaded.
+ * `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` — and traces the root module each
+ * `NestFactory.create`, `createApplicationContext` or `createMicroservice`
+ * call boots to the file that declares it. The file is parsed, never loaded.
  */
 export function analyseMainFile(layout: ApplicationLayout): MainFileAnalysis {
-  const { application, projectDir } = layout;
-  const stem = resolve(projectDir, application.sourceRoot, application.entryFile);
-  const mainFile = ENTRY_FILE_EXTENSIONS.map((extension) => stem + extension).find(
-    isFile,
-  );
+  const { application } = layout;
+  const mainFile = entryFileSources(layout).find(isFile);
   if (!mainFile) {
     return {
       kind: "unknown",
@@ -327,10 +320,7 @@ export function locateRootModule(
  * directory, the project, the application's `root`, then its `sourceRoot`,
  * which SWC strips — and the candidates are tried in that order.
  */
-export function compiledCandidates(
-  source: string,
-  layout: ApplicationLayout,
-): string[] {
+function compiledCandidates(source: string, layout: ApplicationLayout): string[] {
   const extension = COMPILED_EXTENSIONS.get(extname(source));
   if (extension === undefined) {
     return [];
@@ -346,14 +336,8 @@ export function compiledCandidates(
     resolve(projectDir, application.sourceRoot),
   ];
   const candidates = roots.flatMap((root) => {
-    if (root === undefined) {
-      return [];
-    }
-
-    const path = relative(root, source);
-    const outside =
-      path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path);
-    return outside
+    const path = root === undefined ? undefined : pathInside(root, source);
+    return path === undefined
       ? []
       : [join(outDir, path.slice(0, path.length - extname(path).length) + extension)];
   });
@@ -361,20 +345,30 @@ export function compiledCandidates(
   return [...new Set(candidates)];
 }
 
+/** Where an application's entry file may be, as source: `<sourceRoot>/<entryFile>` with each extension. */
+function entryFileSources({ application, projectDir }: ApplicationLayout): string[] {
+  const stem = resolve(projectDir, application.sourceRoot, application.entryFile);
+  return ENTRY_FILE_EXTENSIONS.map((extension) => stem + extension);
+}
+
+/** The one file webpack and rspack bundle an application into: `main.js`, after its entry file. */
+function bundleFileName(application: NestApplication): string {
+  return `${basename(application.entryFile)}.js`;
+}
+
 /**
  * Every path an application's entry file has: its source and what it compiles
  * or bundles to. The export never loads one of them, whatever it contains.
  */
-export function applicationEntryFiles(layout: ApplicationLayout): string[] {
+function applicationEntryFiles(layout: ApplicationLayout): string[] {
   const { application, projectDir, tsconfig } = layout;
-  const stem = resolve(projectDir, application.sourceRoot, application.entryFile);
-  const sources = ENTRY_FILE_EXTENSIONS.map((extension) => stem + extension);
-  const bundle = `${basename(application.entryFile)}.js`;
+  const sources = entryFileSources(layout);
+  const bundle = bundleFileName(application);
 
   return [
     ...sources,
     ...sources.flatMap((source) => compiledCandidates(source, layout)),
-    // Where webpack and rspack write main.js: the outDir, and by default
+    // Where webpack and rspack write the bundle: the outDir, and by default
     // dist/ followed by the application's root.
     join(outDirOf(projectDir, tsconfig), bundle),
     join(projectDir, DEFAULT_OUT_DIR, application.root, bundle),
@@ -382,19 +376,39 @@ export function applicationEntryFiles(layout: ApplicationLayout): string[] {
 }
 
 /**
- * Refuses to load a file that would start the application: an application's
- * entry file, by its path, and any file that calls a method of `NestFactory`
- * — main.ts compiled by tsc (`core_1.NestFactory.create(...)`), a webpack
- * bundle (`_nestjs_core__WEBPACK_IMPORTED_MODULE_0__.NestFactory.create(...)`),
- * or one that imports `NestFactory` under another name. Applies to every file
+ * The entry files of the default project and of every named application, as
+ * far as they can be worked out: an application whose tsconfig cannot be read
+ * is taken to build into `dist/`, never a reason to fail the export — the
+ * check for `NestFactory` calls runs on the file regardless.
+ */
+function entryFilesOf({ projectDir, cwd, config }: LoadingProject): string[] {
+  return everyApplication(config).flatMap((application) => {
+    let layout: ApplicationLayout;
+    try {
+      layout = readApplicationLayout(projectDir, application, cwd);
+    } catch (error) {
+      if (!(error instanceof CliError)) {
+        throw error;
+      }
+
+      layout = { projectDir, application, tsconfig: undefined };
+    }
+
+    return applicationEntryFiles(layout);
+  });
+}
+
+/**
+ * Refuses to load a file that would start the application: any file that
+ * calls a method of `NestFactory` — main.ts compiled by tsc
+ * (`core_1.NestFactory.create(...)`), a webpack bundle
+ * (`_nestjs_core__WEBPACK_IMPORTED_MODULE_0__.NestFactory.create(...)`), or
+ * one that imports `NestFactory` under another name — and, by its path, the
+ * entry file of any application nest-cli.json defines. Applies to every file
  * the export loads, `--entry` included.
  */
-export function assertLoadableEntry(
-  path: string,
-  applicationEntries: readonly string[],
-  cwd: string,
-): void {
-  const file = displayPath(path, cwd);
+export function assertLoadableEntry(path: string, project: LoadingProject): void {
+  const file = displayPath(path, project.cwd);
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -409,7 +423,7 @@ export function assertLoadableEntry(
   const reason =
     call !== undefined
       ? `it calls ${call}`
-      : applicationEntries.some((entry) => resolve(entry) === target)
+      : entryFilesOf(project).some((entry) => resolve(entry) === target)
         ? "it is the application's entry file"
         : undefined;
 
@@ -445,7 +459,7 @@ export function findNestFactoryCall(sourceFile: ts.SourceFile): string | undefin
 }
 
 /** The root module's name as a user knows it: its export name, or main.ts's name for a default export. */
-export function rootName(root: BootedRootModule): string {
+function rootName(root: BootedRootModule): string {
   return root.exportName === "default" ? root.localName : root.exportName;
 }
 
@@ -481,10 +495,11 @@ export function bundledMessage(params: {
 }): string {
   const { application, bundler, root, command, cwd } = params;
   const label = application.root || application.name || "The project";
+  const bundle = bundleFileName(application);
   const bundled =
     bundler === "monorepo-default"
-      ? `${label} is built into one main.js — nest-cli.json names no builder, and the Nest CLI bundles a monorepo with webpack, or rspack from Nest CLI 12 — which starts the application when it is loaded.`
-      : `${label} is built with ${bundler} into one main.js, which starts the application when it is loaded.`;
+      ? `${label} is built into one ${bundle} — nest-cli.json names no builder, and the Nest CLI bundles a monorepo with webpack, or rspack from Nest CLI 12 — which starts the application when it is loaded.`
+      : `${label} is built with ${bundler} into one ${bundle}, which starts the application when it is loaded.`;
 
   return `${bundled} Its root module is ${rootName(root)} in ${displayPath(root.sourceFile, cwd)}. Run: ${command}`;
 }

@@ -1,15 +1,24 @@
 import { statSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 
-/** A path relative to `cwd` when it lies inside it, else absolute. */
-export function displayPath(path: string, cwd: string): string {
-  const relativePath = relative(cwd, path);
+/**
+ * `path` relative to `dir` when it lies inside it; undefined when it is `dir`
+ * itself, or lies outside it.
+ */
+export function pathInside(dir: string, path: string): string | undefined {
+  const relativePath = relative(dir, path);
   const outside =
+    relativePath === "" ||
     relativePath === ".." ||
     relativePath.startsWith(`..${sep}`) ||
     isAbsolute(relativePath);
 
-  return relativePath && !outside ? relativePath : path;
+  return outside ? undefined : relativePath;
+}
+
+/** A path relative to `cwd` when it lies inside it, else absolute. */
+export function displayPath(path: string, cwd: string): string {
+  return pathInside(cwd, path) ?? path;
 }
 
 export function isFile(path: string): boolean {

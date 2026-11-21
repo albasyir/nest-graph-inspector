@@ -524,7 +524,11 @@ void bootstrap();
   }, 180_000);
 
   afterAll(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    // Unset when beforeAll failed before making it: that failure is the one
+    // to report, not a second one here.
+    if (workDir) {
+      rmSync(workDir, { recursive: true, force: true });
+    }
   });
 
   it("E1: exports a root module that is neither AppModule nor in app.module.ts", async () => {

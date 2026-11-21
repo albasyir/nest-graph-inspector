@@ -749,6 +749,46 @@ export class ${root} {}
         notes: ["entry src/root.module.ts (RootModule, from src/main.ts)"],
       });
     });
+
+    it("never reads a bundler's own config as a tsconfig, even to find app.module.js", () => {
+      write("tsconfig.json", STANDARD_TSCONFIG);
+      write(
+        "nest-cli.json",
+        JSON.stringify({
+          compilerOptions: {
+            builder: { type: "rspack", options: { configPath: "rspack.config.js" } },
+          },
+        }),
+      );
+      write("rspack.config.js", "module.exports = { target: 'node' };\n");
+      // Nothing main.ts boots can be followed, so the convention's own error
+      // is what the export reports: about the build, not rspack.config.js.
+      write("src/main.ts", 'import { bootstrap } from "./bootstrap";\n\nvoid bootstrap();\n');
+      write("dist/main.js", WEBPACK_BUNDLE);
+
+      expect(() => detect()).toThrow(
+        new CliError(
+          "No app.module.js found under dist (looked for dist/app.module.js and dist/src/app.module.js). Build your project first (nest build), or pass --entry <file>.",
+        ),
+      );
+    });
+
+    it("names the bundle after the entry file", () => {
+      write("nest-cli.json", JSON.stringify({ entryFile: "server", compilerOptions: { builder: "webpack" } }));
+      write("tsconfig.json", STANDARD_TSCONFIG);
+      write(
+        "src/server.ts",
+        mainSource('import { RootModule } from "./root.module";', "NestFactory.create(RootModule)"),
+      );
+      write("src/root.module.ts", moduleSource("RootModule"));
+      write("dist/server.js", WEBPACK_BUNDLE);
+
+      expect(() => detect()).toThrow(
+        new CliError(
+          "The project is built with webpack into one server.js, which starts the application when it is loaded. Its root module is RootModule in src/root.module.ts. Run: nest-graph-inspector export --require ts-node/register",
+        ),
+      );
+    });
   });
 
   describe("an application not built yet", () => {

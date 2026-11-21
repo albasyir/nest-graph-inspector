@@ -9,32 +9,29 @@ import { displayPath, isDirectory, isFile } from "./files";
 import {
   DEFAULT_SOURCE_ROOT,
   applicationSelectionError,
-  everyApplication,
   outDirOf,
-  parseNestCliConfig,
-  readApplicationTsConfig,
-  readBuildTsConfig,
+  readApplicationLayout,
+  readConventionTsConfig,
   readNestCliConfig,
+  readNestCliConfigOrDefaults,
   selectApplication,
+  type ApplicationLayout,
   type NestCliConfig,
 } from "./nest-cli-config";
 import {
   analyseMainFile,
-  applicationEntryFiles,
   assertLoadableEntry,
   bundledMessage,
   chooseRootModule,
   conventionCheck,
+  conventionWarnings,
   declaresRootMessage,
   forRootWarning,
   loaderCommand,
   locateRootModule,
   notBuiltMessage,
-  type ApplicationLayout,
   type ConventionCheck,
 } from "./root-module-detection";
-
-export { displayPath, isDirectory, isFile } from "./files";
 
 export const PACKAGE_NAME = "nest-graph-inspector";
 
@@ -210,7 +207,11 @@ function resolveGivenEntry(request: EntryRequest, entry: string): ResolvedEntry 
     );
   }
 
-  assertLoadableEntry(path, entryFilesOfEveryApplication(projectDir, cwd), cwd);
+  assertLoadableEntry(path, {
+    projectDir,
+    cwd,
+    config: readNestCliConfigOrDefaults(projectDir),
+  });
 
   if (isTypeScriptFile(path) && !request.hasLoader) {
     throw new CliError(
@@ -237,11 +238,7 @@ function resolveDefaultEntry(
     detectConventionalEntry(projectDir, config, cwd),
   );
   if (convention.kind === "found") {
-    assertLoadableEntry(
-      convention.path,
-      entryFilesOfEveryApplication(projectDir, cwd, config),
-      cwd,
-    );
+    assertLoadableEntry(convention.path, { projectDir, cwd, config });
     return {
       origin: "convention",
       path: convention.path,
@@ -255,19 +252,13 @@ function resolveDefaultEntry(
     throw applicationSelectionError(selection, config);
   }
 
-  let layout: ApplicationLayout;
-  try {
-    layout = {
-      projectDir,
-      application: selection.application,
-      tsconfig: readApplicationTsConfig(projectDir, selection.application, cwd),
-    };
-  } catch (error) {
-    // The convention reads a tsconfig as well, and has said what it could not.
-    throw error instanceof CliError ? convention.error : error;
-  }
-
-  return resolveFromMainFile(request, layout, selection.note, convention.error);
+  return resolveFromMainFile({
+    request,
+    config,
+    layout: readApplicationLayout(projectDir, selection.application, cwd),
+    selectionNote: selection.note,
+    conventionError: convention.error,
+  });
 }
 
 /** `--app <name>`: the convention within that application's outDir, then its main.ts. */
@@ -282,21 +273,16 @@ function resolveApplicationEntry(
     throw applicationSelectionError(selection, config);
   }
 
-  const { application } = selection;
-  const layout: ApplicationLayout = {
-    projectDir,
-    application,
-    tsconfig: readApplicationTsConfig(projectDir, application, cwd),
-  };
+  const layout = readApplicationLayout(projectDir, selection.application, cwd);
   const convention = detect(() =>
-    detectEntryUnder(outDirOf(projectDir, layout.tsconfig), application.sourceRoot, cwd),
+    detectEntryUnder(
+      outDirOf(projectDir, layout.tsconfig),
+      layout.application.sourceRoot,
+      cwd,
+    ),
   );
   if (convention.kind === "found") {
-    assertLoadableEntry(
-      convention.path,
-      entryFilesOfEveryApplication(projectDir, cwd, config),
-      cwd,
-    );
+    assertLoadableEntry(convention.path, { projectDir, cwd, config });
     return {
       origin: "convention",
       path: convention.path,
@@ -305,7 +291,13 @@ function resolveApplicationEntry(
     };
   }
 
-  return resolveFromMainFile(request, layout, selection.note, convention.error);
+  return resolveFromMainFile({
+    request,
+    config,
+    layout,
+    selectionNote: selection.note,
+    conventionError: convention.error,
+  });
 }
 
 /**
@@ -313,12 +305,19 @@ function resolveApplicationEntry(
  * names no root module the export can follow, the convention's own error
  * stands, as it did before main.ts was read.
  */
-function resolveFromMainFile(
-  request: EntryRequest,
-  layout: ApplicationLayout,
-  selectionNote: string | undefined,
-  conventionError: CliError,
-): ResolvedEntry {
+function resolveFromMainFile({
+  request,
+  config,
+  layout,
+  selectionNote,
+  conventionError,
+}: {
+  request: EntryRequest;
+  config: NestCliConfig;
+  layout: ApplicationLayout;
+  selectionNote: string | undefined;
+  conventionError: CliError;
+}): ResolvedEntry {
   const { cwd } = request;
   const analysis = analyseMainFile(layout);
   if (analysis.kind === "unknown") {
@@ -360,11 +359,7 @@ function resolveFromMainFile(
     );
   }
 
-  assertLoadableEntry(
-    located.path,
-    entryFilesOfEveryApplication(layout.projectDir, cwd),
-    cwd,
-  );
+  assertLoadableEntry(located.path, { projectDir: layout.projectDir, cwd, config });
   const forRoot =
     moduleName === root.exportName
       ? forRootWarning(analysis.mainFile, root, cwd)
@@ -408,47 +403,10 @@ function defaultConventionCheck(
   try {
     const selection = selectApplication(config, undefined);
     return selection.kind === "selected"
-      ? conventionCheck({
-          projectDir,
-          application: selection.application,
-          tsconfig: readApplicationTsConfig(projectDir, selection.application, cwd),
-        })
+      ? conventionCheck(readApplicationLayout(projectDir, selection.application, cwd))
       : undefined;
   } catch {
     return undefined;
-  }
-}
-
-/**
- * The entry files of the default project and of every named application, as
- * far as they can be worked out. A configuration that cannot be read costs
- * this list its paths, never the export: the check for `NestFactory` calls
- * runs on the file regardless.
- */
-function entryFilesOfEveryApplication(
-  projectDir: string,
-  cwd: string,
-  known?: NestCliConfig,
-): string[] {
-  const config = known ?? readNestCliConfigOrDefaults(projectDir);
-
-  return everyApplication(config).flatMap((application) => {
-    let tsconfig: ApplicationLayout["tsconfig"];
-    try {
-      tsconfig = readApplicationTsConfig(projectDir, application, cwd);
-    } catch {
-      tsconfig = undefined;
-    }
-
-    return applicationEntryFiles({ projectDir, application, tsconfig });
-  });
-}
-
-function readNestCliConfigOrDefaults(projectDir: string): NestCliConfig {
-  try {
-    return readNestCliConfig(projectDir);
-  } catch {
-    return parseNestCliConfig(undefined, undefined);
   }
 }
 
@@ -468,16 +426,8 @@ function detectConventionalEntry(
   config: NestCliConfig,
   cwd: string,
 ): string {
-  // The convention reads a tsc builder's configPath ahead of tsConfigPath.
-  const tsconfig = readBuildTsConfig(
-    projectDir,
-    config.compilerOptions.builder?.configPath ??
-      config.compilerOptions.tsConfigPath,
-    cwd,
-  );
-
   return detectEntryUnder(
-    outDirOf(projectDir, tsconfig),
+    outDirOf(projectDir, readConventionTsConfig(projectDir, config, cwd)),
     config.sourceRoot ?? DEFAULT_SOURCE_ROOT,
     cwd,
   );
@@ -548,7 +498,7 @@ function findFiles(dir: string, fileName: string, depth: number): string[] {
     });
 }
 
-export function isTypeScriptFile(path: string): boolean {
+function isTypeScriptFile(path: string): boolean {
   return TYPESCRIPT_EXTENSIONS.has(extname(path));
 }
 
@@ -663,6 +613,34 @@ export function selectEntryModule(
   throw new CliError(
     `${file} has no export named ${name}. ${exportedModules} Pass --entry <file> and --module <name> for the file and export of your root module.`,
   );
+}
+
+/**
+ * The root module export to boot from the loaded entry — the one its module
+ * name names, as `selectEntryModule` picks it — and what the export warns of
+ * once it is known: for an entry found by convention, that main.ts boots a
+ * different module, or boots this one through `forRoot()`.
+ */
+export function selectRootModule(
+  entry: ResolvedEntry,
+  moduleExports: unknown,
+  cwd: string,
+): { name: string; module: Type<unknown>; warnings: string[] } {
+  const selected = selectEntryModule(moduleExports, entry.moduleName, entry.path, cwd);
+  const warnings =
+    entry.origin === "convention" && entry.check
+      ? conventionWarnings(
+          entry.check,
+          {
+            path: entry.path,
+            moduleName: selected.name,
+            requestedModule: entry.moduleName,
+          },
+          cwd,
+        )
+      : [];
+
+  return { ...selected, warnings };
 }
 
 function isNestModuleClass(value: unknown): value is Type<unknown> {

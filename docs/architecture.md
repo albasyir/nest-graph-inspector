@@ -634,6 +634,10 @@ Why each step is the way it is:
   worked changes; main.ts is consulted for that project only to warn, after
   the root module export is chosen, when it boots a different module. Only
   where the convention finds nothing, or several files, does main.ts decide.
+  The convention reads the tsconfig the top level of nest-cli.json names, by
+  the same rule as an application's, but without an application's fallback
+  on a matching project's settings; a webpack or rspack builder's
+  `configPath` is that bundler's own config, never read as a tsconfig.
 - **main.ts is parsed, never run.** The root module is whatever main.ts
   passes to `NestFactory`, and loading main.ts is exactly what starts the
   application. `cli/root-module-detection.ts` parses it with the TypeScript
@@ -1619,10 +1623,14 @@ Facts a code change can invalidate, and the file to check:
   `nest-cli-config.ts` (`CliUsageError`, exit code 2, in `cli-error.ts`)
 - How main.ts is found and read: the extensions it is looked for with
   (`ENTRY_FILE_EXTENSIONS`), the `NestFactory` methods that count as booting a
-  root module (`BOOT_METHODS`), and the directories compiled output is probed
-  under, in order (`compiledCandidates`) — `lib/src/cli/root-module-detection.ts`;
-  what nest-cli.json settings make a build a bundle, and which project is the
-  default — `buildOf` and `selectApplication` in `lib/src/cli/nest-cli-config.ts`
+  root module (`BOOT_METHODS`), how many `const` declarations a root module
+  argument is followed through (`MAX_CONSTANT_DEPTH`), and the directories
+  compiled output is probed under, in order (`compiledCandidates`) —
+  `lib/src/cli/root-module-detection.ts`;
+  what nest-cli.json settings make a build a bundle, which project is the
+  default, and which tsconfig an application and the convention read —
+  `buildOf`, `selectApplication`, `configuredTsConfigPath` and
+  `readConventionTsConfig` in `lib/src/cli/nest-cli-config.ts`
 - Which files the export refuses to load — `assertLoadableEntry` and
   `applicationEntryFiles` in `lib/src/cli/root-module-detection.ts`
 - The Nest CLI's own defaults the export mirrors (`sourceRoot` `src`,
