@@ -9,21 +9,30 @@ import {
   useVueFlow
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { useDebounceFn, useResizeObserver } from '@vueuse/core'
+import { ControlButton, Controls } from '@vue-flow/controls'
+import { useDebounceFn, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import type { Edge, Node } from '@vue-flow/core'
 import type { CSSProperties } from 'vue'
 import type { GraphOutput } from 'nest-graph-inspector'
 import {
   formatCircularEdgeLabel,
-  getCircularLabelPlacement,
-  unionRects,
-  type CircularEdgeRect
+  getCircularLabelPlacement
 } from '~/utils/circular-dependency-edge'
 import {
   CIRCULAR_DEPENDENCY_EDGE_COLOR,
   MODULE_EDGE_COLOR
 } from '~/utils/graph-viewer-edges'
+import {
+  formatLevelRange,
+  getBracketFrame,
+  getBracketLevelHeaders,
+  getBracketOffscreen,
+  getCutCardIds,
+  getLevelRevealViewport,
+  getVerticalRevealViewport,
+  type BracketCanvas,
+  type BracketViewport
+} from '~/utils/module-bracket-viewport'
 import { createDeepDiveFitTracker } from '~/utils/module-deep-dive'
 import {
   BRACKET_SIDES,
@@ -41,7 +50,13 @@ import { buildModulePageLocation } from '~/utils/module-page-route'
  * A module among the others, as a tournament bracket opening both ways: what
  * it needs to its left, level by level, and what needs it to its right — the
  * dependencies view of a module's page. The layout, the routes and every fact
- * on the cards come from `utils/module-dependency-bracket.ts`; this draws them.
+ * on the cards come from `utils/module-dependency-bracket.ts`; where the
+ * canvas looks, from `utils/module-bracket-viewport.ts`; this draws them.
+ *
+ * The bracket reads first: each module joined to the one the walk came from.
+ * Every other import between modules drawn is there on demand — for the
+ * module under the pointer or the keyboard, for a cycle whose label is
+ * pointed at or pressed, or for all of them at once from the legend.
  *
  * Every other module on the canvas is a link to its own page, keeping the
  * depths asked for; a stub where a branch goes on asks for one more level on
@@ -68,40 +83,124 @@ const bracket = computed(() => buildModuleDependencyBracket({
   depth: props.depth
 }))
 
+const nodeById = computed(() =>
+  new Map<string, BracketNode>((bracket.value?.nodes ?? []).map(node => [node.id, node]))
+)
+
 /** What each side of the toolbar says, and whether its steppers can step. */
-const sides = computed(() => {
-  const summaries = bracket.value?.sides
-  return BRACKET_SIDES.map((side) => {
-    const summary = summaries?.[side]
-    return {
-      side,
-      label: side === 'left' ? 'Needs' : 'Needed by',
-      icon: side === 'left' ? 'i-lucide-arrow-left' : 'i-lucide-arrow-right',
-      depth: summary?.depth ?? 0,
-      available: summary?.available ?? 0,
-      shown: summary?.shown ?? 0,
-      canDeepen: Boolean(summary?.hasMore),
-      canShallow: (summary?.depth ?? 0) > 1
+const sides = computed(() => BRACKET_SIDES.map((side) => {
+  const summary = bracket.value?.sides[side]
+  const depth = summary?.depth ?? 0
+
+  return {
+    side,
+    label: side === 'left' ? 'Needs' : 'Needed by',
+    depth,
+    available: summary?.available ?? 0,
+    shown: summary?.shown ?? 0,
+    canDeepen: Boolean(summary?.hasMore),
+    canShallow: depth > 1
+  }
+}))
+
+// What the reader is pointing at. The bracket draws its own connectors
+// always; the rest follows the reader.
+
+/** The card under the pointer, and the one the keyboard is on. */
+const pointedNodeId = ref<string | null>(null)
+const focusedNodeId = ref<string | null>(null)
+/** The cycles a label under the pointer, or with focus, names. */
+const pointedCycleIds = ref<readonly number[]>([])
+/** The cycles a pressed label names: they stay lit until it is pressed again. */
+const pinnedCycleIds = ref<readonly number[]>([])
+const showAllImports = ref(false)
+
+const activeNodeIds = computed(() => new Set(
+  [pointedNodeId.value, focusedNodeId.value].filter((id): id is string => id !== null)
+))
+const activeCycleIds = computed(() => new Set(
+  pointedCycleIds.value.length > 0 ? pointedCycleIds.value : pinnedCycleIds.value
+))
+/** The module on both sides the reader is on, whose other card lights up with it. */
+const activeTwinName = computed(() => {
+  for (const id of activeNodeIds.value) {
+    const node = nodeById.value.get(id)
+    if (node?.kind === 'module' && node.isOnCycleWithCenter) {
+      return node.moduleName
     }
-  })
+  }
+  return null
 })
+
+function isEdgeLit(edge: BracketEdge): boolean {
+  return edge.cycleIds.some(id => activeCycleIds.value.has(id))
+}
+
+function isEdgeDimmed(edge: BracketEdge): boolean {
+  return activeCycleIds.value.size > 0 && !isEdgeLit(edge)
+}
+
+function isLinkShown(edge: BracketEdge): boolean {
+  return showAllImports.value
+    || isEdgeLit(edge)
+    || activeNodeIds.value.has(edge.source)
+    || activeNodeIds.value.has(edge.target)
+}
+
+function isTwinLit(node: BracketModuleNode): boolean {
+  return node.isOnCycleWithCenter && activeTwinName.value === node.moduleName
+}
+
+function isCyclePinned(edge: BracketEdge): boolean {
+  return edge.cycleIds.length > 0
+    && edge.cycleIds.length === pinnedCycleIds.value.length
+    && edge.cycleIds.every(id => pinnedCycleIds.value.includes(id))
+}
+
+function togglePinnedCycle(edge: BracketEdge): void {
+  pinnedCycleIds.value = isCyclePinned(edge) ? [] : [...edge.cycleIds]
+}
+
+function pointAt(node: BracketNode): void {
+  pointedNodeId.value = node.id
+}
+
+function leave(node: BracketNode): void {
+  if (pointedNodeId.value === node.id) {
+    pointedNodeId.value = null
+  }
+}
+
+function focusOn(node: BracketNode): void {
+  focusedNodeId.value = node.id
+}
+
+function blurFrom(node: BracketNode): void {
+  if (focusedNodeId.value === node.id) {
+    focusedNodeId.value = null
+  }
+}
 
 type FlowNode = Node<BracketNode, Record<string, never>, BracketNode['kind']>
 type FlowEdge = Edge<BracketEdge, Record<string, never>, 'bracket'>
 
+// The column headings are drawn across the top of the canvas instead, at a
+// size of their own, wherever the canvas is zoomed.
 const flowNodes = computed<FlowNode[]>(() =>
-  (bracket.value?.nodes ?? []).map(node => ({
-    id: node.id,
-    type: node.kind,
-    position: node.position,
-    data: node,
-    style: { width: `${node.width}px`, height: `${node.height}px` },
-    draggable: false,
-    selectable: false,
-    connectable: false,
-    focusable: false,
-    domAttributes: getNodeAttributes(node)
-  }))
+  (bracket.value?.nodes ?? [])
+    .filter(node => node.kind !== 'level')
+    .map(node => ({
+      id: node.id,
+      type: node.kind,
+      position: node.position,
+      data: node,
+      style: { width: `${node.width}px`, height: `${node.height}px` },
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      focusable: false,
+      domAttributes: getNodeAttributes(node)
+    }))
 )
 
 /** What a test, or a stylesheet, can tell a node by. */
@@ -125,9 +224,17 @@ function getNodeAttributes(node: BracketNode): Record<string, string> {
 const flowEdges = computed<FlowEdge[]>(() =>
   (bracket.value?.edges ?? []).map((edge) => {
     const isCircular = edge.cycleIds.length > 0
+    const isLit = isEdgeLit(edge)
     const color = edge.kind === 'stub'
       ? 'var(--ui-border-accented)'
       : isCircular ? CIRCULAR_DEPENDENCY_EDGE_COLOR : MODULE_EDGE_COLOR
+    const classes = [
+      'bracket-edge',
+      `bracket-edge--${edge.kind}`,
+      isCircular ? 'bracket-edge--circular' : '',
+      isLit ? 'bracket-edge--lit' : '',
+      isEdgeDimmed(edge) ? 'bracket-edge--dimmed' : ''
+    ]
 
     return {
       id: edge.id,
@@ -137,8 +244,11 @@ const flowEdges = computed<FlowEdge[]>(() =>
       targetHandle: edge.targetHandle,
       type: 'bracket',
       data: edge,
-      class: `bracket-edge bracket-edge--${edge.kind}${isCircular ? ' bracket-edge--circular' : ''}`,
-      style: getEdgeStyle(edge, color),
+      hidden: edge.kind === 'link' && !isLinkShown(edge),
+      // A cycle's own line is drawn over the bracket's where they cross.
+      zIndex: isLit ? 2 : isCircular ? 1 : 0,
+      class: classes.filter(Boolean).join(' '),
+      style: getEdgeStyle(edge, color, isLit),
       ...(edge.kind === 'stub' ? {} : { markerEnd: { type: MarkerType.ArrowClosed, color } })
     }
   })
@@ -146,13 +256,13 @@ const flowEdges = computed<FlowEdge[]>(() =>
 
 type EdgeStroke = { stroke: string, strokeWidth: number, strokeDasharray?: string }
 
-function getEdgeStyle(edge: BracketEdge, color: string): EdgeStroke {
+function getEdgeStyle(edge: BracketEdge, color: string, isLit: boolean): EdgeStroke {
   switch (edge.kind) {
     case 'tree':
     case 'self':
-      return { stroke: color, strokeWidth: edge.cycleIds.length > 0 ? 2.2 : 1.75 }
+      return { stroke: color, strokeWidth: isLit ? 3 : edge.cycleIds.length > 0 ? 2.25 : 1.75 }
     case 'link':
-      return { stroke: color, strokeWidth: 1.25, strokeDasharray: '6 5' }
+      return { stroke: color, strokeWidth: isLit ? 2.25 : 1.5, strokeDasharray: '6 5' }
     case 'stub':
       return { stroke: color, strokeWidth: 1.5, strokeDasharray: '2 4' }
     default: {
@@ -171,7 +281,7 @@ const hasLinks = computed(() =>
 const hasStubs = computed(() =>
   Boolean(bracket.value?.nodes.some(node => node.kind === 'stub'))
 )
-const hasCycleBadges = computed(() =>
+const hasTwins = computed(() =>
   Boolean(bracket.value?.nodes.some(node => node.kind === 'module' && node.isOnCycleWithCenter))
 )
 
@@ -188,7 +298,11 @@ function directRunLocation(node: BracketCenterNode) {
   })
 }
 
-function stepDepth(side: BracketSide, by: number): void {
+function stepDepth(side: BracketSide, by: number, isAllowed: boolean): void {
+  if (!isAllowed) {
+    return
+  }
+
   const current = sides.value.find(entry => entry.side === side)?.depth ?? 0
   emit('depthChange', side, Math.max(1, current + by))
 }
@@ -199,6 +313,13 @@ function describeStub(stub: BracketStubNode): string {
   return stub.side === 'left'
     ? `${shown}: show one more level of what ${props.moduleName} needs`
     : `${shown}: show one more level of what needs ${props.moduleName}`
+}
+
+/** What being on both sides means, for a module on one of them. */
+function describeTwin(node: BracketModuleNode): string {
+  return node.side === 'left'
+    ? `It also needs ${props.moduleName}: the two are on a cycle`
+    : `${props.moduleName} also needs it: the two are on a cycle`
 }
 
 function pluralize(count: number, noun: string): string {
@@ -212,68 +333,87 @@ function getCycleLabelStyle(edge: BracketEdge): CSSProperties {
     : { display: 'none' }
 }
 
-// Framing. The whole bracket on a canvas wide enough to read it; on a narrow
-// one, the module and the first level each side — the rest a pan away.
+// Framing. A bracket opens on its module at a zoom its names read at — all
+// of it when that fits — and what the canvas cuts off is a chip away.
 
-const { fitBounds, viewportHelper } = useVueFlow(flowId)
+const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
 const fitTracker = createDeepDiveFitTracker()
-/** Room left around the bracket, as Vue Flow reads a fit padding. */
-const FIT_PADDING = 0.08
-/** Narrower than this, the canvas frames the first level only. */
-const NARROW_CANVAS_PX = 640
-let isFitPending = true
+const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+const isPhone = useMediaQuery('(max-width: 639.98px)')
+/** The strip of column headings pinned across the top of the canvas. */
+const HEADINGS_HEIGHT = 32
+const REVEAL_DURATION_MS = 280
+let isFramePending = true
 
-function getFitBounds(): CircularEdgeRect | null {
-  const current = bracket.value
-  if (!current) {
-    return null
-  }
-
-  const width = containerRef.value?.clientWidth ?? Number.POSITIVE_INFINITY
-  if (width >= NARROW_CANVAS_PX) {
-    return current.bounds
-  }
-
-  return unionRects(current.nodes
-    .filter(node => node.kind === 'center'
-      || node.kind === 'empty'
-      || (node.kind === 'module' && node.level === 1))
-    .map(node => ({ x: node.position.x, y: node.position.y, width: node.width, height: node.height })))
-}
+const canvas = computed<BracketCanvas>(() => ({
+  width: dimensions.value.width,
+  height: dimensions.value.height,
+  top: HEADINGS_HEIGHT
+}))
+const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
 
 /**
- * Frames the bracket. Until Vue Flow's viewport exists a fit does nothing, so
- * it stays owed and is made the moment the viewport is ready; a newer fit
- * supersedes one still running.
+ * Frames the bracket. Until Vue Flow's viewport exists a frame does nothing,
+ * so it stays owed and is made the moment the viewport is ready; a newer
+ * frame supersedes one still running.
  */
-async function fitBracket(): Promise<void> {
+async function frameBracket(): Promise<void> {
   const isCurrent = fitTracker.begin()
-  isFitPending = true
-  const bounds = getFitBounds()
-  if (!bounds || !viewportHelper.value.viewportInitialized) {
+  isFramePending = true
+  const current = bracket.value
+  if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value) {
     return
   }
 
-  const isFitted = await fitBounds(bounds, { padding: FIT_PADDING })
+  const isFramed = await setViewport(getBracketFrame(current, canvas.value))
   if (isCurrent()) {
-    isFitPending = !isFitted
+    isFramePending = !isFramed
   }
 }
 
-function refitBracket(): void {
+/** Back to the frame the bracket opened at, as if it had just opened. */
+function recentre(): void {
   fitTracker.reset()
-  void fitBracket()
+  void frameBracket()
 }
 
 function noteReaderMove(): void {
   fitTracker.noteReaderMove()
 }
 
+function zoomCanvas(direction: 'in' | 'out'): void {
+  noteReaderMove()
+  void (direction === 'in' ? zoomIn() : zoomOut())
+}
+
+/** All of the bracket at once, however small that draws it: an overview to zoom into. */
+function showWholeBracket(): void {
+  noteReaderMove()
+  void fitView({ padding: 0.08 })
+}
+
+/**
+ * A pan of the canvas, at the same zoom throughout: a smooth zoom would fly
+ * out and back in on the way, and names would pass through a size too small
+ * to read.
+ */
+function panOptions() {
+  return {
+    duration: prefersReducedMotion.value ? 0 : REVEAL_DURATION_MS,
+    interpolate: 'linear' as const
+  }
+}
+
+async function moveTo(target: BracketViewport): Promise<void> {
+  noteReaderMove()
+  await setViewport(target, panOptions())
+}
+
 watch(
   () => viewportHelper.value.viewportInitialized,
   (isInitialized) => {
-    if (isInitialized && isFitPending) {
-      void fitBracket()
+    if (isInitialized && isFramePending) {
+      void frameBracket()
     }
   },
   { immediate: true }
@@ -283,22 +423,112 @@ watch(
 // the reader did to the last one.
 watch(
   [() => props.moduleName, () => props.depth.left, () => props.depth.right],
-  async () => {
+  async ([moduleName], [previousModuleName]) => {
+    if (moduleName !== previousModuleName) {
+      pointedNodeId.value = null
+      focusedNodeId.value = null
+      pointedCycleIds.value = []
+      pinnedCycleIds.value = []
+    }
     fitTracker.reset()
     await nextTick()
-    void fitBracket()
+    void frameBracket()
   }
 )
 
-// A resize reframes a fit still owed, or one the reader has not moved away
+// A resize reframes a frame still owed, or one the reader has not moved away
 // from — never a view they panned or zoomed themselves.
-const debouncedFit = useDebounceFn(() => {
-  if (isFitPending || fitTracker.shouldFitOnResize()) {
-    void fitBracket()
+const debouncedFrame = useDebounceFn(() => {
+  if (isFramePending || fitTracker.shouldFitOnResize()) {
+    void frameBracket()
   }
 }, 200)
 
-useResizeObserver(containerRef, debouncedFit)
+useResizeObserver(containerRef, debouncedFrame)
+
+/** What the view leaves out, as chips at the canvas edges that go there. */
+const offscreen = computed(() =>
+  bracket.value && hasCanvas.value
+    ? getBracketOffscreen(bracket.value, viewport.value, canvas.value)
+    : null
+)
+
+type EdgeChip = { edge: BracketSide, kind: 'levels' | 'middle', text: string, label: string }
+
+const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeChip[] => {
+  const current = offscreen.value
+  if (!current) {
+    return []
+  }
+
+  if (current.middle === edge) {
+    return [{ edge, kind: 'middle', text: props.moduleName, label: `Back to ${props.moduleName}` }]
+  }
+
+  const levels = current.levels[edge]
+  if (levels.length === 0) {
+    return []
+  }
+
+  const range = formatLevelRange(levels)
+  return [{
+    edge,
+    kind: 'levels',
+    text: range,
+    label: edge === 'left'
+      ? `Show ${range.toLowerCase()} of what ${props.moduleName} needs`
+      : `Show ${range.toLowerCase()} of what needs ${props.moduleName}`
+  }]
+}))
+
+const verticalChips = computed(() => {
+  const current = offscreen.value
+  if (!current) {
+    return []
+  }
+
+  return [
+    { direction: 'up' as const, count: current.above },
+    { direction: 'down' as const, count: current.below }
+  ].filter(chip => chip.count > 0)
+})
+
+function followEdgeChip(chip: EdgeChip): void {
+  const current = bracket.value
+  if (!current) {
+    return
+  }
+
+  if (chip.kind === 'middle') {
+    fitTracker.reset()
+    void setViewport(getBracketFrame(current, canvas.value), panOptions())
+    return
+  }
+
+  void moveTo(getLevelRevealViewport(current, viewport.value, canvas.value, chip.edge))
+}
+
+function followVerticalChip(direction: 'up' | 'down'): void {
+  const current = bracket.value
+  if (current) {
+    void moveTo(getVerticalRevealViewport(current, viewport.value, canvas.value, direction))
+  }
+}
+
+/** Cards an edge of the canvas cuts through: drawn back, as what a chip there leads to. */
+const cutCardIds = computed(() =>
+  bracket.value && hasCanvas.value
+    ? getCutCardIds(bracket.value, viewport.value, canvas.value)
+    : new Set<string>()
+)
+
+const levelHeaders = computed(() =>
+  bracket.value && hasCanvas.value
+    ? getBracketLevelHeaders(bracket.value, viewport.value, canvas.value)
+    : []
+)
+
+const isLegendOpen = ref(false)
 </script>
 
 <template>
@@ -309,7 +539,6 @@ useResizeObserver(containerRef, debouncedFit)
         :key="entry.side"
         role="group"
         class="module-bracket__depth"
-        :class="`module-bracket__depth--${entry.side}`"
         :aria-labelledby="`${flowId}-${entry.side}-label`"
       >
         <span
@@ -318,18 +547,22 @@ useResizeObserver(containerRef, debouncedFit)
         >
           <UIcon
             v-if="entry.side === 'left'"
-            :name="entry.icon"
+            name="i-lucide-arrow-left"
             class="size-4 shrink-0"
             aria-hidden="true"
           />
           {{ entry.label }}
           <UIcon
             v-if="entry.side === 'right'"
-            :name="entry.icon"
+            name="i-lucide-arrow-right"
             class="size-4 shrink-0"
             aria-hidden="true"
           />
         </span>
+        <span
+          class="module-bracket__depth-word"
+          aria-hidden="true"
+        >Depth</span>
         <div class="module-bracket__stepper">
           <UButton
             icon="i-lucide-minus"
@@ -337,10 +570,11 @@ useResizeObserver(containerRef, debouncedFit)
             variant="outline"
             size="sm"
             square
-            aria-label="Show one level fewer"
             class="module-bracket__step"
-            :disabled="!entry.canShallow"
-            @click="stepDepth(entry.side, -1)"
+            :aria-disabled="entry.canShallow ? undefined : 'true'"
+            :aria-label="entry.canShallow ? 'Show one level fewer' : 'Show one level fewer (one level is the fewest)'"
+            :title="entry.canShallow ? 'Show one level fewer' : 'One level is the fewest'"
+            @click="stepDepth(entry.side, -1, entry.canShallow)"
           />
           <output
             class="module-bracket__depth-value"
@@ -356,10 +590,11 @@ useResizeObserver(containerRef, debouncedFit)
             variant="outline"
             size="sm"
             square
-            aria-label="Show one more level"
             class="module-bracket__step"
-            :disabled="!entry.canDeepen"
-            @click="stepDepth(entry.side, 1)"
+            :aria-disabled="entry.canDeepen ? undefined : 'true'"
+            :aria-label="entry.canDeepen ? 'Show one more level' : 'Show one more level (all levels shown)'"
+            :title="entry.canDeepen ? 'Show one more level' : 'All levels shown'"
+            @click="stepDepth(entry.side, 1, entry.canDeepen)"
           />
         </div>
         <span class="module-bracket__depth-meta">
@@ -367,7 +602,7 @@ useResizeObserver(containerRef, debouncedFit)
             None
           </template>
           <template v-else>
-            of {{ entry.available }} · {{ pluralize(entry.shown, 'module') }}
+            max {{ entry.available }} · {{ pluralize(entry.shown, 'module') }}
           </template>
         </span>
       </div>
@@ -375,7 +610,7 @@ useResizeObserver(containerRef, debouncedFit)
 
     <div
       ref="containerRef"
-      class="relative min-h-0 flex-1 overflow-hidden"
+      class="module-bracket__canvas"
     >
       <VueFlow
         :id="flowId"
@@ -403,18 +638,24 @@ useResizeObserver(containerRef, debouncedFit)
           />
 
           <EdgeLabelRenderer v-if="edgeProps.data.label">
-            <span
-              class="module-bracket__cycle"
+            <button
+              type="button"
+              class="module-bracket__cycle nodrag nopan"
+              :class="{
+                'module-bracket__cycle--lit': isEdgeLit(edgeProps.data),
+                'module-bracket__cycle--dimmed': isEdgeDimmed(edgeProps.data)
+              }"
               :style="getCycleLabelStyle(edgeProps.data)"
+              :aria-pressed="isCyclePinned(edgeProps.data)"
+              :aria-label="`Trace cycle ${formatCircularEdgeLabel(edgeProps.data.cycleIds)}`"
+              @mouseenter="pointedCycleIds = edgeProps.data.cycleIds"
+              @mouseleave="pointedCycleIds = []"
+              @focus="pointedCycleIds = edgeProps.data.cycleIds"
+              @blur="pointedCycleIds = []"
+              @click="togglePinnedCycle(edgeProps.data)"
             >
-              <UIcon
-                name="i-lucide-triangle-alert"
-                class="module-bracket__cycle-icon"
-                aria-hidden="true"
-              />
-              <span aria-hidden="true">{{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}</span>
-              <span class="sr-only">Circular dependency {{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}</span>
-            </span>
+              {{ formatCircularEdgeLabel(edgeProps.data.cycleIds) }}
+            </button>
           </EdgeLabelRenderer>
         </template>
 
@@ -429,34 +670,32 @@ useResizeObserver(containerRef, debouncedFit)
             type="source"
             :position="Position.Left"
           />
-          <div
-            class="module-bracket-center"
-            :class="{ 'module-bracket-center--root': data.isRoot }"
-          >
+          <div class="module-bracket-center">
             <div class="module-bracket-center__title">
               <UIcon
                 name="i-lucide-package"
-                class="size-4 shrink-0 text-muted"
+                class="module-bracket-center__icon"
                 aria-hidden="true"
               />
               <span
                 class="module-bracket-center__name"
                 translate="no"
+                :title="data.moduleName"
               >{{ data.moduleName }}</span>
               <span
                 v-if="data.isRoot"
-                class="module-bracket-badge module-bracket-badge--root"
+                class="module-bracket-tag"
               >Root</span>
               <span
                 v-if="data.isOnCycle"
-                class="module-bracket-badge module-bracket-badge--cycle"
+                class="module-bracket-cycle-mark"
               >
                 <UIcon
                   name="i-lucide-repeat-2"
-                  class="size-3 shrink-0"
+                  class="size-4 shrink-0"
                   aria-hidden="true"
                 />
-                Cycle
+                On a cycle
               </span>
             </div>
             <dl class="module-bracket-center__stats">
@@ -477,36 +716,29 @@ useResizeObserver(containerRef, debouncedFit)
                 <dd>{{ data.stats.exports }}</dd>
               </div>
             </dl>
-            <NuxtLink
+            <UButton
               v-if="data.stats.runnableNodeIds.length"
               :to="directRunLocation(data)"
+              color="neutral"
+              variant="solid"
+              block
+              icon="i-lucide-play"
+              trailing-icon="i-lucide-arrow-right"
               class="module-bracket-center__run"
             >
-              <UIcon
-                name="i-lucide-play"
-                class="size-4 shrink-0"
-                aria-hidden="true"
-              />
-              <span>Direct Run</span>
-              <span class="module-bracket-center__run-count">
-                {{ data.stats.runnableNodeIds.length }} runnable
-              </span>
-              <UIcon
-                name="i-lucide-arrow-right"
-                class="ms-auto size-4 shrink-0"
-                aria-hidden="true"
-              />
-            </NuxtLink>
+              Direct Run
+              <span class="module-bracket-center__run-count">· {{ data.stats.runnableNodeIds.length }} runnable</span>
+            </UButton>
             <p
               v-else
-              class="module-bracket-center__run module-bracket-center__run--none"
+              class="module-bracket-center__run-none"
             >
               <UIcon
                 name="i-lucide-play"
                 class="size-4 shrink-0"
                 aria-hidden="true"
               />
-              Direct Run: nothing to call
+              Direct Run: nothing to call here
             </p>
           </div>
           <Handle
@@ -535,7 +767,15 @@ useResizeObserver(containerRef, debouncedFit)
           <NuxtLink
             :to="recenterOn(data)"
             class="module-bracket-module"
-            :class="{ 'module-bracket-module--root': data.isRoot }"
+            :class="[`module-bracket-module--${data.side}`, {
+              'module-bracket-module--active': activeNodeIds.has(data.id),
+              'module-bracket-module--twin-lit': isTwinLit(data),
+              'module-bracket-module--cut': cutCardIds.has(data.id)
+            }]"
+            @mouseenter="pointAt(data)"
+            @mouseleave="leave(data)"
+            @focus="focusOn(data)"
+            @blur="blurFrom(data)"
           >
             <span
               class="module-bracket-module__name"
@@ -544,22 +784,21 @@ useResizeObserver(containerRef, debouncedFit)
             >{{ data.moduleName }}</span>
             <span
               v-if="data.isRoot"
-              class="module-bracket-badge module-bracket-badge--root"
+              class="module-bracket-tag"
             >Root</span>
-            <!-- The icon alone, so a long name keeps its room; the words are
-                 there for a screen reader and on hover. -->
             <span
               v-if="data.isOnCycleWithCenter"
-              class="module-bracket-badge module-bracket-badge--cycle module-bracket-badge--icon"
+              class="module-bracket-twin"
               data-cycle-badge
-              :title="`On a cycle with ${props.moduleName}: each needs the other`"
+              :title="describeTwin(data)"
             >
               <UIcon
                 name="i-lucide-repeat-2"
-                class="size-3 shrink-0"
+                class="size-3.5 shrink-0"
                 aria-hidden="true"
               />
-              <span class="sr-only">On a cycle with {{ props.moduleName }}</span>
+              also {{ data.side === 'left' ? 'right' : 'left' }}
+              <span class="sr-only">— {{ describeTwin(data) }}</span>
             </span>
           </NuxtLink>
           <Handle
@@ -588,9 +827,9 @@ useResizeObserver(containerRef, debouncedFit)
           <button
             type="button"
             class="module-bracket-stub"
-            :class="`module-bracket-stub--${data.side}`"
+            :class="[`module-bracket-stub--${data.side}`, { 'module-bracket-stub--cut': cutCardIds.has(data.id) }]"
             :aria-label="describeStub(data)"
-            @click="stepDepth(data.side, 1)"
+            @click="stepDepth(data.side, 1, true)"
           >
             <UIcon
               :name="data.side === 'left' ? 'i-lucide-chevrons-left' : 'i-lucide-chevrons-right'"
@@ -617,66 +856,223 @@ useResizeObserver(containerRef, debouncedFit)
           </p>
         </template>
 
-        <template #node-level="{ data }">
-          <p class="module-bracket-level">
-            Level {{ data.level }}
-            <span class="module-bracket-level__count">· {{ pluralize(data.moduleCount, 'module') }}</span>
-          </p>
-        </template>
-
         <Background />
+        <!-- Vue Flow's own buttons are icons with no name; these say what they do. -->
         <Controls
           :show-interactive="false"
-          @zoom-in="noteReaderMove"
-          @zoom-out="noteReaderMove"
-          @fit-view="refitBracket"
-        />
+          class="module-bracket__controls"
+        >
+          <template #control-zoom-in>
+            <ControlButton
+              title="Zoom in"
+              aria-label="Zoom in"
+              @click="zoomCanvas('in')"
+            >
+              <UIcon
+                name="i-lucide-plus"
+                aria-hidden="true"
+              />
+            </ControlButton>
+          </template>
+          <template #control-zoom-out>
+            <ControlButton
+              title="Zoom out"
+              aria-label="Zoom out"
+              @click="zoomCanvas('out')"
+            >
+              <UIcon
+                name="i-lucide-minus"
+                aria-hidden="true"
+              />
+            </ControlButton>
+          </template>
+          <template #control-fit-view>
+            <ControlButton
+              title="Show the whole bracket"
+              aria-label="Show the whole bracket"
+              @click="showWholeBracket"
+            >
+              <UIcon
+                name="i-lucide-maximize"
+                aria-hidden="true"
+              />
+            </ControlButton>
+          </template>
+          <ControlButton
+            :title="`Back to ${props.moduleName}`"
+            :aria-label="`Back to ${props.moduleName}`"
+            @click="recentre"
+          >
+            <UIcon
+              name="i-lucide-locate-fixed"
+              aria-hidden="true"
+            />
+          </ControlButton>
+        </Controls>
       </VueFlow>
+
+      <!-- Each column's heading, pinned across the top: read at one size
+           whatever the zoom, and in view however far the canvas is panned. -->
+      <div
+        v-if="levelHeaders.length > 0"
+        class="module-bracket__headings"
+      >
+        <p
+          v-for="header in levelHeaders"
+          :key="header.id"
+          class="module-bracket__heading"
+          data-bracket-node="level"
+          :data-side="header.side"
+          :data-level="header.level"
+          :style="{ left: `${header.left}px`, width: `${header.width}px` }"
+        >
+          Level {{ header.level }}
+          <span class="module-bracket__heading-count">· {{ pluralize(header.moduleCount, 'module') }}</span>
+        </p>
+      </div>
+
+      <button
+        v-for="chip in edgeChips"
+        :key="`${chip.edge}-${chip.kind}`"
+        type="button"
+        class="module-bracket__chip"
+        :class="`module-bracket__chip--${chip.edge}`"
+        :aria-label="chip.label"
+        :data-chip="chip.kind"
+        :data-side="chip.edge"
+        @click="followEdgeChip(chip)"
+      >
+        <UIcon
+          v-if="chip.edge === 'left'"
+          name="i-lucide-arrow-left"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+        <span
+          class="module-bracket__chip-text"
+          :translate="chip.kind === 'middle' ? 'no' : undefined"
+        >{{ chip.text }}</span>
+        <UIcon
+          v-if="chip.edge === 'right'"
+          name="i-lucide-arrow-right"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+      </button>
+
+      <button
+        v-for="chip in verticalChips"
+        :key="chip.direction"
+        type="button"
+        class="module-bracket__chip"
+        :class="`module-bracket__chip--${chip.direction}`"
+        :data-chip="chip.direction"
+        @click="followVerticalChip(chip.direction)"
+      >
+        <UIcon
+          :name="chip.direction === 'up' ? 'i-lucide-arrow-up' : 'i-lucide-arrow-down'"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+        {{ chip.count }} more {{ chip.count === 1 ? 'module' : 'modules' }}
+      </button>
     </div>
 
     <footer
-      class="module-bracket__legend border-t border-default px-4 py-2 text-xs text-muted"
+      class="module-bracket__legend"
       aria-label="Legend"
     >
-      <span class="module-bracket__legend-item">
-        <span class="module-bracket__line" />
-        Import, pointing at the module importing
-      </span>
-      <span
-        v-if="hasLinks"
-        class="module-bracket__legend-item"
+      <button
+        v-if="isPhone"
+        type="button"
+        class="module-bracket__legend-toggle"
+        :aria-expanded="isLegendOpen"
+        :aria-controls="`${flowId}-legend`"
+        @click="isLegendOpen = !isLegendOpen"
       >
-        <span class="module-bracket__line module-bracket__line--link" />
-        Import between modules already drawn
-      </span>
-      <span
-        v-if="hasCircularEdges"
-        class="module-bracket__legend-item"
+        <UIcon
+          name="i-lucide-info"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+        Key
+        <UIcon
+          :name="isLegendOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+      </button>
+      <ul
+        v-show="!isPhone || isLegendOpen"
+        :id="`${flowId}-legend`"
+        class="module-bracket__legend-items"
       >
-        <span class="module-bracket__line module-bracket__line--circular" />
-        Circular dependency (#id)
-      </span>
-      <span
-        v-if="hasCycleBadges"
-        class="module-bracket__legend-item"
-      >
-        <span class="module-bracket-badge module-bracket-badge--cycle">
-          <UIcon
-            name="i-lucide-repeat-2"
-            class="size-3 shrink-0"
+        <li class="module-bracket__legend-item">
+          <span
+            class="module-bracket__line"
             aria-hidden="true"
           />
-          Cycle
-        </span>
-        Needs <span translate="no">{{ props.moduleName }}</span> and is needed by it
-      </span>
-      <span
-        v-if="hasStubs"
-        class="module-bracket__legend-item"
-      >
-        <span class="module-bracket__legend-stub">+N</span>
-        More one level further: select to show it
-      </span>
+          Import, pointing at the module importing
+        </li>
+        <li
+          v-if="hasCircularEdges"
+          class="module-bracket__legend-item"
+        >
+          <span
+            class="module-bracket__line module-bracket__line--circular"
+            aria-hidden="true"
+          />
+          Import on a cycle
+          <span
+            class="module-bracket__cycle module-bracket__cycle--sample"
+            aria-hidden="true"
+          >#1</span>
+          — point at its number to trace it
+        </li>
+        <li
+          v-if="hasTwins"
+          class="module-bracket__legend-item"
+        >
+          <span
+            class="module-bracket-twin"
+            aria-hidden="true"
+          >
+            <UIcon
+              name="i-lucide-repeat-2"
+              class="size-3.5 shrink-0"
+            />
+            also right
+          </span>
+          On both sides: needs <span translate="no">{{ props.moduleName }}</span> and is needed by it
+        </li>
+        <li
+          v-if="hasStubs"
+          class="module-bracket__legend-item"
+        >
+          <span
+            class="module-bracket__legend-stub"
+            aria-hidden="true"
+          >+N</span>
+          More one level further: select to show it
+        </li>
+        <li
+          v-if="hasLinks"
+          class="module-bracket__legend-item"
+        >
+          <span
+            class="module-bracket__line module-bracket__line--link"
+            aria-hidden="true"
+          />
+          Other imports between modules drawn: point at a module
+        </li>
+      </ul>
+      <USwitch
+        v-if="hasLinks"
+        v-model="showAllImports"
+        label="Show all imports"
+        size="sm"
+        class="module-bracket__legend-switch"
+      />
     </footer>
   </div>
 </template>
@@ -691,34 +1087,39 @@ useResizeObserver(containerRef, debouncedFit)
 /*
  * The navigator's --mg-* palette, declared again here: this page can be the
  * first one a tab opens, before GraphViewer's global styles have ever loaded.
+ * A cycle wears one colour everywhere on the page: its connectors in
+ * --mg-edge-circular, its labels and marks as a pale tint of it with ink of
+ * the same hue.
  */
 .module-bracket {
-  --mg-subgraph-border: #bbb;
-  --mg-root-border: #ff6b6b;
-  --mg-root-bg: rgba(255, 107, 107, 0.06);
+  --mg-subgraph-border: #c4c4c4;
   --mg-edge-module: #0284c7;
   --mg-edge-circular: #d97706;
+  --bracket-cycle-ink: #92400e;
+  --bracket-cycle-tint: #fef3c7;
+  --bracket-cycle-edge: #f59e0b;
 }
 
 .dark .module-bracket {
   --mg-subgraph-border: #4a5568;
-  --mg-root-border: #f87171;
-  --mg-root-bg: rgba(248, 113, 113, 0.08);
   --mg-edge-module: #38bdf8;
   --mg-edge-circular: #facc15;
+  --bracket-cycle-ink: #fde68a;
+  --bracket-cycle-tint: rgb(250 204 21 / 0.14);
+  --bracket-cycle-edge: rgb(250 204 21 / 0.55);
 }
 
 /*
  * The two sides' depths, each at its own end of the bar as each side stands
- * at its own end of the bracket. On a phone both stay on one row and the
- * counts beside them go: the steppers are what the row is for.
+ * at its own end of the bracket, and in the same words in the same order:
+ * which side, its depth, then how far it goes.
  */
 .module-bracket__toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: 8px 24px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--ui-border);
   background: var(--ui-bg);
@@ -731,10 +1132,6 @@ useResizeObserver(containerRef, debouncedFit)
   min-width: 0;
 }
 
-.module-bracket__depth--right {
-  flex-direction: row-reverse;
-}
-
 .module-bracket__depth-label {
   display: inline-flex;
   align-items: center;
@@ -743,6 +1140,18 @@ useResizeObserver(containerRef, debouncedFit)
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.module-bracket__depth-word {
+  color: var(--ui-text-toned);
+  font-size: 13px;
+}
+
+.module-bracket__depth-word::before,
+.module-bracket__depth-meta::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--ui-text-toned);
 }
 
 .module-bracket__stepper {
@@ -760,36 +1169,39 @@ useResizeObserver(containerRef, debouncedFit)
   text-align: center;
 }
 
+/* A step that cannot be taken looks it, and says why when pointed at. */
+.module-bracket__step[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.module-bracket__step[aria-disabled="true"]:hover {
+  background: transparent;
+}
+
 .module-bracket__depth-meta {
-  color: var(--ui-text-muted);
-  font-size: 12px;
+  color: var(--ui-text-toned);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/*
- * On a phone the two sides take a column each, the label over its stepper,
- * so both stay on screen at once with 40px targets.
- */
+/* On a phone each side takes a row of its own, its steppers 40px targets. */
 @media (max-width: 639.98px) {
   .module-bracket__toolbar {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 6px 12px;
-  }
-
-  .module-bracket__depth,
-  .module-bracket__depth--right {
     flex-direction: column;
-    gap: 2px;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px 16px;
   }
 
-  .module-bracket__depth--left {
-    align-items: flex-start;
+  /* One width for both labels, so the two rows' steppers line up. */
+  .module-bracket__depth-label {
+    width: 108px;
   }
 
-  .module-bracket__depth--right {
-    align-items: flex-end;
+  .module-bracket__depth-word {
+    display: none;
   }
 
   .module-bracket__step {
@@ -799,8 +1211,25 @@ useResizeObserver(containerRef, debouncedFit)
   }
 
   .module-bracket__depth-meta {
-    display: none;
+    margin-left: auto;
   }
+
+  .module-bracket__depth-meta::before {
+    content: none;
+  }
+}
+
+/*
+ * The canvas keeps the page's 16px margin, so a card cut off at its edge — and
+ * its name — never runs into the window's edge, and the canvas shares one left
+ * and one right edge with the toolbar above it and the legend below.
+ */
+.module-bracket__canvas {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0 16px;
+  overflow: hidden;
 }
 
 /*
@@ -830,45 +1259,74 @@ useResizeObserver(containerRef, debouncedFit)
   z-index: 7;
 }
 
-/* Links are what the bracket has room left for: drawn, and kept back. */
-.module-bracket__flow :deep(.bracket-edge--link:not(.bracket-edge--circular) .vue-flow__edge-path) {
-  opacity: 0.55;
+/* Links are drawn on demand, and kept back behind the bracket when they are. */
+.module-bracket__flow :deep(.bracket-edge--link:not(.bracket-edge--lit) .vue-flow__edge-path) {
+  opacity: 0.75;
 }
 
-/* The module the page is about: larger, and framed in ink. */
+/* Tracing a cycle: its connectors stand out, the rest steps back. */
+.module-bracket__flow :deep(.bracket-edge--dimmed .vue-flow__edge-path) {
+  opacity: 0.2;
+}
+
+/*
+ * The zoom controls as touch targets on a phone or any touch screen, in a row
+ * along the canvas foot rather than a column up its side, over the module's
+ * card.
+ */
+@media (pointer: coarse), (max-width: 639.98px) {
+  .module-bracket__flow :deep(.vue-flow__controls) {
+    display: flex;
+    flex-direction: row;
+  }
+
+  .module-bracket__flow :deep(.vue-flow__controls-button) {
+    width: 40px;
+    height: 40px;
+  }
+
+  .module-bracket__flow :deep(.vue-flow__controls-button svg) {
+    max-width: 16px;
+    max-height: 16px;
+  }
+}
+
+/* The module the page is about: the largest card, framed in ink. */
 .module-bracket-center {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 100%;
-  padding: 12px 14px;
+  padding: 16px;
   border: 2px solid var(--ui-border-inverted);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--ui-bg);
   box-sizing: border-box;
-  font-family: "Public Sans", system-ui, sans-serif;
-}
-
-.module-bracket-center--root {
-  border-color: var(--mg-root-border);
 }
 
 .module-bracket-center__title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+}
+
+.module-bracket-center__icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--ui-text-muted);
 }
 
 .module-bracket-center__name {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
   color: var(--ui-text-highlighted);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 24px;
+  line-height: 26px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -877,19 +1335,19 @@ useResizeObserver(containerRef, debouncedFit)
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
-  padding: 8px 0;
+  padding: 10px 0;
   border-block: 1px solid var(--ui-border);
 }
 
 .module-bracket-center__stats > div + div {
-  padding-left: 8px;
+  padding-left: 10px;
   border-left: 1px solid var(--ui-border);
 }
 
 .module-bracket-center__stats dt {
   overflow: hidden;
-  color: var(--ui-text-muted);
-  font-size: 11px;
+  color: var(--ui-text-toned);
+  font-size: 12px;
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -898,80 +1356,94 @@ useResizeObserver(containerRef, debouncedFit)
 .module-bracket-center__stats dd {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 24px;
+  line-height: 28px;
 }
 
 .module-bracket-center__run {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  margin: 0 -6px;
-  padding: 0 6px;
-  border-radius: 6px;
-  color: var(--ui-text-highlighted);
-  font-size: 13px;
+  min-height: 46px;
+  justify-content: center;
+  font-size: 15px;
   font-weight: 600;
-  text-decoration: none;
-  transition: background-color 120ms ease;
-}
-
-a.module-bracket-center__run:hover {
-  background: var(--ui-bg-elevated);
-}
-
-a.module-bracket-center__run:focus-visible {
-  outline: 2px solid var(--ui-primary);
-  outline-offset: 2px;
 }
 
 .module-bracket-center__run-count {
-  color: var(--ui-text-muted);
   font-weight: 500;
+  opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
 
-.module-bracket-center__run--none {
-  color: var(--ui-text-muted);
-  font-weight: 500;
+.module-bracket-center__run-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 46px;
+  margin: 0;
+  border: 1px dashed var(--ui-border-accented);
+  border-radius: 8px;
+  color: var(--ui-text-toned);
+  font-size: 14px;
 }
 
 /* Every other module: its name on a card drawn as the navigator draws a module. */
 .module-bracket-module {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   height: 100%;
-  padding: 0 10px;
-  border: 2px solid var(--mg-subgraph-border);
+  padding: 0 12px;
+  border: 1.5px solid var(--mg-subgraph-border);
   border-radius: 8px;
   background: var(--ui-bg);
   box-sizing: border-box;
   color: var(--ui-text-highlighted);
-  font-family: "Public Sans", system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: none;
   cursor: pointer;
-  transition: border-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
 }
 
-.module-bracket-module--root {
-  border-color: var(--mg-root-border);
-  background: var(--mg-root-bg);
-}
-
-.module-bracket-module:hover {
+.module-bracket-module:hover,
+.module-bracket-module--active {
   border-color: var(--ui-border-inverted);
 }
 
 .module-bracket-module:focus-visible {
   outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
+}
+
+/*
+ * A card the canvas edge cuts through steps back: part of the levels the chip
+ * at that edge leads to, not one the frame is about. Pointed at, or reached by
+ * the keyboard, it comes forward again.
+ */
+.module-bracket-module--cut,
+.module-bracket-stub--cut {
+  opacity: 0.45;
+}
+
+.module-bracket-module--cut:hover,
+.module-bracket-module--cut:focus-visible,
+.module-bracket-stub--cut:hover,
+.module-bracket-stub--cut:focus-visible {
+  opacity: 1;
+}
+
+/* The same module's card on the other side, lit while either is pointed at. */
+.module-bracket-module--twin-lit {
+  border-color: var(--mg-edge-circular);
+  /* A 1px inner ring thickens the border while lit without moving the card's
+     text, and leaves the outline to the focus ring. taste-skill-ignore */
+  box-shadow: inset 0 0 0 1px var(--mg-edge-circular);
 }
 
 .module-bracket-module__name {
@@ -982,37 +1454,52 @@ a.module-bracket-center__run:focus-visible {
   white-space: nowrap;
 }
 
-.module-bracket-badge {
+/*
+ * The bracket mirrors: on the left a card's name sits at its end nearer the
+ * middle, as on the right, where the connectors into the middle start — and
+ * where a card cut off by the canvas edge still shows it.
+ */
+.module-bracket-module--left {
+  flex-direction: row-reverse;
+}
+
+.module-bracket-module--left .module-bracket-module__name {
+  text-align: right;
+}
+
+/* The root module is a fact, not a warning: a neutral tag. */
+.module-bracket-tag {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 6px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--ui-border-accented);
   border-radius: 999px;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
+  background: var(--ui-bg-elevated);
+  color: var(--ui-text-toned);
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
 
-.module-bracket-badge--root {
-  background: color-mix(in srgb, var(--mg-root-border) 16%, transparent);
-  color: var(--ui-error);
+/* A module on both sides: in the cycle's ink, naming the other side. */
+.module-bracket-twin,
+.module-bracket-cycle-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--bracket-cycle-ink);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-/* The cycle colour the graph's cycle labels wear. */
-.module-bracket-badge--cycle {
-  border: 1px solid #f59e0b;
-  background: #facc15;
-  color: #713f12;
-}
-
-.module-bracket-badge--icon {
-  justify-content: center;
-  width: 18px;
-  padding: 0;
+.module-bracket-cycle-mark {
+  margin-left: auto;
+  font-size: 13px;
 }
 
 /* Where a branch goes on: a button asking for one more level. */
@@ -1026,18 +1513,15 @@ a.module-bracket-center__run:focus-visible {
   border: 1.5px dashed var(--ui-border-accented);
   border-radius: 8px;
   background: var(--ui-bg);
-  color: var(--ui-text-muted);
-  font-size: 13px;
+  color: var(--ui-text-toned);
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
     border-color 120ms ease,
-    color 120ms ease;
-}
-
-.module-bracket-stub--left {
-  flex-direction: row;
+    color 120ms ease,
+    opacity 120ms ease;
 }
 
 .module-bracket-stub--right {
@@ -1065,62 +1549,219 @@ a.module-bracket-center__run:focus-visible {
   border: 1px dashed var(--ui-border-accented);
   border-radius: 8px;
   box-sizing: border-box;
-  color: var(--ui-text-muted);
-  font-size: 13px;
+  color: var(--ui-text-toned);
+  font-size: 14px;
   text-align: center;
 }
 
-.module-bracket-level {
-  margin: 0;
-  color: var(--ui-text-highlighted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 24px;
-  white-space: nowrap;
-}
-
-.module-bracket-level__count {
-  color: var(--ui-text-muted);
-  font-weight: 500;
-}
-
-/* The deep dive's cycle chip: the ids of the cycles a connector is a step of. */
+/* A cycle's number on its connector: press it to keep the cycle traced. */
 .module-bracket__cycle {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 7px;
-  border: 1px solid #f59e0b;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--bracket-cycle-edge);
   border-radius: 999px;
-  background: #facc15;
-  color: #713f12;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 11px;
-  font-weight: 800;
+  background: var(--bracket-cycle-tint);
+  color: var(--bracket-cycle-ink);
+  font-size: 12px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   white-space: nowrap;
+  cursor: pointer;
+  pointer-events: all;
+  transition: opacity 120ms ease;
+}
+
+.module-bracket__cycle:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.module-bracket__cycle--lit,
+.module-bracket__cycle[aria-pressed="true"] {
+  border-color: var(--mg-edge-circular);
+  /* The same inner ring as a lit card: a state, not a shadow. taste-skill-ignore */
+  box-shadow: inset 0 0 0 1px var(--mg-edge-circular);
+}
+
+.module-bracket__cycle--dimmed {
+  opacity: 0.35;
+}
+
+.module-bracket__cycle--sample {
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+  cursor: default;
   pointer-events: none;
 }
 
-.module-bracket__cycle-icon {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
+/* Column headings, pinned across the top of the canvas. */
+.module-bracket__headings {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 5;
+  height: 32px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  pointer-events: none;
+}
+
+.module-bracket__heading {
+  position: absolute;
+  top: 0;
+  display: block;
+  height: 32px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ui-text-highlighted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-bracket__heading-count {
+  color: var(--ui-text-toned);
+  font-weight: 500;
+}
+
+/* Mirrored like the cards below it: read from the end nearer the middle. */
+.module-bracket__heading[data-side="left"] {
+  text-align: right;
+}
+
+/* Chips at the canvas edges, toward what the view cuts off. */
+.module-bracket__chip {
+  position: absolute;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(50% - 24px);
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--ui-border-accented);
+  border-radius: 999px;
+  background: var(--ui-bg);
+  color: var(--ui-text-highlighted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 120ms ease;
+}
+
+.module-bracket__chip:hover {
+  background: var(--ui-bg-elevated);
+}
+
+.module-bracket__chip:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.module-bracket__chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The chips toward each side's hidden levels stand at the top of the canvas,
+ * under the headings, where they cover no card the bracket is framed on.
+ */
+.module-bracket__chip--left,
+.module-bracket__chip--right {
+  top: 44px;
+}
+
+.module-bracket__chip--left {
+  left: 12px;
+}
+
+.module-bracket__chip--right {
+  right: 12px;
+}
+
+.module-bracket__chip--up,
+.module-bracket__chip--down {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.module-bracket__chip--up {
+  top: 44px;
+}
+
+.module-bracket__chip--down {
+  bottom: 12px;
+}
+
+@media (pointer: coarse), (max-width: 639.98px) {
+  .module-bracket__chip {
+    height: 40px;
+    padding: 0 14px;
+  }
+}
+
+/* A phone has room for the two side chips across the top, and no more. */
+@media (max-width: 639.98px) {
+  .module-bracket__chip--up {
+    top: 96px;
+  }
+
+  .module-bracket__chip--down {
+    right: 12px;
+    left: auto;
+    transform: none;
+  }
 }
 
 .module-bracket__legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-text-toned);
+  font-size: 12px;
+}
+
+.module-bracket__legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .module-bracket__legend-item {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.375rem;
+  gap: 6px;
+}
+
+.module-bracket__legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 4px;
+  color: var(--ui-text-highlighted);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .module-bracket__line {
@@ -1143,20 +1784,24 @@ a.module-bracket-center__run:focus-visible {
   font-weight: 600;
 }
 
-/* On a phone, one row the legend scrolls along, rather than four that push the graph off. */
+/* On a phone the key folds behind a toggle, the switch beside it. */
 @media (max-width: 639.98px) {
   .module-bracket__legend {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    white-space: nowrap;
-    scrollbar-width: thin;
+    padding: 4px 16px;
+  }
+
+  .module-bracket__legend-items {
+    order: 3;
+    flex-basis: 100%;
+    padding-bottom: 6px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .module-bracket-module,
   .module-bracket-stub,
-  .module-bracket-center__run {
+  .module-bracket__cycle,
+  .module-bracket__chip {
     transition: none;
   }
 }
