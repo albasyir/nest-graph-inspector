@@ -227,8 +227,10 @@ const ROW_PITCH = BRACKET_MODULE_HEIGHT + 16
 /** How far out of its column a link's first lane runs, and how far apart lanes are. */
 const LANE_START = 16
 const LANE_STEP = 8
-/** Lanes in a gap before they start over: they stay clear of its middle. */
+/** Lanes beside a column: they stay clear of the gap's middle, where the brackets turn. */
 const LANE_COUNT = 5
+/** How far apart two links turning in one lane keep: a corner's radius each. */
+const LANE_CLEARANCE = 8
 /** How round an edge's corners are. */
 const CORNER_RADIUS = 8
 /** How far along its own stretch of connector a tree edge's label sits. */
@@ -246,9 +248,11 @@ export const BRACKET_CENTER_ID = 'center'
  * The bracket around `input.center`, or `null` when the graph has no such
  * module.
  *
- * Every walk, layout and route here is linear in the modules and imports the
- * graph holds, give or take the sorting of a column, so a graph of hundreds of
- * modules lays out in a few milliseconds.
+ * The walks and the order of each column are linear in the modules and
+ * imports the graph holds, give or take the sorting of a column; routing an
+ * edge looks at the lanes beside its columns and, for a link reaching back
+ * past the next column, at the gaps between the rows it crosses — so a graph
+ * of hundreds of modules still lays out within a frame (the tests time 300).
  */
 export function buildModuleDependencyBracket(
   input: ModuleDependencyBracketInput
@@ -1011,39 +1015,163 @@ function getStretchSpots(route: readonly EdgePoint[]): EdgePoint[] {
 const HALF_ROW_GAP = (ROW_PITCH - BRACKET_MODULE_HEIGHT) / 2
 /** How far a channel keeps from the cards it runs between. */
 const CHANNEL_CLEARANCE = 2
+/** How far apart two links crossing in one gap between rows run. */
+const CHANNEL_STEP = 4
+/** Where in a gap a link may cross: its middle first, then a step to either side. */
+const CHANNEL_SHIFTS = [0, -CHANNEL_STEP, CHANNEL_STEP] as const
+/**
+ * What running a step off a gap's middle costs, in detour: more than the
+ * step saves, so a link takes the middle of a free gap whenever one is near.
+ */
+const CHANNEL_SHIFT_COST = CHANNEL_STEP * 2 + 1
+/** The longest way round a link takes to keep off another link's crossing. */
+const CHANNEL_DETOUR_LIMIT = ROW_PITCH * 4
+
+/** Where a link reaching back past the next column crosses the columns between. */
+type Crossing = { y: number, left: number, right: number }
 
 /**
- * The height a link crosses `cards` at without passing behind any of them:
- * the height it is going at when that is free — anywhere between its two ends
- * costs the same length — else the free channel nearest it, halfway between
- * two rows, above the top row or below the bottom one. Above the topmost card
- * is always free, so there is always one.
+ * A run of columns a link crosses, as a channel through them is looked for:
+ * the heights their cards block, clearance included — open spans, top to
+ * bottom, merged where they overlap, so whether a height is clear of every
+ * card is one binary search — and the middles of the gaps above and below
+ * each card, once each, since cards level across the columns share them.
  */
-function findChannel(cards: readonly CircularEdgeRect[], fromY: number, toY: number): number {
-  const isFree = (y: number) => !cards.some(card =>
-    y > card.y - CHANNEL_CLEARANCE && y < card.y + card.height + CHANNEL_CLEARANCE)
-  const detour = (y: number) => Math.abs(y - fromY) + Math.abs(y - toY)
-  const candidates = [
-    fromY,
-    toY,
-    ...cards.flatMap(card => [card.y - HALF_ROW_GAP, card.y + card.height + HALF_ROW_GAP])
-  ]
+type CrossedColumns = {
+  blocked: ReadonlyArray<readonly [number, number]>
+  gapMiddles: readonly number[]
+}
 
-  let best = Number.NaN
-  for (const y of candidates) {
-    if (!isFree(y)) {
-      continue
-    }
-    if (
-      Number.isNaN(best)
-      || detour(y) < detour(best)
-      || (detour(y) === detour(best) && Math.abs(y - fromY) < Math.abs(best - fromY))
-    ) {
-      best = y
+function getCrossedColumns(cards: readonly CircularEdgeRect[]): CrossedColumns {
+  const spans = cards
+    .map((card): [number, number] => [card.y - CHANNEL_CLEARANCE, card.y + card.height + CHANNEL_CLEARANCE])
+    .sort((above, below) => above[0] - below[0])
+  const blocked: Array<[number, number]> = []
+
+  for (const span of spans) {
+    const last = blocked.at(-1)
+    // Open spans that only touch leave the height they touch at clear.
+    if (last && span[0] < last[1]) {
+      last[1] = Math.max(last[1], span[1])
+    } else {
+      blocked.push(span)
     }
   }
 
-  return Number.isNaN(best) ? fromY : best
+  const gapMiddles = new Set<number>()
+  for (const card of cards) {
+    gapMiddles.add(card.y - HALF_ROW_GAP)
+    gapMiddles.add(card.y + card.height + HALF_ROW_GAP)
+  }
+
+  return { blocked, gapMiddles: [...gapMiddles] }
+}
+
+/**
+ * The height a link crosses `columns` at, between `left` and `right`, without
+ * passing behind any of their cards: the height it is going at when that is
+ * free — anywhere between its two ends costs the same length — else the free
+ * channel nearest it, halfway between two rows, above the top row or below
+ * the bottom one. It keeps off the heights other links already cross at, and
+ * the `stubs` other edges leave the columns at its two ends by, moving to
+ * another gap or a step to one side of the middle of this one; only when that
+ * would take it far out of its way does it share the nearest channel. Above
+ * the topmost card is always free, so there is always one.
+ */
+function findChannel(params: {
+  columns: CrossedColumns
+  crossings: readonly Crossing[]
+  /**
+   * The heights edges leave the columns at the link's two ends by, each
+   * column's in ascending order, but for the height of the link's own card.
+   */
+  stubs: ReadonlyArray<{ heights: readonly number[], own: number }>
+  fromY: number
+  toY: number
+  left: number
+  right: number
+}): number {
+  const { columns: { blocked, gapMiddles }, crossings, stubs, fromY, toY, left, right } = params
+  const isClearOfCards = (y: number) => {
+    let low = 0
+    let high = blocked.length - 1
+    while (low <= high) {
+      const middle = (low + high) >> 1
+      const span = blocked[middle]
+      if (!span) {
+        return true
+      }
+      if (y <= span[0]) {
+        high = middle - 1
+      } else if (y >= span[1]) {
+        low = middle + 1
+      } else {
+        return false
+      }
+    }
+    return true
+  }
+  const nearby = crossings.filter(crossing => crossing.left < right && crossing.right > left)
+  const isClearOfLinks = (y: number) =>
+    !stubs.some(stub => hasValueNear(stub.heights, y, CHANNEL_STEP, stub.own))
+    && !nearby.some(crossing => Math.abs(crossing.y - y) < CHANNEL_STEP)
+
+  let nearest: { y: number, cost: number } | null = null
+  let nearestFree: { y: number, cost: number } | null = null
+  const isBetter = (y: number, cost: number, than: { y: number, cost: number } | null) =>
+    !than
+    || cost < than.cost
+    || (cost === than.cost && Math.abs(y - fromY) < Math.abs(than.y - fromY))
+
+  for (const middle of [fromY, toY, ...gapMiddles]) {
+    for (const shift of CHANNEL_SHIFTS) {
+      const y = middle + shift
+      if (!isClearOfCards(y)) {
+        continue
+      }
+
+      const cost = (shift === 0 ? 0 : CHANNEL_SHIFT_COST) + Math.abs(y - fromY) + Math.abs(y - toY)
+      if (isBetter(y, cost, nearest)) {
+        nearest = { y, cost }
+      }
+      if (isBetter(y, cost, nearestFree) && isClearOfLinks(y)) {
+        nearestFree = { y, cost }
+      }
+    }
+  }
+
+  if (nearestFree && nearest && nearestFree.cost <= nearest.cost + CHANNEL_DETOUR_LIMIT) {
+    return nearestFree.y
+  }
+  return nearest?.y ?? fromY
+}
+
+/**
+ * Whether any value of `sorted`, in ascending order, lies less than `distance`
+ * from `y` — other than `except`.
+ */
+function hasValueNear(sorted: readonly number[], y: number, distance: number, except: number): boolean {
+  let low = 0
+  let high = sorted.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if ((sorted[middle] ?? Number.POSITIVE_INFINITY) <= y - distance) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+
+  for (let index = low; index < sorted.length; index += 1) {
+    const value = sorted[index] ?? Number.POSITIVE_INFINITY
+    if (value >= y + distance) {
+      return false
+    }
+    if (value !== except) {
+      return true
+    }
+  }
+  return false
 }
 
 function grow(rect: CircularEdgeRect, by: number): CircularEdgeRect {
@@ -1071,9 +1199,13 @@ function getColumn(node: RoutedNode): number {
  * Routes edges across the bracket. Every edge leaves and enters a node by its
  * left or right side and turns only at right angles:
  *
- * - An edge into the next column out — every tree and stub edge, and any link
- *   between neighbouring columns — turns halfway across the gap, so the
- *   branches of one module share one upright, the way a bracket joins them.
+ * - A tree or stub edge into the next column out turns halfway across the
+ *   gap, so the branches of one module share one upright, the way a bracket
+ *   joins them.
+ * - A link into the next column out turns in a lane beside that column
+ *   instead — halfway across it would run along another module's upright —
+ *   and crosses the gap level with the module nearer the middle, where only
+ *   that module's own branches run.
  * - A link back towards the middle leaves its module by the side facing the
  *   middle, turns in a lane of its own in the gap beside the column it ends
  *   in, and comes into that column from its far side. One reaching back past
@@ -1083,21 +1215,82 @@ function getColumn(node: RoutedNode): number {
  * - A link within one column runs round the column's outer side, in a lane of
  *   its own.
  *
- * Lanes keep to either side of a gap's middle, where the brackets turn: links
- * within a column next to that column, links back towards the middle next to
- * the column on the gap's other side — so no lane runs along an upright.
+ * Lanes keep to either side of a gap's middle, where the brackets turn, each
+ * family of them beside one column — so no lane runs along an upright. Two
+ * links share a lane only where they never meet in it (`takeLane`), so edges
+ * that join no card in common never run along one another while a gap has
+ * lanes to spare.
  */
 function createRouter(
   routePoints: EdgePoint[],
   /** The cards standing in each column, by column. */
   cardsByColumn: ReadonlyMap<number, readonly CircularEdgeRect[]>
 ) {
-  const lanes = new Map<string, number>()
-  const nextLane = (key: string) => {
-    const lane = lanes.get(key) ?? 0
-    lanes.set(key, lane + 1)
-    return (lane % LANE_COUNT) * LANE_STEP + LANE_START
+  /** Each family of lanes beside a column, and the heights each lane is taken over. */
+  const lanes = new Map<string, Array<Array<readonly [number, number]>>>()
+  const crossings: Crossing[] = []
+  /** Where each column's cards send edges into the gaps beside it: their middles, top to bottom. */
+  const stubHeightsByColumn = new Map(
+    [...cardsByColumn.entries()].map(([column, cards]) => [
+      column,
+      cards.map(card => card.y + card.height / 2).sort((above, below) => above - below)
+    ])
+  )
+  /** Each run of columns links cross, worked out once for all of them. */
+  const crossedByRun = new Map<string, CrossedColumns>()
+  /** The columns strictly between `nearer` and `further`, by their column numbers. */
+  const getCrossed = (nearer: number, further: number): CrossedColumns => {
+    const key = `${nearer}:${further}`
+    const known = crossedByRun.get(key)
+    if (known) {
+      return known
+    }
+
+    const cards: CircularEdgeRect[] = []
+    for (let column = nearer + 1; column < further; column += 1) {
+      cards.push(...(cardsByColumn.get(column) ?? []))
+    }
+    const crossed = getCrossedColumns(cards)
+    crossedByRun.set(key, crossed)
+    return crossed
   }
+
+  /**
+   * How far from its column a link turns, between `fromY` and `toY`: in the
+   * lane nearest the column that no other link turns in over those heights,
+   * or — beside a column too crowded for that — the one fewest others share.
+   * A gap with no column beyond it has no brackets turning in its middle, so
+   * there lanes go on out as far as the links need.
+   */
+  const takeLane = (key: string, fromY: number, toY: number, isOuterGap = false): number => {
+    const top = Math.min(fromY, toY) - LANE_CLEARANCE
+    const bottom = Math.max(fromY, toY) + LANE_CLEARANCE
+    const family = lanes.get(key) ?? []
+    lanes.set(key, family)
+    const meets = ([start, end]: readonly [number, number]) => start < bottom && end > top
+
+    let chosen = family.findIndex(taken => !taken.some(meets))
+    if (chosen === -1 && (isOuterGap || family.length < LANE_COUNT)) {
+      chosen = family.length
+      family.push([])
+    }
+    if (chosen === -1) {
+      let fewestMet = Number.POSITIVE_INFINITY
+      for (const [index, taken] of family.entries()) {
+        const met = taken.filter(meets).length
+        if (met < fewestMet) {
+          chosen = index
+          fewestMet = met
+        }
+      }
+    }
+
+    family[chosen]?.push([top, bottom])
+    return chosen * LANE_STEP + LANE_START
+  }
+  /** Whether nothing stands beyond a column, on the side away from the middle. */
+  const isOutermost = (side: BracketSide, column: number) =>
+    !cardsByColumn.has(side === 'left' ? column - 1 : column + 1)
 
   function route(params: {
     kind: Exclude<BracketEdgeKind, 'self'>
@@ -1120,7 +1313,22 @@ function createRouter(
       reach
     })
 
-    if (sourceColumn < targetColumn) {
+    if (sourceColumn < targetColumn && kind === 'link') {
+      // A link into the next column out that is no branch of the bracket
+      // would, turning halfway across, run along the upright of another
+      // module's branches and read as one of them. It turns in a lane beside
+      // the column further out, and crosses the gap level with the module
+      // nearer the middle, where only that module's own branches run.
+      const from = rightOf(source)
+      const to = leftOf(target)
+      const offset = takeLane(`back:${side}:${sourceColumn}`, from.y, to.y)
+      const turn = side === 'left' ? from.x + offset : to.x - offset
+      points = from.y === to.y
+        ? [from, to]
+        : [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
+      handles = ['right-source', 'left-target']
+      lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+    } else if (sourceColumn < targetColumn) {
       const from = rightOf(source)
       const to = leftOf(target)
       const turn = (from.x + to.x) / 2
@@ -1129,43 +1337,52 @@ function createRouter(
         : [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = ['right-source', 'left-target']
       // A tree edge's label goes on the stretch only it runs along: beside the
-      // module further out, before the branches of its parent join. A link
-      // leaves by the same stretch as that module's tree edge, so its label
-      // is placed later, along the upright, clear of the tree edge's.
+      // module further out, before the branches of its parent join.
       if (kind === 'tree') {
         const spot = side === 'left'
           ? { x: from.x + TREE_LABEL_INSET, y: from.y }
           : { x: to.x - TREE_LABEL_INSET, y: to.y }
         label = { labelX: spot.x, labelY: spot.y, ...LABEL_CENTERED }
-      } else if (kind === 'link') {
-        lane = upright(turn, from, to, 'both')
       }
     } else if (sourceColumn > targetColumn) {
       const from = leftOf(source)
       const to = rightOf(target)
-      const offset = nextLane(`back:${side}:${targetColumn}`)
+      const turnKey = `back:${side}:${targetColumn}`
       // On the left the lane hugs the column it ends in, on the right the
       // column across the gap from it: its label reaches away from either.
-      const turn = side === 'left' ? to.x + offset : to.x + COLUMN_GAP - offset
+      const turnAt = (offset: number) => side === 'left' ? to.x + offset : to.x + COLUMN_GAP - offset
+      const reach = side === 'left' ? 'right' : 'left'
       handles = ['left-source', 'right-target']
 
       if (sourceColumn - targetColumn === 1) {
+        const turn = turnAt(takeLane(turnKey, from.y, to.y))
         points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
-        lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+        lane = upright(turn, from, to, reach)
       } else {
         // Further than the next column, a straight run would pass behind the
         // cards of the columns between and read as an edge of theirs. It
-        // turns out of its own column in the lane beside it — shared with
-        // the lanes already running there — crosses in the free channel
-        // between those columns' rows nearest the way it is going, and turns
-        // in beside the column it ends in.
-        const exit = from.x - nextLane(side === 'left'
-          ? `same:${side}:${sourceColumn}`
-          : `back:${side}:${sourceColumn - 1}`)
-        const crossed = [...cardsByColumn.entries()]
-          .filter(([column]) => column > targetColumn && column < sourceColumn)
-          .flatMap(([, cards]) => cards)
-        const channel = findChannel(crossed, from.y, to.y)
+        // crosses them in the free channel between their rows nearest the
+        // way it is going — off the middles of the other cards at its two
+        // ends, where their edges leave them — turning into it in a lane
+        // beside its own column, of the family already turning there, and
+        // out of it beside the column it ends in.
+        const channel = findChannel({
+          columns: getCrossed(targetColumn, sourceColumn),
+          crossings,
+          stubs: [
+            { heights: stubHeightsByColumn.get(sourceColumn) ?? [], own: from.y },
+            { heights: stubHeightsByColumn.get(targetColumn) ?? [], own: to.y }
+          ],
+          fromY: from.y,
+          toY: to.y,
+          left: to.x,
+          right: from.x
+        })
+        const exit = side === 'left'
+          ? from.x - takeLane(`same:${side}:${sourceColumn}`, from.y, channel, isOutermost(side, sourceColumn))
+          : from.x - takeLane(`back:${side}:${sourceColumn - 1}`, from.y, channel)
+        const turn = turnAt(takeLane(turnKey, channel, to.y))
+        crossings.push({ y: channel, left: Math.min(exit, turn), right: Math.max(exit, turn) })
         points = [
           from,
           { x: exit, y: from.y },
@@ -1174,12 +1391,12 @@ function createRouter(
           { x: turn, y: to.y },
           to
         ]
-        lane = upright(turn, { x: turn, y: channel }, to, side === 'left' ? 'right' : 'left')
+        lane = upright(turn, { x: turn, y: channel }, to, reach)
       }
     } else {
       const from = side === 'left' ? leftOf(source) : rightOf(source)
       const to = side === 'left' ? leftOf(target) : rightOf(target)
-      const offset = nextLane(`same:${side}:${sourceColumn}`)
+      const offset = takeLane(`same:${side}:${sourceColumn}`, from.y, to.y, isOutermost(side, sourceColumn))
       const turn = side === 'left' ? from.x - offset : from.x + offset
       points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = side === 'left'

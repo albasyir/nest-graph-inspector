@@ -1068,23 +1068,25 @@ through what the visitor did:
   `ModuleDependencyBracket.vue` as a tournament bracket that opens both ways —
   what it imports in the column to its left, what those import further left,
   and what imports it fanning out to its right the same way. The layout is
-  `app/utils/module-dependency-bracket.ts`, pure and linear in modules and
-  imports: one breadth-first walk per side, so a module stands once per side,
-  at its shortest distance, and a cycle never makes a walk go round; a module
+  `app/utils/module-dependency-bracket.ts`, pure: one breadth-first walk per
+  side, linear in modules and imports, so a module stands once per side, at
+  its shortest distance, and a cycle never makes a walk go round; a module
   standing on both sides is on a cycle with the one in the middle and carries
   a cycle badge, and an import on a reported module cycle wears the circular
   colour and its `#id`. An import between two modules already drawn on a side
-  is a dashed link rather than a second card, kept to the gaps between columns
-  — crossing a column between the rows of its cards — so that no line passes
-  behind a card it does not join (the layout's tests check this on every
-  edge); one back into the middle is never drawn on its own side — the module
-  making it always stands one level into the other side. Each side shows its
-  own depth, `left` and `right` in the query, 3 when they are absent
-  (`DEFAULT_BRACKET_DEPTH`); a branch going on past the last level ends in a
-  "+N modules" stub that asks for one more. Every other module is a link to
-  its own page, keeping the depths, and the card in the middle says how many
-  of the module's providers and controllers Direct Run can call, linking to
-  the first of them.
+  is a dashed link rather than a second card. Links turn in lanes of their own
+  beside the columns, off the uprights the brackets turn on, and cross a column
+  between the rows of its cards, so no line passes behind a card it does not
+  join; two edges that join no card in common share no stretch while a gap
+  has lanes to spare (the layout's tests check both on every edge of the
+  demo-shaped graph, the first on a 300-module one too). An import back into
+  the middle is never drawn on its own side — the module making it always
+  stands one level into the other side. Each side shows its own depth, `left`
+  and `right` in the query, 3 when they are absent (`DEFAULT_BRACKET_DEPTH`);
+  a branch going on past the last level ends in a "+N modules" stub that asks
+  for one more. Every other module is a link to its own page, keeping the
+  depths, and the card in the middle says how many of the module's providers
+  and controllers Direct Run can call, linking to the first of them.
 - **Inside Module** (`?view=inside`): what the module declares —
   `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
   fields the graph already carries (horizontally on desktop, or vertically on

@@ -220,6 +220,49 @@ function cardsCrossed(bracket: ModuleDependencyBracket, edge: BracketEdge): stri
     .map(card => card.id)
 }
 
+/**
+ * Pairs of edges joining no card in common that run along one straight
+ * stretch, where one cannot be told from the other. Edges meeting at a card
+ * share the stretch beside it by design.
+ */
+function sharedStretches(bracket: ModuleDependencyBracket): string[] {
+  const routed = bracket.edges
+    .filter(edge => edge.kind !== 'self')
+    .map((edge) => {
+      const route = routeOf(edge.path)
+      return { edge, stretches: route.slice(1).map((end, index) => [route[index] ?? end, end] as const) }
+    })
+  const shared = new Set<string>()
+
+  for (const [index, first] of routed.entries()) {
+    const ends = new Set([first.edge.source, first.edge.target])
+    for (const second of routed.slice(index + 1)) {
+      if (ends.has(second.edge.source) || ends.has(second.edge.target)) {
+        continue
+      }
+
+      for (const [a, b] of first.stretches) {
+        for (const [c, d] of second.stretches) {
+          const along = a.y === b.y && c.y === d.y && a.y === c.y
+            ? 'x'
+            : a.x === b.x && c.x === d.x && a.x === c.x ? 'y' : null
+          if (!along) {
+            continue
+          }
+
+          const overlap = Math.min(Math.max(a[along], b[along]), Math.max(c[along], d[along]))
+            - Math.max(Math.min(a[along], b[along]), Math.min(c[along], d[along]))
+          if (overlap > 1) {
+            shared.add(`${first.edge.id} and ${second.edge.id}`)
+          }
+        }
+      }
+    }
+  }
+
+  return [...shared]
+}
+
 function middleOf(bracket: ModuleDependencyBracket): BracketCenterNode {
   const node = bracket.nodes.find(candidate => candidate.kind === 'center')
   assert.ok(node?.kind === 'center', 'the module in the middle is drawn')
@@ -629,6 +672,17 @@ describe('the bracket', () => {
       const wide = build(large, center, { left: 99, right: 99 })
       for (const edge of wide.edges.filter(candidate => candidate.kind !== 'self')) {
         assert.deepEqual(cardsCrossed(wide, edge), [], `${edge.id} (centre ${center})`)
+      }
+    }
+  })
+
+  test('no two edges joining no card in common run along one stretch', () => {
+    // DatabaseModule in the middle stands every other module in one column,
+    // joined by a score of links that all turn beside it.
+    for (const center of Object.keys(SHOP.modules)) {
+      for (const depth of [1, 2, 3, 99]) {
+        const bracket = build(SHOP, center, { left: depth, right: depth })
+        assert.deepEqual(sharedStretches(bracket), [], `centre ${center}, depth ${depth}`)
       }
     }
   })
