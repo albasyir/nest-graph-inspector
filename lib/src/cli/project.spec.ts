@@ -343,6 +343,36 @@ describe("project", () => {
         ]);
       });
 
+      it("looks past a default-exported function of the name, which is no export of the name, to export *", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write(
+          "src/modules/index.ts",
+          'export * from "./root.module";\n\nexport default function RootModule(): void {}\n',
+        );
+        write("src/modules/root.module.ts", ROOT_MODULE);
+        write("dist/modules/root.module.js", "exports.RootModule = class {};\n");
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
+          "src/main.ts boots RootModule from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module RootModule to export RootModule.",
+        ]);
+      });
+
+      it("stops at a function exported under the name itself, rather than look through export *", () => {
+        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
+        write(
+          "src/modules/index.ts",
+          'export * from "./root.module";\n\nexport function RootModule(): void {}\n',
+        );
+        write("src/modules/root.module.ts", ROOT_MODULE);
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+        const resolved = resolveEntry(request());
+
+        expect(resolved).toMatchObject({ origin: "convention", check: undefined });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
+      });
+
       it("gives up, quietly, on re-exports that go round in a circle", () => {
         write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
         write("src/modules/index.ts", 'export * from "./other";\n');

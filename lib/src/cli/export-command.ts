@@ -1,13 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import type { GraphOutput } from "../types/graph-output.type";
 import { CliError, describeError } from "./cli-error";
 import type { CliIo } from "./cli";
 import { displayPath, isDirectory, isFile } from "./files";
 import {
   findProjectPackage,
+  isTypeScriptFile,
   loadModule,
   loadNestCore,
   readOwnPackage,
@@ -102,10 +103,9 @@ export async function runExportCommand(
     try {
       moduleExports = await loadModule(entryPath, projectRequire);
     } catch (error) {
-      throw new CliError(
-        `Loading ${displayPath(entryPath, io.cwd)} failed: ${describeError(error)}`,
-        { cause: error },
-      );
+      throw new CliError(loadFailedMessage(entryPath, error, options.require ?? [], io.cwd), {
+        cause: error,
+      });
     }
 
     const rootModule = selectRootModule(entry, moduleExports, io.cwd);
@@ -182,6 +182,26 @@ export async function runExportCommand(
   );
 
   return 0;
+}
+
+/**
+ * Why loading the entry failed — and, for a TypeScript file the `--require`
+ * loaders were meant to load, what such a loader has to do.
+ */
+export function loadFailedMessage(
+  entryPath: string,
+  error: unknown,
+  requires: readonly string[],
+  cwd: string,
+): string {
+  const file = displayPath(entryPath, cwd);
+  const failed = `Loading ${file} failed: ${describeError(error)}`;
+  if (!isTypeScriptFile(entryPath) || !requires.length) {
+    return failed;
+  }
+
+  const loaders = requires.map((request) => `--require ${request}`).join(" ");
+  return `${failed}\n${file} is TypeScript, loaded through ${loaders}: the loader must register ${extname(entryPath)} files and emit the decorator metadata Nest reads (--require ts-node/register does both).`;
 }
 
 /**

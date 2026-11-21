@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
 import { CliError, describeError } from "./cli-error";
 import { displayPath, isFile, pathInside } from "./files";
@@ -101,9 +101,25 @@ export type BootedRootModule = {
   dynamicMethod: string | undefined;
 };
 
+/** A `NestFactory` call whose root module the export cannot follow, passed over while another decides. */
+export type SkippedBoot = {
+  /** Its line in main.ts, from 1. */
+  line: number;
+  /** The call, on one line, cut short when long. */
+  call: string;
+};
+
 export type MainFileAnalysis =
-  /** The root modules main.ts boots, each once, in the order it boots them. */
-  | { kind: "boots"; mainFile: string; roots: NonEmptyArray<BootedRootModule> }
+  /**
+   * The root modules main.ts boots, each once, in the order it boots them,
+   * and the boots passed over because their root module cannot be followed.
+   */
+  | {
+      kind: "boots";
+      mainFile: string;
+      roots: NonEmptyArray<BootedRootModule>;
+      skipped: readonly SkippedBoot[];
+    }
   /** main.ts declares its root module class itself: loading it would start the application. */
   | { kind: "declares-root"; mainFile: string; name: string }
   /** Nothing to act on: no main.ts, no `NestFactory` call, or a root module only known at runtime. */
@@ -122,21 +138,23 @@ export type RootModuleEntry =
   /** Built into a bundle, of which nothing but the entry exists to load. */
   | { kind: "bundled"; bundler: Bundler }
   /**
-   * Built by SWC both where Nest CLI 12 writes it and where Nest CLI 11 does:
-   * one of the two is left from an older build, and which cannot be told.
+   * Built to more than one of the places its build can write it — SWC's
+   * Nest CLI 12 and Nest CLI 11 layouts, or tsc's for different root
+   * directories: all but one are left from older builds, and which is current
+   * cannot be told.
    */
-  | { kind: "both-layouts"; paths: readonly string[] }
+  | { kind: "several"; paths: readonly string[] }
   /**
-   * Built to a file another application's build writes too, from a source at
-   * the same path in its own tree: whose the file is cannot be told.
+   * Built to a file another application's build writes too, from a source of
+   * its own: whose the file is cannot be told.
    */
   | { kind: "shared"; path: string; otherSource: string };
 
 /** What exists of a file's compiled candidates. */
 export type CompiledFile =
   | { kind: "found"; path: string }
-  /** SWC's two layouts, both there: see `RootModuleEntry`. */
-  | { kind: "both-layouts"; paths: readonly string[] }
+  /** More than one, all but one stale: see `RootModuleEntry`. */
+  | { kind: "several"; paths: readonly string[] }
   | { kind: "missing" };
 
 type Bundler = Extract<ApplicationBuild, { kind: "bundled" }>["bundler"];
@@ -156,6 +174,12 @@ type RootArgument =
   | {
       kind: "imported";
       specifier: string;
+      /**
+       * How the specifier is resolved: as an `import`, in the mode main.ts's
+       * own format gives it, or as a `require` — `import x = require()`, a
+       * `require()` call — always in CommonJS's.
+       */
+      resolution: "import" | "require";
       exportName: string;
       localName: string;
       dynamicMethod: string | undefined;
@@ -201,36 +225,57 @@ export function analyseMainFile(layout: ApplicationLayout): MainFileAnalysis {
   }
 
   let roots: readonly BootedRootModule[] = [];
-  for (const argument of calls) {
+  const skipped: SkippedBoot[] = [];
+  for (const call of calls) {
+    const argument: ts.Expression | undefined = call.arguments[0];
     const root =
       argument === undefined ? undefined : analyseRootArgument(argument, main, 0);
     if (root?.kind === "declared") {
       return { kind: "declares-root", mainFile, name: root.name };
     }
 
-    // A root module only known at runtime is passed over: what can be
-    // followed decides.
-    if (root?.kind !== "imported") {
+    const sourceFile =
+      root?.kind === "imported"
+        ? resolveImport(root.specifier, mainFile, layout, root.resolution)
+        : undefined;
+    // A root module only known at runtime, or from a package, is passed over:
+    // what can be followed decides, and a note says what was passed over.
+    if (root?.kind !== "imported" || sourceFile === undefined) {
+      skipped.push(skippedBoot(call, main.sourceFile));
       continue;
     }
 
-    const sourceFile = resolveImport(root.specifier, mainFile, layout);
-    if (sourceFile !== undefined) {
-      roots = withRoot(roots, {
-        exportName: root.exportName,
-        localName: root.localName,
-        sourceFile,
-        dynamicMethod: root.dynamicMethod,
-      });
-    }
+    roots = withRoot(roots, {
+      exportName: root.exportName,
+      localName: root.localName,
+      sourceFile,
+      dynamicMethod: root.dynamicMethod,
+    });
   }
 
   return isNonEmpty(roots)
-    ? { kind: "boots", mainFile, roots }
+    ? { kind: "boots", mainFile, roots, skipped }
     : {
         kind: "unknown",
         reason: "its root module is not an import the export can follow",
       };
+}
+
+/** How many characters of a passed-over call a note quotes. */
+const MAX_QUOTED_CALL = 80;
+
+function skippedBoot(call: ts.CallExpression, sourceFile: ts.SourceFile): SkippedBoot {
+  const { line } = sourceFile.getLineAndCharacterOfPosition(call.getStart(sourceFile));
+  // One line, as a formatter would put it: `create(\n  Root,\n)` is `create(Root)`.
+  const text = call
+    .getText(sourceFile)
+    .replace(/\s+/g, " ")
+    .replace(/\( /g, "(")
+    .replace(/,? \)/g, ")");
+  return {
+    line: line + 1,
+    call: text.length > MAX_QUOTED_CALL ? `${text.slice(0, MAX_QUOTED_CALL - 1)}…` : text,
+  };
 }
 
 /** Each root module once, by file and export; a `.forRoot()` call on any boot of it marks it. */
@@ -317,9 +362,9 @@ export function chooseRootModule(
 /**
  * The file to load for a root module. A compiled application loads the file
  * `nest build` compiled the module's source to, found by probing — when that
- * file is plainly this build's. A bundled one has no such file — its
- * `main.js` holds everything and starts the application — so, like an
- * application not built yet, or one whose compiled file cannot be told
+ * one file is there and is plainly this build's. A bundled one has no such
+ * file — its `main.js` holds everything and starts the application — so, like
+ * an application not built yet, or one whose compiled file cannot be told
  * current or its own, it is loaded from its TypeScript source when
  * `--require` names a loader, and not at all otherwise. `others` are the
  * project's other applications, whose builds could write the same file.
@@ -337,14 +382,14 @@ export function locateRootModule(
   }
 
   const candidates = compiledCandidates(root.sourceFile, layout);
-  const compiled = pickCompiled(candidates, layout);
+  const compiled = pickCompiled(candidates);
   switch (compiled.kind) {
     case "missing":
       return hasLoader ? source : { kind: "not-built", candidates };
-    case "both-layouts":
+    case "several":
       return hasLoader ? source : compiled;
     case "found": {
-      const otherSource = sharedWith(compiled.path, root.sourceFile, layout, others);
+      const otherSource = sharedWith(compiled.path, root.sourceFile, others);
       if (otherSource === undefined) {
         return { kind: "compiled", path: compiled.path };
       }
@@ -359,48 +404,57 @@ export function locateRootModule(
 }
 
 /**
- * The compiled file among a source's candidates: the first that exists — but
- * not when both of SWC's layouts exist, since one is left from an older build
- * of the other Nest CLI, and which cannot be told.
+ * The compiled file among a source's candidates: the one that exists. When
+ * more than one does — SWC's layouts for both Nest CLIs, tsc's for different
+ * root directories — all but one are left from older builds, and which is
+ * current cannot be told, so none is taken.
  */
-export function pickCompiled(
-  candidates: readonly string[],
-  layout: ApplicationLayout,
-): CompiledFile {
-  const existing = candidates.filter(isFile);
-  const [first] = existing;
+export function pickCompiled(candidates: readonly string[]): CompiledFile {
+  const seen = new Set<string>();
+  const existing = candidates.filter((path) => {
+    const key = canonicalKey(path);
+    if (key === undefined || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return isFile(path);
+  });
+  const [first, ...rest] = existing;
   if (first === undefined) {
     return { kind: "missing" };
   }
 
-  return layout.application.build.kind === "swc" && existing.length > 1
-    ? { kind: "both-layouts", paths: existing }
-    : { kind: "found", path: first };
+  return rest.length ? { kind: "several", paths: existing } : { kind: "found", path: first };
 }
 
 /**
- * The source of another application's that builds to `compiled` too — the
- * one at the same path in its own source root — when there is one: whose the
- * file is cannot then be told. One file reached from both applications, a
- * library's, is no other's.
+ * A source of another application's that its build writes to `compiled`
+ * too, when there is one: whose the file is cannot then be told. Each other
+ * build is read backwards — which of its sources would land on `compiled`,
+ * under its own outDir and root directories — and a source that exists there
+ * counts when that build does write it to `compiled`. A bundle writes no such
+ * file, and one file reached from both applications, a library's, is no
+ * other's.
  */
 function sharedWith(
   compiled: string,
   source: string,
-  layout: ApplicationLayout,
   others: readonly ApplicationLayout[],
 ): string | undefined {
-  const fromSourceRoot = relative(
-    resolve(layout.projectDir, layout.application.sourceRoot),
-    source,
-  );
   for (const other of others) {
-    const otherSource = resolve(other.projectDir, other.application.sourceRoot, fromSourceRoot);
-    if (
-      !samePath(otherSource, source) &&
-      isFile(otherSource) &&
-      compiledCandidates(otherSource, other).some((candidate) => samePath(candidate, compiled))
-    ) {
+    if (other.application.build.kind === "bundled") {
+      continue;
+    }
+
+    const otherSource = sourcesBuiltTo(compiled, other).find(
+      (candidate) =>
+        !samePath(candidate, source) &&
+        !samePath(candidate, compiled) &&
+        isFile(candidate) &&
+        compiledCandidates(candidate, other).some((path) => samePath(path, compiled)),
+    );
+    if (otherSource !== undefined) {
       return otherSource;
     }
   }
@@ -408,8 +462,69 @@ function sharedWith(
   return undefined;
 }
 
+/** The extensions a source file may have, for each compiled file it can become. */
+const SOURCE_EXTENSIONS = [...COMPILED_EXTENSIONS.keys()];
+
 /**
- * Where `nest build` writes `source`, as candidates tried in order. tsc
+ * The source files an application's build could write to `compiled`, as
+ * candidates: `compiledCandidates` read backwards — beside it, for tsc
+ * without an outDir; else at its path from the outDir under each root
+ * directory the build may compile from, or, for SWC, from the project, whole
+ * or with the source root's first directory put back.
+ */
+function sourcesBuiltTo(compiled: string, layout: ApplicationLayout): string[] {
+  const { application, projectDir, tsconfig } = layout;
+  const { build } = application;
+  const stem = compiled.slice(0, compiled.length - extname(compiled).length);
+  const asSources = (base: string) => SOURCE_EXTENSIONS.map((extension) => base + extension);
+  if (build.kind === "tsc" && tsconfig !== undefined && tsconfig.options.outDir === undefined) {
+    return asSources(stem);
+  }
+
+  const outDir =
+    build.kind === "swc" && build.outDir !== undefined
+      ? resolve(projectDir, build.outDir)
+      : outDirOf(projectDir, tsconfig);
+  const fromOutDir = pathInside(outDir, stem);
+  if (fromOutDir === undefined) {
+    return [];
+  }
+
+  const [firstDirectory] = application.sourceRoot
+    .split(/[\\/]/)
+    .filter((segment) => segment !== "" && segment !== ".");
+  const roots =
+    build.kind === "swc"
+      ? [projectDir, ...(firstDirectory === undefined ? [] : [join(projectDir, firstDirectory)])]
+      : compilerRoots(layout);
+  return [...new Set(roots.flatMap((root) => asSources(join(root, fromOutDir))))];
+}
+
+/**
+ * The root directories a compiled build may write a source's path from: an
+ * explicit `rootDir` alone, for tsc; otherwise the ones probed, in order — an
+ * explicit `rootDir`, the tsconfig's own directory, the project, the
+ * application's `root`, then its `sourceRoot`.
+ */
+function compilerRoots(layout: ApplicationLayout): string[] {
+  const { application, projectDir, tsconfig } = layout;
+  const rootDir = tsconfig?.options.rootDir;
+  if (application.build.kind === "tsc" && rootDir !== undefined) {
+    return [rootDir];
+  }
+
+  return [
+    rootDir,
+    tsconfig ? dirname(tsconfig.path) : undefined,
+    projectDir,
+    resolve(projectDir, application.root),
+    resolve(projectDir, application.sourceRoot),
+  ].filter((root): root is string => root !== undefined);
+}
+
+/**
+ * Where `nest build` writes `source`, as candidates — of which `pickCompiled`
+ * takes one only when no other exists. tsc
  * writes where its tsconfig says, and only there is looked: beside the source
  * when the tsconfig sets no `outDir`, and under the `outDir` at the source's
  * path from an explicit `rootDir` — anywhere else could only hold a stale
@@ -438,25 +553,13 @@ function compiledCandidates(source: string, layout: ApplicationLayout): string[]
     );
   }
 
-  const tsc = build.kind === "tsc";
-  if (tsc && tsconfig !== undefined && tsconfig.options.outDir === undefined) {
+  if (build.kind === "tsc" && tsconfig !== undefined && tsconfig.options.outDir === undefined) {
     return [compiledName(source)];
   }
 
   const outDir = outDirOf(projectDir, tsconfig);
-  const rootDir = tsconfig?.options.rootDir;
-  const roots =
-    tsc && rootDir !== undefined
-      ? [rootDir]
-      : [
-          rootDir,
-          tsconfig ? dirname(tsconfig.path) : undefined,
-          projectDir,
-          resolve(projectDir, application.root),
-          resolve(projectDir, application.sourceRoot),
-        ];
-  const candidates = roots.flatMap((root) => {
-    const path = root === undefined ? undefined : pathInside(root, source);
+  const candidates = compilerRoots(layout).flatMap((root) => {
+    const path = pathInside(root, source);
     return path === undefined ? [] : [join(outDir, compiledName(path))];
   });
 
@@ -732,15 +835,37 @@ export function notBuiltMessage(params: {
   return `No compiled ${rootName(root)} found: ${displayPath(mainFile, cwd)} boots it from ${displayPath(root.sourceFile, cwd)}, which has not been built${built}. ${buildAdvice(app)}, or run: ${command}`;
 }
 
-export function bothLayoutsMessage(params: {
+export function severalBuildsMessage(params: {
   mainFile: string;
   root: BootedRootModule;
   paths: readonly string[];
+  build: ApplicationBuild;
   command: string;
   cwd: string;
 }): string {
-  const { mainFile, root, paths, command, cwd } = params;
-  return `${displayPath(mainFile, cwd)} boots ${rootName(root)} from ${displayPath(root.sourceFile, cwd)}, which SWC has built to both ${paths.map((path) => displayPath(path, cwd)).join(" and ")}: Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build. Pass --entry with the current one, build again into an emptied outDir, or run: ${command}`;
+  const { mainFile, root, paths, build, command, cwd } = params;
+  const files = joinedPaths(paths, cwd);
+  const built =
+    build.kind === "swc" ? `which SWC has built to both ${files}` : `which has been built to ${files}`;
+  return `${displayPath(mainFile, cwd)} boots ${rootName(root)} from ${displayPath(root.sourceFile, cwd)}, ${built}: ${staleBuildsReason(build)}. Pass --entry with the current one, build again into an emptied outDir, or run: ${command}`;
+}
+
+/**
+ * Why a file built to more than one of its candidates is loaded from none:
+ * SWC's two layouts, one per Nest CLI, or tsc's for root directories it
+ * inferred differently from one build to another.
+ */
+export function staleBuildsReason(build: ApplicationBuild): string {
+  return build.kind === "swc"
+    ? "Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build"
+    : "each is where a build from a different root directory writes it, so all but one of them are left from older builds";
+}
+
+/** Paths for a message: `a and b`, `a, b and c`. */
+export function joinedPaths(paths: readonly string[], cwd: string): string {
+  const shown = paths.map((path) => displayPath(path, cwd));
+  const last = shown.pop();
+  return shown.length ? `${shown.join(", ")} and ${last ?? ""}` : (last ?? "");
 }
 
 export function sharedOutputMessage(params: {
@@ -948,7 +1073,7 @@ function explicitExport(
         : undefined) ?? { kind: "declared" };
     }
 
-    if (ts.isClassDeclaration(statement) && exportsClassAs(statement, exportName)) {
+    if (ts.isClassDeclaration(statement) && exportsDeclarationAs(statement, exportName)) {
       return { kind: "declared" };
     }
 
@@ -967,10 +1092,11 @@ function explicitExport(
       continue;
     }
 
+    // export function RootModule, or — only as `default` — export default
+    // function RootModule: a value, not a class.
     if (
       (ts.isFunctionDeclaration(statement) || ts.isEnumDeclaration(statement)) &&
-      hasModifier(statement, ts.SyntaxKind.ExportKeyword) &&
-      statement.name?.text === exportName
+      exportsDeclarationAs(statement, exportName)
     ) {
       return { kind: "opaque" };
     }
@@ -1089,8 +1215,15 @@ function hasModifier(node: ts.HasModifiers, kind: ts.SyntaxKind): boolean {
   return (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === kind);
 }
 
-/** Whether a class declaration exports the class as `exportName`: `export class X`, or `export default class`. */
-function exportsClassAs(statement: ts.ClassDeclaration, exportName: string): boolean {
+/**
+ * Whether a declaration exports what it declares as `exportName`:
+ * `export class X`, `export function X`, or — for `default` only, whatever it
+ * is named — `export default class`, `export default function`.
+ */
+function exportsDeclarationAs(
+  statement: ts.ClassDeclaration | ts.FunctionDeclaration | ts.EnumDeclaration,
+  exportName: string,
+): boolean {
   if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) {
     return false;
   }
@@ -1246,21 +1379,20 @@ function parseWithScopes(path: string, text: string): BoundMainFile {
 }
 
 /**
- * The first argument of every direct `NestFactory.create`-style call, in source
- * order — counting only the `NestFactory` main.ts takes from `@nestjs/core`,
- * each name resolved in its own scope: an object of main.ts's own that shares
- * the name, or a parameter, catch variable or local declaration that shadows
- * the import, boots nothing. (The load guard, which only refuses, counts any
+ * Every direct `NestFactory.create`-style call, in source order — counting
+ * only the `NestFactory` main.ts takes from `@nestjs/core`, each name resolved
+ * in its own scope: an object of main.ts's own that shares the name, or a
+ * parameter, catch variable or local declaration that shadows the import,
+ * boots nothing. (The load guard, which only refuses, counts any
  * `NestFactory`, scopes or not.)
  */
-function findBootCalls(main: BoundMainFile): (ts.Expression | undefined)[] {
-  const calls: (ts.Expression | undefined)[] = [];
+function findBootCalls(main: BoundMainFile): ts.CallExpression[] {
+  const calls: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = coreReference(node.expression, main, 0);
       if (callee?.kind === "method" && callee.name !== undefined && BOOT_METHODS.has(callee.name)) {
-        const argument: ts.Expression | undefined = node.arguments[0];
-        calls.push(argument);
+        calls.push(node);
       }
     }
 
@@ -1807,13 +1939,13 @@ function analyseModuleReference(
   if (ts.isPropertyAccessExpression(reference)) {
     // mods.RootModule, from import * as mods, or require("./root.module").RootModule
     const object = unwrap(reference.expression);
-    const specifier = ts.isIdentifier(object)
+    const namespace = ts.isIdentifier(object)
       ? namespaceSpecifier(object, main)
-      : freeRequireSpecifier(object, main);
-    if (specifier !== undefined) {
+      : requiredModule(object, main);
+    if (namespace !== undefined) {
       return {
         kind: "imported",
-        specifier,
+        ...namespace,
         exportName: reference.name.text,
         localName: ts.isIdentifier(object)
           ? `${object.text}.${reference.name.text}`
@@ -1826,11 +1958,28 @@ function analyseModuleReference(
   return { kind: "unknown" };
 }
 
+/** A module main.ts takes something from, and whether as an `import` or a `require`. */
+type ModuleImport = Pick<
+  Extract<RootArgument, { kind: "imported" }>,
+  "specifier" | "resolution"
+>;
+
+/** `require("./root.module")`, with CommonJS's own `require`, as the module it requires. */
+function requiredModule(
+  expression: ts.Expression,
+  main: BoundMainFile,
+): ModuleImport | undefined {
+  const specifier = freeRequireSpecifier(expression, main);
+  return specifier === undefined ? undefined : { specifier, resolution: "require" };
+}
+
 /**
  * What a name passed to `NestFactory` refers to, by the declaration the
  * checker finds for it in its own scope — so a local that shadows an import
  * is the local: an import, a class main.ts declares, or a variable followed
- * to what it was declared with, while it still holds that.
+ * to what it was declared with, while it still holds that. A variable that
+ * holds an imported class keeps its own name as main.ts's for it
+ * (`const Worker = WorkerModule`), so `--module` can choose it by either.
  */
 function nameReference(
   identifier: ts.Identifier,
@@ -1856,12 +2005,12 @@ function nameReference(
   const destructured = destructuredFrom(declaration, symbol, main);
   if (destructured !== undefined) {
     // const { RootModule } = require("./root.module");
-    const specifier = freeRequireSpecifier(destructured.initializer, main);
-    return specifier === undefined || destructured.property === undefined
+    const required = requiredModule(destructured.initializer, main);
+    return required === undefined || destructured.property === undefined
       ? { kind: "unknown" }
       : {
           kind: "imported",
-          specifier,
+          ...required,
           exportName: destructured.property,
           localName: name,
           dynamicMethod: undefined,
@@ -1880,25 +2029,38 @@ function nameReference(
     return { kind: "declared", name };
   }
 
-  return depth < MAX_CONSTANT_DEPTH
-    ? analyseRootArgument(declaration.initializer, main, depth + 1)
-    : { kind: "unknown" };
+  if (depth >= MAX_CONSTANT_DEPTH) {
+    return { kind: "unknown" };
+  }
+
+  const held = analyseRootArgument(declaration.initializer, main, depth + 1);
+  // One that holds RootModule.forRoot(...) holds a dynamic module, not the
+  // class, and keeps the class's name for the warning that names the call.
+  return held.kind === "imported" && held.dynamicMethod === undefined
+    ? { ...held, localName: name }
+    : held;
 }
 
 /** The module and export an import binds a name to: `import { X as Y } from`, `import X from`. */
 function importedExport(
   declaration: ts.Declaration,
-): { specifier: string; exportName: string } | undefined {
+): (ModuleImport & { exportName: string }) | undefined {
   if (ts.isImportSpecifier(declaration)) {
     const specifier = valueImportSpecifier(declaration.parent.parent);
     return declaration.isTypeOnly || specifier === undefined
       ? undefined
-      : { specifier, exportName: (declaration.propertyName ?? declaration.name).text };
+      : {
+          specifier,
+          resolution: "import",
+          exportName: (declaration.propertyName ?? declaration.name).text,
+        };
   }
 
   if (ts.isImportClause(declaration)) {
     const specifier = valueImportSpecifier(declaration);
-    return specifier === undefined ? undefined : { specifier, exportName: "default" };
+    return specifier === undefined
+      ? undefined
+      : { specifier, resolution: "import", exportName: "default" };
   }
 
   return undefined;
@@ -1911,38 +2073,49 @@ function importedExport(
 function namespaceSpecifier(
   identifier: ts.Identifier,
   main: BoundMainFile,
-): string | undefined {
+): ModuleImport | undefined {
   const symbol = main.checker.getSymbolAtLocation(identifier);
   const declaration = symbol?.declarations?.[0];
   if (symbol === undefined || declaration === undefined) {
     return undefined;
   }
 
+  const imported = (
+    specifier: string | undefined,
+    resolution: ModuleImport["resolution"],
+  ): ModuleImport | undefined =>
+    specifier === undefined ? undefined : { specifier, resolution };
+
   if (ts.isNamespaceImport(declaration)) {
-    return valueImportSpecifier(declaration.parent);
+    return imported(valueImportSpecifier(declaration.parent), "import");
   }
 
   if (ts.isImportEqualsDeclaration(declaration)) {
-    return importEqualsSpecifier(declaration);
+    return imported(importEqualsSpecifier(declaration), "require");
   }
 
   return ts.isVariableDeclaration(declaration) &&
     declaration.initializer !== undefined &&
     holdsItsInitializer(declaration, symbol, main)
-    ? freeRequireSpecifier(declaration.initializer, main)
+    ? requiredModule(declaration.initializer, main)
     : undefined;
 }
 
 /**
  * The source file an import in `containingFile` resolves to, as TypeScript
  * resolves it under the application's tsconfig: `paths` aliases, and a
- * `./root.module.js` specifier naming `root.module.ts`. Undefined for a
- * package's module, or one without code to load.
+ * `./root.module.js` specifier naming `root.module.ts`. An `import` resolves
+ * in the mode the file's own format gives it — ESM's, for an `.mts` file or a
+ * `"type": "module"` package under `node16`/`nodenext` — and a `require` —
+ * `import x = require()`, `require()` — always in CommonJS's, as the
+ * compiler does. Undefined for a package's module, or one without code to
+ * load.
  */
 function resolveImport(
   specifier: string,
   containingFile: string,
   layout: ApplicationLayout,
+  resolution: ModuleImport["resolution"] = "import",
 ): string | undefined {
   const options: ts.CompilerOptions = {
     ...layout.tsconfig?.options,
@@ -1964,7 +2137,9 @@ function resolveImport(
     host,
     undefined,
     undefined,
-    ts.getImpliedNodeFormatForFile(containingFile, undefined, host, options),
+    resolution === "require"
+      ? ts.ModuleKind.CommonJS
+      : ts.getImpliedNodeFormatForFile(containingFile, undefined, host, options),
   );
   if (
     !resolvedModule ||

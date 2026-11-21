@@ -13,6 +13,7 @@ import ts from "typescript";
 import type { GraphOutput } from "../types/graph-output.type";
 import {
   SPAWN_TIMEOUT_MS,
+  compile,
   installPackage,
   linkDependencies,
   readGraph,
@@ -212,6 +213,29 @@ function writeProject(
       );
     }
   }
+}
+
+/**
+ * Builds a project's application with tsc itself, from the tsconfig `nest
+ * build` would run it with: what lands where is the compiler's doing, and any
+ * diagnostic fails the fixture.
+ */
+function buildWithTsc(project: string, tsconfig: string): void {
+  const config = ts.getParsedCommandLineOfConfigFile(
+    join(workDir, "projects", project, tsconfig),
+    undefined,
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+      },
+    },
+  );
+  if (!config || config.errors.length) {
+    throw new Error(`${project}/${tsconfig} cannot be read`);
+  }
+
+  compile(config.fileNames, config.options);
 }
 
 /** `nest-graph-inspector export` in a project, as a user's shell runs it. */
@@ -573,10 +597,12 @@ export class MainModule {
       "rspack.config.js": 'module.exports = { target: "node" };\n',
     });
 
-    // E6: not built at all.
+    // E6: not built at all. no-loader.cjs is a --require that registers
+    // nothing, which leaves the TypeScript to Node.
     writeProject("unbuilt", {
       "tsconfig.json": TSCONFIG({ rootDir: "src", outDir: "dist" }),
       "ts-loader.cjs": TS_LOADER,
+      "no-loader.cjs": '"use strict";\n',
       "src/marker.ts": MARKER,
       "src/child.module.ts": moduleSource("ChildModule"),
       "src/unbuilt-root.module.ts": moduleSource("UnbuiltRootModule", [
@@ -758,24 +784,164 @@ export const RootModule = AppModule;
       { rootDir: "apps", outDir: "dist", files: apiSources },
     ]);
 
+    // E15: a tsconfig with an outDir and no rootDir, built by TypeScript 5,
+    // which took the sources' directory for its root, and again by
+    // TypeScript 6, which takes the tsconfig's: dist/ and dist/src/ both
+    // hold the root module, and one of them is stale.
+    const inferredRoots = {
+      "tsconfig.json": TSCONFIG({ outDir: "dist" }),
+      "ts-loader.cjs": TS_LOADER,
+      "src/marker.ts": MARKER,
+      "src/inferred-root.module.ts": moduleSource("InferredRootModule"),
+      "src/main.ts": mainSource("InferredRootModule", "./inferred-root.module"),
+    };
+    const inferredSources = Object.keys(inferredRoots).filter((file) => file.startsWith("src/"));
+    writeProject("tsc-inferred-roots", inferredRoots, [
+      { rootDir: "src", outDir: "dist", files: inferredSources },
+      { rootDir: "", outDir: "dist", files: inferredSources },
+    ]);
+
+    // E16: main.ts boots a root module it computes at runtime, then the one
+    // it imports: the import decides, and the other boot is said to be
+    // passed over.
+    const skippedBoot = {
+      "tsconfig.json": TSCONFIG({ rootDir: "src", outDir: "dist" }),
+      "src/marker.ts": MARKER,
+      "src/root.module.ts": moduleSource("RootModule"),
+      "src/root-for.ts": `import { RootModule } from "./root.module";
+
+export function rootFor(app: string | undefined): typeof RootModule {
+  void app;
+  return RootModule;
+}
+`,
+      "src/main.ts": `import { NestFactory } from "@nestjs/core";
+import { markRan } from "./marker";
+import { RootModule } from "./root.module";
+import { rootFor } from "./root-for";
+
+async function bootstrap(): Promise<void> {
+  markRan("bootstrap");
+  const context = await NestFactory.createApplicationContext(rootFor(process.env.APP));
+  await context.close();
+  const app = await NestFactory.create(RootModule);
+  await app.listen(3000);
+}
+
+void bootstrap();
+`,
+    };
+    writeProject("skipped-boot", skippedBoot, srcBuild(skippedBoot));
+
+    // E17: main.ts boots two root modules, each through a const of its own
+    // name, which --module can name.
+    const aliasRoots = {
+      ...twoRoots,
+      "src/main.ts": `import { NestFactory } from "@nestjs/core";
+import { ApiModule } from "./api.module";
+import { markRan } from "./marker";
+import { WorkerModule } from "./worker.module";
+
+const Api = ApiModule;
+const Worker = WorkerModule;
+
+async function bootstrap(): Promise<void> {
+  markRan("bootstrap");
+  const worker = await NestFactory.createApplicationContext(Worker);
+  await worker.init();
+  const api = await NestFactory.create(Api);
+  await api.listen(3000);
+}
+
+void bootstrap();
+`,
+    };
+    writeProject("alias-roots", aliasRoots, srcBuild(aliasRoots));
+
+    // E18: an .mts main.ts under NodeNext — an ES module in a CommonJS
+    // package — that takes its root module with import = require().
+    const mtsRequire = {
+      "tsconfig.json": TSCONFIG({
+        module: "nodenext",
+        moduleResolution: "nodenext",
+        rootDir: "src",
+        outDir: "dist",
+      }),
+      "src/marker.ts": MARKER,
+      "src/child.module.ts": moduleSource("ChildModule"),
+      "src/root.module.ts": moduleSource("RootModule", [["ChildModule", "./child.module"]]),
+      "src/main.mts": `import { NestFactory } from "@nestjs/core";
+import { markRan } from "./marker.js";
+import modules = require("./root.module");
+
+async function bootstrap(): Promise<void> {
+  markRan("bootstrap");
+  const app = await NestFactory.create(modules.RootModule);
+  await app.listen(3000);
+}
+
+void bootstrap();
+`,
+    };
+    writeProject("mts-require", mtsRequire, [
+      {
+        rootDir: "src",
+        outDir: "dist",
+        files: ["src/marker.ts", "src/child.module.ts", "src/root.module.ts"],
+      },
+    ]);
+
+    // E19: the convention's AppModule, while main.ts boots RootModule through
+    // a barrel that star-exports it — beside a default-exported function of
+    // that name, which exports no RootModule.
+    const barrelDefaultFunction = {
+      "tsconfig.json": TSCONFIG({ rootDir: "src", outDir: "dist" }),
+      "src/marker.ts": MARKER,
+      "src/app.module.ts": moduleSource("AppModule"),
+      "src/modules/root.module.ts": moduleSource("RootModule", [], "../marker"),
+      "src/modules/index.ts": `export * from "./root.module";
+
+export default function RootModule(): void {}
+`,
+      "src/main.ts": mainSource("RootModule", "./modules"),
+    };
+    writeProject(
+      "barrel-default-function",
+      barrelDefaultFunction,
+      srcBuild(barrelDefaultFunction),
+    );
+
     // E4, one source path in each application: api and worker each boot
-    // RootModule from their own root.module.ts, and tsc, inferring its root
-    // directory, writes either to dist/root.module.js — where api's is.
+    // RootModule from their own root.module.ts, and each builds with a
+    // tsconfig.app.json of its own — its sources, rootDir src/, outDir the
+    // project's dist/ — so tsc writes either to dist/root.module.js. Only
+    // api has been built, by tsc itself.
+    const ownTsConfig = (app: string) => ({
+      ...application(app),
+      compilerOptions: { tsConfigPath: `apps/${app}/tsconfig.app.json` },
+    });
+    const appTsConfig = (rootDir: string) =>
+      JSON.stringify({
+        extends: "../../tsconfig.json",
+        compilerOptions: { rootDir, outDir: "../../dist", types: ["node"] },
+        include: ["src/**/*"],
+      });
     const sameRootPath: Record<string, string> = {
       "nest-cli.json": JSON.stringify({
         monorepo: true,
         root: "apps/api",
         sourceRoot: "apps/api/src",
-        compilerOptions: { builder: "tsc" },
-        projects: { api: application("api"), worker: application("worker") },
+        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+        projects: { api: ownTsConfig("api"), worker: ownTsConfig("worker") },
       }),
-      "tsconfig.json": TSCONFIG({ outDir: "dist" }),
+      "tsconfig.json": TSCONFIG(),
       "ts-loader.cjs": TS_LOADER,
     };
     for (const [app, feature] of [
       ["api", "ApiFeatureModule"],
       ["worker", "WorkerFeatureModule"],
     ] as const) {
+      sameRootPath[`apps/${app}/tsconfig.app.json`] = appTsConfig("src");
       sameRootPath[`apps/${app}/src/marker.ts`] = MARKER;
       sameRootPath[`apps/${app}/src/feature.module.ts`] = moduleSource(feature);
       sameRootPath[`apps/${app}/src/root.module.ts`] = moduleSource("RootModule", [
@@ -783,13 +949,121 @@ export const RootModule = AppModule;
       ]);
       sameRootPath[`apps/${app}/src/main.ts`] = mainSource("RootModule", "./root.module");
     }
-    writeProject("monorepo-same-root-path", sameRootPath, [
-      {
-        rootDir: "apps/api/src",
-        outDir: "dist",
-        files: Object.keys(sameRootPath).filter((file) => file.startsWith("apps/api/src/")),
-      },
+    writeProject("monorepo-same-root-path", sameRootPath);
+    buildWithTsc("monorepo-same-root-path", "apps/api/tsconfig.app.json");
+
+    // E4, the same output path from sources at different paths: api's
+    // rootDir is apps/api, worker's apps/worker/src, so api's
+    // src/root.module.ts and worker's src/src/root.module.ts both become
+    // dist/src/root.module.js. Only api has been built, by tsc itself.
+    const rootDirs: Record<string, string> = {
+      "nest-cli.json": JSON.stringify({
+        monorepo: true,
+        root: "apps/api",
+        sourceRoot: "apps/api/src",
+        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+        projects: { api: ownTsConfig("api"), worker: ownTsConfig("worker") },
+      }),
+      "tsconfig.json": TSCONFIG(),
+      "ts-loader.cjs": TS_LOADER,
+      "apps/api/tsconfig.app.json": appTsConfig("."),
+      "apps/api/src/marker.ts": MARKER,
+      "apps/api/src/feature.module.ts": moduleSource("ApiFeatureModule"),
+      "apps/api/src/root.module.ts": moduleSource("RootModule", [
+        ["ApiFeatureModule", "./feature.module"],
+      ]),
+      "apps/api/src/main.ts": mainSource("RootModule", "./root.module"),
+      "apps/worker/tsconfig.app.json": appTsConfig("src"),
+      "apps/worker/src/marker.ts": MARKER,
+      "apps/worker/src/src/feature.module.ts": moduleSource("WorkerFeatureModule", [], "../marker"),
+      "apps/worker/src/src/root.module.ts": moduleSource(
+        "RootModule",
+        [["WorkerFeatureModule", "./feature.module"]],
+        "../marker",
+      ),
+      "apps/worker/src/main.ts": mainSource("RootModule", "./src/root.module"),
+    };
+    writeProject("monorepo-root-dirs", rootDirs);
+    buildWithTsc("monorepo-root-dirs", "apps/api/tsconfig.app.json");
+
+    // E4, a tsc application beside a webpack one, both with a root.module.ts
+    // at the top of their sources and dist/ as their outDir: only tsc writes
+    // a dist/root.module.js — webpack writes one bundle — so it is api's.
+    const bundledSibling: Record<string, string> = {
+      "nest-cli.json": JSON.stringify({
+        monorepo: true,
+        root: "apps/api",
+        sourceRoot: "apps/api/src",
+        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+        projects: {
+          api: ownTsConfig("api"),
+          worker: {
+            ...ownTsConfig("worker"),
+            compilerOptions: { builder: "webpack", tsConfigPath: "apps/worker/tsconfig.app.json" },
+          },
+        },
+      }),
+      "tsconfig.json": TSCONFIG(),
+      "dist/apps/worker/main.js": BUNDLE,
+    };
+    for (const [app, feature] of [
+      ["api", "ApiFeatureModule"],
+      ["worker", "WorkerFeatureModule"],
+    ] as const) {
+      bundledSibling[`apps/${app}/tsconfig.app.json`] = appTsConfig("src");
+      bundledSibling[`apps/${app}/src/marker.ts`] = MARKER;
+      bundledSibling[`apps/${app}/src/feature.module.ts`] = moduleSource(feature);
+      bundledSibling[`apps/${app}/src/root.module.ts`] = moduleSource("RootModule", [
+        [feature, "./feature.module"],
+      ]);
+      bundledSibling[`apps/${app}/src/main.ts`] = mainSource("RootModule", "./root.module");
+    }
+    writeProject("monorepo-bundled-sibling", bundledSibling);
+    buildWithTsc("monorepo-bundled-sibling", "apps/api/tsconfig.app.json");
+
+    // E4, --app's app.module.js in both SWC layouts: worker, the default
+    // project, is built by SWC from src/ with rootDir ".", so Nest CLI 12
+    // writes dist/src/ and Nest CLI 11 dist/. An older build left an
+    // app.module.js in the first; api's tsc, rootDir apps/api/src, writes
+    // its own AppModule to the second.
+    const swcTwoLayouts: Record<string, string> = {
+      "nest-cli.json": JSON.stringify({
+        monorepo: true,
+        root: "",
+        sourceRoot: "src",
+        compilerOptions: { builder: "swc", tsConfigPath: "tsconfig.json" },
+        projects: {
+          worker: {
+            type: "application",
+            root: "",
+            sourceRoot: "src",
+            compilerOptions: { builder: "swc", tsConfigPath: "tsconfig.json" },
+          },
+          api: {
+            ...application("api"),
+            compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+          },
+        },
+      }),
+      "tsconfig.json": TSCONFIG({ rootDir: ".", outDir: "dist", types: ["node"] }),
+      "apps/api/tsconfig.app.json": JSON.stringify({
+        extends: "../../tsconfig.json",
+        compilerOptions: { rootDir: "src" },
+        include: ["src/**/*"],
+      }),
+      "apps/api/src/marker.ts": MARKER,
+      "apps/api/src/app.module.ts": moduleSource("AppModule"),
+      "apps/api/src/main.ts": mainSource("AppModule", "./app.module"),
+      "src/marker.ts": MARKER,
+      "src/worker.module.ts": moduleSource("WorkerModule"),
+      "src/main.ts": mainSource("WorkerModule", "./worker.module"),
+      "dist/src/app.module.js": STALE_MODULE,
+    };
+    writeProject("monorepo-swc-two-layouts", swcTwoLayouts, [
+      // Nest CLI 11's layout for worker's modules; its main.js is api's.
+      { rootDir: "src", outDir: "dist", files: ["src/marker.ts", "src/worker.module.ts"] },
     ]);
+    buildWithTsc("monorepo-swc-two-layouts", "apps/api/tsconfig.app.json");
   }, 180_000);
 
   afterAll(() => {
@@ -901,6 +1175,47 @@ export const RootModule = AppModule;
       });
     }, SPAWN_TIMEOUT_MS);
 
+    it("never loads, for --app, a root module another build wrote from a source at another path", async () => {
+      const [refused, loaded] = await Promise.all([
+        exportIn("monorepo-root-dirs", ["--app", "worker"]),
+        exportIn("monorepo-root-dirs", ["--app", "worker", "--require", "./ts-loader.cjs"]),
+      ]);
+
+      expectRefused(
+        refused,
+        1,
+        "nest-graph-inspector: apps/worker/src/main.ts boots RootModule from apps/worker/src/src/root.module.ts, built to dist/src/root.module.js — but another application's apps/api/src/root.module.ts builds to dist/src/root.module.js too, so whose it is cannot be told. Pass --entry with the file to load, or load the TypeScript source: ",
+      );
+      expectExported(loaded, "RootModule", {
+        present: ["WorkerFeatureModule"],
+        absent: ["ApiFeatureModule"],
+      });
+      expect(loaded.stderr).toContain(
+        "nest-graph-inspector: entry apps/worker/src/src/root.module.ts (RootModule, from apps/worker/src/main.ts)\n",
+      );
+    }, SPAWN_TIMEOUT_MS);
+
+    it("exports, for --app, its tsc build's own file, which a webpack application with a source at that path never writes", async () => {
+      const result = await exportIn("monorepo-bundled-sibling", ["--app", "api"]);
+
+      expectExported(result, "RootModule", {
+        present: ["ApiFeatureModule"],
+        absent: ["WorkerFeatureModule"],
+      });
+      expect(result.stderr).toContain(
+        "nest-graph-inspector: entry dist/root.module.js (RootModule, from apps/api/src/main.ts)\n",
+      );
+    }, SPAWN_TIMEOUT_MS);
+
+    it("takes neither of --app's two SWC layouts of app.module.js, before setting aside the one another application writes, and never loads the stale one", async () => {
+      const result = await exportIn("monorepo-swc-two-layouts", ["--app", "worker"]);
+
+      expectExported(result, "WorkerModule", { present: [], absent: ["AppModule"] });
+      expect(result.stderr).toContain(
+        "nest-graph-inspector: entry dist/worker.module.js (WorkerModule, from src/main.ts)\n",
+      );
+    }, SPAWN_TIMEOUT_MS);
+
     it("never takes another application's app.module.js from an outDir they share", async () => {
       const [worker, detected] = await Promise.all([
         exportIn("monorepo-shared-out-dir", ["--app", "worker"]),
@@ -995,6 +1310,15 @@ export const RootModule = AppModule;
     );
     expect(unbuilt.stderr).toMatch(/ --require ts-node\/register\n$/);
     expectExported(loaded, "UnbuiltRootModule", { present: ["ChildModule"] });
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E6: says what a --require loader must do when the TypeScript source it was to load fails to", async () => {
+    const result = await exportIn("unbuilt", ["--require", "./no-loader.cjs"]);
+
+    expectRefused(result, 1, "nest-graph-inspector: Loading src/unbuilt-root.module.ts failed: ");
+    expect(result.stderr).toContain(
+      "\nsrc/unbuilt-root.module.ts is TypeScript, loaded through --require ./no-loader.cjs: the loader must register .ts files and emit the decorator metadata Nest reads (--require ts-node/register does both).\n",
+    );
   }, SPAWN_TIMEOUT_MS);
 
   it("E7: refuses a one-file application, however it is pointed at, loading nothing", async () => {
@@ -1114,6 +1438,62 @@ export const RootModule = AppModule;
     expectExported(loaded, "SwcRootModule", { present: [] });
     expect(loaded.stderr).toContain(
       "nest-graph-inspector: entry apps/api/src/swc-root.module.ts (SwcRootModule, from apps/api/src/main.ts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E15: takes neither of two files tsc wrote from root directories it inferred differently, unless told which or given a loader", async () => {
+    const [refused, given, loaded] = await Promise.all([
+      exportIn("tsc-inferred-roots"),
+      exportIn("tsc-inferred-roots", ["--entry", "dist/src/inferred-root.module.js"]),
+      exportIn("tsc-inferred-roots", ["--require", "./ts-loader.cjs"]),
+    ]);
+
+    expectRefused(
+      refused,
+      1,
+      "nest-graph-inspector: src/main.ts boots InferredRootModule from src/inferred-root.module.ts, which has been built to dist/src/inferred-root.module.js and dist/inferred-root.module.js: each is where a build from a different root directory writes it, so all but one of them are left from older builds. Pass --entry with the current one, build again into an emptied outDir, or run: ",
+    );
+    expectExported(given, "InferredRootModule", { present: [] });
+    expectExported(loaded, "InferredRootModule", { present: [] });
+    expect(loaded.stderr).toContain(
+      "nest-graph-inspector: entry src/inferred-root.module.ts (InferredRootModule, from src/main.ts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E16: says which boot it passed over, by line, when another boot's root module decides", async () => {
+    const result = await exportIn("skipped-boot");
+
+    expectExported(result, "RootModule", { present: [] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: entry dist/root.module.js (RootModule, from src/main.ts)\n" +
+        "nest-graph-inspector: skipped src/main.ts:8 NestFactory.createApplicationContext(rootFor(process.env.APP)): its root module is not an import the export can follow\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E17: takes the root module --module names by the const main.ts boots it through", async () => {
+    const result = await exportIn("alias-roots", ["--module", "Worker"]);
+
+    expectExported(result, "WorkerModule", { present: [], absent: ["ApiModule"] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: entry dist/worker.module.js (WorkerModule, from src/main.ts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E18: resolves an .mts main.ts's import = require() as CommonJS does, without an extension", async () => {
+    const result = await exportIn("mts-require");
+
+    expectExported(result, "RootModule", { present: ["ChildModule"] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: entry dist/root.module.js (RootModule, from src/main.mts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E19: warns that main.ts boots another module, through a barrel whose default-exported function of that name hides nothing", async () => {
+    const result = await exportIn("barrel-default-function");
+
+    expectExported(result, "AppModule", { present: [], absent: ["RootModule"] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: warning: src/main.ts boots RootModule from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module RootModule to export RootModule.\n",
     );
   }, SPAWN_TIMEOUT_MS);
 

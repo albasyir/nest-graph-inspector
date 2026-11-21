@@ -345,6 +345,51 @@ describe("root module detection", () => {
       expect(detect()).toMatchObject({ origin: "main", path: compiled });
     });
 
+    describe("an .mts main.ts under NodeNext, an ES module of a CommonJS package", () => {
+      beforeEach(() => {
+        write(
+          "tsconfig.json",
+          JSON.stringify({
+            compilerOptions: {
+              module: "nodenext",
+              moduleResolution: "nodenext",
+              rootDir: "src",
+              outDir: "dist",
+            },
+          }),
+        );
+        write("src/root.module.ts", moduleSource("RootModule"));
+      });
+      const bootingFrom = (imports: string, root: string) =>
+        `import { NestFactory } from "@nestjs/core";\n${imports}\n\nvoid NestFactory.create(${root}).then((app) => app.listen(3000));\n`;
+
+      it("resolves import = require() as require does, in CommonJS mode, without an extension", () => {
+        write(
+          "src/main.mts",
+          bootingFrom('import modules = require("./root.module");', "modules.RootModule"),
+        );
+        const compiled = write("dist/root.module.js", compiledModule("RootModule"));
+
+        expect(detect()).toMatchObject({
+          origin: "main",
+          path: compiled,
+          moduleName: "RootModule",
+          mainFile: at("src/main.mts"),
+        });
+      });
+
+      it("resolves an import in the file's own ESM mode, where a relative path needs its extension", () => {
+        write("dist/root.module.js", compiledModule("RootModule"));
+        write("dist/main.mjs", COMPILED_MAIN);
+        write("src/main.mts", bootingFrom('import { RootModule } from "./root.module";', "RootModule"));
+
+        expect(() => detect()).toThrow(conventionError());
+
+        write("src/main.mts", bootingFrom('import { RootModule } from "./root.module.js";', "RootModule"));
+        expect(detect()).toMatchObject({ origin: "main", path: at("dist/root.module.js") });
+      });
+    });
+
     it.each([
       [
         "create<NestFastifyApplication>(root, adapter)",
@@ -639,6 +684,67 @@ void bootstrap();
       });
     });
 
+    describe("root modules main.ts names through a const of its own", () => {
+      beforeEach(() => {
+        write("tsconfig.json", STANDARD_TSCONFIG);
+        write(
+          "src/main.ts",
+          `import { NestFactory } from "@nestjs/core";
+import { ApiModule } from "./api.module";
+import { WorkerModule } from "./worker.module";
+
+const Api = ApiModule;
+const Worker = WorkerModule;
+
+async function bootstrap() {
+  const api = await NestFactory.create(Api);
+  const worker = await NestFactory.createMicroservice(Worker, {});
+  await Promise.all([api.listen(3000), worker.listen()]);
+}
+void bootstrap();
+`,
+        );
+        write("src/api.module.ts", moduleSource("ApiModule"));
+        write("src/worker.module.ts", moduleSource("WorkerModule"));
+        write("dist/api.module.js", compiledModule("ApiModule"));
+        write("dist/worker.module.js", compiledModule("WorkerModule"));
+      });
+
+      it.each(["Worker", "WorkerModule"])("takes the one --module %s names: the const's name, or the class's", (module) => {
+        expect(detect({ module })).toMatchObject({
+          origin: "main",
+          path: at("dist/worker.module.js"),
+          moduleName: "WorkerModule",
+        });
+      });
+
+      it("lists them by the names their files export them under", () => {
+        expect(() => detect()).toThrow(
+          new CliError(
+            "src/main.ts boots 2 root modules (ApiModule, WorkerModule). Pass --module <name>.",
+          ),
+        );
+      });
+    });
+
+    it("names the class, not the const, in the warning for a const that holds its forRoot()", () => {
+      const compiled = writeRootModuleProject(
+        mainSource(
+          'import { RootModule } from "./root.module";\n\nconst Root = RootModule.forRoot({ url: process.env.DATABASE_URL });',
+          "NestFactory.create(Root)",
+        ),
+      );
+
+      expect(detect()).toMatchObject({
+        origin: "main",
+        path: compiled,
+        moduleName: "RootModule",
+        warnings: [
+          "src/main.ts boots RootModule.forRoot(...); exporting RootModule without the options main.ts passes to it.",
+        ],
+      });
+    });
+
     it("counts a method destructured from NestFactory by its syntax alone", () => {
       // A heuristic over the syntax, not a claim that the call boots: Nest's
       // create() reads `this`, so called without its receiver it throws.
@@ -799,6 +905,39 @@ void bootstrap();
           path: compiled,
           moduleName: "RootModule",
         });
+      });
+    });
+
+    it("says which boots it passed over, by line, when another decides", () => {
+      const compiled = writeRootModuleProject(`import { NestFactory } from "@nestjs/core";
+import { HostModule } from "@acme/host";
+import { RootModule } from "./root.module";
+import { rootFor } from "./root-for";
+
+async function bootstrap() {
+  const context = await NestFactory.createApplicationContext(
+    rootFor(process.env.APP ?? "an application name long enough to be cut short"),
+    { logger: false },
+  );
+  await context.close();
+  await NestFactory.create(HostModule);
+  const app = await NestFactory.create(RootModule);
+  await app.listen(3000);
+}
+void bootstrap();
+`);
+
+      expect(detect()).toEqual({
+        origin: "main",
+        path: compiled,
+        moduleName: "RootModule",
+        mainFile: at("src/main.ts"),
+        notes: [
+          "entry dist/root.module.js (RootModule, from src/main.ts)",
+          'skipped src/main.ts:7 NestFactory.createApplicationContext(rootFor(process.env.APP ?? "an application…: its root module is not an import the export can follow',
+          "skipped src/main.ts:12 NestFactory.create(HostModule): its root module is not an import the export can follow",
+        ],
+        warnings: [],
       });
     });
 
@@ -1424,14 +1563,211 @@ export class ${root} {}
       });
 
       it("takes a file only the application's own build writes", () => {
+        // The flattened file gone: beside it, worker's would be one of two.
+        rmSync(at("dist/root.module.js"));
         const compiled = write("dist/apps/worker/src/root.module.js", compiledModule("RootModule"));
 
         expect(detect({ app: "worker" })).toMatchObject({ origin: "main", path: compiled });
       });
 
+      it("takes neither of two files worker's build could have written, before asking whose either is", () => {
+        write("dist/apps/worker/src/root.module.js", compiledModule("RootModule"));
+
+        expect(() => detect({ app: "worker", argv: ["export", "--app", "worker"] })).toThrow(
+          new CliError(
+            "apps/worker/src/main.ts boots RootModule from apps/worker/src/root.module.ts, which has been built to dist/apps/worker/src/root.module.js and dist/root.module.js: each is where a build from a different root directory writes it, so all but one of them are left from older builds. Pass --entry with the current one, build again into an emptied outDir, or run: nest-graph-inspector export --app worker --require ts-node/register",
+          ),
+        );
+      });
+
       it("will not take it for the default project either", () => {
         expect(() => detect()).toThrow(
           /another application's apps\/worker\/src\/root\.module\.ts builds to dist\/root\.module\.js too/,
+        );
+      });
+    });
+
+    /** api and worker, each with a tsconfig.app.json of its own that `compilerOptions` completes. */
+    const writeOwnTsConfigs = (
+      compilerOptions: Record<"api" | "worker", Record<string, unknown>>,
+      builders: Partial<Record<"api" | "worker", unknown>> = {},
+    ) => {
+      const application = (app: "api" | "worker") => ({
+        type: "application",
+        root: `apps/${app}`,
+        sourceRoot: `apps/${app}/src`,
+        compilerOptions: {
+          tsConfigPath: `apps/${app}/tsconfig.app.json`,
+          ...(builders[app] === undefined ? {} : { builder: builders[app] }),
+        },
+      });
+      write(
+        "nest-cli.json",
+        JSON.stringify({
+          monorepo: true,
+          root: "apps/api",
+          sourceRoot: "apps/api/src",
+          compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+          projects: { api: application("api"), worker: application("worker") },
+        }),
+      );
+      write("tsconfig.json", JSON.stringify({ compilerOptions: { module: "commonjs" } }));
+      for (const app of ["api", "worker"] as const) {
+        write(
+          `apps/${app}/tsconfig.app.json`,
+          JSON.stringify({
+            extends: "../../tsconfig.json",
+            compilerOptions: compilerOptions[app],
+            include: ["src/**/*"],
+          }),
+        );
+      }
+    };
+
+    describe("applications whose builds take different root directories", () => {
+      // api's rootDir is apps/api, worker's apps/worker/src, and both write to
+      // dist/: api's src/root.module.ts and worker's src/src/root.module.ts
+      // both become dist/src/root.module.js.
+      beforeEach(() => {
+        writeOwnTsConfigs({
+          api: { rootDir: ".", outDir: "../../dist" },
+          worker: { rootDir: "src", outDir: "../../dist" },
+        });
+        write(
+          "apps/api/src/main.ts",
+          mainSource('import { RootModule } from "./root.module";', "NestFactory.create(RootModule)"),
+        );
+        write("apps/api/src/root.module.ts", moduleSource("RootModule"));
+        write(
+          "apps/worker/src/main.ts",
+          mainSource('import { RootModule } from "./src/root.module";', "NestFactory.create(RootModule)"),
+        );
+        write("apps/worker/src/src/root.module.ts", moduleSource("RootModule"));
+        // Only api has been built.
+        write("dist/src/root.module.js", compiledModule("RootModule"));
+      });
+
+      it("will not take, for --app, a file the other's build writes from a source at another path", () => {
+        expect(() => detect({ app: "worker", argv: ["export", "--app", "worker"] })).toThrow(
+          new CliError(
+            "apps/worker/src/main.ts boots RootModule from apps/worker/src/src/root.module.ts, built to dist/src/root.module.js — but another application's apps/api/src/root.module.ts builds to dist/src/root.module.js too, so whose it is cannot be told. Pass --entry with the file to load, or load the TypeScript source: TS_NODE_PROJECT=apps/worker/tsconfig.app.json nest-graph-inspector export --app worker --require ts-node/register",
+          ),
+        );
+        expect(detect({ app: "worker", hasLoader: true })).toMatchObject({
+          origin: "main",
+          path: at("apps/worker/src/src/root.module.ts"),
+        });
+      });
+    });
+
+    it("takes a file a bundled application's build could not have written, though it has a source at that path", () => {
+      // api built by tsc into dist/, worker by webpack into one main.js: only
+      // tsc writes a dist/root.module.js.
+      writeOwnTsConfigs(
+        {
+          api: { rootDir: "src", outDir: "../../dist" },
+          worker: { rootDir: "src", outDir: "../../dist" },
+        },
+        { worker: "webpack" },
+      );
+      for (const app of ["api", "worker"]) {
+        write(
+          `apps/${app}/src/main.ts`,
+          mainSource('import { RootModule } from "./root.module";', "NestFactory.create(RootModule)"),
+        );
+        write(`apps/${app}/src/root.module.ts`, moduleSource("RootModule"));
+      }
+      const compiled = write("dist/root.module.js", compiledModule("RootModule"));
+
+      expect(detect({ app: "api" })).toMatchObject({ origin: "main", path: compiled });
+    });
+
+    describe("--app's app.module.js built by SWC in both layouts, one of them another application's path", () => {
+      // worker, the default project, is built by SWC from src/ with rootDir
+      // ".", so Nest CLI 12 writes dist/src/ and Nest CLI 11 dist/; api's tsc,
+      // its rootDir apps/api/src, writes dist/ too.
+      beforeEach(() => {
+        const worker = {
+          type: "application",
+          root: "",
+          sourceRoot: "src",
+          compilerOptions: { builder: "swc", tsConfigPath: "tsconfig.json" },
+        };
+        write(
+          "nest-cli.json",
+          JSON.stringify({
+            monorepo: true,
+            root: "",
+            sourceRoot: "src",
+            compilerOptions: { builder: "swc", tsConfigPath: "tsconfig.json" },
+            projects: {
+              worker,
+              api: {
+                type: "application",
+                root: "apps/api",
+                sourceRoot: "apps/api/src",
+                compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+              },
+            },
+          }),
+        );
+        write(
+          "tsconfig.json",
+          JSON.stringify({ compilerOptions: { module: "commonjs", rootDir: ".", outDir: "dist" } }),
+        );
+        write(
+          "apps/api/tsconfig.app.json",
+          JSON.stringify({ extends: "../../tsconfig.json", compilerOptions: { rootDir: "src" } }),
+        );
+        write(
+          "src/main.ts",
+          mainSource('import { WorkerModule } from "./worker.module";', "NestFactory.create(WorkerModule)"),
+        );
+        write("src/worker.module.ts", moduleSource("WorkerModule"));
+        write("dist/worker.module.js", compiledModule("WorkerModule"));
+      });
+
+      it("takes neither, before setting aside the one another application's build could write", () => {
+        write("dist/src/app.module.js", compiledModule("AppModule"));
+        write("dist/app.module.js", compiledModule("AppModule"));
+
+        expect(detect({ app: "worker" })).toMatchObject({
+          origin: "main",
+          path: at("dist/worker.module.js"),
+          moduleName: "WorkerModule",
+        });
+      });
+
+      it("takes the one there is when it is worker's alone", () => {
+        const entry = write("dist/src/app.module.js", compiledModule("AppModule"));
+
+        expect(detect({ app: "worker" })).toMatchObject({ origin: "convention", path: entry });
+      });
+
+      it("takes, of one, none another application's build could write too, and says why when main.ts gives nothing to follow", () => {
+        write("dist/app.module.js", compiledModule("AppModule"));
+        expect(detect({ app: "worker" })).toMatchObject({
+          origin: "main",
+          path: at("dist/worker.module.js"),
+        });
+
+        rmSync(at("src/main.ts"));
+        expect(() => detect({ app: "worker" })).toThrow(
+          new CliError(
+            "dist/app.module.js is where worker's build writes its app.module.js, but another application's build writes its own there too, so whose it is cannot be told. Pass --entry <file>.",
+          ),
+        );
+      });
+
+      it("says which files, when main.ts gives nothing to follow either", () => {
+        write("dist/src/app.module.js", compiledModule("AppModule"));
+        write("dist/app.module.js", compiledModule("AppModule"));
+        rmSync(at("src/main.ts"));
+
+        expect(() => detect({ app: "worker" })).toThrow(
+          new CliError(
+            "SWC has built worker's app.module.js to both dist/src/app.module.js and dist/app.module.js: Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build. Pass --entry with the current one, or build again into an emptied outDir.",
+          ),
         );
       });
     });
@@ -1574,6 +1910,45 @@ export class ${root} {}
 
       const compiled = write("dist/src/root.module.js", compiledModule("RootModule"));
       expect(detect()).toMatchObject({ origin: "main", path: compiled });
+    });
+
+    describe("a tsconfig with an outDir and no rootDir, whose root directory tsc infers", () => {
+      beforeEach(() => {
+        write("tsconfig.json", JSON.stringify({ compilerOptions: { module: "commonjs", outDir: "dist" } }));
+      });
+
+      it.each([
+        // TypeScript 6 takes the tsconfig's directory.
+        ["the tsconfig's directory", "dist/src/root.module.js"],
+        // TypeScript 5 took the common directory of the sources.
+        ["the sources' directory", "dist/root.module.js"],
+      ])("takes the one file there is, built from %s", (_root, path) => {
+        const compiled = write(path, compiledModule("RootModule"));
+
+        expect(detect()).toMatchObject({ origin: "main", path: compiled });
+      });
+
+      it("takes neither of two, one left from a build that inferred another root directory", () => {
+        write("dist/src/root.module.js", compiledModule("RootModule"));
+        write("dist/root.module.js", compiledModule("RootModule"));
+
+        expect(() => detect()).toThrow(
+          new CliError(
+            "src/main.ts boots RootModule from src/root.module.ts, which has been built to dist/src/root.module.js and dist/root.module.js: each is where a build from a different root directory writes it, so all but one of them are left from older builds. Pass --entry with the current one, build again into an emptied outDir, or run: nest-graph-inspector export --require ts-node/register",
+          ),
+        );
+        expect(detect({ hasLoader: true })).toMatchObject({
+          origin: "main",
+          path: at("src/root.module.ts"),
+        });
+      });
+
+      it("still finds app.module.js by convention, as it always has, when both are there", () => {
+        const entry = write("dist/app.module.js", compiledModule("AppModule"));
+        write("dist/src/app.module.js", compiledModule("AppModule"));
+
+        expect(detect()).toMatchObject({ origin: "convention", path: entry });
+      });
     });
   });
 

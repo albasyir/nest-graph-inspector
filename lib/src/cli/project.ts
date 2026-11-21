@@ -25,7 +25,6 @@ import {
 import {
   analyseMainFile,
   assertLoadableEntry,
-  bothLayoutsMessage,
   buildAdvice,
   bundledMessage,
   chooseRootModule,
@@ -34,15 +33,19 @@ import {
   conventionWarnings,
   declaresRootMessage,
   forRootWarning,
+  joinedPaths,
   loaderCommand,
   locateRootModule,
   notBuiltMessage,
   pickCompiled,
   samePath,
+  severalBuildsMessage,
   sharedOutputMessage,
+  staleBuildsReason,
   type BootedRootModule,
   type ConventionCheck,
   type RootModuleEntry,
+  type SkippedBoot,
 } from "./root-module-detection";
 
 export const PACKAGE_NAME = "nest-graph-inspector";
@@ -391,9 +394,19 @@ function resolveFromMainFile({
     notes: [
       ...(selectionNote === undefined ? [] : [selectionNote]),
       `entry ${displayPath(path, cwd)} (${moduleName}, from ${displayPath(analysis.mainFile, cwd)})`,
+      ...analysis.skipped.map((skipped) => skippedBootNote(analysis.mainFile, skipped, cwd)),
     ],
     warnings: forRoot === undefined ? [] : [forRoot],
   };
+}
+
+/**
+ * A boot main.ts makes that the export passed over, said so the choice it
+ * made is plain: its root module is only known at runtime, or comes from a
+ * package.
+ */
+function skippedBootNote(mainFile: string, skipped: SkippedBoot, cwd: string): string {
+  return `skipped ${displayPath(mainFile, cwd)}:${skipped.line} ${skipped.call}: its root module is not an import the export can follow`;
 }
 
 /** Why the root module main.ts boots has no file the export will load, and what to do. */
@@ -427,8 +440,15 @@ function unlocatedMessage(
         command,
         cwd,
       });
-    case "both-layouts":
-      return bothLayoutsMessage({ mainFile, root, paths: located.paths, command, cwd });
+    case "several":
+      return severalBuildsMessage({
+        mainFile,
+        root,
+        paths: located.paths,
+        build: layout.application.build,
+        command,
+        cwd,
+      });
     case "shared":
       return sharedOutputMessage({
         mainFile,
@@ -508,9 +528,11 @@ function conventionNotes(found: {
 }
 
 /**
- * `--app`'s conventional `app.module.js`: the first of its own that exists —
- * unless SWC has built it in both Nest CLIs' layouts. When there is none,
- * why — for main.ts's analysis to fall back on.
+ * `--app`'s conventional `app.module.js`: the one of its candidates that
+ * exists, when it is plainly the application's own. Which exist is settled
+ * first — more than one means all but one are stale, and none is taken —
+ * and only then whose the one there is. When none is taken, why — for main.ts's
+ * analysis to fall back on.
  */
 function detectApplicationEntry(
   layout: ApplicationLayout,
@@ -518,28 +540,38 @@ function detectApplicationEntry(
   cwd: string,
   app: string,
 ): Detection {
-  const candidates = ownedConventionalEntries(layout, config, cwd);
-  const show = (paths: readonly string[], separator: string) =>
-    paths.map((path) => displayPath(path, cwd)).join(separator);
-  const compiled = pickCompiled(candidates, layout);
+  const candidates = conventionalEntryCandidates(layout);
+  const { build } = layout.application;
+  const failed = (message: string): Detection => ({
+    kind: "failed",
+    error: new CliError(message),
+  });
+  const compiled = pickCompiled(candidates);
   switch (compiled.kind) {
     case "found":
-      return { kind: "found", path: compiled.path };
-    case "both-layouts":
-      return {
-        kind: "failed",
-        error: new CliError(
-          `SWC has built ${app}'s ${ROOT_MODULE_FILE} to both ${show(compiled.paths, " and ")}: Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build. Pass --entry with the current one, or build again into an emptied outDir.`,
-        ),
-      };
+      return ownedConventionalEntries(layout, config, cwd).some((owned) =>
+        samePath(owned, compiled.path),
+      )
+        ? { kind: "found", path: compiled.path }
+        : failed(
+            `${displayPath(compiled.path, cwd)} is where ${app}'s build writes its ${ROOT_MODULE_FILE}, but another application's build writes its own there too, so whose it is cannot be told. Pass --entry <file>.`,
+          );
+    case "several": {
+      const built =
+        build.kind === "swc"
+          ? `SWC has built ${app}'s ${ROOT_MODULE_FILE} to both`
+          : `${app}'s ${ROOT_MODULE_FILE} has been built to`;
+      return failed(
+        `${built} ${joinedPaths(compiled.paths, cwd)}: ${staleBuildsReason(build)}. Pass --entry with the current one, or build again into an emptied outDir.`,
+      );
+    }
     case "missing": {
-      const lookedFor = candidates.length ? ` (looked for ${show(candidates, ", ")})` : "";
-      return {
-        kind: "failed",
-        error: new CliError(
-          `No compiled ${ROOT_MODULE_FILE} found for ${app}${lookedFor}. ${buildAdvice(app)}, or pass --entry <file>.`,
-        ),
-      };
+      const lookedFor = candidates.length
+        ? ` (looked for ${candidates.map((path) => displayPath(path, cwd)).join(", ")})`
+        : "";
+      return failed(
+        `No compiled ${ROOT_MODULE_FILE} found for ${app}${lookedFor}. ${buildAdvice(app)}, or pass --entry <file>.`,
+      );
     }
     default: {
       const _exhaustive: never = compiled;
@@ -670,7 +702,8 @@ function findFiles(dir: string, fileName: string, depth: number): string[] {
     });
 }
 
-function isTypeScriptFile(path: string): boolean {
+/** Whether a file is TypeScript, which Node loads only through a `--require` loader. */
+export function isTypeScriptFile(path: string): boolean {
   return TYPESCRIPT_EXTENSIONS.has(extname(path));
 }
 
