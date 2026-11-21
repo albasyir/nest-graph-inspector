@@ -28,6 +28,7 @@ import {
   bundledMessage,
   chooseRootModule,
   conventionCheck,
+  conventionalEntryCandidates,
   conventionWarnings,
   declaresRootMessage,
   forRootWarning,
@@ -479,24 +480,23 @@ function detectApplicationEntry(
     return { kind: "found", path: found };
   }
 
-  const outDir = outDirOf(layout.projectDir, layout.tsconfig);
+  const name = layout.application.name ?? "the application";
+  const lookedFor = candidates.length
+    ? ` (looked for ${candidates.map((path) => displayPath(path, cwd)).join(", ")})`
+    : "";
   return {
     kind: "failed",
     error: new CliError(
-      isDirectory(outDir)
-        ? `No ${ROOT_MODULE_FILE} found under ${displayPath(outDir, cwd)} (looked for ${candidates
-            .map((path) => displayPath(path, cwd))
-            .join(" and ")}). ${BUILD_HINT}`
-        : `No compiled application found: ${displayPath(outDir, cwd)} does not exist. ${BUILD_HINT}`,
+      `No compiled ${ROOT_MODULE_FILE} found for ${name}${lookedFor}. ${BUILD_HINT}`,
     ),
   };
 }
 
 /**
- * The `app.module.js` files that are plainly an application's own output, in
- * the convention's order: `<outDir>/app.module.js` — unless an application
- * with other sources is built into that outDir too, when the file could be
- * either's — and `<outDir>/<sourceRoot>/app.module.js`.
+ * The `app.module.js` files that are plainly an application's own output:
+ * where its build writes `<sourceRoot>/app.module.ts`
+ * (`conventionalEntryCandidates`), less any path another application's
+ * build could write its own to — a file there could be either's.
  */
 function ownedConventionalEntries(
   layout: ApplicationLayout,
@@ -504,20 +504,16 @@ function ownedConventionalEntries(
   cwd: string,
 ): string[] {
   const { application, projectDir } = layout;
-  const outDir = outDirOf(projectDir, layout.tsconfig);
   const sources = resolve(projectDir, application.sourceRoot);
-  const shared = readEveryLayout(projectDir, config, cwd).some(
-    (other) =>
-      !samePath(resolve(projectDir, other.application.sourceRoot), sources) &&
-      samePath(outDirOf(projectDir, other.tsconfig), outDir),
-  );
+  const others = readEveryLayout(projectDir, config, cwd)
+    .filter(
+      (other) => !samePath(resolve(projectDir, other.application.sourceRoot), sources),
+    )
+    .flatMap(conventionalEntryCandidates);
 
-  return [
-    ...new Set([
-      ...(shared ? [] : [join(outDir, ROOT_MODULE_FILE)]),
-      join(outDir, application.sourceRoot, ROOT_MODULE_FILE),
-    ]),
-  ];
+  return conventionalEntryCandidates(layout).filter(
+    (candidate) => !others.some((other) => samePath(other, candidate)),
+  );
 }
 
 /**

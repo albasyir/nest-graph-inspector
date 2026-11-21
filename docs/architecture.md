@@ -591,8 +591,9 @@ on trust:
    bin gets a warning, and the export carries on
 3. Load --env-file files into process.env with process.loadEnvFile(), last
    to first, so that — as with node --env-file — the environment wins and a
-   later file beats an earlier one. The export never loads main.ts, which is
-   where an application usually loads its environment before AppModule
+   later file beats an earlier one. The export never selects main.ts to load,
+   and main.ts is where an application usually loads its environment before
+   AppModule
 4. Find the entry, reading files and never loading one: --entry as given,
    and main.ts unread; else the convention, from nest-cli.json's sourceRoot
    and the outDir of the tsconfig `nest build` compiles with —
@@ -638,8 +639,12 @@ Why each step is the way it is:
   worked changes; main.ts is consulted for that project only to warn, after
   the root module export is chosen, when it boots a different module — main.ts's
   import followed through static re-exports (`export { X } from`,
-  `export { X as Y } from`, `export * from`, at most three files on) to the
-  file that declares the class. Only where the convention finds nothing, or
+  `export { X as Y } from`, an import exported again, `export * from`, at most
+  three files on) to the file that declares the class. They are read as
+  JavaScript reads them: a module's explicit export of a name hides any
+  `export *` that has it too, and a file a lookup has been through for one
+  name is still looked in for another — only the same file and name, met
+  again on one trail, ends it. Only where the convention finds nothing, or
   several files, does main.ts decide. The convention reads the tsconfig it
   always has, from the top level of nest-cli.json: the builder's
   `options.configPath`, whatever the builder, else `tsConfigPath`; one it
@@ -649,12 +654,15 @@ Why each step is the way it is:
   project's note when the file is plainly that project's own output, its
   path otherwise.
 - **`--app` takes only its own output.** Applications can share an outDir,
-  so a search of it can find another application's `app.module.js`. With
-  `--app`, the convention looks only at `<outDir>/<sourceRoot>/app.module.js`
-  and — unless an application with other sources builds into the same
-  outDir — `<outDir>/app.module.js`; failing those, that application's
-  main.ts decides. Without `--app`, the whole outDir is still searched, as it
-  always has been.
+  and an outDir can hold what an older build left, so a search of it can
+  find another application's `app.module.js`, or a stale one. With `--app`,
+  the convention looks only where that application's build writes
+  `<sourceRoot>/app.module.ts` — the candidates the next bullets find for any
+  root module's file, so under an explicit `rootDir` only the path tsc writes
+  — less any path another application's build could write its own to;
+  failing those, that application's main.ts decides. A bundled application
+  writes no `app.module.js` at all. Without `--app`, the whole outDir is still
+  searched, as it always has been.
 - **An application is read as `nest build` reads it.** `nest build <app>`
   takes each setting from the project, else the top level; `nest build`
   without a name takes the top level alone, so the default project is the
@@ -668,28 +676,40 @@ Why each step is the way it is:
   monorepo as anywhere else. A monorepo is a bundle because `nest g app`,
   turning a project into one, writes `"builder": "rspack"` into nest-cli.json
   (older Nest CLIs wrote `"webpack": true`), not because it is a monorepo.
-- **main.ts is parsed, never run.** The root module is whatever main.ts
-  passes to `NestFactory`, and loading main.ts is exactly what starts the
-  application. `cli/root-module-detection.ts` parses it with the TypeScript
-  compiler API and resolves the import with `ts.resolveModuleName` under the
-  application's own tsconfig; `cli/nest-cli-config.ts` reads `nest-cli.json`
-  and that tsconfig. Neither requires, imports or spawns anything. Only the
+- **main.ts is parsed, never selected to load.** The root module is whatever
+  main.ts passes to `NestFactory`, and loading main.ts is exactly what starts
+  the application — which a module the loaded file imports can still do,
+  unchecked (below). `cli/root-module-detection.ts` parses it with the
+  TypeScript compiler API and resolves the import with `ts.resolveModuleName`
+  under the application's own tsconfig; `cli/nest-cli-config.ts` reads
+  `nest-cli.json` and that tsconfig. Neither requires, imports or spawns
+  anything. Only the
   `NestFactory` main.ts takes from `@nestjs/core` — imported, required or
   `import()`ed, under any name — boots a root module; an object of its own
-  that shares the name does not. A `--module` that names several of the root
+  that shares the name does not, and neither does a parameter, a catch
+  clause's variable or a local declaration that shadows the import: each
+  name is resolved in its own scope, by a TypeScript checker over main.ts
+  alone (no lib, no import resolved). A `--module` that names several of the root
   modules main.ts boots — one export name from two files — chooses none, and
   `--entry` with `--module` is asked for. What only exists at runtime — a
   root module main.ts computes, or a bootstrap function imported from
   another file — is out of its reach, and the convention's error stands.
-- **Compiled output is probed, not assumed — except where tsc says.** With
-  no `outDir`, tsc writes beside the source, and only there is looked; with
-  an explicit `rootDir`, only the path under it — anywhere else could only
-  hold a stale file. Otherwise where a source file lands depends on the
-  `rootDir` tsc infers, on the project layout, and on the builder: SWC
-  strips the source root, and a Nest CLI monorepo compiled by tsc lands in
-  `dist/apps/<app>/apps/<app>/src/`. The candidates are tried in a fixed
-  order, the first that exists winning. A webpack or rspack build is never
-  probed: its output is one `main.js` that starts the application.
+- **Compiled output is probed, not assumed — except where the compiler
+  says.** With no `outDir`, tsc writes beside the source, and only there is
+  looked; with an explicit `rootDir`, only the path under it — anywhere else
+  could only hold a stale file. SWC writes as `@swc/cli`'s `getDest` names
+  files: under the `swc` builder's `options.outDir`, which the Nest CLI lets
+  override the tsconfig's, else the tsconfig's `outDir`, else `dist`, at the
+  source's path from the project, its first directory stripped under
+  `stripLeadingPaths`. The builder's own `stripLeadingPaths` decides when it
+  sets one; otherwise Nest CLI 12 strips a one-directory source root unless
+  the tsconfig's `rootDir` lies above it, and Nest CLI 11 always strips, so
+  both layouts are candidates, 12's first. Otherwise — tsc inferring its root
+  directory — where a source file lands depends on that root, on the project
+  layout, and on the TypeScript version: a Nest CLI monorepo compiled by tsc
+  lands in `dist/apps/<app>/apps/<app>/src/`. The candidates are tried in a
+  fixed order, the first that exists winning. A webpack or rspack build is
+  never probed: its output is one `main.js` that starts the application.
 - **The file about to be loaded is checked, `--entry`'s included.** Before
   it is loaded, the file is parsed and refused when it calls a method of
   `NestFactory` — however it is reached: `core_1.NestFactory.create`, a
@@ -782,9 +802,9 @@ temporary project, as npm would install it, and runs the bin there with `node`:
 entry detection, standard output, ES module entries, delegation, a project copy
 too old for the CLI, and failures. `cli/root-module-detection.spec.ts` covers
 finding the root module — main.ts's import forms and `NestFactory` calls,
-monorepo applications and shared outDirs, where tsc writes, bundled and
-unbuilt builds, the files refused, symlinks included — on projects written to
-a temporary directory, loading nothing; and
+names shadowed in a scope, monorepo applications and shared outDirs, where
+tsc and SWC write, bundled and unbuilt builds, the files refused, symlinks
+included — on projects written to a temporary directory, loading nothing; and
 `cli/root-module-detection.e2e.spec.ts` runs the bin the same way as
 `bin.spec.ts` against fixture projects laid out as `nest build`, SWC, webpack,
 rspack and a Nest CLI monorepo leave them, requiring the right root module of
@@ -1588,14 +1608,14 @@ that is never the default.
 11. **An export runs nothing.** `nest-graph-inspector export` boots in preview
     mode and never calls `init()` or `listen()`. `lib/src/cli/export-graph.spec.ts`
     requires that no constructor, factory, lifecycle hook, or `configure()` of
-    the application runs and that nothing listens. Nor does it load a file
+    the application runs and that nothing listens. Nor does it select a file
     that starts the application: main.ts is parsed to find the root module,
-    never loaded, and the file about to be loaded, `--entry`'s included, is
-    refused when it calls a `NestFactory` method or is an application's entry
-    file. Only that file is checked, not the modules it imports, so a root
-    module file must not import main.ts or a file that boots the
-    application. `lib/src/cli/root-module-detection.e2e.spec.ts` requires it
-    of every export it runs.
+    never selected to load, and the file about to be loaded, `--entry`'s
+    included, is refused when it calls a `NestFactory` method or is an
+    application's entry file. Only that file is checked, not the modules it
+    imports, so a root module file must not import main.ts or a file that
+    boots the application. `lib/src/cli/root-module-detection.e2e.spec.ts`
+    requires it of every export it runs.
 12. **There is one graph builder.** The running inspector and the export both
     build `GraphOutput` with `GraphOutputBuilder` over a `DiscoveryAdapter`;
     never give the export its own. `export-graph.spec.ts` and
@@ -1675,21 +1695,28 @@ Facts a code change can invalidate, and the file to check:
   `nest-cli-config.ts` (`CliUsageError`, exit code 2, in `cli-error.ts`)
 - How main.ts is found and read: the extensions it is looked for with
   (`ENTRY_FILE_EXTENSIONS`), the `NestFactory` methods that count as booting a
-  root module (`BOOT_METHODS`) and the `@nestjs/core` bindings that count as
-  its `NestFactory` (`collectCoreBindings`), how many `const` declarations a
-  root module argument is followed through (`MAX_CONSTANT_DEPTH`), how many
-  files of re-exports the convention's warning follows (`MAX_REEXPORT_DEPTH`),
-  where tsc's output is looked for — beside the source without an `outDir`,
-  under an explicit `rootDir` alone, else the directories probed, in order
-  (`compiledCandidates`) — and when the printed command sets
+  root module (`BOOT_METHODS`), the `@nestjs/core` declarations that count as
+  its `NestFactory`, each name resolved in its scope by a checker over main.ts
+  alone (`parseWithScopes`, `declaredReference`, `MAX_ALIAS_DEPTH`), how many
+  `const` declarations a root module argument is followed through
+  (`MAX_CONSTANT_DEPTH`), how the convention's warning follows re-exports —
+  explicit before `export *`, a trail of files and names, `MAX_REEXPORT_DEPTH`
+  files deep (`declaringExport`, `explicitExport`) — where compiled output is
+  looked for — tsc's beside the source without an `outDir`, under an explicit
+  `rootDir` alone, else the directories probed, in order; SWC's under its
+  builder's `outDir` with the Nest CLI 12 and 11 `stripLeadingPaths` layouts
+  (`compiledCandidates`, `swcCandidates`, `nestCli12StripsLeadingPaths`) — the
+  `app.module.js` paths an application's build writes
+  (`conventionalEntryCandidates`), and when the printed command sets
   `TS_NODE_PROJECT` (`loaderCommand`) — `lib/src/cli/root-module-detection.ts`;
-  what nest-cli.json settings make a build a bundle, which project is the
-  default and which of its settings it takes, and which tsconfig an
-  application and the convention read — `buildOf`, `selectApplication`,
-  `resolveApplication` and `legacyConventionTsConfigPath` in
-  `lib/src/cli/nest-cli-config.ts`; which `app.module.js` files `--app` takes
-  as its own, and when the convention's note names the default project —
-  `ownedConventionalEntries` and `conventionNotes` in `lib/src/cli/project.ts`
+  what nest-cli.json settings make a build a bundle or an SWC build, which
+  project is the default and which of its settings it takes, and which
+  tsconfig an application and the convention read — `buildOf`, `parseBuilder`,
+  `selectApplication`, `resolveApplication` and
+  `legacyConventionTsConfigPath` in `lib/src/cli/nest-cli-config.ts`; which
+  `app.module.js` files `--app` takes as its own, and when the convention's
+  note names the default project — `ownedConventionalEntries` and
+  `conventionNotes` in `lib/src/cli/project.ts`
 - Which files the export refuses to load, and that it checks no file but the
   one it loads — `assertLoadableEntry` and `applicationEntryFiles` (a bundle's
   paths for a bundled build only) in `lib/src/cli/root-module-detection.ts`
@@ -1698,8 +1725,11 @@ Facts a code change can invalidate, and the file to check:
   none, monorepo or not, and `compilerOptions.webpack: true` ahead of any
   builder) — `DEFAULT_*` and `buildOf` in `lib/src/cli/nest-cli-config.ts`,
   against `getBuilder` and `actions/build.action.ts` in the installed
-  `@nestjs/cli`; and what `nest g app` writes when it makes a monorepo
-  (`"builder": "rspack"`; older versions `"webpack": true`) —
+  `@nestjs/cli`; the `@swc/cli` options the Nest CLI sets and lets an `swc`
+  builder's `options` override (`outDir`, `stripLeadingPaths`, the source
+  root as its input) — `lib/compiler/defaults/swc-defaults.ts` there, and
+  `getDest` in `@swc/cli`; and what `nest g app` writes when it makes a
+  monorepo (`"builder": "rspack"`; older versions `"webpack": true`) —
   `src/lib/sub-app/sub-app.factory.ts` in `@nestjs/schematics`
 - That the CLI export e2e job runs `root-module-detection.e2e.spec.ts` alone,
   on Node 20, 22 and 24 — `cli-e2e` in `.github/workflows/ci.yml`, and

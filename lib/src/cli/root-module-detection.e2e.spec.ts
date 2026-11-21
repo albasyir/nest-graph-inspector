@@ -81,6 +81,18 @@ require.extensions[".ts"] = function compileTypeScript(module, filename) {
 };
 `;
 
+/**
+ * A module an older build left behind, which the export must never load:
+ * loading it records itself, so a run that takes it cannot pass.
+ */
+const STALE_MODULE = `"use strict";
+const { appendFileSync } = require("node:fs");
+if (process.env.FIXTURE_RAN_LOG) {
+  appendFileSync(process.env.FIXTURE_RAN_LOG, "stale module loaded\\n");
+}
+exports.AppModule = class AppModule {};
+`;
+
 /** What webpack or rspack makes of main.ts: one file that starts the application as it loads. */
 const BUNDLE = `"use strict";
 const { appendFileSync } = require("node:fs");
@@ -474,6 +486,66 @@ export class MainModule {
       },
     ]);
 
+    // E4, worker's own layout: rootDir apps/, an outDir of its own, so tsc
+    // writes dist/worker/worker/src/. An app.module.js an older build left
+    // flattened in that outDir must never load — it says so if it does.
+    const ownLayout = {
+      "nest-cli.json": JSON.stringify({
+        monorepo: true,
+        root: "apps/api",
+        sourceRoot: "apps/api/src",
+        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
+        projects: {
+          api: { ...application("api"), compilerOptions: { tsConfigPath: "apps/api/tsconfig.app.json" } },
+          worker: {
+            ...application("worker"),
+            compilerOptions: { tsConfigPath: "apps/worker/tsconfig.app.json" },
+          },
+        },
+      }),
+      "tsconfig.json": TSCONFIG(),
+      "apps/api/tsconfig.app.json": JSON.stringify({
+        extends: "../../tsconfig.json",
+        compilerOptions: { outDir: "../../dist/api" },
+      }),
+      "apps/worker/tsconfig.app.json": JSON.stringify({
+        extends: "../../tsconfig.json",
+        compilerOptions: { rootDir: "..", outDir: "../../dist/worker" },
+      }),
+      "apps/worker/src/marker.ts": MARKER,
+      "apps/worker/src/worker.module.ts": moduleSource("WorkerModule"),
+      "apps/worker/src/main.ts": mainSource("WorkerModule", "./worker.module"),
+      "dist/worker/app.module.js": STALE_MODULE,
+    };
+    writeProject("monorepo-own-layout", ownLayout, [
+      {
+        rootDir: "apps",
+        outDir: "dist/worker",
+        files: Object.keys(ownLayout).filter((file) => file.startsWith("apps/worker/src/")),
+      },
+    ]);
+
+    // E11: built by SWC into the outDir its builder options name, not the
+    // tsconfig's — dist/ holds an older tsc build that must not be taken.
+    const swcOutDir = {
+      "nest-cli.json": JSON.stringify({
+        compilerOptions: { builder: { type: "swc", options: { outDir: "build" } } },
+      }),
+      "tsconfig.json": TSCONFIG({ outDir: "dist" }),
+      "src/marker.ts": MARKER,
+      "src/child.module.ts": moduleSource("ChildModule"),
+      "src/swc-root.module.ts": moduleSource("SwcRootModule", [["ChildModule", "./child.module"]]),
+      "src/main.ts": mainSource("SwcRootModule", "./swc-root.module"),
+      "dist/swc-root.module.js": STALE_MODULE,
+    };
+    writeProject("swc-out-dir", swcOutDir, [
+      {
+        rootDir: "src",
+        outDir: "build",
+        files: Object.keys(swcOutDir).filter((file) => file.startsWith("src/")),
+      },
+    ]);
+
     // E5: built by webpack or rspack into one main.js that starts the
     // application; nothing else is in dist.
     const bundled = {
@@ -580,8 +652,8 @@ void bootstrap();
     };
     writeProject("two-roots", twoRoots, srcBuild(twoRoots));
 
-    // E10: main.ts also calls create() on a NestFactory of its own, which
-    // boots nothing.
+    // E10: main.ts also calls create() on a NestFactory of its own, and on a
+    // parameter that shadows the import; neither boots anything.
     const ownFactory = {
       "tsconfig.json": TSCONFIG({ rootDir: "src", outDir: "dist" }),
       "src/marker.ts": MARKER,
@@ -597,9 +669,14 @@ import { markRan } from "./marker";
 import { RootModule } from "./root.module";
 import { tools } from "./tools";
 
+export function warmUp(NestFactory: typeof tools.NestFactory): void {
+  NestFactory.create(HelperModule);
+}
+
 async function bootstrap(): Promise<void> {
   markRan("bootstrap");
   tools.NestFactory.create(HelperModule);
+  warmUp(tools.NestFactory);
   const app = await NestFactory.create(RootModule);
   await app.listen(3000);
 }
@@ -690,6 +767,15 @@ void bootstrap();
       }
       expect(detected.stderr).toContain(DEFAULT_PROJECT_NOTE);
       expect(named.stderr).not.toContain("defines applications");
+    }, SPAWN_TIMEOUT_MS);
+
+    it("never loads an app.module.js an older build left where --app's tsc no longer writes", async () => {
+      const result = await exportIn("monorepo-own-layout", ["--app", "worker"]);
+
+      expectExported(result, "WorkerModule", { present: [], absent: ["AppModule"] });
+      expect(result.stderr).toContain(
+        "nest-graph-inspector: entry dist/worker/worker/src/worker.module.js (WorkerModule, from apps/worker/src/main.ts)\n",
+      );
     }, SPAWN_TIMEOUT_MS);
 
     it("never takes another application's app.module.js from an outDir they share", async () => {
@@ -875,12 +961,21 @@ void bootstrap();
     }, SPAWN_TIMEOUT_MS);
   });
 
-  it("E10: counts only @nestjs/core's NestFactory, so another object's create() is no second root module", async () => {
+  it("E10: counts only @nestjs/core's NestFactory, so another object's create(), or a shadowing parameter's, is no second root module", async () => {
     const result = await exportIn("own-factory");
 
     expectExported(result, "RootModule", { present: [], absent: ["HelperModule"] });
     expect(result.stderr).toContain(
       "nest-graph-inspector: entry dist/root.module.js (RootModule, from src/main.ts)\n",
+    );
+  }, SPAWN_TIMEOUT_MS);
+
+  it("E11: exports an SWC build from the outDir its builder options name, never the tsconfig's", async () => {
+    const result = await exportIn("swc-out-dir");
+
+    expectExported(result, "SwcRootModule", { present: ["ChildModule"] });
+    expect(result.stderr).toContain(
+      "nest-graph-inspector: entry build/swc-root.module.js (SwcRootModule, from src/main.ts)\n",
     );
   }, SPAWN_TIMEOUT_MS);
 });

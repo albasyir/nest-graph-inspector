@@ -262,7 +262,7 @@ Responsibilities:
 | `export-command.ts` | The export: delegation to the project's own copy, load order, the stdout guard, writing the file |
 | `project.ts` | Entry resolution — `--entry`, the `app.module.js` convention (for `--app`, only the application's own), then main.ts — and the notes saying which application; loading the project's own `@nestjs/core`, picking the root module export |
 | `nest-cli-config.ts` | Reads and validates `nest-cli.json` and the build tsconfig; which application (`--app`, the default project), its settings and tsconfig as `nest build` reads them, and how it is built (compiled or bundled) |
-| `root-module-detection.ts` | Parses main.ts — never loads it — for the root module `@nestjs/core`'s `NestFactory` boots, traces it to the compiled file or TypeScript source, and refuses to load the file the export is about to load when it would start the application (the modules it imports are not checked) |
+| `root-module-detection.ts` | Parses main.ts, rather than loading it, for the root module `@nestjs/core`'s `NestFactory` boots, traces it to the compiled file or TypeScript source, and refuses to load the file the export is about to load when it would start the application (the modules it imports are not checked) |
 | `files.ts` | Path display and file checks the modules above share |
 | `export-graph.ts` | The preview-mode boot, the inspector options read from the container, and the graph build |
 | `stderr-logger.ts` | The logger the application is booted with: warnings and errors to stderr |

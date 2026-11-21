@@ -27,7 +27,7 @@ const DEFAULT_BUILDER = "tsc";
  */
 const NO_INPUTS_FOUND = 18003;
 
-/** `compilerOptions.builder`: a string, or `{ type, options: { configPath } }`. */
+/** `compilerOptions.builder`: a string, or `{ type, options }`. */
 export type NestBuilderSetting = {
   /** `tsc`, `swc`, `webpack`, `rspack`; unset when only `options` is given. */
   type: string | undefined;
@@ -36,6 +36,12 @@ export type NestBuilderSetting = {
    * configuration for `webpack` and `rspack`.
    */
   configPath: string | undefined;
+  /**
+   * `options.outDir` and `options.stripLeadingPaths`: for `swc`, `@swc/cli`
+   * options the Nest CLI lets override its own (`swc-defaults.ts`).
+   */
+  outDir: string | undefined;
+  stripLeadingPaths: boolean | undefined;
 };
 
 /** The `compilerOptions` that decide where and how an application is built. */
@@ -81,8 +87,17 @@ export type NestCliConfig = NestApplicationSettings & {
 
 /** How `nest build` turns an application's sources into JavaScript. */
 export type ApplicationBuild =
-  /** `tsc` or `swc`: a JavaScript file per source file, under the outDir. */
-  | { kind: "compiled"; compiler: string }
+  /** `tsc`: a JavaScript file per source file, where the tsconfig says. */
+  | { kind: "tsc" }
+  /**
+   * `swc`, run through `@swc/cli`: a JavaScript file per file of the source
+   * root, in the builder's `options.outDir`, else the tsconfig's, at its path
+   * from the project — less its first directory under `stripLeadingPaths`.
+   * Either is undefined where the builder leaves it to the Nest CLI.
+   */
+  | { kind: "swc"; outDir: string | undefined; stripLeadingPaths: boolean | undefined }
+  /** A builder the export does not know: its output is looked for as tsc's is. */
+  | { kind: "other"; builder: string }
   /**
    * `webpack` or `rspack`: the application and every module it imports in one
    * `main.js`, which starts the application when it is loaded.
@@ -223,7 +238,12 @@ function parseCompilerSettings(value: unknown): NestCompilerSettings {
 
 function parseBuilder(value: unknown): NestBuilderSetting | undefined {
   if (typeof value === "string") {
-    return { type: value, configPath: undefined };
+    return {
+      type: value,
+      configPath: undefined,
+      outDir: undefined,
+      stripLeadingPaths: undefined,
+    };
   }
 
   if (!isRecord(value)) {
@@ -231,9 +251,13 @@ function parseBuilder(value: unknown): NestBuilderSetting | undefined {
   }
 
   const options = isRecord(value.options) ? value.options : {};
+  const stripLeadingPaths = options.stripLeadingPaths;
   return {
     type: stringField(value, "type"),
     configPath: stringField(options, "configPath"),
+    outDir: stringField(options, "outDir"),
+    stripLeadingPaths:
+      typeof stripLeadingPaths === "boolean" ? stripLeadingPaths : undefined,
   };
 }
 
@@ -416,7 +440,9 @@ function resolveApplication(
  * when nest-cli.json names none — in a monorepo as anywhere else. A `webpack`
  * or `rspack` builder bundles; `tsc`, `swc` and any other compile. `nest g
  * app` writes `"builder": "rspack"` when it makes a monorepo, and older Nest
- * CLIs wrote `"webpack": true`: that is what makes a monorepo a bundle.
+ * CLIs wrote `"webpack": true`: that is what makes a monorepo a bundle. An
+ * `swc` builder's `options` go to `@swc/cli` over the Nest CLI's own, so its
+ * `outDir` and `stripLeadingPaths` decide where SWC writes.
  */
 function buildOf(
   builder: NestBuilderSetting | undefined,
@@ -427,9 +453,21 @@ function buildOf(
   }
 
   const type = builder?.type ?? DEFAULT_BUILDER;
-  return type === "webpack" || type === "rspack"
-    ? { kind: "bundled", bundler: type }
-    : { kind: "compiled", compiler: type };
+  switch (type) {
+    case "webpack":
+    case "rspack":
+      return { kind: "bundled", bundler: type };
+    case "tsc":
+      return { kind: "tsc" };
+    case "swc":
+      return {
+        kind: "swc",
+        outDir: builder?.outDir,
+        stripLeadingPaths: builder?.stripLeadingPaths,
+      };
+    default:
+      return { kind: "other", builder: type };
+  }
 }
 
 /** The application project the top level describes, matched by `sourceRoot`, else by `root`. */

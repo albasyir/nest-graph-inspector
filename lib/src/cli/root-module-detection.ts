@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
 import { CliError, describeError } from "./cli-error";
 import { displayPath, isFile, pathInside } from "./files";
@@ -15,7 +15,7 @@ import {
 
 /**
  * Finds an application's root module without running any of it: main.ts is
- * parsed, never loaded, and the module it passes to `NestFactory` is traced
+ * parsed rather than loaded, and the module it passes to `NestFactory` is traced
  * through its import to a source file, then to the file `nest build` compiled
  * it to. The file the export is about to load is checked here first, too, so
  * that it is never main.ts itself, compiled or bundled, or any other file that
@@ -168,7 +168,7 @@ type NestFactoryCall = {
  * Parses the application's entry file — `<sourceRoot>/<entryFile>.ts`, or
  * `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` — and traces the root module each
  * `NestFactory.create`, `createApplicationContext` or `createMicroservice`
- * call boots to the file that declares it. The file is parsed, never loaded.
+ * call boots to the file that declares it. The file is parsed rather than loaded.
  */
 export function analyseMainFile(layout: ApplicationLayout): MainFileAnalysis {
   const { application } = layout;
@@ -187,8 +187,8 @@ export function analyseMainFile(layout: ApplicationLayout): MainFileAnalysis {
     return { kind: "unknown", reason: describeError(error) };
   }
 
-  const sourceFile = parseSourceFile(mainFile, text);
-  const calls = findBootCalls(sourceFile);
+  const { sourceFile, checker } = parseWithScopes(mainFile, text);
+  const calls = findBootCalls(sourceFile, checker);
   if (!calls.length) {
     return { kind: "unknown", reason: "it calls no NestFactory method" };
   }
@@ -339,12 +339,15 @@ export function locateRootModule(
 }
 
 /**
- * Where tsc or SWC writes `source`. Where tsc says, only there: beside the
- * source when the tsconfig sets no `outDir`, and under the `outDir` at the
- * source's path from an explicit `rootDir` — anywhere else could only hold a
- * stale file. Otherwise the root directory is probed rather than assumed: the
- * tsconfig's own directory, the project, the application's `root`, then its
- * `sourceRoot`, which SWC strips; the candidates are tried in that order.
+ * Where `nest build` writes `source`, as candidates tried in order. tsc
+ * writes where its tsconfig says, and only there is looked: beside the source
+ * when the tsconfig sets no `outDir`, and under the `outDir` at the source's
+ * path from an explicit `rootDir` — anywhere else could only hold a stale
+ * file. SWC writes where `@swc/cli` names its files (`swcCandidates`).
+ * Otherwise — tsc inferring its root directory, a builder the export does not
+ * know, a bundle's stale output — the root directory is probed rather than
+ * assumed: an explicit `rootDir`, the tsconfig's own directory, the project,
+ * the application's `root`, then its `sourceRoot`.
  */
 function compiledCandidates(source: string, layout: ApplicationLayout): string[] {
   const extension = COMPILED_EXTENSIONS.get(extname(source));
@@ -355,32 +358,119 @@ function compiledCandidates(source: string, layout: ApplicationLayout): string[]
   const { application, projectDir, tsconfig } = layout;
   const compiledName = (path: string) =>
     path.slice(0, path.length - extname(path).length) + extension;
-  const tsc =
-    application.build.kind === "compiled" && application.build.compiler === "tsc";
+  const { build } = application;
+  if (build.kind === "swc") {
+    return swcCandidates(source, layout, build).map(compiledName);
+  }
+
+  const tsc = build.kind === "tsc";
   if (tsc && tsconfig !== undefined && tsconfig.options.outDir === undefined) {
     return [compiledName(source)];
   }
 
   const outDir = outDirOf(projectDir, tsconfig);
   const rootDir = tsconfig?.options.rootDir;
-  if (tsc && rootDir !== undefined) {
-    const path = pathInside(rootDir, source);
-    return path === undefined ? [] : [join(outDir, compiledName(path))];
-  }
-
-  const roots = [
-    rootDir,
-    tsconfig ? dirname(tsconfig.path) : undefined,
-    projectDir,
-    resolve(projectDir, application.root),
-    resolve(projectDir, application.sourceRoot),
-  ];
+  const roots =
+    tsc && rootDir !== undefined
+      ? [rootDir]
+      : [
+          rootDir,
+          tsconfig ? dirname(tsconfig.path) : undefined,
+          projectDir,
+          resolve(projectDir, application.root),
+          resolve(projectDir, application.sourceRoot),
+        ];
   const candidates = roots.flatMap((root) => {
     const path = root === undefined ? undefined : pathInside(root, source);
     return path === undefined ? [] : [join(outDir, compiledName(path))];
   });
 
   return [...new Set(candidates)];
+}
+
+/**
+ * Where `@swc/cli` writes `source` when the Nest CLI runs it, before the
+ * extension changes. Its `getDest` takes the source's path from the project,
+ * strips its first directory under `stripLeadingPaths`, and joins it to the
+ * outDir — the builder's `options.outDir`, else the tsconfig's, else `dist`
+ * (`swc-defaults.ts`). The builder's own `stripLeadingPaths` decides when it
+ * sets one. Otherwise Nest CLI 12 strips only a source root of one directory,
+ * and only when the tsconfig's `rootDir` is unset or is that source root,
+ * while Nest CLI 11 always strips: both layouts are candidates, 12's first.
+ */
+function swcCandidates(
+  source: string,
+  layout: ApplicationLayout,
+  build: Extract<ApplicationBuild, { kind: "swc" }>,
+): string[] {
+  const { application, projectDir, tsconfig } = layout;
+  const fromProject = pathInside(projectDir, source);
+  if (fromProject === undefined) {
+    return [];
+  }
+
+  const outDir =
+    build.outDir === undefined
+      ? outDirOf(projectDir, tsconfig)
+      : resolve(projectDir, build.outDir);
+  const whole = join(outDir, fromProject);
+  // @swc/cli's stripComponents: every directory but the first, or the path
+  // itself when it has no directory.
+  const [, ...rest] = fromProject.split(sep);
+  const stripped = rest.length ? join(outDir, ...rest) : whole;
+
+  if (build.stripLeadingPaths !== undefined) {
+    return [build.stripLeadingPaths ? stripped : whole];
+  }
+
+  return nestCli12StripsLeadingPaths(tsconfig?.options.rootDir, application.sourceRoot)
+    ? [stripped]
+    : [...new Set([whole, stripped])];
+}
+
+/**
+ * Whether Nest CLI 12 runs `@swc/cli` with `stripLeadingPaths`, as its
+ * `shouldStripLeadingPaths` decides: never for a source root of more than one
+ * directory, which stripping could not flatten; else when the tsconfig sets no
+ * `rootDir`, or one that is the source root.
+ */
+function nestCli12StripsLeadingPaths(
+  rootDir: string | undefined,
+  sourceRoot: string,
+): boolean {
+  const posix = (path: string) =>
+    path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/\/+/g, "/");
+  const root = posix(sourceRoot).replace(/^\.\//, "").replace(/\/+$/, "");
+  if (root.includes("/")) {
+    return false;
+  }
+
+  if (rootDir === undefined) {
+    return true;
+  }
+
+  const directory = posix(rootDir).replace(/\/+$/, "");
+  return directory === root || directory.endsWith(`/${root}`);
+}
+
+/** The conventional root module file, as source: `app.module.ts`, beside main.ts. */
+const CONVENTIONAL_ROOT_MODULE = "app.module.ts";
+
+/**
+ * Where an application's own build writes its conventional root module,
+ * `<sourceRoot>/app.module.ts`: the candidates `compiledCandidates` finds for
+ * any root module's file — so under an explicit `rootDir`, only the path tsc
+ * writes, and the flattened `<outDir>/app.module.js` only where the build can
+ * write it. A bundle writes none.
+ */
+export function conventionalEntryCandidates(layout: ApplicationLayout): string[] {
+  const { application, projectDir } = layout;
+  return application.build.kind === "bundled"
+    ? []
+    : compiledCandidates(
+        resolve(projectDir, application.sourceRoot, CONVENTIONAL_ROOT_MODULE),
+        layout,
+      );
 }
 
 /** Where an application's entry file may be, as source: `<sourceRoot>/<entryFile>` with each extension. */
@@ -396,7 +486,8 @@ function bundleFileName(application: NestApplication): string {
 
 /**
  * Every path an application's entry file has: its source and what it compiles
- * or bundles to. The export never loads one of them, whatever it contains.
+ * or bundles to. The export never selects one of them to load, whatever it
+ * contains.
  */
 function applicationEntryFiles(layout: ApplicationLayout): string[] {
   const { application, projectDir, tsconfig } = layout;
@@ -633,8 +724,7 @@ export function conventionCheck(layout: ApplicationLayout): ConventionCheck | un
       file: booted.sourceFile,
       exportName: booted.exportName,
       layout,
-      depth: 0,
-      seen: new Set(),
+      trail: new Set(),
     });
     if (declared === undefined) {
       return undefined;
@@ -654,69 +744,203 @@ export function conventionCheck(layout: ApplicationLayout): ConventionCheck | un
 
 /**
  * The file that declares the class a module exports as `exportName`, and the
- * name it declares it under: `file` itself, or — following static re-exports,
- * `export { X } from`, `export { X as Y } from` and `export * from`, at most
- * MAX_REEXPORT_DEPTH files on and never through a file twice — the file a
- * barrel takes it from. Undefined when the trail leads nowhere it can read.
+ * name that file exports it under: `file` itself, or — following static
+ * re-exports, `export { X } from`, `export { X as Y } from`, an import it
+ * exports again, and `export * from`, at most MAX_REEXPORT_DEPTH files on —
+ * the file a barrel takes it from. As in a module, an explicit export of the
+ * name hides any `export *` that has it too. The lookup never enters the same
+ * file for the same name twice on one trail, so a cycle ends, while a sibling
+ * `export *` may still look in a file for another name. Undefined when the
+ * trail leads nowhere it can read.
  */
-function declaringExport(trail: {
+function declaringExport(lookup: {
   file: string;
   exportName: string;
   layout: ApplicationLayout;
-  depth: number;
-  seen: Set<string>;
+  /** The files and names the lookup is already inside of. */
+  trail: ReadonlySet<string>;
 }): { file: string; exportName: string } | undefined {
-  const { file, exportName, layout, depth, seen } = trail;
-  if (depth > MAX_REEXPORT_DEPTH || seen.has(file)) {
+  const { file, exportName, layout, trail } = lookup;
+  const step = JSON.stringify([file, exportName]);
+  if (trail.size > MAX_REEXPORT_DEPTH || trail.has(step)) {
     return undefined;
   }
 
-  seen.add(file);
   const sourceFile = parseSourceFile(file, readFileSync(file, "utf8"));
-  if (declaresClass(sourceFile, exportName)) {
-    return { file, exportName };
+  const onTrail = new Set(trail).add(step);
+  const follow = (specifier: string, name: string) => {
+    const target = resolveImport(specifier, file, layout);
+    return target === undefined
+      ? undefined
+      : declaringExport({ file: target, exportName: name, layout, trail: onTrail });
+  };
+
+  const explicit = explicitExport(sourceFile, exportName);
+  switch (explicit?.kind) {
+    case "declared":
+      return { file, exportName };
+    case "reexported":
+      return follow(explicit.specifier, explicit.name);
+    case "opaque":
+      return undefined;
+    case undefined:
+      break;
+    default: {
+      const _exhaustive: never = explicit;
+      return _exhaustive;
+    }
   }
 
-  for (const statement of sourceFile.statements) {
-    if (
-      !ts.isExportDeclaration(statement) ||
-      statement.isTypeOnly ||
-      statement.moduleSpecifier === undefined ||
-      !ts.isStringLiteralLike(statement.moduleSpecifier)
-    ) {
-      continue;
-    }
+  // `export * from` re-exports every name but `default`.
+  if (exportName === "default") {
+    return undefined;
+  }
 
-    const clause = statement.exportClause;
-    const element =
-      clause !== undefined && ts.isNamedExports(clause)
-        ? clause.elements.find(
-            (candidate) => !candidate.isTypeOnly && candidate.name.text === exportName,
-          )
-        : undefined;
-    // `export * from` re-exports every name but `default`.
-    const imported =
-      clause === undefined
-        ? exportName === "default"
-          ? undefined
-          : exportName
-        : element === undefined
-          ? undefined
-          : (element.propertyName ?? element.name).text;
-    const target =
-      imported === undefined
-        ? undefined
-        : resolveImport(statement.moduleSpecifier.text, file, layout);
-    const found =
-      imported === undefined || target === undefined
-        ? undefined
-        : declaringExport({ file: target, exportName: imported, layout, depth: depth + 1, seen });
+  for (const specifier of starExports(sourceFile)) {
+    const found = follow(specifier, exportName);
     if (found !== undefined) {
       return found;
     }
   }
 
   return undefined;
+}
+
+/** How a module exports a name itself, rather than through `export *`. */
+type ExplicitExport =
+  /** It declares the class: `export class X`, `export default class`, `export { Local as X }`. */
+  | { kind: "declared" }
+  /** It takes it from another module: `export { Y as X } from`, or an import it exports. */
+  | { kind: "reexported"; specifier: string; name: string }
+  /** Something no class can be traced through: a namespace, a value. */
+  | { kind: "opaque" };
+
+/**
+ * How a module exports `exportName` itself; undefined when it does not, and
+ * the name is whatever its `export *`s give it.
+ */
+function explicitExport(
+  sourceFile: ts.SourceFile,
+  exportName: string,
+): ExplicitExport | undefined {
+  const imports = importedBindings(sourceFile);
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      if (exportName !== "default") {
+        continue;
+      }
+
+      // export default RootModule: the class, wherever that name comes from.
+      const value = unwrap(statement.expression);
+      return (ts.isIdentifier(value) ? imports.get(value.text) : undefined) ?? {
+        kind: "declared",
+      };
+    }
+
+    if (ts.isClassDeclaration(statement) && exportsClassAs(statement, exportName)) {
+      return { kind: "declared" };
+    }
+
+    if (!ts.isExportDeclaration(statement) || statement.isTypeOnly) {
+      continue;
+    }
+
+    const clause = statement.exportClause;
+    const specifier =
+      statement.moduleSpecifier !== undefined && ts.isStringLiteralLike(statement.moduleSpecifier)
+        ? statement.moduleSpecifier.text
+        : undefined;
+    if (clause !== undefined && ts.isNamespaceExport(clause)) {
+      if (clause.name.text === exportName) {
+        return { kind: "opaque" };
+      }
+      continue;
+    }
+
+    const element = clause?.elements.find(
+      (candidate) => !candidate.isTypeOnly && candidate.name.text === exportName,
+    );
+    if (element === undefined) {
+      continue;
+    }
+
+    const local = (element.propertyName ?? element.name).text;
+    if (specifier !== undefined) {
+      return { kind: "reexported", specifier, name: local };
+    }
+
+    // export { Local as X }: a class declared here, or an import.
+    const declared = sourceFile.statements.some(
+      (candidate) => ts.isClassDeclaration(candidate) && candidate.name?.text === local,
+    );
+    return declared ? { kind: "declared" } : (imports.get(local) ?? { kind: "opaque" });
+  }
+
+  return undefined;
+}
+
+/** Whether a class declaration exports the class as `exportName`: `export class X`, or `export default class`. */
+function exportsClassAs(statement: ts.ClassDeclaration, exportName: string): boolean {
+  const modifiers = ts.getModifiers(statement) ?? [];
+  const has = (kind: ts.SyntaxKind) => modifiers.some((modifier) => modifier.kind === kind);
+  if (!has(ts.SyntaxKind.ExportKeyword)) {
+    return false;
+  }
+
+  return exportName === "default"
+    ? has(ts.SyntaxKind.DefaultKeyword)
+    : !has(ts.SyntaxKind.DefaultKeyword) && statement.name?.text === exportName;
+}
+
+/** A module's value imports, by local name, as what exporting each again would be. */
+function importedBindings(sourceFile: ts.SourceFile): ReadonlyMap<string, ExplicitExport> {
+  const bindings = new Map<string, ExplicitExport>();
+  for (const statement of sourceFile.statements) {
+    const clause = ts.isImportDeclaration(statement) ? statement.importClause : undefined;
+    if (
+      !ts.isImportDeclaration(statement) ||
+      clause === undefined ||
+      clause.phaseModifier === ts.SyntaxKind.TypeKeyword ||
+      !ts.isStringLiteralLike(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+
+    const specifier = statement.moduleSpecifier.text;
+    if (clause.name) {
+      bindings.set(clause.name.text, { kind: "reexported", specifier, name: "default" });
+    }
+
+    const named = clause.namedBindings;
+    if (named && ts.isNamespaceImport(named)) {
+      bindings.set(named.name.text, { kind: "opaque" });
+    } else if (named) {
+      for (const element of named.elements) {
+        if (!element.isTypeOnly) {
+          bindings.set(element.name.text, {
+            kind: "reexported",
+            specifier,
+            name: (element.propertyName ?? element.name).text,
+          });
+        }
+      }
+    }
+  }
+
+  return bindings;
+}
+
+/** The modules a file re-exports every name of: `export * from`. */
+function starExports(sourceFile: ts.SourceFile): string[] {
+  return sourceFile.statements.flatMap((statement) =>
+    ts.isExportDeclaration(statement) &&
+    !statement.isTypeOnly &&
+    statement.exportClause === undefined &&
+    statement.moduleSpecifier !== undefined &&
+    ts.isStringLiteralLike(statement.moduleSpecifier)
+      ? [statement.moduleSpecifier.text]
+      : [],
+  );
 }
 
 /**
@@ -755,25 +979,6 @@ export function conventionWarnings(
   return forRoot === undefined ? [] : [forRoot];
 }
 
-/** Whether a file declares the class it exports as `exportName`, rather than re-exporting it. */
-function declaresClass(sourceFile: ts.SourceFile, exportName: string): boolean {
-  return sourceFile.statements.some((statement) => {
-    if (exportName === "default" && ts.isExportAssignment(statement)) {
-      return true;
-    }
-
-    if (!ts.isClassDeclaration(statement)) {
-      return false;
-    }
-
-    return exportName === "default"
-      ? (ts.getModifiers(statement) ?? []).some(
-          (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
-        )
-      : statement.name?.text === exportName;
-  });
-}
-
 function parseSourceFile(path: string, text: string): ts.SourceFile {
   return ts.createSourceFile(
     path,
@@ -800,18 +1005,57 @@ function scriptKindOf(path: string): ts.ScriptKind {
 }
 
 /**
- * The first argument of every direct `NestFactory.create`-style call, in source
- * order — counting only the `NestFactory` main.ts takes from `@nestjs/core`: an
- * object of its own that happens to share the name boots nothing. (The load
- * guard, which only refuses, counts any `NestFactory`.)
+ * main.ts parsed and bound as a program of its own, for the checker to tell
+ * which declaration each name in it refers to, scope by scope. Nothing else
+ * is read: no import is resolved, and no lib is loaded.
  */
-function findBootCalls(sourceFile: ts.SourceFile): (ts.Expression | undefined)[] {
-  const bindings = collectCoreBindings(sourceFile);
+function parseWithScopes(
+  path: string,
+  text: string,
+): { sourceFile: ts.SourceFile; checker: ts.TypeChecker } {
+  const parsed = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, scriptKindOf(path));
+  const target = resolve(path);
+  const isTarget = (fileName: string) => resolve(fileName) === target;
+  const host: ts.CompilerHost = {
+    getSourceFile: (fileName) => (isTarget(fileName) ? parsed : undefined),
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile: () => undefined,
+    getCurrentDirectory: () => dirname(path),
+    getCanonicalFileName: (fileName) => fileName,
+    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+    getNewLine: () => "\n",
+    fileExists: isTarget,
+    readFile: (fileName) => (isTarget(fileName) ? text : undefined),
+  };
+  const program = ts.createProgram({
+    rootNames: [path],
+    options: { noLib: true, noResolve: true, allowJs: true, noEmit: true, types: [] },
+    host,
+  });
+
+  return {
+    sourceFile: program.getSourceFile(path) ?? parsed,
+    checker: program.getTypeChecker(),
+  };
+}
+
+/**
+ * The first argument of every direct `NestFactory.create`-style call, in source
+ * order — counting only the `NestFactory` main.ts takes from `@nestjs/core`,
+ * each name resolved in its own scope: an object of main.ts's own that shares
+ * the name, or a parameter, catch variable or local declaration that shadows
+ * the import, boots nothing. (The load guard, which only refuses, counts any
+ * `NestFactory`, scopes or not.)
+ */
+function findBootCalls(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): (ts.Expression | undefined)[] {
   const calls: (ts.Expression | undefined)[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-      const method = coreBootMethod(node, bindings);
-      if (method !== undefined && BOOT_METHODS.has(method)) {
+      const callee = coreReference(node.expression, checker, 0);
+      if (callee?.kind === "method" && callee.name !== undefined && BOOT_METHODS.has(callee.name)) {
         const argument: ts.Expression | undefined = node.arguments[0];
         calls.push(argument);
       }
@@ -824,174 +1068,159 @@ function findBootCalls(sourceFile: ts.SourceFile): (ts.Expression | undefined)[]
   return calls;
 }
 
-/** The local names main.ts binds to `@nestjs/core`, to its `NestFactory`, or to one of that's methods. */
-type CoreBindings = {
-  /** `import * as core`, `import core = require()`, `const core = require()`. */
-  modules: Set<string>;
-  /** `import { NestFactory as F }`, `const { NestFactory } = require()`, `const F = core.NestFactory`. */
-  factories: Set<string>;
-  /** `const { create } = NestFactory`, `const create = core.NestFactory.create`. */
-  methods: Map<string, string | undefined>;
-};
+/** What an expression in main.ts is of `@nestjs/core`: the module, its `NestFactory`, or one of that's methods. */
+type CoreReference =
+  | { kind: "module" }
+  | { kind: "factory" }
+  /** `create`; undefined for a computed `NestFactory[name]`. */
+  | { kind: "method"; name: string | undefined };
 
-function collectCoreBindings(sourceFile: ts.SourceFile): CoreBindings {
-  const bindings: CoreBindings = {
-    modules: new Set(),
-    factories: new Set(),
-    methods: new Map(),
-  };
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node)) {
-      collectCoreImport(node, bindings);
-    } else if (ts.isImportEqualsDeclaration(node)) {
-      const reference = node.moduleReference;
-      if (
-        !node.isTypeOnly &&
-        ts.isExternalModuleReference(reference) &&
-        ts.isStringLiteralLike(reference.expression) &&
-        reference.expression.text === NEST_CORE
-      ) {
-        bindings.modules.add(node.name.text);
-      }
-    } else if (ts.isVariableDeclaration(node) && node.initializer) {
-      collectCoreVariable(node.name, node.initializer, bindings);
-    }
+/**
+ * How many declarations a name is followed through to `@nestjs/core`:
+ * `const F = core.NestFactory`, then `const G = F`, and so on.
+ */
+const MAX_ALIAS_DEPTH = 5;
 
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+/**
+ * What an expression refers to of `@nestjs/core`, if anything: `require()` or
+ * `import()` of it, a member of something that does, or a name whose
+ * declaration — the one the checker finds for it in its own scope — binds it
+ * to one of those.
+ */
+function coreReference(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  depth: number,
+): CoreReference | undefined {
+  if (depth > MAX_ALIAS_DEPTH) {
+    return undefined;
+  }
 
-  return bindings;
+  const { base, names } = memberChain(expression);
+  let reference: CoreReference | undefined = isCoreModuleCall(base)
+    ? { kind: "module" }
+    : ts.isIdentifier(base)
+      ? declaredReference(checker.getSymbolAtLocation(base), checker, depth)
+      : undefined;
+  for (const name of names) {
+    reference = memberOf(reference, name);
+  }
+
+  return reference;
 }
 
-function collectCoreImport(node: ts.ImportDeclaration, bindings: CoreBindings): void {
-  const clause = node.importClause;
+/** `<core>.NestFactory` is the factory, and `<factory>.<name>` one of its methods. */
+function memberOf(
+  reference: CoreReference | undefined,
+  name: string | undefined,
+): CoreReference | undefined {
+  switch (reference?.kind) {
+    case "module":
+      return name === NEST_FACTORY ? { kind: "factory" } : undefined;
+    case "factory":
+      return { kind: "method", name };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What a name's declaration binds it to of `@nestjs/core`: an import of the
+ * package or its `NestFactory`, or a variable holding one. A parameter, a
+ * catch clause's variable, a function or a class binds nothing of it.
+ */
+function declaredReference(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+  depth: number,
+): CoreReference | undefined {
+  const declaration = symbol?.declarations?.[0];
+  if (declaration === undefined) {
+    return undefined;
+  }
+
+  if (ts.isImportSpecifier(declaration)) {
+    const imported = (declaration.propertyName ?? declaration.name).text;
+    return !declaration.isTypeOnly &&
+      importsCore(declaration.parent.parent) &&
+      imported === NEST_FACTORY
+      ? { kind: "factory" }
+      : undefined;
+  }
+
+  if (ts.isNamespaceImport(declaration)) {
+    return importsCore(declaration.parent) ? { kind: "module" } : undefined;
+  }
+
+  if (ts.isImportClause(declaration)) {
+    // import core from "@nestjs/core": the CommonJS module itself.
+    return importsCore(declaration) ? { kind: "module" } : undefined;
+  }
+
+  if (ts.isImportEqualsDeclaration(declaration)) {
+    const reference = declaration.moduleReference;
+    return !declaration.isTypeOnly &&
+      ts.isExternalModuleReference(reference) &&
+      ts.isStringLiteralLike(reference.expression) &&
+      reference.expression.text === NEST_CORE
+      ? { kind: "module" }
+      : undefined;
+  }
+
+  if (ts.isVariableDeclaration(declaration)) {
+    return declaration.initializer === undefined
+      ? undefined
+      : coreReference(declaration.initializer, checker, depth + 1);
+  }
+
   if (
-    !clause ||
-    clause.phaseModifier === ts.SyntaxKind.TypeKeyword ||
-    !ts.isStringLiteralLike(node.moduleSpecifier) ||
-    node.moduleSpecifier.text !== NEST_CORE
+    ts.isBindingElement(declaration) &&
+    !declaration.dotDotDotToken &&
+    ts.isObjectBindingPattern(declaration.parent) &&
+    ts.isVariableDeclaration(declaration.parent.parent) &&
+    declaration.parent.parent.initializer !== undefined
   ) {
-    return;
+    // const { NestFactory } = require("@nestjs/core"); const { create } = NestFactory;
+    const property = declaration.propertyName
+      ? propertyNameText(declaration.propertyName)
+      : ts.isIdentifier(declaration.name)
+        ? declaration.name.text
+        : undefined;
+    return memberOf(
+      coreReference(declaration.parent.parent.initializer, checker, depth + 1),
+      property,
+    );
   }
 
-  if (clause.name) {
-    // import core from "@nestjs/core", the CommonJS module itself.
-    bindings.modules.add(clause.name.text);
-  }
-
-  const named = clause.namedBindings;
-  if (named && ts.isNamespaceImport(named)) {
-    bindings.modules.add(named.name.text);
-  } else if (named) {
-    for (const element of named.elements) {
-      if (!element.isTypeOnly && (element.propertyName ?? element.name).text === NEST_FACTORY) {
-        bindings.factories.add(element.name.text);
-      }
-    }
-  }
+  return undefined;
 }
 
-function collectCoreVariable(
-  name: ts.BindingName,
-  initializer: ts.Expression,
-  bindings: CoreBindings,
-): void {
-  const value = unwrap(initializer);
-  const { base, names } = memberChain(value);
-  const isModule = names.length === 0 && isCoreModule(base, bindings);
-  const isFactory = isCoreFactory(base, names, bindings);
-  if (ts.isIdentifier(name)) {
-    if (isModule) {
-      bindings.modules.add(name.text);
-    } else if (isFactory) {
-      bindings.factories.add(name.text);
-    } else {
-      const method = coreFactoryMethod(base, names, bindings);
-      if (method !== undefined) {
-        bindings.methods.set(name.text, method.name);
-      }
-    }
-    return;
-  }
-
-  if (!ts.isObjectBindingPattern(name) || (!isModule && !isFactory)) {
-    return;
-  }
-
-  for (const element of name.elements) {
-    if (element.dotDotDotToken || !ts.isIdentifier(element.name)) {
-      continue;
-    }
-
-    const property = element.propertyName
-      ? propertyNameText(element.propertyName)
-      : element.name.text;
-    if (isModule && property === NEST_FACTORY) {
-      // const { NestFactory } = require("@nestjs/core");
-      bindings.factories.add(element.name.text);
-    } else if (isFactory) {
-      // const { create } = NestFactory;
-      bindings.methods.set(element.name.text, property);
-    }
-  }
+/** Whether an import clause takes values from `@nestjs/core`. */
+function importsCore(clause: ts.ImportClause): boolean {
+  const { moduleSpecifier } = clause.parent;
+  return (
+    clause.phaseModifier !== ts.SyntaxKind.TypeKeyword &&
+    ts.isStringLiteralLike(moduleSpecifier) &&
+    moduleSpecifier.text === NEST_CORE
+  );
 }
 
-/** `@nestjs/core` itself: a name bound to it, `require("@nestjs/core")`, or `import("@nestjs/core")`. */
-function isCoreModule(base: ts.Expression, bindings: CoreBindings): boolean {
-  if (ts.isIdentifier(base)) {
-    return bindings.modules.has(base.text);
-  }
-
-  if (requireSpecifier(base) === NEST_CORE) {
+/** `require("@nestjs/core")`, or `import("@nestjs/core")`. */
+function isCoreModuleCall(expression: ts.Expression): boolean {
+  if (requireSpecifier(expression) === NEST_CORE) {
     return true;
   }
 
   if (
-    !ts.isCallExpression(base) ||
-    base.expression.kind !== ts.SyntaxKind.ImportKeyword ||
-    base.arguments.length !== 1
+    !ts.isCallExpression(expression) ||
+    expression.expression.kind !== ts.SyntaxKind.ImportKeyword ||
+    expression.arguments.length !== 1
   ) {
     return false;
   }
 
-  const specifier = base.arguments[0];
+  const specifier = expression.arguments[0];
   return ts.isStringLiteralLike(specifier) && specifier.text === NEST_CORE;
-}
-
-/** `@nestjs/core`'s `NestFactory`: a name bound to it, or `<core>.NestFactory`. */
-function isCoreFactory(
-  base: ts.Expression,
-  names: readonly (string | undefined)[],
-  bindings: CoreBindings,
-): boolean {
-  if (names.length === 0) {
-    return ts.isIdentifier(base) && bindings.factories.has(base.text);
-  }
-
-  return names.length === 1 && names[0] === NEST_FACTORY && isCoreModule(base, bindings);
-}
-
-/** A method of `@nestjs/core`'s `NestFactory`, taken as a value: `<factory>.create`. */
-function coreFactoryMethod(
-  base: ts.Expression,
-  names: readonly (string | undefined)[],
-  bindings: CoreBindings,
-): { name: string | undefined } | undefined {
-  const last = names.length - 1;
-  return last >= 0 && isCoreFactory(base, names.slice(0, last), bindings)
-    ? { name: names[last] }
-    : undefined;
-}
-
-/** The `@nestjs/core` `NestFactory` method a call makes directly — `F.create(...)`, `core.NestFactory.create(...)` — if it makes one. */
-function coreBootMethod(call: ts.CallExpression, bindings: CoreBindings): string | undefined {
-  const { base, names } = memberChain(call.expression);
-  if (names.length === 0 && ts.isIdentifier(base) && bindings.methods.has(base.text)) {
-    return bindings.methods.get(base.text);
-  }
-
-  return coreFactoryMethod(base, names, bindings)?.name;
 }
 
 /**

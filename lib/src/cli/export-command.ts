@@ -246,10 +246,12 @@ function delegateToProjectPackage(
 /**
  * Loads `--env-file`s into `process.env` before any of the application's
  * code runs, as a `main.ts` that loads its environment before importing
- * `AppModule` would — and the export never loads `main.ts`. Precedence is
- * `node --env-file`'s: a variable already set in the environment keeps its
- * value, and of two files the later one wins. `process.loadEnvFile()` never
- * overrides a variable, so the files are loaded from the last to the first.
+ * `AppModule` would — and the export never selects `main.ts` to load (a
+ * module the entry imports could still load it: imports are not checked).
+ * Precedence is `node --env-file`'s: a variable already set in the
+ * environment keeps its value, and of two files the later one wins.
+ * `process.loadEnvFile()` never overrides a variable, so the files are loaded
+ * from the last to the first.
  */
 function loadEnvFiles(paths: readonly string[], cwd: string): void {
   if (!paths.length) {
