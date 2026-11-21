@@ -1,4 +1,5 @@
 import type { GraphOutput } from 'nest-graph-inspector'
+import type { RouteLocationRaw } from 'vue-router'
 import { EXAMPLE_GRAPH_SOURCE } from '~/utils/demo-graph-preview'
 import {
   checkGraphFileSize,
@@ -17,6 +18,12 @@ type OpenOptions = {
    * loading — carries on.
    */
   beforeOpen?: () => boolean
+  /**
+   * The viewer page to land on once the graph is open: the navigator unless
+   * said otherwise — a documentation preview handing over a module's page
+   * says otherwise.
+   */
+  to?: RouteLocationRaw
 }
 
 /**
@@ -129,7 +136,7 @@ export function useGraphFileOpener() {
     }
 
     graphStore.openGraphFile(graph, source)
-    await navigateTo('/view/navigator', { replace: true })
+    await navigateTo(options.to ?? '/view/navigator', { replace: true })
 
     return true
   }

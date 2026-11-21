@@ -16,6 +16,13 @@ const props = withDefaults(defineProps<{
   showLoadExample?: BooleanProp
   showControls?: BooleanProp
   showMiniMap?: BooleanProp
+  /**
+   * Open a module's page in the viewer on a click — a provider's or a
+   * controller's module, with Direct Run open on it — in place of the Direct
+   * Run drawer. `/view` hands it this preview's graph: the static one, or the
+   * demo once it runs. Back returns here.
+   */
+  openModulePages?: BooleanProp
 }>(), {
   previewId: undefined,
   fixBightline: false,
@@ -28,7 +35,8 @@ const props = withDefaults(defineProps<{
   interactive: true,
   showLoadExample: false,
   showControls: false,
-  showMiniMap: false
+  showMiniMap: false,
+  openModulePages: false
 })
 
 function parseBooleanProp(value: BooleanProp | undefined, fallback: boolean) {
@@ -60,6 +68,9 @@ const isInteractive = computed(() => parseBooleanProp(props.interactive, true))
 const shouldShowLoadExample = computed(() => parseBooleanProp(props.showLoadExample, false))
 const shouldShowControls = computed(() => parseBooleanProp(props.showControls, false))
 const shouldShowMiniMap = computed(() => parseBooleanProp(props.showMiniMap, false))
+const modulePageNavigation = computed(() =>
+  parseBooleanProp(props.openModulePages, false) ? 'preview' as const : undefined
+)
 
 const previewCaption = computed(() => {
   if (fixedBrightLineLabel.value) {
@@ -118,6 +129,7 @@ const sourceSentence = computed(() =>
         :collapsed-modules="props.collapsedModules"
         :show-circular-dependencies="shouldShowCircularDependencies"
         :enable-bright-line="shouldShowBrightLine"
+        :module-page-navigation="modulePageNavigation"
         default-open-module-detail
       />
       <div

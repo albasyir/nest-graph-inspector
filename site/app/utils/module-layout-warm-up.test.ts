@@ -16,6 +16,13 @@ describe('drawsModuleGraphOnArrival', () => {
     assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: ['true'] }), false)
   })
 
+  test('a preview handing a module over opens that module\'s page, which needs no ELK', () => {
+    assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: 'OrderModule' }), false)
+    assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: ['OrderModule'] }), false)
+    assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: '' }), true)
+    assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: null }), true)
+  })
+
   test('no other page draws it on arrival, whatever its query', () => {
     for (const path of [
       '/',

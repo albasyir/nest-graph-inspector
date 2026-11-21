@@ -799,8 +799,16 @@ useResizeObserver(containerRef, debouncedFit)
   }
 }
 
+/*
+ * Vue Flow lets a node take the pointer only when it can be selected or
+ * dragged, or something listens for clicks on it — none of which a bracket
+ * node is — and sets `pointer-events: none` on it inline otherwise. These hold
+ * links and buttons of their own; a press that moves still pans the canvas,
+ * which swallows the click.
+ */
 .module-bracket__flow :deep(.vue-flow__node) {
   cursor: default;
+  pointer-events: all !important;
 }
 
 .module-bracket__flow :deep(.vue-flow__handle) {

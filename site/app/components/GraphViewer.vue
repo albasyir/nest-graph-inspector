@@ -103,6 +103,11 @@ import {
   shouldWarnAboutBrightLine
 } from '~/utils/graph-viewer-bright-line'
 import { encodeModuleId } from '~/utils/module-id'
+import {
+  buildModulePageLocation,
+  buildPreviewModulePageLocation,
+  resolveNodeModulePage
+} from '~/utils/module-page-route'
 
 function normalizeDep(dep: GraphOutputDependencyRef): {
   moduleName: string
@@ -291,8 +296,20 @@ const props = withDefaults(
      * cannot open the deep dive. Off for a preview with nothing to focus on.
      */
     canFocusModule?: boolean
+    /**
+     * Makes a click on a node open a module's page in place of the Direct Run
+     * drawer, which is then never drawn: a module opens its own page, and a
+     * provider or controller its module's inside view, with Direct Run open
+     * on it. `viewer` goes there directly — a viewer page, whose graph the
+     * tab already holds; `preview` goes by `/view?preview=true`, which hands a
+     * documentation preview's graph to the tab first. Unset, a click on a
+     * provider or controller opens the drawer, and one on a module does
+     * nothing. A drag never counts as a click.
+     */
+    modulePageNavigation?: 'viewer' | 'preview'
   }>(),
   {
+    modulePageNavigation: undefined,
     canOpenModuleDeepDive: false,
     canFocusModule: true,
     layoutData: null,
@@ -2444,7 +2461,9 @@ function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
 
 function handlePaneClick(): void {
   closeJsDocHoverCard()
-  selectDirectRunNode(null)
+  if (!props.modulePageNavigation) {
+    selectDirectRunNode(null)
+  }
 }
 
 function selectDirectRunNode(nodeId: string | null): void {
@@ -2459,9 +2478,52 @@ function selectDirectRunNode(nodeId: string | null): void {
   emit('directRunDrawerClose')
 }
 
+/**
+ * Vue Flow reports a click on a node only for a press that did not move it
+ * — a drag past `nodeDragThreshold` swallows the click — so dragging a node
+ * never opens anything.
+ */
 function handleNodeClick(event: NodeMouseEvent): void {
   closeJsDocHoverCard()
+  if (props.modulePageNavigation) {
+    openModulePageFor(event.node.id)
+    return
+  }
+
   selectDirectRunNode(event.node.id)
+}
+
+/** Leaves the whole graph for the page of the module a node is, or belongs to. */
+function openModulePageFor(nodeId: string): void {
+  const target = resolveNodeModulePage(graphData.value, nodeId)
+  if (!target) {
+    return
+  }
+
+  void navigateTo(props.modulePageNavigation === 'preview'
+    ? buildPreviewModulePageLocation(target.moduleName, target.state)
+    : buildModulePageLocation(target.moduleName, target.state))
+}
+
+/**
+ * Enter on a focused node opens its module's page, as a click does: Vue Flow
+ * answers a key on a node only by selecting it. A key on a control inside
+ * the node — a module header's buttons — is that control's.
+ */
+function handleNodeKeydown(event: KeyboardEvent): void {
+  const node = event.target
+  if (
+    !props.modulePageNavigation
+    || event.key !== 'Enter'
+    || !(node instanceof HTMLElement)
+    || !node.classList.contains('vue-flow__node')
+    || !node.dataset.id
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  openModulePageFor(node.dataset.id)
 }
 
 function openCircularTooltip(edgeId: string): void {
@@ -3191,10 +3253,12 @@ defineExpose({ centerGraph, focusModule })
     class="graph-viewer"
     :class="{
       'graph-viewer--flush': props.flush,
-      'graph-viewer--canvas-hidden': !isCanvasShown
+      'graph-viewer--canvas-hidden': !isCanvasShown,
+      'graph-viewer--opens-module-pages': props.modulePageNavigation
     }"
     :style="{ height: props.height }"
     :data-layout-state="moduleLayoutStatus.state"
+    @keydown="handleNodeKeydown"
   >
     <div
       v-if="props.interactive && props.canSaveLayout"
@@ -3863,6 +3927,7 @@ defineExpose({ centerGraph, focusModule })
     </VueFlow>
 
     <DirectRunDrawer
+      v-if="!props.modulePageNavigation"
       :graph="graphData"
       :node-id="selectedDirectRunNodeId"
       :direct-run-url="props.directRunUrl"
@@ -4017,6 +4082,15 @@ defineExpose({ centerGraph, focusModule })
 .graph-viewer--flush {
   border: 0;
   border-radius: 0;
+}
+
+/* A node that opens a page says so; one being dragged still shows the grip. */
+.graph-viewer--opens-module-pages .vue-flow__node {
+  cursor: pointer;
+}
+
+.graph-viewer--opens-module-pages .vue-flow__node.dragging {
+  cursor: grabbing;
 }
 
 /*

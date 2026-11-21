@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { findDirectRunTarget } from '~/utils/direct-run-provider'
+import { buildModulePageLocation } from '~/utils/module-page-route'
 
 definePageMeta({
   layout: 'viewer'
 })
 
 const route = useRoute()
-const router = useRouter()
 const graphStore = useGraphInspectorStore()
 const {
-  directRunUrl,
-  directRunDisabledReason,
-  requestHeaders,
   graphData,
-  graphIsStatic,
   errorStatus,
   endpointRequiresAccessToken,
   hasLoadError,
@@ -37,33 +34,29 @@ useSeoMeta({
   description: 'Viewing NestJS dependency graph data.'
 })
 
-// A graph node id (`controller-UserModule-UserController`), never a bare class
-// name: only the id says whether it is a provider or a controller.
-const directRunOn = computed(() => {
-  const value = route.query['direct-run-on']
-  const nodeId = Array.isArray(value) ? value[0] : value
-  return nodeId || undefined
-})
-
-function handleDirectRunDrawerOpen(nodeId: string) {
-  if (route.query['direct-run-on'] === nodeId) return
-
-  router.push({
-    query: {
-      ...route.query,
-      'direct-run-on': nodeId
+// Direct Run lives on a module's page now. A link from before — the navigator
+// open on a provider or controller (`direct-run-on`, a graph node id, never a
+// bare class name) — goes on to its module's page, open on it, in place of
+// this one; one naming nothing in the graph is dropped from the address.
+watch(
+  [() => route.query['direct-run-on'], graphData],
+  ([value, graph]) => {
+    const nodeId = Array.isArray(value) ? value[0] : value
+    if (!nodeId || !graph) {
+      return
     }
-  })
-}
 
-function handleDirectRunDrawerClose() {
-  const { 'direct-run-on': _directRunOn, ...query } = route.query
-  router.push({ query })
-}
-
-function handleTraceOpen() {
-  router.push('/view/trace')
-}
+    const target = findDirectRunTarget(graph, nodeId)
+    const { 'direct-run-on': _directRunOn, ...query } = route.query
+    void navigateTo(
+      target
+        ? buildModulePageLocation(target.moduleName, { view: 'inside', directRunOn: target.nodeId })
+        : { query },
+      { replace: true }
+    )
+  },
+  { immediate: true }
+)
 
 // A module name, as the issues page links to it.
 const focusModuleName = computed(() => {
@@ -115,11 +108,6 @@ watch(
       v-model:show-bright-line="showBrightLine"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
-      :direct-run-disabled="graphIsStatic"
-      :direct-run-disabled-reason="directRunDisabledReason"
-      :direct-run-on="directRunOn"
-      :direct-run-url="directRunUrl"
-      :direct-run-headers="requestHeaders"
       :layout-data="layoutData"
       can-save-layout
       :layout-dirty="isLayoutDirty"
@@ -128,11 +116,9 @@ watch(
       :layout-saved-at="layoutSavedAt"
       :layout-persistence="layoutPersistence"
       can-open-module-deep-dive
+      module-page-navigation="viewer"
       height="100%"
       flush
-      @direct-run-drawer-open="handleDirectRunDrawerOpen"
-      @direct-run-drawer-close="handleDirectRunDrawerClose"
-      @trace-open="handleTraceOpen"
       @layout-change="graphStore.markLayoutDirty()"
       @layout-save="graphStore.saveLayout"
       @layout-download="graphStore.downloadLayout"

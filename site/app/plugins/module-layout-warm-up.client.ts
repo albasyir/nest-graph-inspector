@@ -23,13 +23,18 @@ export default defineNuxtPlugin({
     const arrival = new URL(window.location.href)
     if (drawsModuleGraphOnArrival({
       path: withoutBase(arrival.pathname, useRuntimeConfig().app.baseURL || '/'),
-      preview: arrival.searchParams.get('preview')
+      preview: arrival.searchParams.get('preview'),
+      module: arrival.searchParams.get('module')
     })) {
       startModuleLayoutWarmUp()
     }
 
     useRouter().beforeEach((to) => {
-      if (drawsModuleGraphOnArrival({ path: to.path, preview: to.query.preview })) {
+      if (drawsModuleGraphOnArrival({
+        path: to.path,
+        preview: to.query.preview,
+        module: to.query.module
+      })) {
         startModuleLayoutWarmUp()
       }
     })
