@@ -164,6 +164,62 @@ function boxesOverlap(
     && right.y < left.y + left.height
 }
 
+type Point = { x: number, y: number }
+
+/**
+ * The points a routed edge's path runs through: where it starts, every
+ * corner, and where each rounded corner is entered — consecutive points are
+ * on one straight stretch, so each pair is a stretch of the route.
+ */
+function routeOf(path: string): Point[] {
+  const tokens = path.match(/[MLQC]|-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi) ?? []
+  const points: Point[] = []
+  let command = ''
+  let pending: number[] = []
+
+  for (const token of tokens) {
+    if (/^[MLQC]$/i.test(token)) {
+      command = token.toUpperCase()
+      pending = []
+      continue
+    }
+
+    pending.push(Number(token))
+    if (pending.length === 2) {
+      const [x = 0, y = 0] = pending
+      // A rounded corner is a quadratic curve: its control point is the
+      // corner itself, its end lies on the next stretch.
+      if (command !== 'Q' || points.length === 0 || points.at(-1)?.x !== x || points.at(-1)?.y !== y) {
+        points.push({ x, y })
+      }
+      pending = []
+    }
+  }
+
+  return points
+}
+
+/** The cards an edge's route passes behind, other than its own two ends. */
+function cardsCrossed(bracket: ModuleDependencyBracket, edge: BracketEdge): string[] {
+  const route = routeOf(edge.path)
+  const cards = bracket.nodes.filter(node =>
+    node.kind !== 'level' && node.id !== edge.source && node.id !== edge.target)
+
+  return cards
+    .filter(card => route.slice(1).some((end, index) => {
+      const start = route[index] ?? end
+      const left = Math.min(start.x, end.x)
+      const right = Math.max(start.x, end.x)
+      const top = Math.min(start.y, end.y)
+      const bottom = Math.max(start.y, end.y)
+      return left < card.position.x + card.width - 1
+        && right > card.position.x + 1
+        && top < card.position.y + card.height - 1
+        && bottom > card.position.y + 1
+    }))
+    .map(card => card.id)
+}
+
 function middleOf(bracket: ModuleDependencyBracket): BracketCenterNode {
   const node = bracket.nodes.find(candidate => candidate.kind === 'center')
   assert.ok(node?.kind === 'center', 'the module in the middle is drawn')
@@ -496,6 +552,11 @@ describe('the bracket', () => {
           }
         }
 
+        // No edge passes behind a card it does not join.
+        for (const edge of bracket.edges.filter(candidate => candidate.kind !== 'self')) {
+          assert.deepEqual(cardsCrossed(bracket, edge), [], `${edge.id} passes behind cards (centre ${center}, depth ${depth})`)
+        }
+
         const ids = new Set(bracket.nodes.map(node => node.id))
         assert.equal(ids.size, bracket.nodes.length, 'node ids are unique')
         assert.equal(new Set(bracket.edges.map(edge => edge.id)).size, bracket.edges.length, 'edge ids are unique')
@@ -532,6 +593,42 @@ describe('the bracket', () => {
             `${node.id} is inside the bounds`
           )
         }
+      }
+    }
+  })
+
+  test('a link back over a column goes round its cards, never behind one', () => {
+    // E, two columns out, imports A, which stands in the first column level
+    // with its only child B: a straight run from A would pass behind B.
+    const detour = graph({
+      Center: ['A', 'C'],
+      A: ['B'],
+      B: [],
+      C: ['D'],
+      D: ['E'],
+      E: ['A']
+    })
+    const bracket = build(detour, 'Center')
+    const link = edgeBetween(bracket, getBracketModuleNodeId('left', 'A'), getBracketModuleNodeId('left', 'E'))
+
+    assert.ok(link, 'the link from A to E is drawn')
+    assert.equal(link.kind, 'link')
+    assert.deepEqual(cardsCrossed(bracket, link), [])
+    assert.equal(
+      centerY(nodeOf(bracket, 'left', 'A')), centerY(nodeOf(bracket, 'left', 'B')),
+      'B stands level with A, in the way of a straight run'
+    )
+
+    // The same on the right, and on a graph far larger.
+    const mirrored = build(graph({ A: ['Center'], B: ['A'], C: ['Center'], D: ['C'], E: ['D'], Center: [] }, {}), 'Center')
+    for (const edge of mirrored.edges.filter(candidate => candidate.kind !== 'self')) {
+      assert.deepEqual(cardsCrossed(mirrored, edge), [], edge.id)
+    }
+    const large = syntheticGraph(300)
+    for (const center of ['L4M7', 'L9M29']) {
+      const wide = build(large, center, { left: 99, right: 99 })
+      for (const edge of wide.edges.filter(candidate => candidate.kind !== 'self')) {
+        assert.deepEqual(cardsCrossed(wide, edge), [], `${edge.id} (centre ${center})`)
       }
     }
   })

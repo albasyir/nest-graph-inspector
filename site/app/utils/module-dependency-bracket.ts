@@ -205,11 +205,11 @@ export type ModuleDependencyBracket = {
   bounds: CircularEdgeRect
 }
 
-export const BRACKET_CENTER_WIDTH = 320
-export const BRACKET_CENTER_HEIGHT = 156
-export const BRACKET_MODULE_WIDTH = 244
-export const BRACKET_MODULE_HEIGHT = 40
-export const BRACKET_STUB_WIDTH = 136
+const BRACKET_CENTER_WIDTH = 320
+const BRACKET_CENTER_HEIGHT = 156
+const BRACKET_MODULE_WIDTH = 244
+const BRACKET_MODULE_HEIGHT = 40
+const BRACKET_STUB_WIDTH = 136
 const STUB_HEIGHT = BRACKET_MODULE_HEIGHT
 const EMPTY_WIDTH = BRACKET_MODULE_WIDTH
 const EMPTY_HEIGHT = 64
@@ -761,7 +761,16 @@ function routeEdges(params: {
   routePoints: EdgePoint[]
 }): BracketEdge[] {
   const { center, layouts, walks, adjacency, cycleIdsByImport } = params
-  const router = createRouter(params.routePoints)
+  const cardsByColumn = new Map<number, CircularEdgeRect[]>()
+  for (const node of params.nodes) {
+    if (node.kind === 'module' || node.kind === 'stub') {
+      const column = getColumn(node)
+      const cards = cardsByColumn.get(column) ?? []
+      cards.push({ x: node.position.x, y: node.position.y, width: node.width, height: node.height })
+      cardsByColumn.set(column, cards)
+    }
+  }
+  const router = createRouter(params.routePoints, cardsByColumn)
   const edges: RoutedEdge[] = []
   const cycleIdsOf = (importer: string, imported: string) =>
     [...(cycleIdsByImport.get(getImportKey(importer, imported)) ?? [])]
@@ -998,6 +1007,45 @@ function getStretchSpots(route: readonly EdgePoint[]): EdgePoint[] {
   })
 }
 
+/** Half the gap between two rows of cards: where a channel between them runs. */
+const HALF_ROW_GAP = (ROW_PITCH - BRACKET_MODULE_HEIGHT) / 2
+/** How far a channel keeps from the cards it runs between. */
+const CHANNEL_CLEARANCE = 2
+
+/**
+ * The height a link crosses `cards` at without passing behind any of them:
+ * the height it is going at when that is free — anywhere between its two ends
+ * costs the same length — else the free channel nearest it, halfway between
+ * two rows, above the top row or below the bottom one. Above the topmost card
+ * is always free, so there is always one.
+ */
+function findChannel(cards: readonly CircularEdgeRect[], fromY: number, toY: number): number {
+  const isFree = (y: number) => !cards.some(card =>
+    y > card.y - CHANNEL_CLEARANCE && y < card.y + card.height + CHANNEL_CLEARANCE)
+  const detour = (y: number) => Math.abs(y - fromY) + Math.abs(y - toY)
+  const candidates = [
+    fromY,
+    toY,
+    ...cards.flatMap(card => [card.y - HALF_ROW_GAP, card.y + card.height + HALF_ROW_GAP])
+  ]
+
+  let best = Number.NaN
+  for (const y of candidates) {
+    if (!isFree(y)) {
+      continue
+    }
+    if (
+      Number.isNaN(best)
+      || detour(y) < detour(best)
+      || (detour(y) === detour(best) && Math.abs(y - fromY) < Math.abs(best - fromY))
+    ) {
+      best = y
+    }
+  }
+
+  return Number.isNaN(best) ? fromY : best
+}
+
 function grow(rect: CircularEdgeRect, by: number): CircularEdgeRect {
   return { x: rect.x - by, y: rect.y - by, width: rect.width + by * 2, height: rect.height + by * 2 }
 }
@@ -1028,7 +1076,10 @@ function getColumn(node: RoutedNode): number {
  *   branches of one module share one upright, the way a bracket joins them.
  * - A link back towards the middle leaves its module by the side facing the
  *   middle, turns in a lane of its own in the gap beside the column it ends
- *   in, and comes into that column from its far side.
+ *   in, and comes into that column from its far side. One reaching back past
+ *   the next column first turns beside its own and crosses the columns
+ *   between in a free channel between their rows (`findChannel`), so it never
+ *   passes behind their cards.
  * - A link within one column runs round the column's outer side, in a lane of
  *   its own.
  *
@@ -1036,7 +1087,11 @@ function getColumn(node: RoutedNode): number {
  * within a column next to that column, links back towards the middle next to
  * the column on the gap's other side — so no lane runs along an upright.
  */
-function createRouter(routePoints: EdgePoint[]) {
+function createRouter(
+  routePoints: EdgePoint[],
+  /** The cards standing in each column, by column. */
+  cardsByColumn: ReadonlyMap<number, readonly CircularEdgeRect[]>
+) {
   const lanes = new Map<string, number>()
   const nextLane = (key: string) => {
     const lane = lanes.get(key) ?? 0
@@ -1092,9 +1147,35 @@ function createRouter(routePoints: EdgePoint[]) {
       // On the left the lane hugs the column it ends in, on the right the
       // column across the gap from it: its label reaches away from either.
       const turn = side === 'left' ? to.x + offset : to.x + COLUMN_GAP - offset
-      points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
       handles = ['left-source', 'right-target']
-      lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+
+      if (sourceColumn - targetColumn === 1) {
+        points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
+        lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+      } else {
+        // Further than the next column, a straight run would pass behind the
+        // cards of the columns between and read as an edge of theirs. It
+        // turns out of its own column in the lane beside it — shared with
+        // the lanes already running there — crosses in the free channel
+        // between those columns' rows nearest the way it is going, and turns
+        // in beside the column it ends in.
+        const exit = from.x - nextLane(side === 'left'
+          ? `same:${side}:${sourceColumn}`
+          : `back:${side}:${sourceColumn - 1}`)
+        const crossed = [...cardsByColumn.entries()]
+          .filter(([column]) => column > targetColumn && column < sourceColumn)
+          .flatMap(([, cards]) => cards)
+        const channel = findChannel(crossed, from.y, to.y)
+        points = [
+          from,
+          { x: exit, y: from.y },
+          { x: exit, y: channel },
+          { x: turn, y: channel },
+          { x: turn, y: to.y },
+          to
+        ]
+        lane = upright(turn, { x: turn, y: channel }, to, side === 'left' ? 'right' : 'left')
+      }
     } else {
       const from = side === 'left' ? leftOf(source) : rightOf(source)
       const to = side === 'left' ? leftOf(target) : rightOf(target)
