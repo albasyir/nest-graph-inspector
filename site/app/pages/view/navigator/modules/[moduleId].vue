@@ -220,7 +220,7 @@ function handleTraceOpen() {
                 :href="href"
                 class="module-page__view"
                 :class="{ 'module-page__view--active': option.isActive }"
-                :aria-current="option.isActive ? 'true' : undefined"
+                :aria-current="option.isActive ? 'page' : undefined"
                 @click="navigate"
               >
                 <UIcon
