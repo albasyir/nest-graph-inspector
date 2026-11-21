@@ -105,7 +105,7 @@ const viewOptions = computed(() => {
 
   return ([
     { view: 'dependencies', label: 'Dependencies', icon: 'i-lucide-git-fork' },
-    { view: 'inside', label: 'Inside module', icon: 'i-lucide-boxes' }
+    { view: 'inside', label: 'Inside Module', icon: 'i-lucide-boxes' }
   ] as const).map(option => ({
     ...option,
     isActive: option.view === view,

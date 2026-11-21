@@ -193,11 +193,12 @@ function stepDepth(side: BracketSide, by: number): void {
   emit('depthChange', side, Math.max(1, current + by))
 }
 
+/** A stub's name: its own words first, then what pressing it does. */
 function describeStub(stub: BracketStubNode): string {
-  const modules = `${stub.moduleCount} more ${stub.moduleCount === 1 ? 'module' : 'modules'}`
+  const shown = `+${pluralize(stub.moduleCount, 'module')}`
   return stub.side === 'left'
-    ? `Show ${modules}: one more level of what ${props.moduleName} needs`
-    : `Show ${modules}: one more level of what needs ${props.moduleName}`
+    ? `${shown}: show one more level of what ${props.moduleName} needs`
+    : `${shown}: show one more level of what needs ${props.moduleName}`
 }
 
 function pluralize(count: number, noun: string): string {
@@ -345,7 +346,9 @@ useResizeObserver(containerRef, debouncedFit)
             class="module-bracket__depth-value"
             aria-live="polite"
           >
-            {{ entry.depth }}<span class="sr-only"> {{ entry.depth === 1 ? 'level' : 'levels' }}</span>
+            <!-- The space is the interpolation's own: the compiler drops a
+                 whitespace-only text node at the start of an element. -->
+            {{ entry.depth }}<span class="sr-only">{{ ` ${entry.depth === 1 ? 'level' : 'levels'}` }}</span>
           </output>
           <UButton
             icon="i-lucide-plus"
@@ -537,6 +540,7 @@ useResizeObserver(containerRef, debouncedFit)
             <span
               class="module-bracket-module__name"
               translate="no"
+              :title="data.moduleName"
             >{{ data.moduleName }}</span>
             <span
               v-if="data.isRoot"
