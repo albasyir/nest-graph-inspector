@@ -216,7 +216,7 @@ function resolveDefaultEntry(request: EntryRequest, config: NestCliConfig): Reso
       check:
         layout === undefined
           ? undefined
-          : conventionCheck(layout, otherApplicationLayouts(layout, config, cwd)),
+          : conventionCheck(layout, () => otherApplicationLayouts(layout, config, cwd)),
       notes: conventionNotes({ config, selection, layout, path, cwd }),
       warnings: [],
     };
@@ -254,7 +254,7 @@ function resolveApplicationEntry(
       origin: "convention",
       path: assertLoadableEntry(convention.path, { projectDir, cwd }),
       moduleName: request.module,
-      check: conventionCheck(layout, otherApplicationLayouts(layout, config, cwd)),
+      check: conventionCheck(layout, () => otherApplicationLayouts(layout, config, cwd)),
       notes: [],
       warnings: [],
     };
@@ -437,6 +437,11 @@ function otherApplicationLayouts(
   config: NestCliConfig,
   cwd: string,
 ): ApplicationLayout[] {
+  // Without projects the application is the only one: no tsconfig to read.
+  if (config.projects.size === 0) {
+    return [];
+  }
+
   const { application, projectDir } = layout;
   const sources = resolve(projectDir, application.sourceRoot);
   return readEveryLayout(projectDir, config, cwd).filter(

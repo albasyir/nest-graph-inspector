@@ -170,13 +170,15 @@ function installedSwcOptionsFrom(projectDir: string): SwcOptionsFrom {
         return "unknown";
       }
 
-      const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version));
+      const parts = typeof version === "string" ? /^(\d+)\.(\d+)\.(\d+)(-?)/.exec(version) : null;
       if (!parts) {
         return "unknown";
       }
 
-      const [major, minor, patch] = parts.slice(1).map(Number);
-      return (major * 1000 + minor) * 1000 + patch >= 12_000_014 ? "application" : "top-level";
+      const [major, minor, patch] = parts.slice(1, 4).map(Number);
+      const release = (major * 1000 + minor) * 1000 + patch;
+      // Semver precedence: a prerelease comes before its release, so 12.0.14-rc.0 is not yet 12.0.14.
+      return release > 12_000_014 || (release === 12_000_014 && !parts[4]) ? "application" : "top-level";
     }
 
     if (dirname(dir) === dir) {

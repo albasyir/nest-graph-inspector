@@ -35,7 +35,7 @@ export type ConventionCheck = {
 /** What main.ts boots, when that is one root module traced to its class's file; never throws. */
 export function conventionCheck(
   layout: ApplicationLayout,
-  others: readonly ApplicationLayout[],
+  others: () => readonly ApplicationLayout[],
 ): ConventionCheck | undefined {
   try {
     const analysis = analyseMainFile(layout);
@@ -55,7 +55,12 @@ export function conventionCheck(
     }
 
     const root = { ...booted, sourceFile: declared.file, exportName: declared.exportName };
-    return { mainFile: analysis.mainFile, root, compiled: compiledCandidates(root.sourceFile, layout), others };
+    return {
+      mainFile: analysis.mainFile,
+      root,
+      compiled: compiledCandidates(root.sourceFile, layout),
+      others: others(),
+    };
   } catch {
     // Only ever a warning: a project the analysis cannot read gets none.
     return undefined;

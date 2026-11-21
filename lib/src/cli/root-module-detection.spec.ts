@@ -1476,6 +1476,7 @@ void bootstrap();
       it.each([
         ["11.0.0", "top-build/root.module.js"],
         ["12.0.13", "top-build/root.module.js"],
+        ["12.0.14-rc.0", "top-build/root.module.js"],
         ["12.0.14", "worker-build/root.module.js"],
       ])("finds it where the installed Nest CLI %s writes it", (version, compiled) => {
         writeSources();
@@ -1484,9 +1485,25 @@ void bootstrap();
         expect(detect({ app: "worker" })).toMatchObject({ origin: "main", path: at(compiled) });
       });
 
-      it("takes neither when no installed Nest CLI tells which", () => {
+      it("reads the Nest CLI installed in a parent directory's node_modules, as Node finds it", () => {
+        writeSources("app/src");
+        writeAll(Object.fromEntries(Object.entries(files).map(([path, content]) => [`app/${path}`, content])));
+        write("node_modules/@nestjs/cli/package.json", JSON.stringify({ version: "12.0.14" }));
+
+        expect(detect({ app: "worker", projectDir: at("app"), cwd: at("app") })).toMatchObject({
+          origin: "main",
+          path: at("app/worker-build/root.module.js"),
+        });
+      });
+
+      it.each<[string, string | undefined]>([
+        ["none is installed", undefined],
+        ["its package.json does not parse", "{"],
+        ["its package.json has no version", JSON.stringify({ name: "@nestjs/cli" })],
+        ["its version is not a string", JSON.stringify({ version: ["12.0.14"] })],
+      ])("takes neither when no installed Nest CLI's version can be read: %s", (_case, manifest) => {
         writeSources();
-        writeAll(files);
+        writeAll(manifest === undefined ? files : { ...files, "node_modules/@nestjs/cli/package.json": manifest });
 
         expect(() => detect({ app: "worker" })).toThrow(
           new CliError(
