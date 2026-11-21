@@ -12,6 +12,14 @@ for the published history.
 
 ## [Unreleased]
 
+### Added
+
+- **Every module has a page of its own: what it needs, and what needs it.** Clicking a module in the graph viewer's navigator — or in the graph on the landing page — opens its page, which draws it as a tournament bracket opening both ways: the modules it imports in the column to its left, what those import further left, and the modules importing it fanning out to its right. Each side shows three levels to start with, and is deepened or narrowed on its own; a branch that goes on ends in a **+N modules** stub that shows one more level. Clicking any other module moves to its page, and Back steps back again. A module standing on both sides is on a cycle with the one in the middle and is badged; an import on a reported module cycle keeps the cycle colour and its `#id`. Each module stands once per side, however many ways lead to it, so a cycle never draws for ever. The address keeps the view and both depths, so a page can be shared and Back and Forward work. Site only: `lib/` is unchanged, so this needs no npm release.
+
+### Changed
+
+- **Direct Run opens on a module's page, beside its graph, instead of in a drawer over it.** Clicking a provider or controller in the navigator opens its module's page on **Inside Module** — what the module declares, as the module deep dive drew it — with Direct Run docked beside the graph, or below it on a phone; clicking another provider or controller there moves the panel to it, and its close button puts it away. The panel runs and inspects exactly as the drawer did, keeps each target's last run while it is put away, and links to the trace as before. A link that opened the drawer on the navigator now opens the module's page on that target. The documentation's Direct Run preview keeps its drawer. Site only: `lib/` is unchanged, so this needs no npm release.
+
 ## [0.17.0] - 2026-11-21
 
 ### Added

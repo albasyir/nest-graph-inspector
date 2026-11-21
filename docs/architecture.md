@@ -1056,15 +1056,59 @@ printed link ending in `/execution-sequence` lands there too. Everything on
 `issues` except the cycles is derived in the viewer by
 `app/utils/architecture-issues.ts` from fields the graph already carries, so
 it needs no change to `GraphOutput` and works against any library version the
-viewer supports. A module's deep dive lives under the navigator at
+viewer supports. A module's page lives under the navigator at
 `/view/navigator/modules/<id>`, where `<id>` is the module name through
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
-than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it
-draws the module alone, laid out by `app/utils/module-deep-dive.ts` from fields
-the graph already carries (horizontally on desktop, or vertically on mobile
-viewports with dependencies at the top and dependents below). `nuxt.config.ts` renders `/view/**` client-side only —
-neither the tab's session nor the developer's local endpoint exists on a server
-— while `/view` itself keeps SSR so it still unfurls as a link.
+than `/view/<page>`, so the bootstrap middleware matches it explicitly. It has
+two views, and its query says which and how — `app/utils/module-page-route.ts`
+reads and writes it, so an address can be shared and Back and Forward step
+through what the visitor did:
+
+- **Dependencies**, the default: the module among the others, drawn by
+  `ModuleDependencyBracket.vue` as a tournament bracket that opens both ways —
+  what it imports in the column to its left, what those import further left,
+  and what imports it fanning out to its right the same way. The layout is
+  `app/utils/module-dependency-bracket.ts`, pure and linear in modules and
+  imports: one breadth-first walk per side, so a module stands once per side,
+  at its shortest distance, and a cycle never makes a walk go round; a module
+  standing on both sides is on a cycle with the one in the middle and carries
+  a cycle badge, and an import on a reported module cycle wears the circular
+  colour and its `#id`. An import between two modules already drawn on a side
+  is a dashed link rather than a second card, and one back into the middle is
+  never drawn on its own side — the module making it always stands one level
+  into the other side. Each side shows its own depth, `left` and `right` in the
+  query, 3 when they are absent (`DEFAULT_BRACKET_DEPTH`); a branch going on
+  past the last level ends in a "+N modules" stub that asks for one more. Every
+  other module is a link to its own page, keeping the depths, and the card in
+  the middle says how many of the module's providers and controllers Direct Run
+  can call, linking to the first of them.
+- **Inside Module** (`?view=inside`): what the module declares —
+  `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
+  fields the graph already carries (horizontally on desktop, or vertically on
+  mobile viewports with dependencies at the top and dependents below) — with
+  Direct Run docked beside it, or below it on a narrow screen
+  (`DirectRunPanel.vue`, a region, never a dialog). Clicking a provider or
+  controller opens it there and puts it in the query as `direct-run-on`, its
+  graph node id; an address with `direct-run-on` opens on this view whatever
+  `view` says, as a deep-dive link from before the page had two views does.
+
+The page keeps itself from one module to the next — its page key is fixed —
+so re-centring on another module does not load the graph again; it loads one
+only when the tab moved to another graph on the way. A click on a module in
+the navigator opens its page, and one on a provider or controller its module's
+inside view open on it (`module-page-navigation` on `GraphViewer.vue`, which
+then draws no Direct Run drawer; a drag never counts as a click, since Vue Flow
+reports one only for a press that did not move the node). The navigator's own
+`direct-run-on`, from before, is sent on to that target's page. The landing
+page's hero preview does the same through `/view`: its link is
+`/view?preview=true&module=<name>`, with the page's query beside it, and `/view`
+hands over the preview's graph — the static one, or the running demo — as it
+does for "Open full-screen demo", then replaces itself with the module's page,
+so Back returns to the landing page. The documentation's Direct Run preview
+keeps its drawer (`DirectRunDrawer.vue`, the same panel in a drawer).
+`nuxt.config.ts` renders `/view/**` client-side only — neither the tab's
+session nor the developer's local endpoint exists on a server — while `/view`
+itself keeps SSR so it still unfurls as a link.
 
 **The graph file source.** The viewer has a second kind of graph besides an
 endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the
@@ -1157,7 +1201,8 @@ that lays a graph out, never preloaded or prefetched (`build:manifest` in
 `nuxt.config.ts` drops ELK's files from every page's hints), and warmed early
 where a graph is coming: `plugins/module-layout-warm-up.client.ts` starts it on
 arriving at the navigator or `/view?preview=true` — while the page itself
-loads — and on any navigation to the navigator, and the in-browser demo starts
+loads; not when the preview hands over a module (`&module=`), whose page lays
+itself out without ELK — and on any navigation to the navigator, and the in-browser demo starts
 it while its payload downloads and boots. A warm-up lays a small graph shaped
 like a real one out three times, so the first real layout finds ELK compiled
 and optimised. Where no worker can be made at all, ELK's bundled build lays
@@ -1878,6 +1923,16 @@ Facts a code change can invalidate, and the file to check:
   `start()` in `site/app/stores/nodepod-demo.ts`; the size of ELK's worker
   script, `~1.6 MB` (`~477 KB` gzipped) — the `elkjs` version in
   `site/package.json`
+- A module page's address — `view`, `left`, `right`, `direct-run-on`, the
+  depth each side shows when it says none (3), and the preview hand-off
+  `/view?preview=true&module=<name>` — `app/utils/module-page-route.ts` and
+  `DEFAULT_BRACKET_DEPTH` in `app/utils/module-dependency-bracket.ts` (the
+  browser suite's `DEFAULT_DEPTH` mirrors it); that dragging a navigator node
+  never fires its click, which opens a module page — `useDrag` and the node
+  wrapper in the installed `@vue-flow/core`; and that a bracket node takes the
+  pointer for its links only by overriding the inline `pointer-events: none`
+  Vue Flow gives a node nobody can select, drag or click —
+  `ModuleDependencyBracket.vue`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that

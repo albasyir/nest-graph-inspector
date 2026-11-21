@@ -89,8 +89,8 @@ is not a Nest HTTP request pipeline.** For a controller method this means:
   the controller or method is honored.
 
 This must be visible in: the graph/schema docs, the public API doc, the
-viewer's controller Direct Run drawer (a persistent note, not a tooltip), and
-this file. It was already true of provider Direct Run; controllers make it
+viewer's Direct Run panel for a controller (a persistent note, not a tooltip),
+and this file. It was already true of provider Direct Run; controllers make it
 more likely to surprise someone, because a controller method's *name* often
 reads like an HTTP action.
 
@@ -183,11 +183,13 @@ Graph node rendering already distinguishes controllers from providers (badge
 letter `C` vs `P`); this feature makes controller nodes *actionable* the same
 way provider nodes are, without merging their identities. Selecting a graph
 node generalizes from "selected provider" to "selected Direct Run target"
-(`{ moduleName, targetType, targetName }`); one drawer component,
-`DirectRunDrawer.vue`, serves both targets in both the navigator and a module's
-deep dive — the same tabs, JSON-args editor, and Run / Inspect buttons — with a
-"Controller" vs "Provider" badge in its header and a persistent limitation note
-shown only for controllers. The outgoing request always states `target`
+(`{ moduleName, targetType, targetName }`); one panel component,
+`DirectRunPanel.vue`, serves both targets — the same tabs, JSON-args editor,
+and Run / Inspect buttons — with a "Controller" vs "Provider" badge in its
+header and a persistent limitation note shown only for controllers. A module's
+page docks it beside the module's own graph, and a click on a provider or
+controller in the navigator opens that page on it; `DirectRunDrawer.vue` puts
+the same panel in a drawer for the documentation's previews. The outgoing request always states `target`
 explicitly (never relies on the default) and uses the matching
 `controller` / `provider` field; `directRunRequestSchema` in
 `site/app/utils/direct-run-provider.ts` refuses any other shape before it is
@@ -196,9 +198,10 @@ Zod schema the editor's JSON Schema is generated from.
 
 The target's identity travels as the graph node id —
 `controller-<module>-<name>` or `provider-<module>-<name>` — never as a bare
-class name: the selection, the `directRunDrawerOpen` event, the navigator's
-`direct-run-on` query, and the args editor's Monaco model path (which Monaco
-also keys the JSON schema by) all carry the target type. A node id is resolved
+class name: the selection, the open events (`directRunOpen` on a module's page,
+`directRunDrawerOpen` on a preview), the module page's `direct-run-on` query,
+and the args editor's Monaco model path (which Monaco also keys the JSON schema
+by) all carry the target type. A node id is resolved
 by exact match against the graph's own providers and controllers, not parsed,
 so a controller can never be resolved as a same-named provider in the same or
 any other module.
