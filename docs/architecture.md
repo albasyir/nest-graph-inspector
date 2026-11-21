@@ -593,10 +593,19 @@ on trust:
    to first, so that — as with node --env-file — the environment wins and a
    later file beats an earlier one. The export never loads main.ts, which is
    where an application usually loads its environment before AppModule
-4. Find the entry: --entry, or from nest-cli.json's sourceRoot and the outDir
-   of the tsconfig `nest build` compiles with — <outDir>/app.module.js,
-   <outDir>/<sourceRoot>/app.module.js, or the only app.module.js under
-   <outDir>. Never main.js, which would start the application
+4. Find the entry, reading files and never loading one: --entry as given,
+   and main.ts unread; else the convention, from nest-cli.json's sourceRoot
+   and the outDir of the tsconfig `nest build` compiles with —
+   <outDir>/app.module.js, <outDir>/<sourceRoot>/app.module.js, or the only
+   app.module.js under <outDir>; else the root module main.ts passes to
+   NestFactory.create(), createApplicationContext() or createMicroservice(),
+   found by parsing main.ts, traced through its import (tsconfig paths
+   included) to its source file, and from there to the file tsc or SWC
+   compiled it to — or, with --require, to that source, all a webpack or
+   rspack bundle leaves to load. --app does the same for one application of
+   a Nest CLI monorepo. Whatever was found, a file that calls a NestFactory
+   method, or is an application's entry file, is refused: never main.js,
+   which would start the application
 5. chdir to the project, so .env files and tsconfig.json resolve as they do
    when the application starts there
 6. Divert process.stdout to stderr for the rest of the process, then load the
@@ -620,6 +629,39 @@ on trust:
 
 Why each step is the way it is:
 
+- **The convention before main.ts.** A project whose `app.module.js` the
+  convention finds loads the very file it always has, so no export that
+  worked changes; main.ts is consulted for that project only to warn, after
+  the root module export is chosen, when it boots a different module. Only
+  where the convention finds nothing, or several files, does main.ts decide.
+- **main.ts is parsed, never run.** The root module is whatever main.ts
+  passes to `NestFactory`, and loading main.ts is exactly what starts the
+  application. `cli/root-module-detection.ts` parses it with the TypeScript
+  compiler API and resolves the import with `ts.resolveModuleName` under the
+  application's own tsconfig; `cli/nest-cli-config.ts` reads `nest-cli.json`
+  and that tsconfig. Neither requires, imports or spawns anything. What only
+  exists at runtime — a root module main.ts computes, or a bootstrap function
+  imported from another file — is out of its reach, and the convention's
+  error stands.
+- **Compiled output is probed, not assumed.** Where tsc writes a source
+  file depends on its `rootDir` (explicit, or the tsconfig's directory since
+  TypeScript 6), on the project layout, and on the builder: SWC strips the
+  source root, and a Nest CLI monorepo compiled by tsc lands in
+  `dist/apps/<app>/apps/<app>/src/`. The candidates are tried in a fixed
+  order, the first that exists winning. A webpack or rspack build — or a
+  monorepo naming no builder, which the Nest CLI bundles — is never probed:
+  its output is one `main.js` that starts the application.
+- **Every loaded file is checked, `--entry` included.** Before anything is
+  loaded, the file is parsed and refused when it calls a method of
+  `NestFactory` — however it is reached: `core_1.NestFactory.create`, a
+  webpack bundle's `_nestjs_core__WEBPACK_IMPORTED_MODULE_0__.NestFactory`,
+  an alias — or when it is an application's entry file, which can start the
+  application through a function it imports. This changed `--entry`, which
+  used to load whatever it was given: security over convenience.
+- **No loader is installed or chosen.** A TypeScript loader decides whether
+  decorator metadata is emitted, and with it whether the graph is right;
+  where only the TypeScript source can be loaded, the export prints the
+  `--require` command and stops rather than pick one.
 - **Nest from the project, never from beside the CLI.** Under `npx` the CLI can
   live in a temporary directory holding its own copy of the peers. A second
   `@nestjs/core` would build a second, empty container, and the application's
@@ -685,8 +727,19 @@ cycle; it then compares the export with the `/output.json` the same application
 serves when booted normally. `cli/bin.spec.ts` compiles the package into a
 temporary project, as npm would install it, and runs the bin there with `node`:
 entry detection, standard output, ES module entries, delegation, a project copy
-too old for the CLI, and failures. `demo/test/graph-export.e2e-spec.ts` requires
-the demo's export to equal the running demo's `/output.json` byte for byte.
+too old for the CLI, and failures. `cli/root-module-detection.spec.ts` covers
+finding the root module — main.ts's import forms and `NestFactory` calls,
+monorepo applications, bundled and unbuilt builds, the files refused — on
+projects written to a temporary directory, loading nothing; and
+`cli/root-module-detection.e2e.spec.ts` runs the bin the same way as
+`bin.spec.ts` against fixture projects laid out as `nest build`, SWC, webpack,
+rspack and a Nest CLI monorepo leave them, requiring the right root module of
+every export, and of every run — refused or not — that main.ts never ran and
+nothing listened: main.ts records its bootstrap, and a preload in
+`NODE_OPTIONS` records and refuses every `listen()`. CI runs that spec on its
+own, on Node 20, 22 and 24, as CLI export e2e; it is also part of the
+library's `test`. `demo/test/graph-export.e2e-spec.ts` requires the demo's
+export to equal the running demo's `/output.json` byte for byte.
 
 ---
 
@@ -1383,10 +1436,13 @@ The library must be built first every time
 ([why](#the-three-packages-and-the-direction-of-dependency)).
 
 Test runners differ per package, on purpose: `lib/` uses Jest with specs beside
-the code (`*.spec.ts`) — `cli/bin.spec.ts` among them compiles the package into
-a temporary project and runs its bin with `node`, so the CLI is tested as
+the code (`*.spec.ts`) — `cli/bin.spec.ts` and
+`cli/root-module-detection.e2e.spec.ts` among them compile the package into
+a temporary project and run its bin with `node`, so the CLI is tested as
 installed rather than through `lib/dist`, which can be stale and, in the
-library matrix job that tests before it builds, is absent; `site/` uses `node --test` with
+library matrix job that tests before it builds, is absent; the helpers they
+share live in `cli/test-support/`, which the package build leaves out as it
+does `__fixtures__/`; `site/` uses `node --test` with
 `--experimental-strip-types` over `app/**/*.test.ts`, no framework. The demo's
 e2e suites sit outside all of it — Jest under `test:e2e`, Playwright under
 `test:e2e:browser` — and CI runs them in jobs of their own; `verify` does not.
@@ -1395,7 +1451,7 @@ Workflows:
 
 | Workflow | Trigger | What it gates |
 |---|---|---|
-| `ci.yml` | PR, push to `main` | `verify` job; library on Node 20/22/24; a full site build including the payload boot check; Demo e2e, the demo's Jest e2e suites (`test:e2e`); Viewer e2e (browser), the viewer in Chromium against the demo run as a process (`test:e2e:browser`) |
+| `ci.yml` | PR, push to `main` | `verify` job; library on Node 20/22/24; CLI export e2e on Node 20/22/24, `lib/src/cli/root-module-detection.e2e.spec.ts` alone; a full site build including the payload boot check; Demo e2e, the demo's Jest e2e suites (`test:e2e`); Viewer e2e (browser), the viewer in Chromium against the demo run as a process (`test:e2e:browser`) |
 | `deploy-site.yml` | GitHub release published | Re-runs lint/typecheck/test, stamps the version from the release tag, publishes to npm with provenance, then builds and deploys the site to Pages |
 | `publish-test-package.yml` | manual | Publishes a prerelease under the `test` dist-tag |
 | `redeploy-site-on-tag.yml` | manual | Rebuilds and redeploys the site from any ref |
@@ -1478,7 +1534,12 @@ that is never the default.
 11. **An export runs nothing.** `nest-graph-inspector export` boots in preview
     mode and never calls `init()` or `listen()`. `lib/src/cli/export-graph.spec.ts`
     requires that no constructor, factory, lifecycle hook, or `configure()` of
-    the application runs and that nothing listens.
+    the application runs and that nothing listens. Nor does it load a file
+    that starts the application: main.ts is parsed to find the root module,
+    never loaded, and every file about to be loaded, `--entry`'s included, is
+    refused when it calls a `NestFactory` method or is an application's entry
+    file. `lib/src/cli/root-module-detection.e2e.spec.ts` requires it of every
+    export it runs.
 12. **There is one graph builder.** The running inspector and the export both
     build `GraphOutput` with `GraphOutputBuilder` over a `DiscoveryAdapter`;
     never give the export its own. `export-graph.spec.ts` and
@@ -1521,7 +1582,10 @@ without knowing what it buys.
 | Direct Run invokes real methods | The trace is only honest if the call is real | In the default permissive mode, an authenticated caller can run any callable method on a provider, and any direct method of a controller, including ones TypeScript marks `private`; set `directRun.allowUnsafeMethods: false` to restrict calls to the public methods advertised in that provider's or controller's Direct Run metadata. It remains a development tool, not a production one |
 | Rate limiting keys on socket address | A forwarded header can be set by the caller | Behind a reverse proxy all callers share one bucket |
 | ts-morph reads application sources | JSDoc and parameter types cannot be recovered from decorator metadata alone | Real startup cost for any eager output, deferred to the first request for a viewer-only config; degrades silently when sources are absent |
-| The export loads the application's module files | Preview mode is Nest's own resolution: dynamic modules, `forwardRef`, global modules, and missing providers come out exactly as they do at runtime, which parsing the sources would only approximate | Code at the top level of those files runs — `.env` reads, `forRoot()` calls — and `--entry` pointed at `main.js` would start the application |
+| The export loads the application's module files | Preview mode is Nest's own resolution: dynamic modules, `forwardRef`, global modules, and missing providers come out exactly as they do at runtime, which parsing the sources would only approximate | Code at the top level of those files runs — `.env` reads, `forRoot()` calls. A file that starts the application, `main.js` above all, is refused rather than loaded (below) |
+| The root module is found by parsing main.ts, never by running it | Loading main.ts is what starts the application; what it passes to `NestFactory` is the root module in every project written the usual way | A root module main.ts only computes at runtime, or one booted by a function main.ts imports, is not found — the convention's error stands and `--entry`/`--module` are needed. `RootModule.forRoot(options)` is exported without its options, with a warning |
+| Every file the export loads is checked for `NestFactory` calls, `--entry`'s included | Loading `main.js`, compiled or bundled, runs the bootstrap: it listens on a port and connects to a database. A file name proves nothing; a call does | A module file that also holds a bootstrap — even a function nobody calls as the file loads — is refused, and the module has to move to a file of its own. `--entry` no longer loads whatever it is given |
+| No TypeScript loader is installed or chosen | A loader decides whether decorator metadata is emitted, and with it whether Nest sees every dependency; a silently chosen one could give a silently wrong graph | A bundled or unbuilt project needs `--require ts-node/register` typed; the error prints the exact command |
 | The export boots with `snapshot: true` | It is the boot the CLI was specified with: `preview` together with `snapshot`, as Nest documents preview mode for graph tooling | Nest then builds each dynamic module's key with an unguarded `JSON.stringify` of its metadata, so a `forRoot()` whose options hold a circular object or a `BigInt` fails the export though the application starts; the CLI's hint says so |
 
 ---
@@ -1549,9 +1613,25 @@ Facts a code change can invalidate, and the file to check:
 - Route table — `http-output.adapter.ts` and `viewer-output.adapter.ts`
 - Which controller methods permissive Direct Run resolves —
   `resolvePermissiveControllerMethod` in `direct-run-output.adapter.ts`
-- The CLI's options and defaults (`nest-graph.json`, `AppModule`, the entry
-  candidates, exit codes) — `lib/src/cli/cli.ts`, `export-command.ts`, and
-  `project.ts`
+- The CLI's options and defaults (`nest-graph.json`, `AppModule`, `--app`, the
+  entry candidates, the order the entry is looked for in, exit codes) —
+  `lib/src/cli/cli.ts`, `export-command.ts`, `project.ts`, and
+  `nest-cli-config.ts` (`CliUsageError`, exit code 2, in `cli-error.ts`)
+- How main.ts is found and read: the extensions it is looked for with
+  (`ENTRY_FILE_EXTENSIONS`), the `NestFactory` methods that count as booting a
+  root module (`BOOT_METHODS`), and the directories compiled output is probed
+  under, in order (`compiledCandidates`) — `lib/src/cli/root-module-detection.ts`;
+  what nest-cli.json settings make a build a bundle, and which project is the
+  default — `buildOf` and `selectApplication` in `lib/src/cli/nest-cli-config.ts`
+- Which files the export refuses to load — `assertLoadableEntry` and
+  `applicationEntryFiles` in `lib/src/cli/root-module-detection.ts`
+- The Nest CLI's own defaults the export mirrors (`sourceRoot` `src`,
+  `entryFile` `main`, outDir `dist`, a monorepo bundled with webpack, rspack
+  from CLI 12) — `DEFAULT_*` in `lib/src/cli/nest-cli-config.ts`, against
+  the installed `@nestjs/cli`
+- That the CLI export e2e job runs `root-module-detection.e2e.spec.ts` alone,
+  on Node 20, 22 and 24 — `cli-e2e` in `.github/workflows/ci.yml`, and
+  `test:e2e:cli` in `lib/package.json`
 - That Nest's preview allowlist holds only `InternalCoreModule`, and what
   preview mode skips — `InitializeOnPreviewAllowlist` and
   `Injector.instantiateClass` in the installed `@nestjs/core`

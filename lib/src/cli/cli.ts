@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { CliError, describeError, stackOf } from "./cli-error";
+import { CliError, CliUsageError, describeError, stackOf } from "./cli-error";
 
 const { version } = require("../../package.json") as { version: string };
 
@@ -12,6 +12,7 @@ export type CliIo = {
 const OPTIONS = {
   entry: { type: "string" },
   module: { type: "string" },
+  app: { type: "string" },
   out: { type: "string", short: "o" },
   project: { type: "string", short: "p" },
   require: { type: "string", short: "r", multiple: true },
@@ -31,11 +32,19 @@ hook. The file is the GraphOutput JSON a running inspector serves at
 
 Options:
   --entry <file>      File exporting the root module, compiled JavaScript or —
-                      with a --require loader — TypeScript. Default: found from
-                      nest-cli.json and the tsconfig outDir, such as
-                      dist/app.module.js or dist/src/app.module.js
-  --module <name>     Export name of the root module class (default: AppModule,
-                      or the file's only exported module)
+                      with a --require loader — TypeScript. Default: the
+                      app.module.js nest build writes, found from nest-cli.json
+                      and the tsconfig outDir (dist/app.module.js,
+                      dist/src/app.module.js); failing that, the module main.ts
+                      passes to NestFactory, found by reading main.ts, never by
+                      running it. A file that would start the application, such
+                      as main.js, is refused
+  --module <name>     Export name of the root module class (default: the one
+                      main.ts boots, when the entry was found from main.ts;
+                      else AppModule, or the file's only exported module)
+  --app <name>        The application to export from a Nest CLI monorepo, by
+                      its name under "projects" in nest-cli.json (default: the
+                      default project)
   -o, --out <file>    Where to write the graph; "-" for stdout
                       (default: nest-graph.json)
   -p, --project <dir> Project root; the application is booted from there, as
@@ -114,6 +123,10 @@ export async function runCli(
     const { runExportCommand } = await import("./export-command");
     return await runExportCommand(argv, values, io);
   } catch (error) {
+    if (error instanceof CliUsageError) {
+      return usageError(io, error.message);
+    }
+
     io.stderr.write(
       error instanceof CliError
         ? `nest-graph-inspector: ${error.message}\n${

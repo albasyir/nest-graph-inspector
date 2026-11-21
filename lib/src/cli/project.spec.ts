@@ -11,8 +11,12 @@ import {
   isEsModule,
   loadModule,
   readOwnPackage,
+  resolveEntry,
   selectEntryModule,
+  type EntryRequest,
+  type ResolvedEntry,
 } from "./project";
+import { conventionWarnings } from "./root-module-detection";
 
 describe("project", () => {
   let projectDir: string;
@@ -112,6 +116,143 @@ describe("project", () => {
       expect(() => detectEntry(projectDir, resolve(projectDir, ".."))).toThrow(
         /^No app\.module\.js found under .*dist \(looked for .*app\.module\.js and .*src\/app\.module\.js\)\. Build your project first \(nest build\), or pass --entry <file>\.$/,
       );
+    });
+  });
+
+  describe(resolveEntry.name, () => {
+    const request = (overrides: Partial<EntryRequest> = {}): EntryRequest => ({
+      projectDir,
+      cwd: projectDir,
+      entry: undefined,
+      module: undefined,
+      app: undefined,
+      hasLoader: false,
+      argv: ["export"],
+      ...overrides,
+    });
+    const main = (imports: string, root: string) =>
+      `import { NestFactory } from "@nestjs/core";\n${imports}\n\nvoid NestFactory.create(${root}).then((app) => app.listen(3000));\n`;
+    /** The warnings an entry found by convention gets, once `moduleName` is chosen from it. */
+    const warningsFor = (
+      entry: ResolvedEntry,
+      moduleName: string,
+      requestedModule?: string,
+    ) => {
+      if (entry.origin !== "convention" || !entry.check) {
+        throw new Error(`Expected an entry found by convention, checked against main.ts: ${JSON.stringify(entry)}`);
+      }
+
+      return conventionWarnings(
+        entry.check,
+        { path: entry.path, moduleName, requestedModule },
+        projectDir,
+      );
+    };
+
+    beforeEach(() => {
+      write(
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { rootDir: "src", outDir: "dist" } }),
+      );
+      write("src/app.module.ts", "@Module({})\nexport class AppModule {}\n");
+    });
+
+    it("keeps to the app.module.js the convention finds, as it always has", () => {
+      write("src/main.ts", main('import { AppModule } from "./app.module";', "AppModule"));
+      const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+      const resolved = resolveEntry(request());
+
+      expect(resolved).toMatchObject({
+        origin: "convention",
+        path: entry,
+        moduleName: undefined,
+      });
+      expect(resolved.path).toBe(detectEntry(projectDir, projectDir));
+      expect(resolved.origin === "convention" && resolved.check?.mainFile).toBe(
+        join(projectDir, "src/main.ts"),
+      );
+      expect(warningsFor(resolved, "AppModule")).toEqual([]);
+    });
+
+    it("warns, and still keeps to the convention, when main.ts boots a module from another file", () => {
+      write("src/main.ts", main('import { RootModule } from "./root.module";', "RootModule"));
+      write("src/root.module.ts", "@Module({})\nexport class RootModule {}\n");
+      const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
+      write("dist/root.module.js", "exports.RootModule = class {};\n");
+
+      const resolved = resolveEntry(request());
+
+      expect(resolved).toMatchObject({ origin: "convention", path: entry });
+      expect(warningsFor(resolved, "AppModule")).toEqual([
+        "src/main.ts boots RootModule from src/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/root.module.js --module RootModule to export RootModule.",
+      ]);
+    });
+
+    it("warns when main.ts boots another export of the file the convention found, unless --module chose", () => {
+      write(
+        "src/app.module.ts",
+        "@Module({})\nexport class AppModule {}\n\n@Module({})\nexport class RootModule {}\n",
+      );
+      write("src/main.ts", main('import { RootModule } from "./app.module";', "RootModule"));
+      write("dist/app.module.js", "exports.AppModule = class {};\n");
+
+      const resolved = resolveEntry(request());
+
+      expect(warningsFor(resolved, "AppModule")).toEqual([
+        "src/main.ts boots RootModule from src/app.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --module RootModule to export RootModule.",
+      ]);
+      expect(warningsFor(resolved, "AppModule", "AppModule")).toEqual([]);
+      expect(warningsFor(resolved, "RootModule", "RootModule")).toEqual([]);
+    });
+
+    it("takes --entry at its word and never reads main.ts", () => {
+      // main.ts would be ambiguous, were it read.
+      write(
+        "src/main.ts",
+        `${main('import { AppModule } from "./app.module";\nimport { WorkerModule } from "./worker.module";', "AppModule")}void NestFactory.create(WorkerModule);\n`,
+      );
+      write("src/worker.module.ts", "@Module({})\nexport class WorkerModule {}\n");
+      const entry = write("dist/worker.module.js", "exports.WorkerModule = class {};\n");
+      // The module object every reader shares — the CLI's own and TypeScript's
+      // — rather than an import's frozen namespace.
+      const nodeFs = require("node:fs") as typeof import("node:fs");
+      const readFileSync = jest.spyOn(nodeFs, "readFileSync");
+
+      try {
+        expect(
+          resolveEntry(request({ entry: "dist/worker.module.js", module: "WorkerModule" })),
+        ).toEqual({ origin: "entry", path: entry, moduleName: "WorkerModule" });
+        const read = readFileSync.mock.calls.map(([path]) => String(path));
+        // The entry itself is read, to be checked before it is loaded.
+        expect(read).toContain(entry);
+        expect(read).not.toContain(join(projectDir, "src/main.ts"));
+      } finally {
+        readFileSync.mockRestore();
+      }
+    });
+
+    it("lets --module override the module main.ts boots", () => {
+      write("src/main.ts", main('import { MainModule } from "./main.module";', "MainModule"));
+      write(
+        "src/main.module.ts",
+        "@Module({})\nexport class HelperModule {}\n\n@Module({})\nexport class MainModule {}\n",
+      );
+      const entry = write(
+        "dist/main.module.js",
+        "exports.HelperModule = class {};\nexports.MainModule = class {};\n",
+      );
+
+      expect(resolveEntry(request())).toMatchObject({
+        origin: "main",
+        path: entry,
+        moduleName: "MainModule",
+      });
+      expect(resolveEntry(request({ module: "HelperModule" }))).toMatchObject({
+        origin: "main",
+        path: entry,
+        moduleName: "HelperModule",
+      });
     });
   });
 

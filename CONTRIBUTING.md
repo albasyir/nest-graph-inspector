@@ -42,6 +42,7 @@ Per-package work:
 ```bash
 pnpm --filter nest-graph-inspector run test
 pnpm --filter nest-graph-inspector run test:cov
+pnpm --filter nest-graph-inspector run test:e2e:cli          # the export CLI as installed, against fixture projects (part of test too)
 pnpm --filter nest-graph-inspector-demo run dev
 pnpm --filter nest-graph-inspector-demo run build:nodepod   # rebuild the demo the site runs in the browser, and its graph.json
 pnpm --filter nest-graph-inspector-demo run build:graph     # export the demo's graph without running it (nest-graph-inspector export)
@@ -105,8 +106,9 @@ Scopes in use: `lib`, `demo`, `site`, `deps`, or omit it for repo-wide changes.
 1. Branch from `main`.
 2. Run `pnpm run verify`.
 3. Open the PR and fill in the template.
-4. CI runs lint, typecheck, tests on Node 20/22/24, a full site build, the
-   demo's e2e suites, and the viewer's browser suite.
+4. CI runs lint, typecheck, tests on Node 20/22/24, the export CLI's e2e on
+   Node 20/22/24, a full site build, the demo's e2e suites, and the viewer's
+   browser suite.
 
 ## Releasing
 

@@ -264,8 +264,9 @@ the inspector builds from that container. Nothing is added to `index.ts`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--entry <file>` | Detected | File exporting the root module, compiled JavaScript or — with `--require` — TypeScript. Detected as `<outDir>/app.module.js`, `<outDir>/<sourceRoot>/app.module.js`, or the only `app.module.js` under `<outDir>`, from `nest-cli.json`'s `sourceRoot` (default `src`) and the `outDir` (default `dist`) of the tsconfig `nest build` uses |
-| `--module <name>` | `AppModule` | Export name of the root module class. Unset, it is `AppModule` — but when the file exports no `AppModule`, or an `AppModule` with no `@Module()` metadata (an empty `@Module({})` has none), and exactly one other class with that metadata, that class is used |
+| `--entry <file>` | Detected | File exporting the root module, compiled JavaScript or — with `--require` — TypeScript. Given, it is used as is and main.ts is not read. Detected, in order: `<outDir>/app.module.js`, `<outDir>/<sourceRoot>/app.module.js`, or the only `app.module.js` under `<outDir>`, from `nest-cli.json`'s `sourceRoot` (default `src`) and the `outDir` (default `dist`) of the tsconfig `nest build` uses; failing that, the root module `<sourceRoot>/<entryFile>.ts` (`.mts`, `.cts`, `.js`; `entryFile` default `main`) passes to `NestFactory.create`, `createApplicationContext` or `createMicroservice`, found by parsing it — never loading it — and loaded from the file tsc or SWC compiled it to, or, with `--require`, from its TypeScript source (a webpack or rspack build, or a monorepo naming no builder, has no other). Given or detected, a file that calls a `NestFactory` method, or is an application's entry file, is refused |
+| `--module <name>` | Detected | Export name of the root module class. Unset: the export main.ts boots, when the entry was found from main.ts; otherwise `AppModule` — but when the file exports no `AppModule`, or an `AppModule` with no `@Module()` metadata (an empty `@Module({})` has none), and exactly one other class with that metadata, that class is used. Set, it also chooses among several root modules main.ts boots |
+| `--app <name>` | Default project | Application of a Nest CLI monorepo, by its name under `projects` in `nest-cli.json`: its entry is detected as above, from its own `sourceRoot`, `entryFile` and tsconfig. Unset, the default project — the top level of `nest-cli.json` — is used, and a monorepo whose top level sets neither `sourceRoot` nor `root` fails, asking for `--app`. No effect with `--entry` |
 | `-o, --out <file>` | `nest-graph.json` | Output file, created with its directories; `-` for stdout |
 | `-p, --project <dir>` | Current directory | Project root: `@nestjs/core`, `reflect-metadata`, and `--require` modules resolve from it, and the export runs with it as the working directory |
 | `--env-file <file>` | — | Loaded into `process.env` with `process.loadEnvFile()` before the entry is located and before anything is required; repeatable. A variable already set in the environment keeps its value, and a later file wins over an earlier one, as with `node --env-file`. Node.js 20.12 or later; otherwise the command fails, suggesting `--require dotenv/config` |
@@ -285,8 +286,20 @@ with `require()`.
 | Exit code | Meaning |
 |---|---|
 | `0` | The graph was written |
-| `1` | The export failed (missing entry, no root module export, a failed preview bootstrap, an unwritable output) |
-| `2` | Invalid command line |
+| `1` | The export failed (missing entry, no root module export, a file that would start the application, a failed preview bootstrap, an unwritable output) |
+| `2` | Invalid command line, including an `--app` that names no project in `nest-cli.json`, names a library, or is given where `nest-cli.json` defines no projects |
+
+**Messages.** Besides the summary, the command says on stderr how it found
+the entry when main.ts decided it —
+`nest-graph-inspector: entry dist/root.module.js (RootModule, from src/main.ts)`
+— and which application it took when the default project was one of several.
+It warns when main.ts boots a module other than the one found by convention,
+which is still the one exported, and when main.ts boots it through
+`forRoot()`-style calls whose options the export goes without. Where only the
+TypeScript source could be loaded and no `--require` was given, it fails with
+the command line to run, the user's own plus
+`--require ts-node/register` (and `--require tsconfig-paths/register` when the
+tsconfig maps `paths`); it never installs or chooses a loader.
 
 **Options.** The graph is built with the `NestGraphInspectorModuleOptions` the
 application registered: `forRoot()` or a plain import of the module is read

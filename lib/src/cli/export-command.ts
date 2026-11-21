@@ -6,17 +6,17 @@ import type { GraphOutput } from "../types/graph-output.type";
 import { CliError, describeError } from "./cli-error";
 import type { CliIo } from "./cli";
 import {
-  detectEntry,
   displayPath,
   findProjectPackage,
   isDirectory,
   isFile,
-  isTypeScriptFile,
   loadModule,
   loadNestCore,
   readOwnPackage,
+  resolveEntry,
   selectEntryModule,
 } from "./project";
+import { conventionWarnings } from "./root-module-detection";
 import { createStderrLogger } from "./stderr-logger";
 
 export const DEFAULT_OUT_FILE = "nest-graph.json";
@@ -27,6 +27,7 @@ export const DELEGATED_ENV = "NEST_GRAPH_INSPECTOR_CLI_DELEGATED";
 export type ExportCommandOptions = {
   entry?: string;
   module?: string;
+  app?: string;
   out?: string;
   project?: string;
   require?: string[];
@@ -56,7 +57,25 @@ export async function runExportCommand(
   }
 
   loadEnvFiles(options["env-file"] ?? [], io.cwd);
-  const entryPath = resolveEntry(options, projectDir, io.cwd);
+  const entry = resolveEntry({
+    projectDir,
+    cwd: io.cwd,
+    entry: options.entry,
+    module: options.module,
+    app: options.app,
+    hasLoader: Boolean(options.require?.length),
+    argv,
+  });
+  if (entry.origin === "main") {
+    for (const note of entry.notes) {
+      io.stderr.write(`nest-graph-inspector: ${note}\n`);
+    }
+    for (const warning of entry.warnings) {
+      io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
+    }
+  }
+
+  const entryPath = entry.path;
   const out = options.out ?? DEFAULT_OUT_FILE;
   const outPath = out === "-" ? undefined : resolve(io.cwd, out);
 
@@ -91,12 +110,27 @@ export async function runExportCommand(
       );
     }
 
-    const entry = selectEntryModule(
+    const rootModule = selectEntryModule(
       moduleExports,
-      options.module,
+      entry.moduleName,
       entryPath,
       io.cwd,
     );
+    if (entry.origin === "convention" && entry.check) {
+      const warnings = conventionWarnings(
+        entry.check,
+        {
+          path: entryPath,
+          moduleName: rootModule.name,
+          requestedModule: options.module,
+        },
+        io.cwd,
+      );
+      for (const warning of warnings) {
+        io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
+      }
+    }
+
     // Loaded only now, after the project's own reflect-metadata.
     let exportGraphModule: typeof import("./export-graph");
     try {
@@ -112,10 +146,10 @@ export async function runExportCommand(
 
     try {
       return {
-        entryName: entry.name,
+        entryName: rootModule.name,
         result: await exportGraph({
           nestCore,
-          entryModule: entry.module,
+          entryModule: rootModule.module,
           boot,
           logger: createStderrLogger((text) => io.stderr.write(text)),
         }),
@@ -133,7 +167,7 @@ export async function runExportCommand(
       }
 
       throw new CliError(
-        `Building the graph of ${entry.name} failed: ${describeError(error)}`,
+        `Building the graph of ${rootModule.name} failed: ${describeError(error)}`,
         { cause: error },
       );
     }
@@ -257,32 +291,6 @@ function loadEnvFiles(paths: readonly string[], cwd: string): void {
       );
     }
   }
-}
-
-function resolveEntry(
-  options: ExportCommandOptions,
-  projectDir: string,
-  cwd: string,
-): string {
-  const entryPath = options.entry
-    ? resolve(cwd, options.entry)
-    : detectEntry(projectDir, cwd);
-
-  if (!isFile(entryPath)) {
-    throw new CliError(
-      `Entry file not found: ${displayPath(entryPath, cwd)}. Check the --entry path, and build your project first (nest build) if it points at compiled output.`,
-    );
-  }
-
-  if (isTypeScriptFile(entryPath) && !options.require?.length) {
-    throw new CliError(
-      `${displayPath(entryPath, cwd)} is TypeScript, which Node cannot load on its own. ` +
-        "Build your project and pass the compiled file, or add a loader that emits decorator metadata: " +
-        "--require ts-node/register (and --require tsconfig-paths/register for path aliases).",
-    );
-  }
-
-  return entryPath;
 }
 
 /**
