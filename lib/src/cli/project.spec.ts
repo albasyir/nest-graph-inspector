@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { Injectable, Module } from "@nestjs/common";
 import { CliError } from "./cli-error";
 import { displayPath } from "./files";
+import { assertLoadableEntry } from "./load-guard";
 import {
   detectEntry,
   findProjectPackage,
@@ -174,20 +175,6 @@ describe("project", () => {
       expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
     });
 
-    it("warns, and still keeps to the convention, when main.ts boots a module from another file", () => {
-      write("src/main.ts", main('import { RootModule } from "./root.module";', "RootModule"));
-      write("src/root.module.ts", "@Module({})\nexport class RootModule {}\n");
-      const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
-      write("dist/root.module.js", "exports.RootModule = class {};\n");
-
-      const resolved = resolveEntry(request());
-
-      expect(resolved).toMatchObject({ origin: "convention", path: entry });
-      expect(warningsFor(resolved, { AppModule: class {} })).toEqual([
-        "src/main.ts boots RootModule from src/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/root.module.js --module RootModule to export RootModule.",
-      ]);
-    });
-
     it("warns when main.ts boots another export of the file the convention found, unless --module chose", () => {
       write(
         "src/app.module.ts",
@@ -208,180 +195,160 @@ describe("project", () => {
       ).toEqual([]);
     });
 
-    describe("a root module main.ts imports through a barrel", () => {
+    describe("a root module main.ts boots from another file, or through a barrel", () => {
       const ROOT_MODULE = "@Module({})\nexport class RootModule {}\n";
+      const LEAF = { "src/modules/leaf.ts": "@Module({})\nexport class Real {}\n", "dist/modules/leaf.js": "exports.Real = class {};\n" };
+      const importing = (specifier: string, clause = "{ RootModule }", root = "RootModule") => ({
+        "src/main.ts": main(`import ${clause} from "${specifier}";`, root),
+      });
+      const FROM_MODULES = importing("./modules");
+      const warning = (name: string, source: string, built: string | undefined, exportName = name) =>
+        `src/main.ts boots ${name} from ${source}, but the export uses dist/app.module.js (AppModule) by convention. ${
+          built === undefined ? "Pass --entry/--module" : `Pass --entry ${built} --module ${exportName}`
+        } to export ${name}.`;
+      const ROOT_WARNING = warning("RootModule", "src/modules/root.module.ts", "dist/modules/root.module.js");
+      const REAL_WARNING = warning("Real", "src/modules/leaf.ts", "dist/modules/leaf.js");
+      const ROOT_FILES = { "src/modules/root.module.ts": ROOT_MODULE, "dist/modules/root.module.js": "exports.RootModule = class {};\n" };
 
-      it.each([
-        ["export { RootModule } from", { "src/modules/index.ts": 'export { RootModule } from "./root.module";\n' }],
-        ["export * from", { "src/modules/index.ts": 'export * from "./root.module";\n' }],
+      beforeEach(() => {
+        write("dist/app.module.js", "exports.AppModule = class {};\n");
+      });
+
+      it.each<[string, Record<string, string>, string]>([
         [
-          "two barrels",
+          "from another file",
+          { ...importing("./root.module"), "src/root.module.ts": ROOT_MODULE, "dist/root.module.js": "exports.RootModule = class {};\n" },
+          warning("RootModule", "src/root.module.ts", "dist/root.module.js"),
+        ],
+        ["through export { RootModule } from", { ...FROM_MODULES, ...ROOT_FILES, "src/modules/index.ts": 'export { RootModule } from "./root.module";\n' }, ROOT_WARNING],
+        ["through export * from", { ...FROM_MODULES, ...ROOT_FILES, "src/modules/index.ts": 'export * from "./root.module";\n' }, ROOT_WARNING],
+        [
+          "through two barrels",
           {
+            ...FROM_MODULES,
+            ...ROOT_FILES,
             "src/modules/index.ts": 'export * from "./feature";\n',
             "src/modules/feature/index.ts": 'export { RootModule } from "../root.module";\n',
           },
+          ROOT_WARNING,
         ],
-      ])("follows %s to the class, and warns that the convention exports another", (_form, barrels) => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        for (const [path, content] of Object.entries(barrels)) {
+        [
+          "through export { X as Y }, named as its own file exports it",
+          {
+            ...FROM_MODULES,
+            "src/modules/index.ts": 'export { Root as RootModule } from "./root.module";\n',
+            "src/modules/root.module.ts": "@Module({})\nexport class Root {}\n",
+            "dist/modules/root.module.js": "exports.Root = class {};\n",
+          },
+          warning("Root", "src/modules/root.module.ts", "dist/modules/root.module.js"),
+        ],
+        [
+          "through a file one export * has been through, looked in again for another name",
+          {
+            ...FROM_MODULES,
+            ...LEAF,
+            "src/modules/index.ts": 'export * from "./plain";\nexport * from "./renamed";\n',
+            "src/modules/plain.ts": 'export * from "./leaf";\n',
+            "src/modules/renamed.ts": 'export { Real as RootModule } from "./leaf";\n',
+          },
+          REAL_WARNING,
+        ],
+        ["through an import the barrel exports again", { ...FROM_MODULES, ...LEAF, "src/modules/index.ts": 'import { Real } from "./leaf";\n\nexport { Real as RootModule };\n' }, REAL_WARNING],
+        [
+          "through a const the barrel holds an import in, exported under another name",
+          { ...FROM_MODULES, ...LEAF, "src/modules/index.ts": 'import { Real } from "./leaf";\n\nconst Local = Real;\nexport { Local as RootModule };\n' },
+          REAL_WARNING,
+        ],
+        [
+          "through an import the barrel exports as its default",
+          { ...importing("./modules", "RootModule"), ...LEAF, "src/modules/index.ts": 'import { Real } from "./leaf";\n\nexport default Real;\n' },
+          REAL_WARNING,
+        ],
+        [
+          "through a class the barrel declares and exports under another name",
+          { ...FROM_MODULES, "src/modules/index.ts": "@Module({})\nclass Local {}\nexport { Local as RootModule };\n" },
+          warning("RootModule", "src/modules/index.ts", undefined),
+        ],
+        ["through a class expression the barrel exports as a const", { ...FROM_MODULES, "src/modules/index.ts": "export const RootModule = class {};\n" }, warning("RootModule", "src/modules/index.ts", undefined)],
+        [
+          "past a default-exported function of the name, which is no export of the name, to export *",
+          { ...FROM_MODULES, ...ROOT_FILES, "src/modules/index.ts": 'export * from "./root.module";\n\nexport default function RootModule(): void {}\n' },
+          ROOT_WARNING,
+        ],
+      ])("warns, and still keeps to the convention, when main.ts boots its root module %s", (_form, files, expected) => {
+        for (const [path, content] of Object.entries(files)) {
           write(path, content);
         }
-        write("src/modules/root.module.ts", ROOT_MODULE);
-        write("dist/modules/root.module.js", "exports.RootModule = class {};\n");
-        const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
 
         const resolved = resolveEntry(request());
 
-        expect(resolved).toMatchObject({ origin: "convention", path: entry });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([
-          "src/main.ts boots RootModule from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module RootModule to export RootModule.",
-        ]);
+        expect(resolved).toMatchObject({ origin: "convention", path: join(projectDir, "dist/app.module.js") });
+        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([expected]);
       });
 
-      it("names the class as its own file exports it, through export { X as Y }", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write("src/modules/index.ts", 'export { Root as RootModule } from "./root.module";\n');
-        write("src/modules/root.module.ts", "@Module({})\nexport class Root {}\n");
-        write("dist/modules/root.module.js", "exports.Root = class {};\n");
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
-          "src/main.ts boots Root from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module Root to export Root.",
-        ]);
-      });
-
-      it("does not warn when the barrel re-exports the module the convention found", () => {
-        // The barrel's target, which the check traces main.ts's import to.
-        const source = write("src/app.module.ts", "@Module({})\nexport class AppModule {}\n");
-        write("src/main.ts", main('import { AppModule } from "./modules";', "AppModule"));
-        write("src/modules/index.ts", 'export { AppModule } from "../app.module";\n');
-        const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
+      it.each<[string, Record<string, string>, boolean]>([
+        [
+          "the barrel re-exports the module the convention found",
+          { ...importing("./modules", "{ AppModule }", "AppModule"), "src/modules/index.ts": 'export { AppModule } from "../app.module";\n' },
+          true,
+        ],
+        [
+          "an explicit re-export of the name wins over an export * that has it too",
+          { ...FROM_MODULES, "src/modules/other.ts": ROOT_MODULE, "src/modules/index.ts": 'export * from "./other";\nexport { AppModule as RootModule } from "../app.module";\n' },
+          true,
+        ],
+        [
+          "export const RootModule = AppModule wins over an export * that has a RootModule too",
+          {
+            ...FROM_MODULES,
+            "src/modules/other.ts": ROOT_MODULE,
+            "src/modules/index.ts": 'import { AppModule } from "../app.module";\n\nexport * from "./other";\nexport const RootModule = AppModule;\n',
+          },
+          true,
+        ],
+        [
+          "an exported value it cannot trace stops the trail, rather than export *",
+          {
+            ...FROM_MODULES,
+            "src/modules/other.ts": ROOT_MODULE,
+            "src/modules/index.ts": 'import { forRoot } from "./factory";\n\nexport * from "./other";\nexport const RootModule = forRoot();\n',
+          },
+          false,
+        ],
+        [
+          "a function exported under the name itself stops the trail, rather than export *",
+          { ...FROM_MODULES, ...ROOT_FILES, "src/modules/index.ts": 'export * from "./root.module";\n\nexport function RootModule(): void {}\n' },
+          false,
+        ],
+        ["a namespace re-exported under the name stops the trail", { ...FROM_MODULES, ...ROOT_FILES, "src/modules/index.ts": 'export * as RootModule from "./root.module";\n' }, false],
+        [
+          "an exported let stops the trail",
+          { ...FROM_MODULES, "src/modules/index.ts": 'import { AppModule } from "../app.module";\n\nexport let RootModule = AppModule;\n' },
+          false,
+        ],
+        ["a destructured export const stops the trail", { ...FROM_MODULES, "src/modules/index.ts": 'import * as modules from "./all";\n\nexport const { RootModule } = modules;\n' }, false],
+        [
+          "re-exports go round in a circle, and the check gives up quietly",
+          { ...FROM_MODULES, "src/modules/index.ts": 'export * from "./other";\n', "src/modules/other.ts": 'export * from "./index";\n' },
+          false,
+        ],
+      ])("does not warn when %s", (_case, files, traced) => {
+        for (const [path, content] of Object.entries(files)) {
+          write(path, content);
+        }
 
         const resolved = resolveEntry(request());
 
-        expect(resolved.origin === "convention" && resolved.check).toMatchObject({
-          root: { sourceFile: source, exportName: "AppModule" },
-          compiled: [entry],
+        expect(resolved).toMatchObject({
+          origin: "convention",
+          path: join(projectDir, "dist/app.module.js"),
+          check: traced
+            ? {
+                root: { sourceFile: join(projectDir, "src/app.module.ts"), exportName: "AppModule" },
+                compiled: [join(projectDir, "dist/app.module.js")],
+              }
+            : undefined,
         });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
-      });
-
-      it("takes an explicit re-export of the name over an export * that has it too", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write(
-          "src/modules/index.ts",
-          'export * from "./other";\nexport { AppModule as RootModule } from "../app.module";\n',
-        );
-        write("src/modules/other.ts", ROOT_MODULE);
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        const resolved = resolveEntry(request());
-
-        expect(resolved.origin === "convention" && resolved.check?.root).toMatchObject({
-          sourceFile: join(projectDir, "src/app.module.ts"),
-          exportName: "AppModule",
-        });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
-      });
-
-      it("takes export const RootModule = AppModule over an export * that has a RootModule too", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write(
-          "src/modules/index.ts",
-          'import { AppModule } from "../app.module";\n\nexport * from "./other";\nexport const RootModule = AppModule;\n',
-        );
-        write("src/modules/other.ts", ROOT_MODULE);
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        const resolved = resolveEntry(request());
-
-        expect(resolved.origin === "convention" && resolved.check?.root).toMatchObject({
-          sourceFile: join(projectDir, "src/app.module.ts"),
-          exportName: "AppModule",
-        });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
-      });
-
-      it("stops at an exported value it cannot trace, rather than look through export *", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write(
-          "src/modules/index.ts",
-          'import { forRoot } from "./factory";\n\nexport * from "./other";\nexport const RootModule = forRoot();\n',
-        );
-        write("src/modules/other.ts", ROOT_MODULE);
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        const resolved = resolveEntry(request());
-
-        expect(resolved).toMatchObject({ origin: "convention", check: undefined });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
-      });
-
-      it("looks again, for another name, in a file one export * has been through", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write("src/modules/index.ts", 'export * from "./plain";\nexport * from "./renamed";\n');
-        write("src/modules/plain.ts", 'export * from "./leaf";\n');
-        write("src/modules/renamed.ts", 'export { Real as RootModule } from "./leaf";\n');
-        write("src/modules/leaf.ts", "@Module({})\nexport class Real {}\n");
-        write("dist/modules/leaf.js", "exports.Real = class {};\n");
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
-          "src/main.ts boots Real from src/modules/leaf.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/leaf.js --module Real to export Real.",
-        ]);
-      });
-
-      it("follows an import the barrel exports again", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write("src/modules/index.ts", 'import { Real } from "./leaf";\n\nexport { Real as RootModule };\n');
-        write("src/modules/leaf.ts", "@Module({})\nexport class Real {}\n");
-        write("dist/modules/leaf.js", "exports.Real = class {};\n");
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
-          "src/main.ts boots Real from src/modules/leaf.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/leaf.js --module Real to export Real.",
-        ]);
-      });
-
-      it("looks past a default-exported function of the name, which is no export of the name, to export *", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write(
-          "src/modules/index.ts",
-          'export * from "./root.module";\n\nexport default function RootModule(): void {}\n',
-        );
-        write("src/modules/root.module.ts", ROOT_MODULE);
-        write("dist/modules/root.module.js", "exports.RootModule = class {};\n");
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
-          "src/main.ts boots RootModule from src/modules/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. Pass --entry dist/modules/root.module.js --module RootModule to export RootModule.",
-        ]);
-      });
-
-      it("stops at a function exported under the name itself, rather than look through export *", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write(
-          "src/modules/index.ts",
-          'export * from "./root.module";\n\nexport function RootModule(): void {}\n',
-        );
-        write("src/modules/root.module.ts", ROOT_MODULE);
-        write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        const resolved = resolveEntry(request());
-
-        expect(resolved).toMatchObject({ origin: "convention", check: undefined });
-        expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
-      });
-
-      it("gives up, quietly, on re-exports that go round in a circle", () => {
-        write("src/main.ts", main('import { RootModule } from "./modules";', "RootModule"));
-        write("src/modules/index.ts", 'export * from "./other";\n');
-        write("src/modules/other.ts", 'export * from "./index";\n');
-        const entry = write("dist/app.module.js", "exports.AppModule = class {};\n");
-
-        const resolved = resolveEntry(request());
-
-        expect(resolved).toMatchObject({ origin: "convention", path: entry, check: undefined });
         expect(warningsFor(resolved, { AppModule: class {} })).toEqual([]);
       });
     });
@@ -402,7 +369,7 @@ describe("project", () => {
       try {
         expect(
           resolveEntry(request({ entry: "dist/worker.module.js", module: "WorkerModule" })),
-        ).toEqual({ origin: "entry", path: entry, moduleName: "WorkerModule" });
+        ).toEqual({ origin: "entry", path: entry, moduleName: "WorkerModule", notes: [], warnings: [] });
         const read = readFileSync.mock.calls.map(([path]) => String(path));
         // The entry itself is read, to be checked before it is loaded.
         expect(read).toContain(entry);
@@ -609,7 +576,10 @@ describe("project", () => {
     const entry = write("dist/app.module.cjs", "exports.AppModule = 'loaded';");
 
     await expect(
-      loadModule(entry, createRequire(join(projectDir, "package.json"))),
+      loadModule(
+        assertLoadableEntry(entry, { projectDir, cwd: projectDir }),
+        createRequire(join(projectDir, "package.json")),
+      ),
     ).resolves.toEqual({ AppModule: "loaded" });
   });
 });

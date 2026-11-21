@@ -44,6 +44,7 @@ describe(runCli.name, () => {
 
     expect(stdout).toBe(HELP + HELP);
     expect(HELP).toContain("Usage: nest-graph-inspector export [options]");
+    expect(HELP).toContain("  --app <name>  ");
   });
 
   it("prints its version", async () => {
@@ -64,7 +65,23 @@ describe(runCli.name, () => {
     [["export", "extra"], 'Unexpected argument "extra".'],
     [["export", "--entrypoint", "x"], "Unknown option '--entrypoint'"],
     [["export", "--out"], "Option '-o, --out <value>' argument missing"],
+    [["export", "--app", "nope"], 'nest-cli.json has no project "nope". Pass --app with one of: api, worker.'],
+    [["export", "--app", "shared"], '"shared" is a library, which has no main.ts. Pass --app with one of: api, worker.'],
   ])("rejects %j as a usage error", async (argv, message) => {
+    writeFileSync(
+      join(cwd, "nest-cli.json"),
+      JSON.stringify({
+        monorepo: true,
+        root: "apps/api",
+        sourceRoot: "apps/api/src",
+        projects: {
+          api: { type: "application", root: "apps/api", sourceRoot: "apps/api/src" },
+          worker: { type: "application", root: "apps/worker", sourceRoot: "apps/worker/src" },
+          shared: { type: "library", root: "libs/shared", sourceRoot: "libs/shared/src" },
+        },
+      }),
+    );
+
     await expect(run(...argv)).resolves.toBe(2);
 
     expect(stderr).toContain(`nest-graph-inspector: ${message}`);
@@ -87,14 +104,27 @@ describe(runCli.name, () => {
     );
   });
 
-  it("fails when --entry does not exist", async () => {
-    await expect(run("export", "--entry", "dist/main.module.js")).resolves.toBe(
-      1,
+  it.each([
+    [
+      "does not exist",
+      "dist/main.module.js",
+      "Entry file not found: dist/main.module.js. Check the --entry path, and build your project first (nest build) if it points at compiled output.",
+    ],
+    [
+      "would start the application",
+      "dist/main.js",
+      "dist/main.js starts the application (it calls NestFactory.create), so the export will not load it: loading it would run your bootstrap — listen on a port, connect to a database. Point --entry at the file that exports your root module (e.g. dist/app.module.js).",
+    ],
+  ])("fails when --entry %s", async (_case, entry, message) => {
+    mkdirSync(join(cwd, "dist"));
+    writeFileSync(
+      join(cwd, "dist/main.js"),
+      'const core_1 = require("@nestjs/core");\nconst app_module_1 = require("./app.module");\ncore_1.NestFactory.create(app_module_1.AppModule).then((app) => app.listen(3000));\n',
     );
 
-    expect(stderr).toBe(
-      "nest-graph-inspector: Entry file not found: dist/main.module.js. Check the --entry path, and build your project first (nest build) if it points at compiled output.\n",
-    );
+    await expect(run("export", "--entry", entry)).resolves.toBe(1);
+
+    expect(stderr).toBe(`nest-graph-inspector: ${message}\n`);
   });
 
   // Reading the file is process.loadEnvFile's, which Node.js 20.0-20.11 lack;
@@ -146,49 +176,6 @@ describe(runCli.name, () => {
     );
   });
 
-  it("documents --app", () => {
-    expect(HELP).toContain("  --app <name>  ");
-  });
-
-  it("rejects an --app that nest-cli.json does not define as a usage error", async () => {
-    writeFileSync(
-      join(cwd, "nest-cli.json"),
-      JSON.stringify({
-        monorepo: true,
-        root: "apps/api",
-        sourceRoot: "apps/api/src",
-        projects: {
-          api: { type: "application", root: "apps/api", sourceRoot: "apps/api/src" },
-          worker: { type: "application", root: "apps/worker", sourceRoot: "apps/worker/src" },
-          shared: { type: "library", root: "libs/shared", sourceRoot: "libs/shared/src" },
-        },
-      }),
-    );
-
-    await expect(run("export", "--app", "nope")).resolves.toBe(2);
-    await expect(run("export", "--app", "shared")).resolves.toBe(2);
-
-    expect(stderr).toBe(
-      'nest-graph-inspector: nest-cli.json has no project "nope". Pass --app with one of: api, worker.\n' +
-        'Run "nest-graph-inspector --help" for usage.\n' +
-        'nest-graph-inspector: "shared" is a library, which has no main.ts. Pass --app with one of: api, worker.\n' +
-        'Run "nest-graph-inspector --help" for usage.\n',
-    );
-  });
-
-  it("refuses to load an --entry that would start the application", async () => {
-    mkdirSync(join(cwd, "dist"));
-    writeFileSync(
-      join(cwd, "dist/main.js"),
-      'const core_1 = require("@nestjs/core");\nconst app_module_1 = require("./app.module");\ncore_1.NestFactory.create(app_module_1.AppModule).then((app) => app.listen(3000));\n',
-    );
-
-    await expect(run("export", "--entry", "dist/main.js")).resolves.toBe(1);
-
-    expect(stderr).toBe(
-      "nest-graph-inspector: dist/main.js starts the application (it calls NestFactory.create), so the export will not load it: loading it would run your bootstrap — listen on a port, connect to a database. Point --entry at the file that exports your root module (e.g. dist/app.module.js).\n",
-    );
-  });
 
   it("asks for a loader before loading a TypeScript entry", async () => {
     mkdirSync(join(cwd, "src"));

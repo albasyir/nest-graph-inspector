@@ -65,12 +65,10 @@ export async function runExportCommand(
     argv,
   });
   // How the export came to the entry it found, said before anything loads.
-  const notes = entry.origin === "entry" ? [] : entry.notes;
-  const warnings = entry.origin === "main" ? entry.warnings : [];
-  for (const note of notes) {
+  for (const note of entry.notes) {
     io.stderr.write(`nest-graph-inspector: ${note}\n`);
   }
-  for (const warning of warnings) {
+  for (const warning of entry.warnings) {
     io.stderr.write(`nest-graph-inspector: warning: ${warning}\n`);
   }
 
@@ -184,10 +182,6 @@ export async function runExportCommand(
   return 0;
 }
 
-/**
- * Why loading the entry failed — and, for a TypeScript file the `--require`
- * loaders were meant to load, what such a loader has to do.
- */
 export function loadFailedMessage(
   entryPath: string,
   error: unknown,

@@ -926,30 +926,37 @@ export default function RootModule(): void {}
         compilerOptions: { rootDir, outDir: "../../dist", types: ["node"] },
         include: ["src/**/*"],
       });
-    const sameRootPath: Record<string, string> = {
-      "nest-cli.json": JSON.stringify({
+    /** The default project api, built with tsc, beside `projects`. */
+    const monorepoOf = (projects: Record<string, unknown>) =>
+      JSON.stringify({
         monorepo: true,
         root: "apps/api",
         sourceRoot: "apps/api/src",
         compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
-        projects: { api: ownTsConfig("api"), worker: ownTsConfig("worker") },
-      }),
+        projects,
+      });
+    /** api and worker, each booting RootModule, which imports a feature module of its own, from src/. */
+    const featureApplications = (): Record<string, string> =>
+      Object.fromEntries(
+        (
+          [
+            ["api", "ApiFeatureModule"],
+            ["worker", "WorkerFeatureModule"],
+          ] as const
+        ).flatMap(([app, feature]) => [
+          [`apps/${app}/tsconfig.app.json`, appTsConfig("src")],
+          [`apps/${app}/src/marker.ts`, MARKER],
+          [`apps/${app}/src/feature.module.ts`, moduleSource(feature)],
+          [`apps/${app}/src/root.module.ts`, moduleSource("RootModule", [[feature, "./feature.module"]])],
+          [`apps/${app}/src/main.ts`, mainSource("RootModule", "./root.module")],
+        ]),
+      );
+    writeProject("monorepo-same-root-path", {
+      "nest-cli.json": monorepoOf({ api: ownTsConfig("api"), worker: ownTsConfig("worker") }),
       "tsconfig.json": TSCONFIG(),
       "ts-loader.cjs": TS_LOADER,
-    };
-    for (const [app, feature] of [
-      ["api", "ApiFeatureModule"],
-      ["worker", "WorkerFeatureModule"],
-    ] as const) {
-      sameRootPath[`apps/${app}/tsconfig.app.json`] = appTsConfig("src");
-      sameRootPath[`apps/${app}/src/marker.ts`] = MARKER;
-      sameRootPath[`apps/${app}/src/feature.module.ts`] = moduleSource(feature);
-      sameRootPath[`apps/${app}/src/root.module.ts`] = moduleSource("RootModule", [
-        [feature, "./feature.module"],
-      ]);
-      sameRootPath[`apps/${app}/src/main.ts`] = mainSource("RootModule", "./root.module");
-    }
-    writeProject("monorepo-same-root-path", sameRootPath);
+      ...featureApplications(),
+    });
     buildWithTsc("monorepo-same-root-path", "apps/api/tsconfig.app.json");
 
     // E4, the same output path from sources at different paths: api's
@@ -957,13 +964,7 @@ export default function RootModule(): void {}
     // src/root.module.ts and worker's src/src/root.module.ts both become
     // dist/src/root.module.js. Only api has been built, by tsc itself.
     const rootDirs: Record<string, string> = {
-      "nest-cli.json": JSON.stringify({
-        monorepo: true,
-        root: "apps/api",
-        sourceRoot: "apps/api/src",
-        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
-        projects: { api: ownTsConfig("api"), worker: ownTsConfig("worker") },
-      }),
+      "nest-cli.json": monorepoOf({ api: ownTsConfig("api"), worker: ownTsConfig("worker") }),
       "tsconfig.json": TSCONFIG(),
       "ts-loader.cjs": TS_LOADER,
       "apps/api/tsconfig.app.json": appTsConfig("."),
@@ -989,36 +990,18 @@ export default function RootModule(): void {}
     // E4, a tsc application beside a webpack one, both with a root.module.ts
     // at the top of their sources and dist/ as their outDir: only tsc writes
     // a dist/root.module.js — webpack writes one bundle — so it is api's.
-    const bundledSibling: Record<string, string> = {
-      "nest-cli.json": JSON.stringify({
-        monorepo: true,
-        root: "apps/api",
-        sourceRoot: "apps/api/src",
-        compilerOptions: { builder: "tsc", tsConfigPath: "apps/api/tsconfig.app.json" },
-        projects: {
-          api: ownTsConfig("api"),
-          worker: {
-            ...ownTsConfig("worker"),
-            compilerOptions: { builder: "webpack", tsConfigPath: "apps/worker/tsconfig.app.json" },
-          },
+    writeProject("monorepo-bundled-sibling", {
+      "nest-cli.json": monorepoOf({
+        api: ownTsConfig("api"),
+        worker: {
+          ...ownTsConfig("worker"),
+          compilerOptions: { builder: "webpack", tsConfigPath: "apps/worker/tsconfig.app.json" },
         },
       }),
       "tsconfig.json": TSCONFIG(),
       "dist/apps/worker/main.js": BUNDLE,
-    };
-    for (const [app, feature] of [
-      ["api", "ApiFeatureModule"],
-      ["worker", "WorkerFeatureModule"],
-    ] as const) {
-      bundledSibling[`apps/${app}/tsconfig.app.json`] = appTsConfig("src");
-      bundledSibling[`apps/${app}/src/marker.ts`] = MARKER;
-      bundledSibling[`apps/${app}/src/feature.module.ts`] = moduleSource(feature);
-      bundledSibling[`apps/${app}/src/root.module.ts`] = moduleSource("RootModule", [
-        [feature, "./feature.module"],
-      ]);
-      bundledSibling[`apps/${app}/src/main.ts`] = mainSource("RootModule", "./root.module");
-    }
-    writeProject("monorepo-bundled-sibling", bundledSibling);
+      ...featureApplications(),
+    });
     buildWithTsc("monorepo-bundled-sibling", "apps/api/tsconfig.app.json");
 
     // E4, --app's app.module.js in both SWC layouts: worker, the default

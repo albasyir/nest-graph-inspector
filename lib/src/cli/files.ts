@@ -1,10 +1,8 @@
-import { statSync } from "node:fs";
-import { isAbsolute, relative, sep } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { ts } from "ts-morph";
 
-/**
- * `path` relative to `dir` when it lies inside it; undefined when it is `dir`
- * itself, or lies outside it.
- */
+/** `path` relative to `dir`; undefined when it is `dir` itself or lies outside it. */
 export function pathInside(dir: string, path: string): string | undefined {
   const relativePath = relative(dir, path);
   const outside =
@@ -16,9 +14,15 @@ export function pathInside(dir: string, path: string): string | undefined {
   return outside ? undefined : relativePath;
 }
 
-/** A path relative to `cwd` when it lies inside it, else absolute. */
 export function displayPath(path: string, cwd: string): string {
   return pathInside(cwd, path) ?? path;
+}
+
+/** `a and b`, `a, b and c`. */
+export function joinedPaths(paths: readonly string[], cwd: string): string {
+  const shown = paths.map((path) => displayPath(path, cwd));
+  const last = shown.pop();
+  return shown.length ? `${shown.join(", ")} and ${last ?? ""}` : (last ?? "");
 }
 
 export function isFile(path: string): boolean {
@@ -35,4 +39,24 @@ export function isDirectory(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether two paths name one file, as the file system resolves them —
+ * symlinks followed, case folded where it ignores case — or, where nothing is
+ * there, by their resolved spelling.
+ */
+export function samePath(left: string, right: string): boolean {
+  return pathKey(left) === pathKey(right);
+}
+
+function pathKey(path: string): string {
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    real = resolve(path);
+  }
+
+  return ts.sys.useCaseSensitiveFileNames ? real : real.toLowerCase();
 }

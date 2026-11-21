@@ -11,11 +11,7 @@ export class CliError extends Error {
   }
 }
 
-/**
- * A command line the export cannot act on, though it parsed — an `--app` that
- * names no application in `nest-cli.json` — reported as a usage error, with
- * exit code 2.
- */
+/** Exit code 2: a command line that parsed but names nothing usable, such as an unknown `--app`. */
 export class CliUsageError extends CliError {
   constructor(message: string) {
     super(message);
