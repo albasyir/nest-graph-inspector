@@ -189,7 +189,7 @@ void bootstrap();
 const APPLICATION_COMPILER_OPTIONS: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.CommonJS,
-  moduleResolution: ts.ModuleResolutionKind.Node10,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
   experimentalDecorators: true,
   emitDecoratorMetadata: true,
   strict: true,

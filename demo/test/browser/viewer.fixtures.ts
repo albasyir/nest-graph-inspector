@@ -481,6 +481,7 @@ export async function openPrintedLink({
   try {
     await page.goto(state.viewerLink);
   } catch (error) {
+    // eslint-disable-next-line preserve-caught-error -- the caught error's message holds the access token, so it must not be attached as `cause`
     throw new Error(
       `Opening the printed link failed: ${redactCredentials(error instanceof Error ? error.message : String(error))}`,
     );

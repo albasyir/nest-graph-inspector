@@ -58,6 +58,7 @@ const IRRELEVANT_COMPILER_OPTIONS = [
   'declarationMap',
   'incremental',
   'outDir',
+  'rootDir',
   'sourceMap',
   'tsBuildInfoFile',
   'types',
