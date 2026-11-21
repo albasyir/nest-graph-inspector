@@ -213,7 +213,10 @@ function resolveDefaultEntry(request: EntryRequest, config: NestCliConfig): Reso
       origin: "convention",
       path,
       moduleName: request.module,
-      check: layout === undefined ? undefined : conventionCheck(layout),
+      check:
+        layout === undefined
+          ? undefined
+          : conventionCheck(layout, otherApplicationLayouts(layout, config, cwd)),
       notes: conventionNotes({ config, selection, layout, path, cwd }),
       warnings: [],
     };
@@ -251,7 +254,7 @@ function resolveApplicationEntry(
       origin: "convention",
       path: assertLoadableEntry(convention.path, { projectDir, cwd }),
       moduleName: request.module,
-      check: conventionCheck(layout),
+      check: conventionCheck(layout, otherApplicationLayouts(layout, config, cwd)),
       notes: [],
       warnings: [],
     };

@@ -195,6 +195,39 @@ describe("project", () => {
       ).toEqual([]);
     });
 
+    const OUT_DIR_ONLY = JSON.stringify({ compilerOptions: { outDir: "dist" } });
+    const FROM_SOURCE = "pass --entry src/root.module.ts --module RootModule --require ts-node/register to export RootModule.";
+
+    it.each<[string, Record<string, string>, string]>([
+      ["the one file it is built to", { "dist/root.module.js": "" }, "Pass --entry dist/root.module.js --module RootModule to export RootModule."],
+      [
+        "no file, of two it is built to",
+        { "tsconfig.json": OUT_DIR_ONLY, "dist/src/root.module.js": "", "dist/root.module.js": "" },
+        `RootModule has been built to dist/src/root.module.js and dist/root.module.js, and which is current cannot be told: build again into an emptied outDir, or ${FROM_SOURCE}`,
+      ],
+      [
+        "no file another application's build writes too",
+        {
+          "tsconfig.json": OUT_DIR_ONLY,
+          "nest-cli.json": JSON.stringify({ sourceRoot: "src", projects: { other: { type: "application", root: "other", sourceRoot: "other/src" } } }),
+          "other/src/root.module.ts": "@Module({})\nexport class RootModule {}\n",
+          "dist/root.module.js": "",
+        },
+        `RootModule is built to dist/root.module.js — but another application's other/src/root.module.ts builds to dist/root.module.js too, so whose it is cannot be told: give each application an outDir of its own, or ${FROM_SOURCE}`,
+      ],
+    ])("warns when main.ts boots a root module from another file, naming as --entry %s", (_case, files, advice) => {
+      write("src/main.ts", main('import { RootModule } from "./root.module";', "RootModule"));
+      write("src/root.module.ts", "@Module({})\nexport class RootModule {}\n");
+      write("dist/app.module.js", "exports.AppModule = class {};\n");
+      for (const [path, content] of Object.entries(files)) {
+        write(path, content);
+      }
+
+      expect(warningsFor(resolveEntry(request()), { AppModule: class {} })).toEqual([
+        `src/main.ts boots RootModule from src/root.module.ts, but the export uses dist/app.module.js (AppModule) by convention. ${advice}`,
+      ]);
+    });
+
     describe("a root module main.ts boots from another file, or through a barrel", () => {
       const ROOT_MODULE = "@Module({})\nexport class RootModule {}\n";
       const LEAF = { "src/modules/leaf.ts": "@Module({})\nexport class Real {}\n", "dist/modules/leaf.js": "exports.Real = class {};\n" };

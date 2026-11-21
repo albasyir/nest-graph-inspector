@@ -435,6 +435,16 @@ void bootstrap();
         { path: "dist/root.module.js", moduleName: "RootModule", mainFile: "src/main.mts" },
       ],
       [
+        "a .tsx main.ts",
+        {
+          "tsconfig.json": STANDARD_TSCONFIG,
+          "src/main.tsx": ROOT_MAIN,
+          "src/root.module.ts": moduleSource("RootModule"),
+          "dist/root.module.js": compiledModule("RootModule"),
+        },
+        { path: "dist/root.module.js", moduleName: "RootModule", mainFile: "src/main.tsx" },
+      ],
+      [
         "the module main.ts boots from a file that exports several",
         {
           "tsconfig.json": STANDARD_TSCONFIG,
@@ -1442,6 +1452,48 @@ void bootstrap();
 
       expect(() => detect()).toThrow(new CliError(message));
       expect(detect({ hasLoader: true })).toMatchObject({ origin: "main", path: at(`${sourceRoot}/root.module.ts`) });
+    });
+
+    describe("by SWC for --app, when its own builder options and the top level's differ", () => {
+      const files = {
+        "nest-cli.json": JSON.stringify({
+          sourceRoot: "src",
+          compilerOptions: { builder: { type: "swc", options: { outDir: "top-build" } } },
+          projects: {
+            worker: {
+              type: "application",
+              root: "",
+              sourceRoot: "src",
+              compilerOptions: { builder: { type: "swc", options: { outDir: "worker-build" } } },
+            },
+          },
+        }),
+        "tsconfig.json": DIST_TSCONFIG,
+        "top-build/root.module.js": compiledModule("RootModule"),
+        "worker-build/root.module.js": compiledModule("RootModule"),
+      };
+
+      it.each([
+        ["11.0.0", "top-build/root.module.js"],
+        ["12.0.13", "top-build/root.module.js"],
+        ["12.0.14", "worker-build/root.module.js"],
+      ])("finds it where the installed Nest CLI %s writes it", (version, compiled) => {
+        writeSources();
+        writeAll({ ...files, "node_modules/@nestjs/cli/package.json": JSON.stringify({ version }) });
+
+        expect(detect({ app: "worker" })).toMatchObject({ origin: "main", path: at(compiled) });
+      });
+
+      it("takes neither when no installed Nest CLI tells which", () => {
+        writeSources();
+        writeAll(files);
+
+        expect(() => detect({ app: "worker" })).toThrow(
+          new CliError(
+            "src/main.ts boots RootModule from src/root.module.ts, which SWC has built to both worker-build/root.module.js and top-build/root.module.js: Nest CLI 12 and Nest CLI 11 lay out its output differently, so one of them is left from an older build. Pass --entry with the current one, build again into an emptied outDir, or run: nest-graph-inspector export --require ts-node/register",
+          ),
+        );
+      });
     });
 
     it.each<[string, Record<string, string>, string, string[]?]>([

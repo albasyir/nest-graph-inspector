@@ -731,8 +731,11 @@ Why each step is the way it is:
   says.** `cli/build-output.ts` decides it. With no `outDir`, tsc writes beside the source, and only there is
   looked; with an explicit `rootDir`, only the path under it — anywhere else
   could only hold a stale file. SWC writes as `@swc/cli`'s `getDest` names
-  files: under the `swc` builder's `options.outDir`, which the Nest CLI lets
-  override the tsconfig's, else the tsconfig's `outDir`, else `dist`, at the
+  files: under the `swc` builder's `options.outDir` — for `nest build <app>`
+  the application's own builder's from Nest CLI 12.0.14 and the top level's
+  before, by the installed CLI's package.json, both when none is installed —
+  which the Nest CLI lets override the tsconfig's, else the tsconfig's
+  `outDir`, else `dist`, at the
   source's path from the project, its first directory stripped under
   `stripLeadingPaths`, with the builder's `outFileExtension` when it sets
   one. The builder's own `stripLeadingPaths` decides when it sets one;
@@ -1800,7 +1803,9 @@ Facts a code change can invalidate, and the file to check:
   against `getBuilder` and `actions/build.action.ts` in the installed
   `@nestjs/cli`; the `@swc/cli` options the Nest CLI sets and lets an `swc`
   builder's `options` override (`outDir`, `stripLeadingPaths`,
-  `outFileExtension`, the source root as its input) —
+  `outFileExtension`, the source root as its input), and the version from
+  which `nest build <app>` takes them from the application's own builder,
+  12.0.14 (`installedSwcOptionsFrom` in `lib/src/cli/nest-cli-config.ts`) —
   `lib/compiler/defaults/swc-defaults.ts` there, and `getDest` and the
   `dirWorker` extension in `@swc/cli`; and what `nest g app` writes when it makes a
   monorepo (`"builder": "rspack"`; older versions `"webpack": true`) —

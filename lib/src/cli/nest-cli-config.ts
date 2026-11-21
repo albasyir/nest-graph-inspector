@@ -36,6 +36,14 @@ type NestBuilderSetting = {
   outFileExtension: string | undefined;
 };
 
+export type SwcOptions = Pick<NestBuilderSetting, "outDir" | "stripLeadingPaths" | "outFileExtension">;
+
+/**
+ * Whose builder options SWC builds `nest build <name>` with (`swc-defaults.ts`):
+ * from Nest CLI 12.0.14 the application's, before that the top level's.
+ */
+type SwcOptionsFrom = "application" | "top-level" | "unknown";
+
 type NestApplicationSettings = {
   root: string | undefined;
   sourceRoot: string | undefined;
@@ -57,17 +65,13 @@ export type NestCliConfig = NestApplicationSettings & {
   projects: ReadonlyMap<string, NestProjectSettings>;
   /** See `legacyConventionTsConfigPath`; not the tsconfig `nest build` uses. */
   conventionTsConfigPath: string | undefined;
+  swcOptionsFrom: SwcOptionsFrom;
 };
 
 export type ApplicationBuild =
   | { kind: "tsc" }
-  /** Each setting undefined where the builder leaves it to the Nest CLI and `@swc/cli`. */
-  | {
-      kind: "swc";
-      outDir: string | undefined;
-      stripLeadingPaths: boolean | undefined;
-      outFileExtension: string | undefined;
-    }
+  /** The builder options it could build with — both, when the installed Nest CLI's version is unknown. */
+  | { kind: "swc"; options: readonly (SwcOptions | undefined)[] }
   /** A builder the export does not know: its output is looked for as tsc's is. */
   | { kind: "other"; builder: string }
   /** One `main.js` holding the application and every module it imports, which starts it as it loads. */
@@ -110,9 +114,10 @@ export type ApplicationLayout = {
 };
 
 export function readNestCliConfig(projectDir: string): NestCliConfig {
+  const swcOptionsFrom = installedSwcOptionsFrom(projectDir);
   const file = NEST_CLI_CONFIG_FILES.map((name) => join(projectDir, name)).find(isFile);
   if (!file) {
-    return parseNestCliConfig(undefined, undefined);
+    return parseNestCliConfig(undefined, undefined, swcOptionsFrom);
   }
 
   let raw: unknown;
@@ -122,7 +127,7 @@ export function readNestCliConfig(projectDir: string): NestCliConfig {
     throw new CliError(`Cannot read ${file}: ${describeError(error)}`);
   }
 
-  return parseNestCliConfig(raw, file);
+  return parseNestCliConfig(raw, file, swcOptionsFrom);
 }
 
 export function readNestCliConfigOrDefaults(projectDir: string): NestCliConfig {
@@ -130,14 +135,18 @@ export function readNestCliConfigOrDefaults(projectDir: string): NestCliConfig {
     return readNestCliConfig(projectDir);
   } catch (error) {
     if (error instanceof CliError) {
-      return parseNestCliConfig(undefined, undefined);
+      return parseNestCliConfig(undefined, undefined, installedSwcOptionsFrom(projectDir));
     }
 
     throw error;
   }
 }
 
-function parseNestCliConfig(raw: unknown, file: string | undefined): NestCliConfig {
+function parseNestCliConfig(
+  raw: unknown,
+  file: string | undefined,
+  swcOptionsFrom: SwcOptionsFrom,
+): NestCliConfig {
   const config = isRecord(raw) ? raw : {};
 
   return {
@@ -145,7 +154,35 @@ function parseNestCliConfig(raw: unknown, file: string | undefined): NestCliConf
     ...parseApplicationSettings(config),
     projects: parseProjects(config.projects),
     conventionTsConfigPath: legacyConventionTsConfigPath(config),
+    swcOptionsFrom,
   };
+}
+
+/** By the version of the Nest CLI the project's scripts run, read from its package.json as Node finds it, never run. */
+function installedSwcOptionsFrom(projectDir: string): SwcOptionsFrom {
+  for (let dir = projectDir; ; dir = dirname(dir)) {
+    const manifest = join(dir, "node_modules", "@nestjs", "cli", "package.json");
+    if (isFile(manifest)) {
+      let version: unknown;
+      try {
+        version = (JSON.parse(readFileSync(manifest, "utf8")) as { version?: unknown }).version;
+      } catch {
+        return "unknown";
+      }
+
+      const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version));
+      if (!parts) {
+        return "unknown";
+      }
+
+      const [major, minor, patch] = parts.slice(1).map(Number);
+      return (major * 1000 + minor) * 1000 + patch >= 12_000_014 ? "application" : "top-level";
+    }
+
+    if (dirname(dir) === dir) {
+      return "unknown";
+    }
+  }
 }
 
 /**
@@ -256,7 +293,7 @@ export function selectApplication(
   if (!applications.length) {
     return {
       kind: "selected",
-      application: resolveApplication(undefined, config, undefined),
+      application: resolveApplication(undefined, config, config),
       note: undefined,
     };
   }
@@ -276,7 +313,7 @@ export function selectApplication(
     // The top level alone, as `nest build` without a name reads it: the
     // project it matches only names it. That project's own settings apply
     // when --app selects it.
-    application: resolveApplication(match?.name, config, undefined),
+    application: resolveApplication(match?.name, config, config),
     note: others.length
       ? `${configFileName(config)} defines applications ${applications.join(", ")}; using the default project ${defaultName} (pass --app <name> for another)`
       : undefined,
@@ -290,7 +327,7 @@ export function conventionEntryNote(config: NestCliConfig, entry: string): strin
 
 function everyApplication(config: NestCliConfig): NestApplication[] {
   return [
-    resolveApplication(undefined, config, undefined),
+    resolveApplication(undefined, config, config),
     ...applicationNames(config).flatMap((name) => {
       const project = config.projects.get(name);
       return project ? [resolveApplication(name, project, config)] : [];
@@ -337,26 +374,35 @@ export function applicationSelectionError(
   }
 }
 
-/** Each setting as the Nest CLI's `getValueOrDefault` resolves it: `primary`'s, else `fallback`'s, else the default. */
+/**
+ * Each setting as the Nest CLI's `getValueOrDefault` resolves it: `primary`'s,
+ * else the top level's, else the default — an `swc` builder's options as the
+ * installed Nest CLI takes them.
+ */
 function resolveApplication(
   name: string | undefined,
   primary: NestApplicationSettings,
-  fallback: NestApplicationSettings | undefined,
+  config: NestCliConfig,
 ): NestApplication {
-  const builder = primary.compilerOptions.builder ?? fallback?.compilerOptions.builder;
-  const webpack = primary.compilerOptions.webpack ?? fallback?.compilerOptions.webpack;
+  const builder = primary.compilerOptions.builder ?? config.compilerOptions.builder;
+  const webpack = primary.compilerOptions.webpack ?? config.compilerOptions.webpack;
   const tsConfigPath =
-    primary.compilerOptions.tsConfigPath ?? fallback?.compilerOptions.tsConfigPath;
+    primary.compilerOptions.tsConfigPath ?? config.compilerOptions.tsConfigPath;
+  const topLevel = config.compilerOptions.builder;
 
   return {
     name,
-    root: primary.root ?? fallback?.root ?? "",
-    sourceRoot: primary.sourceRoot ?? fallback?.sourceRoot ?? DEFAULT_SOURCE_ROOT,
-    entryFile: primary.entryFile ?? fallback?.entryFile ?? DEFAULT_ENTRY_FILE,
+    root: primary.root ?? config.root ?? "",
+    sourceRoot: primary.sourceRoot ?? config.sourceRoot ?? DEFAULT_SOURCE_ROOT,
+    entryFile: primary.entryFile ?? config.entryFile ?? DEFAULT_ENTRY_FILE,
     // As `nest build` finds it (getTscConfigPath): `tsConfigPath` first; a
     // builder's `options.configPath` only after, and only a `tsc` builder's.
     tsConfigPath: tsConfigPath ?? (builder?.type === "tsc" ? builder.configPath : undefined),
-    build: buildOf(builder, webpack),
+    build: buildOf(
+      builder,
+      webpack,
+      { application: [builder], "top-level": [topLevel], unknown: [builder, topLevel] }[config.swcOptionsFrom],
+    ),
   };
 }
 
@@ -368,7 +414,11 @@ function resolveApplication(
  * makes a monorepo, and older Nest CLIs wrote `"webpack": true`: that is what
  * makes a monorepo a bundle.
  */
-function buildOf(builder: NestBuilderSetting | undefined, webpack: boolean | undefined): ApplicationBuild {
+function buildOf(
+  builder: NestBuilderSetting | undefined,
+  webpack: boolean | undefined,
+  swcOptions: readonly (SwcOptions | undefined)[],
+): ApplicationBuild {
   if (webpack === true) {
     return { kind: "bundled", bundler: "webpack" };
   }
@@ -381,12 +431,7 @@ function buildOf(builder: NestBuilderSetting | undefined, webpack: boolean | und
     case "tsc":
       return { kind: "tsc" };
     case "swc":
-      return {
-        kind: "swc",
-        outDir: builder?.outDir,
-        stripLeadingPaths: builder?.stripLeadingPaths,
-        outFileExtension: builder?.outFileExtension,
-      };
+      return { kind: "swc", options: swcOptions };
     default:
       return { kind: "other", builder: type };
   }

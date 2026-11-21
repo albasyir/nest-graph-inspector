@@ -5,6 +5,7 @@ import {
   type ApplicationBuild,
   type ApplicationLayout,
   type NestApplication,
+  type SwcOptions,
 } from "./nest-cli-config";
 
 /**
@@ -14,7 +15,7 @@ import {
  * webpack or rspack build writes one bundle, which starts the application.
  */
 
-const ENTRY_FILE_EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
+const ENTRY_FILE_EXTENSIONS = [".ts", ".mts", ".cts", ".tsx", ".js", ".mjs", ".cjs"];
 
 const COMPILED_EXTENSIONS = new Map([
   [".ts", ".js"],
@@ -41,6 +42,10 @@ export function outDirOf(projectDir: string, tsconfig: ApplicationLayout["tsconf
   return tsconfig?.options.outDir ?? join(projectDir, DEFAULT_OUT_DIR);
 }
 
+function swcOutDir({ projectDir, tsconfig }: ApplicationLayout, options: SwcOptions | undefined): string {
+  return options?.outDir === undefined ? outDirOf(projectDir, tsconfig) : resolve(projectDir, options.outDir);
+}
+
 /**
  * tsc writes where its tsconfig says, and only there is looked: beside the
  * source without an `outDir`, under an explicit `rootDir` alone — anywhere
@@ -60,9 +65,12 @@ export function compiledCandidates(source: string, layout: ApplicationLayout): s
     path.slice(0, path.length - extname(path).length) + newExtension;
   if (build.kind === "swc") {
     // @swc/cli names its output `.${outFileExtension}` when that is set.
-    const swcExtension =
-      build.outFileExtension === undefined ? extension : `.${build.outFileExtension}`;
-    return swcCandidates(source, layout, build).map((path) => withExtension(path, swcExtension));
+    const swcPaths = build.options.flatMap((options) =>
+      swcCandidates(source, layout, options).map((path) =>
+        withExtension(path, options?.outFileExtension === undefined ? extension : `.${options.outFileExtension}`),
+      ),
+    );
+    return [...new Set(swcPaths)];
   }
 
   if (build.kind === "tsc" && tsconfig !== undefined && tsconfig.options.outDir === undefined) {
@@ -113,7 +121,7 @@ function compilerRoots(layout: ApplicationLayout): string[] {
 function swcCandidates(
   source: string,
   layout: ApplicationLayout,
-  build: Extract<ApplicationBuild, { kind: "swc" }>,
+  options: SwcOptions | undefined,
 ): string[] {
   const { application, projectDir, tsconfig } = layout;
   const fromProject = pathInside(projectDir, source);
@@ -121,16 +129,15 @@ function swcCandidates(
     return [];
   }
 
-  const outDir =
-    build.outDir === undefined ? outDirOf(projectDir, tsconfig) : resolve(projectDir, build.outDir);
+  const outDir = swcOutDir(layout, options);
   const whole = join(outDir, fromProject);
   // @swc/cli's stripComponents: every directory but the first, or the path
   // itself when it has no directory.
   const [, ...rest] = fromProject.split(sep);
   const stripped = rest.length ? join(outDir, ...rest) : whole;
 
-  if (build.stripLeadingPaths !== undefined) {
-    return [build.stripLeadingPaths ? stripped : whole];
+  if (options?.stripLeadingPaths !== undefined) {
+    return [options.stripLeadingPaths ? stripped : whole];
   }
 
   return nestCli12StripsLeadingPaths(tsconfig?.options.rootDir, application.sourceRoot)
@@ -222,14 +229,11 @@ function sourcesBuiltTo(compiled: string, layout: ApplicationLayout): string[] {
     return asSources(stem);
   }
 
-  const outDir =
-    build.kind === "swc" && build.outDir !== undefined
-      ? resolve(projectDir, build.outDir)
-      : outDirOf(projectDir, tsconfig);
-  const fromOutDir = pathInside(outDir, stem);
-  if (fromOutDir === undefined) {
-    return [];
-  }
+  const outDirs =
+    build.kind === "swc"
+      ? build.options.map((options) => swcOutDir(layout, options))
+      : [outDirOf(projectDir, tsconfig)];
+  const fromOutDirs = outDirs.flatMap((outDir) => pathInside(outDir, stem) ?? []);
 
   // SWC writes from the project, whole or with its first directory stripped.
   const [firstDirectory] = application.sourceRoot
@@ -239,7 +243,7 @@ function sourcesBuiltTo(compiled: string, layout: ApplicationLayout): string[] {
     build.kind === "swc"
       ? [projectDir, ...(firstDirectory === undefined ? [] : [join(projectDir, firstDirectory)])]
       : compilerRoots(layout);
-  return [...new Set(roots.flatMap((root) => asSources(join(root, fromOutDir))))];
+  return [...new Set(roots.flatMap((root) => fromOutDirs.flatMap((path) => asSources(join(root, path)))))];
 }
 
 /** Where an application's own build writes `<sourceRoot>/app.module.ts`; a bundle writes none. */

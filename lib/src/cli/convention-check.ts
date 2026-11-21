@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { ts } from "ts-morph";
-import { compiledCandidates } from "./build-output";
-import { displayPath, isFile, samePath } from "./files";
+import { compiledCandidates, pickCompiled, sharedWith } from "./build-output";
+import { displayPath, joinedPaths, samePath } from "./files";
 import type { ApplicationLayout } from "./nest-cli-config";
 import {
   MAX_CONSTANT_DEPTH,
@@ -28,10 +28,15 @@ export type ConventionCheck = {
   root: BootedRootModule;
   /** Where `nest build` writes the root module's file. */
   compiled: readonly string[];
+  /** The project's other applications, whose builds could write the same file. */
+  others: readonly ApplicationLayout[];
 };
 
 /** What main.ts boots, when that is one root module traced to its class's file; never throws. */
-export function conventionCheck(layout: ApplicationLayout): ConventionCheck | undefined {
+export function conventionCheck(
+  layout: ApplicationLayout,
+  others: readonly ApplicationLayout[],
+): ConventionCheck | undefined {
   try {
     const analysis = analyseMainFile(layout);
     if (analysis.kind !== "boots" || analysis.roots.length !== 1) {
@@ -50,7 +55,7 @@ export function conventionCheck(layout: ApplicationLayout): ConventionCheck | un
     }
 
     const root = { ...booted, sourceFile: declared.file, exportName: declared.exportName };
-    return { mainFile: analysis.mainFile, root, compiled: compiledCandidates(root.sourceFile, layout) };
+    return { mainFile: analysis.mainFile, root, compiled: compiledCandidates(root.sourceFile, layout), others };
   } catch {
     // Only ever a warning: a project the analysis cannot read gets none.
     return undefined;
@@ -73,12 +78,7 @@ export function conventionWarnings(
   const boots = `${displayPath(mainFile, cwd)} boots ${name} from ${displayPath(root.sourceFile, cwd)}, but the export uses ${displayPath(entry.path, cwd)} (${entry.moduleName}) by convention.`;
 
   if (!compiled.some((path) => samePath(path, entry.path))) {
-    const built = compiled.find(isFile);
-    return [
-      built === undefined
-        ? `${boots} Pass --entry/--module to export ${name}.`
-        : `${boots} Pass --entry ${displayPath(built, cwd)} --module ${root.exportName} to export ${name}.`,
-    ];
+    return [`${boots} ${entryAdvice(check, name, cwd)}`];
   }
 
   if (entry.moduleName !== root.exportName) {
@@ -89,6 +89,25 @@ export function conventionWarnings(
 
   const forRoot = forRootWarning(mainFile, root, cwd);
   return forRoot === undefined ? [] : [forRoot];
+}
+
+/** A compiled file to pass as `--entry` only when there is one and it is plainly this build's, as the export itself would take it. */
+function entryAdvice({ root, compiled, others }: ConventionCheck, name: string, cwd: string): string {
+  const fromSource = `pass --entry ${displayPath(root.sourceFile, cwd)} --module ${root.exportName} --require ts-node/register to export ${name}`;
+  const built = pickCompiled(compiled);
+  if (built.kind === "missing") {
+    return `Pass --entry/--module to export ${name}.`;
+  }
+
+  if (built.kind === "several") {
+    return `${name} has been built to ${joinedPaths(built.paths, cwd)}, and which is current cannot be told: build again into an emptied outDir, or ${fromSource}.`;
+  }
+
+  const path = displayPath(built.path, cwd);
+  const otherSource = sharedWith(built.path, root.sourceFile, others);
+  return otherSource === undefined
+    ? `Pass --entry ${path} --module ${root.exportName} to export ${name}.`
+    : `${name} is built to ${path} — but another application's ${displayPath(otherSource, cwd)} builds to ${path} too, so whose it is cannot be told: give each application an outDir of its own, or ${fromSource}.`;
 }
 
 /**
