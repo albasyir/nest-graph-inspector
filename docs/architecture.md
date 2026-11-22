@@ -1077,7 +1077,11 @@ through what the visitor did:
   lighting the other; an import on a reported module cycle keeps the circular
   colour in a lane and a port of its own, off the upright the bracket's
   connectors share, with one `#id` label that traces the cycle while pointed
-  at and keeps it traced once pressed. Any other import between two modules
+  at and keeps it traced once pressed. The modules on a cycle with their
+  parent stand at the ends of its branches, half above the others and half
+  below, so their lines pass the upright rather than cross it; on the card in
+  the middle their ports spread down its side, the bracket's own connector at
+  its middle. Any other import between two modules
   already drawn on a side is a dashed link, drawn on demand only — for the
   module under the pointer or the keyboard, for a traced cycle, or all of
   them from the legend's "Show all imports". Links turn in lanes of their own
@@ -1085,23 +1089,38 @@ through what the visitor did:
   column between the rows of its cards, so no line passes behind a card it
   does not join; two edges that join no card in common share no stretch while
   a gap has lanes to spare (the layout's tests check both on every edge of the
-  demo-shaped graph, the first on a 300-module one too). An import back into
+  demo-shaped graph, the first on a 300-module one too — on a compact
+  bracket, whose gaps hold two lanes a side, the links drawn on demand may
+  share one, and a link's label with nowhere clear to go is left off). An
+  import back into
   the middle is never drawn on its own side — the module making it always
   stands one level into the other side. Each side shows its own depth, `left`
   and `right` in the query, 3 when they are absent (`DEFAULT_BRACKET_DEPTH`);
-  a branch going on past the last level ends in a "+N modules" stub that asks
-  for one more. Every other module is a link to its own page, keeping the
+  a branch going on past the last level ends in a "+N more" stub that asks
+  for one more — a button in the imports' own colour, its connector drawn as
+  the bracket's are, naming in its tooltip the modules it holds back. Every
+  other module is a link to its own page, keeping the
   depths; the card in the middle, the largest on the canvas, says how many of
   the module's providers and controllers Direct Run can call, and its Direct
   Run button opens the inside view on the first of them.
 
+  A canvas narrower than 640px draws the bracket compact, the same bracket
+  smaller: narrower cards whose names wrap over two lines between their words
+  (`app/utils/module-name-words.ts`), a card in the middle that stacks its
+  counts, and tighter gaps — so a 390px phone holds the module and the first
+  level of each side at once.
+
   Where the canvas looks is `app/utils/module-bracket-viewport.ts`, pure too:
   the bracket opens whole when it fits at a zoom its names read at, and
-  otherwise on its module at that zoom (`READABLE_ZOOM`, module names drawn
-  at 12.6px) — on a phone, the module alone. A chip at each edge of the canvas
-  names the levels it cuts off and pans to them at the same zoom, a card the
-  edge cuts through steps back as part of them, and the column headings are
-  pinned across the canvas top at a size of their own.
+  otherwise a regular one opens on its module at that zoom
+  (`READABLE_ZOOM.regular`, module names drawn at 12.6px) and a compact one on
+  its module and both first levels across the canvas, its names drawn at 11px
+  or more (`READABLE_ZOOM.compact`). A chip at each edge of the canvas names
+  the levels it cuts off — a column of stubs among them — and counts their
+  modules ("← Levels 2–3 · 4 more", "2 more · Levels 2–3 →"), and pans to them
+  at the same zoom; a card the edge cuts through steps back as part of them,
+  and the column headings are pinned across the canvas top at a size of their
+  own.
   Vue Flow draws only the cards in view (`only-render-visible-elements`), so
   the browser tests count what a side holds after "Show the whole bracket".
 - **Inside Module** (`?view=inside`): what the module declares —
@@ -1956,11 +1975,15 @@ Facts a code change can invalidate, and the file to check:
   wrapper in the installed `@vue-flow/core`; and that a bracket node takes the
   pointer for its links only by overriding the inline `pointer-events: none`
   Vue Flow gives a node nobody can select, drag or click —
-  `ModuleDependencyBracket.vue`; and the size a bracket's module names are
-  drawn at when the page opens, 12.6px — `READABLE_ZOOM` in
-  `app/utils/module-bracket-viewport.ts` times the 14px names in
-  `ModuleDependencyBracket.vue` (the browser suite's `READABLE_PX`, 12, is the
-  floor it checks)
+  `ModuleDependencyBracket.vue`; the size a bracket's module names are drawn
+  at when the page opens, 12.6px on a regular bracket and 11px or more on a
+  compact one — `READABLE_ZOOM` in `app/utils/module-bracket-viewport.ts`
+  times the 14px and 11.5px names in `ModuleDependencyBracket.vue` (the
+  browser suite's `READABLE_PX`, 12, and `READABLE_PHONE_PX`, 11, are the
+  floors it checks); and the canvas width below which the bracket is compact,
+  640px — `COMPACT_BELOW_WIDTH` in `ModuleDependencyBracket.vue` — with the
+  compact lengths in `METRICS` of `app/utils/module-dependency-bracket.ts`
+  that fit both first levels across a 390px phone
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
