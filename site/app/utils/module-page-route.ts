@@ -30,6 +30,11 @@ import { findDirectRunTarget } from './direct-run-provider.ts'
 import { getModuleNodeId } from './graph-viewer-focus.ts'
 import { DEFAULT_BRACKET_DEPTH, type BracketSide } from './module-dependency-bracket.ts'
 import { encodeModuleId } from './module-id.ts'
+import {
+  PREVIEW_MODULE_PARAMETER,
+  readFirstQueryValue as readFirst,
+  readHandedOverModule
+} from './module-page-hand-off.ts'
 
 /** The two views of a module's page. */
 export type ModulePageView = 'dependencies' | 'inside'
@@ -67,9 +72,6 @@ export type ModulePageTarget = {
  * person reads, and short of a number a stray digit makes absurd.
  */
 export const MAX_REQUESTED_BRACKET_DEPTH = 999
-
-/** The `/view` query a preview names the module it hands over with. */
-const PREVIEW_MODULE_PARAMETER = 'module'
 
 const VIEW_PARAMETER = 'view'
 const DIRECT_RUN_PARAMETER = 'direct-run-on'
@@ -152,15 +154,14 @@ export function buildPreviewModulePageLocation(
 /**
  * The module page `/view?preview=true&module=<name>` hands over to, open as
  * its query asks; `undefined` for any other `/view` address, which opens the
- * viewer as it always has. Only a preview's own link — `preview` exactly
- * `true` — hands over to a module: the page shows whatever the tab holds, and
- * only a preview's hand-off puts that graph there.
+ * viewer as it always has. Which module, if any, is `readHandedOverModule`'s
+ * to say: the ELK warm-up reads the same rule.
  */
 export function resolvePreviewModulePage(
   query: Readonly<Record<string, unknown>>
 ): ModulePageLocation | undefined {
-  const moduleName = readFirst(query[PREVIEW_MODULE_PARAMETER])
-  if (query.preview !== 'true' || !moduleName) {
+  const moduleName = readHandedOverModule(query)
+  if (moduleName === null) {
     return undefined
   }
 
@@ -189,16 +190,6 @@ export function resolveNodeModulePage(
   return target
     ? { moduleName: target.moduleName, state: { view: 'inside', directRunOn: target.nodeId } }
     : null
-}
-
-/** A query value as the router hands it over: a string, or the first of several. */
-function readFirst(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-
-  const [first] = Array.isArray(value) ? value : []
-  return typeof first === 'string' ? first : ''
 }
 
 function readDepth(value: unknown): number {

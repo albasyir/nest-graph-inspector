@@ -760,6 +760,7 @@ that cannot reach into a Pinia setup store.
 | `module-name-words.test.ts` | Test for `module-name-words.ts`: acronyms and digits kept whole, and every demo module name joined back from its words |
 | `module-page-route.ts` | A module page's address — view, depths, `direct-run-on` — read and written; the preview hand-off through `/view?preview=true&module=`; and where a click on a module graph node leads |
 | `module-page-route.test.ts` | Test for `module-page-route.ts` |
+| `module-page-hand-off.ts` | Which module a `/view` address hands the preview's graph over to — the one rule `/view` and the ELK warm-up both read; imports nothing, so the warm-up's plugin stays light |
 | `graph-layout-persistence.ts` | Where a layout lives when the inspector cannot keep it — static graphs, the in-browser demo, and libraries without a layout route keep it per endpoint in memory and `sessionStorage`. Also the shape check for a layout the viewer receives, and the file serialization a download uses (byte-for-byte the library's) |
 | `graph-layout-persistence.test.ts` | Assert-based test for `graph-layout-persistence.ts`, with an injected fake `Storage` |
 | `http-error.ts` | Reads the status out of a failed request, and words a failure from that status alone — never from a transport message or a response body, either of which can quote the URL and what it carries |

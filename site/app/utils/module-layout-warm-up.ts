@@ -1,13 +1,15 @@
+import { readHandedOverModule } from './module-page-hand-off.ts'
+
 /**
  * Whether arriving at `path` draws the module graph straight away, so ELK —
  * which lays it out — is worth starting while the page itself is still
  * loading: the navigator, and `/view?preview=true`, which opens the example
  * there — unless the preview handed a module over with it (`?module=`), which
  * opens that module's page instead. `preview` and `module` are what the
- * address carries, read as `/view` reads them. The other viewer pages, a
- * module's page and every page outside the viewer draw no module graph on
- * arrival — a module's page lays itself out without ELK — and a documentation
- * preview starts ELK when it lays its own graph out.
+ * address carries, read by `/view`'s own rule (`readHandedOverModule`). The
+ * other viewer pages, a module's page and every page outside the viewer draw
+ * no module graph on arrival — a module's page lays itself out without ELK —
+ * and a documentation preview starts ELK when it lays its own graph out.
  */
 export function drawsModuleGraphOnArrival({
   path,
@@ -19,12 +21,9 @@ export function drawsModuleGraphOnArrival({
   module?: unknown
 }): boolean {
   const page = path.replace(/\/+$/, '')
-  const handsOverModule = typeof module === 'string'
-    ? module !== ''
-    : Array.isArray(module) && module.length > 0
 
   return page === '/view/navigator'
-    || (page === '/view' && preview === 'true' && !handsOverModule)
+    || (page === '/view' && preview === 'true' && readHandedOverModule({ preview, module }) === null)
 }
 
 /**

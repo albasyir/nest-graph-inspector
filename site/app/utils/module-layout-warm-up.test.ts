@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import { drawsModuleGraphOnArrival } from './module-layout-warm-up.ts'
+import { resolvePreviewModulePage } from './module-page-route.ts'
 
 describe('drawsModuleGraphOnArrival', () => {
   test('the navigator draws the module graph', () => {
@@ -21,6 +22,20 @@ describe('drawsModuleGraphOnArrival', () => {
     assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: ['OrderModule'] }), false)
     assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: '' }), true)
     assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: null }), true)
+  })
+
+  test('/view and the warm-up agree on every address whether a module is handed over', () => {
+    // `/view` reads the first of several values, so `?module=&module=X` hands
+    // nothing over and opens the navigator: the warm-up must start ELK for it.
+    for (const module of ['OrderModule', ['OrderModule'], ['', 'OrderModule'], ['OrderModule', ''], '', [], null, undefined]) {
+      const handsOver = resolvePreviewModulePage({ preview: 'true', module }) !== undefined
+      assert.equal(
+        drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module }),
+        !handsOver,
+        JSON.stringify(module)
+      )
+    }
+    assert.equal(drawsModuleGraphOnArrival({ path: '/view', preview: 'true', module: ['', 'OrderModule'] }), true)
   })
 
   test('no other page draws it on arrival, whatever its query', () => {
