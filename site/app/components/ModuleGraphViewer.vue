@@ -510,6 +510,32 @@ function handleNodeClick(event: NodeMouseEvent): void {
 }
 
 /**
+ * Enter or Space on a focused provider or controller opens Direct Run on it,
+ * as a click does: Vue Flow answers a key on a node only by selecting it. A
+ * key on a control inside the node is that control's.
+ */
+function handleNodeKeydown(event: KeyboardEvent): void {
+  const element = event.target
+  if (
+    (event.key !== 'Enter' && event.key !== ' ')
+    || !(element instanceof HTMLElement)
+    || !element.classList.contains('vue-flow__node')
+    || !element.dataset.id
+  ) {
+    return
+  }
+
+  const node = deepDive.value?.nodes.find(candidate => candidate.id === element.dataset.id)
+  if (node?.type !== 'item') {
+    return
+  }
+
+  event.preventDefault()
+  closeJsDocHoverCard()
+  selectNode(node.id)
+}
+
+/**
  * A click on the canvas closes what floats over it, and leaves the docked
  * panel be: it stands beside the graph, and closes with its own button.
  */
@@ -540,9 +566,11 @@ function handlePaneClick(): void {
       class="module-graph__workspace"
       :class="{ 'module-graph__workspace--with-panel': selectedNodeId }"
     >
+      <!-- A key on a focused node bubbles here, as in the navigator. -->
       <div
         ref="containerRef"
         class="module-graph__canvas"
+        @keydown="handleNodeKeydown"
       >
         <VueFlow
           :id="flowId"

@@ -571,6 +571,18 @@ test('Direct Run opens beside the module, from its card, and runs a method', asy
     modulePageUrl(state, handler.moduleName, '?view=inside'),
   );
   await expect(panel).toHaveCount(0);
+
+  // A target opens from the keyboard as from the pointer: Enter on it.
+  await graphNode(page, controllerNodeId).focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(
+    modulePageUrl(
+      state,
+      handler.moduleName,
+      `?view=inside&direct-run-on=${controllerNodeId}`,
+    ),
+  );
+  await expect(panel).toBeVisible();
 });
 
 test('a module on a cycle draws every level of both sides, quickly, and says it is on a cycle', async ({
