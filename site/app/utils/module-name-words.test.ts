@@ -1,7 +1,27 @@
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { splitNameIntoWords } from './module-name-words.ts'
+
+/**
+ * The demo's modules, by name, written out here: the graph the site exports
+ * from the demo (`public/nodepod-demo/graph.json`) is a build output, absent
+ * from a clean checkout, so no unit test reads it.
+ */
+const DEMO_MODULE_NAMES = [
+  'AppModule',
+  'DatabaseModule',
+  'AuthModule',
+  'CustomerModule',
+  'CustomerLoyaltyModule',
+  'OrderModule',
+  'StoreProductModule',
+  'ProductModule',
+  'RecommendationModule',
+  'StoreModule',
+  'VoucherModule',
+  'PaymentModule',
+  'NestJSCoreModule'
+] as const
 
 describe('module name words', () => {
   test('a name breaks between the words it is written in', () => {
@@ -18,13 +38,8 @@ describe('module name words', () => {
     assert.deepEqual(splitNameIntoWords(''), [''])
   })
 
-  test('every name in the demo graph joins back from its words', () => {
-    const graph: unknown = JSON.parse(readFileSync(new URL('../../public/nodepod-demo/graph.json', import.meta.url), 'utf8'))
-    const modules = typeof graph === 'object' && graph !== null && 'modules' in graph ? graph.modules : null
-    assert.ok(modules && typeof modules === 'object')
-    const names = Object.keys(modules)
-    assert.ok(names.length > 0)
-    for (const name of [...names, 'A$Weird.Name', '42']) {
+  test('every name of the demo, and odder ones, joins back from its words', () => {
+    for (const name of [...DEMO_MODULE_NAMES, 'A$Weird.Name', '42', '__proto__', 'a:b', 'OAuth2Module']) {
       assert.equal(splitNameIntoWords(name).join(''), name, name)
     }
   })
