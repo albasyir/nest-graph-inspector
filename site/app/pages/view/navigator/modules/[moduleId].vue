@@ -2,6 +2,7 @@
 import type { BreadcrumbItem } from '@nuxt/ui'
 import { useMediaQuery } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
+import { hasJsDocPreview } from '~/utils/jsdoc-preview'
 import type { BracketSide } from '~/utils/module-dependency-bracket'
 import { decodeModuleId } from '~/utils/module-id'
 import {
@@ -67,7 +68,9 @@ const graphModule = computed(() =>
     : undefined
 )
 const isRoot = computed(() => graphData.value?.root === moduleName.value)
-const hasJsDoc = computed(() => Boolean(graphModule.value?.jsdoc?.trim()))
+// As `ModuleJsDocSummary` decides it: a comment with nothing in it, such as
+// `/** */`, shows nothing, so the about button would open nothing.
+const hasJsDoc = computed(() => hasJsDocPreview(graphModule.value?.jsdoc))
 
 // On a phone the header keeps to two rows — the module with its back and
 // about buttons, then the view switch — and the module's JSDoc opens from the

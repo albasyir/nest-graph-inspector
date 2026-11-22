@@ -9,6 +9,11 @@ describe('module name words', () => {
     assert.deepEqual(splitNameIntoWords('NestJSCoreModule'), ['Nest', 'JS', 'Core', 'Module'])
     assert.deepEqual(splitNameIntoWords('HTTPModule'), ['HTTP', 'Module'])
     assert.deepEqual(splitNameIntoWords('Auth2Module'), ['Auth2', 'Module'])
+    // An acronym keeps the digits after it, so no card breaks a name between
+    // them.
+    assert.deepEqual(splitNameIntoWords('HTTP2Module'), ['HTTP2', 'Module'])
+    assert.deepEqual(splitNameIntoWords('V2Module'), ['V2', 'Module'])
+    assert.deepEqual(splitNameIntoWords('OAuth2Module'), ['O', 'Auth2', 'Module'])
     assert.deepEqual(splitNameIntoWords('legacy_module'), ['legacy', '_', 'module'])
     assert.deepEqual(splitNameIntoWords(''), [''])
   })

@@ -628,6 +628,11 @@ test('a module on a cycle draws every level of both sides, quickly, and says it 
   const onCycle = new Set(
     cycles.flatMap((cycle) => cycle.path).filter((name) => name !== moduleName),
   );
+  // A module importing only itself would leave nothing to check below.
+  expect(
+    onCycle.size,
+    `A reported cycle runs from ${moduleName} through another module`,
+  ).toBeGreaterThan(0);
   for (const name of onCycle) {
     for (const side of ['left', 'right'] as const) {
       await expect(
