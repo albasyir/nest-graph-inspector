@@ -1061,8 +1061,13 @@ viewer supports. A module's page lives under the navigator at
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
 than `/view/<page>`, so the bootstrap middleware matches it explicitly. It has
 two views, and its query says which and how — `app/utils/module-page-route.ts`
-reads and writes it, so an address can be shared and Back and Forward step
-through what the visitor did:
+reads and writes it, so an address can be shared and a reload opens the page
+as it was. History holds places, not states: opening a module's page from the
+navigator or the landing page, and re-centring on another module, each add a
+step to Back; a change of depth (a stepper or a stub), of view, or of Direct
+Run's target replaces the address in place. Back from a module's page so
+returns to the module it was re-centred from, or straight to the graph it was
+opened from, however much was changed on it:
 
 - **Dependencies**, the default: the module among the others, drawn by
   `ModuleDependencyBracket.vue` as a tournament bracket that opens both ways —

@@ -135,26 +135,34 @@ const viewOptions = computed(() => {
   }))
 })
 
-function go(state: ModulePageStateInput): void {
+/**
+ * A change on this module's page — a depth, the view, Direct Run's target —
+ * puts itself in the address, so a link shares it and a reload restores it,
+ * in place of the address it changes: Back is for places, not states. It
+ * leaves for the module this one was re-centred from, or for the graph the
+ * page was opened from, however much was changed here. Moving to another
+ * module is a place of its own: the bracket's module cards push.
+ */
+function replaceState(state: ModulePageStateInput): void {
   if (moduleName.value !== null) {
-    void router.push(buildModulePageLocation(moduleName.value, state))
+    void router.replace(buildModulePageLocation(moduleName.value, state))
   }
 }
 
 function setDepth(side: BracketSide, depth: number): void {
   const { view, depth: current } = pageState.value
-  go({ view, depth: { ...current, [side]: depth } })
+  replaceState({ view, depth: { ...current, [side]: depth } })
 }
 
 function openDirectRun(nodeId: string): void {
   const state = pageState.value
   if (state.directRunOn !== nodeId) {
-    go({ ...state, view: 'inside', directRunOn: nodeId })
+    replaceState({ ...state, view: 'inside', directRunOn: nodeId })
   }
 }
 
 function closeDirectRun(): void {
-  go({ ...pageState.value, directRunOn: null })
+  replaceState({ ...pageState.value, directRunOn: null })
 }
 
 function handleTraceOpen() {
@@ -240,8 +248,10 @@ function handleTraceOpen() {
             />
           </div>
 
-          <!-- Links, not tabs: each view has an address of its own, which
-               Back and Forward step through. -->
+          <!-- Links, not tabs: each view has an address of its own, to share
+               or reload. A switch replaces the address, as every change on
+               this page does, so Back leaves the module rather than undoing
+               the switch. -->
           <nav
             aria-label="Module views"
             class="module-page__views"
@@ -251,6 +261,7 @@ function handleTraceOpen() {
               :key="option.view"
               v-slot="{ href, navigate }"
               :to="option.to"
+              replace
               custom
             >
               <a

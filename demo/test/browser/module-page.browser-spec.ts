@@ -406,7 +406,7 @@ test("imports besides the bracket's own show for the module pointed at, or all a
   await expect(links).toHaveCount(0);
 });
 
-test("each side's depth changes on its own, and the address keeps it", async ({
+test("each side's depth changes on its own, the address keeps it, and Back leaves the module", async ({
   page,
   state,
   graph,
@@ -466,26 +466,49 @@ test("each side's depth changes on its own, and the address keeps it", async ({
   ).toBeDisabled();
   await expectLevels({ page, graph, moduleName, side: 'left', depth: 1 });
 
-  // Each step was an address of its own.
-  await page.goBack();
-  await expectDepth(page, 'left', 2);
+  // The address says both depths, so a reload opens the page as it was…
+  await page.reload();
+  await passVersionGate({ page, information });
+  await expectDepth(page, 'left', 1);
   await expectDepth(page, 'right', deeper);
+
+  // …but a depth is no place of its own: each step changed the address in
+  // place, so one Back leaves the module for the graph it was opened from.
+  await page.goBack();
+  await expect(page).toHaveURL(
+    new URL('view/navigator', state.siteBaseUrl).href,
+  );
+  await expectGraphLayoutsReady(page);
+  await expect(graphNode(page, `module-${moduleName}`)).toBeVisible();
 });
 
-test('clicking another module re-centres on it, and Back steps back through the modules to the navigator', async ({
+test('re-centring on another module is a step Back returns from; its depths and stubs are not', async ({
   page,
   state,
   graph,
   information,
 }) => {
   const moduleName = moduleWithDeepDependencies(graph, DEFAULT_DEPTH);
-  const [neighbour] = dependencyLevels(graph, moduleName, 'right')[0] ?? [];
+  // A module importing this one with depth on both sides to change: a right
+  // side of two levels or more, and a left side whose last level, one step
+  // shallower, ends in stubs.
+  const neighbour = (
+    dependencyLevels(graph, moduleName, 'right')[0] ?? []
+  ).find(
+    (name) =>
+      dependencyLevels(graph, name, 'left').length >= DEFAULT_DEPTH &&
+      dependencyLevels(graph, name, 'right').length >= 2,
+  );
 
   if (!neighbour) {
     throw new Error(
-      `Nothing imports ${moduleName}, so there is no module to move to`,
+      `No module importing ${moduleName} has two levels on its right and ${DEFAULT_DEPTH} on its left`,
     );
   }
+  const neighbourRight = Math.min(
+    DEFAULT_DEPTH,
+    dependencyLevels(graph, neighbour, 'right').length,
+  );
 
   await openFromNavigator({ page, state, information, moduleName });
 
@@ -503,10 +526,35 @@ test('clicking another module re-centres on it, and Back steps back through the 
     depth: DEFAULT_DEPTH,
   });
 
+  // On it, both depths change and a stub asks for a level back: each step
+  // changes the address in place.
+  await depthGroup(page, 'left')
+    .getByRole('button', { name: 'Show one level fewer' })
+    .click();
+  await expectDepth(page, 'left', DEFAULT_DEPTH - 1);
+  await depthGroup(page, 'right')
+    .getByRole('button', { name: 'Show one level fewer' })
+    .click();
+  await expectDepth(page, 'right', neighbourRight - 1);
+  await showWholeBracket(page);
+  await page
+    .locator('.vue-flow__node[data-bracket-node="stub"][data-side="left"]')
+    .first()
+    .getByRole('button')
+    .click();
+  await expectDepth(page, 'left', DEFAULT_DEPTH);
+  await expectDepth(page, 'right', neighbourRight - 1);
+  await expect(page).toHaveURL(
+    modulePageUrl(state, neighbour, `?right=${neighbourRight - 1}`),
+  );
+
+  // One Back returns to the module it was re-centred from, as it was…
   await page.goBack();
   await expect(page).toHaveURL(modulePageUrl(state, moduleName));
   await expect(center(page)).toContainText(moduleName);
+  await expectDepth(page, 'left', DEFAULT_DEPTH);
 
+  // …and the next to the graph it was opened from.
   await page.goBack();
   await expect(page).toHaveURL(
     new URL('view/navigator', state.siteBaseUrl).href,
@@ -583,6 +631,14 @@ test('Direct Run opens beside the module, from its card, and runs a method', asy
     ),
   );
   await expect(panel).toBeVisible();
+
+  // The switch of view and every open and close of the panel changed the
+  // address in place: Back leaves the module for the graph it came from.
+  await page.goBack();
+  await expect(page).toHaveURL(
+    new URL('view/navigator', state.siteBaseUrl).href,
+  );
+  await expectGraphLayoutsReady(page);
 });
 
 test('a module on a cycle draws every level of both sides, quickly, and says it is on a cycle', async ({

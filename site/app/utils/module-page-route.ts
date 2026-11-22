@@ -3,7 +3,11 @@
  *
  * `/view/navigator/modules/<id>` is one module's page, `<id>` its name through
  * `encodeModuleId`. Its query holds the rest, so an address can be shared and
- * Back and Forward step through what the visitor did:
+ * a reload opens the page as it was. A change of any of it replaces the
+ * address rather than adding a step to Back, which is for places: the module
+ * re-centred from, or the graph the page was opened from.
+ *
+ * The query:
  *
  * - `view=inside` — what the module declares: its providers, its controllers,
  *   and where its dependencies come from. Without it, the page shows the

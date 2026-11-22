@@ -299,12 +299,19 @@ const hasTwins = computed(() =>
   Boolean(bracket.value?.nodes.some(node => node.kind === 'module' && node.isOnCycleWithCenter))
 )
 
-/** Another module's page, keeping the depths asked for here. */
+/**
+ * Another module's page, keeping the depths asked for here: a place of its
+ * own, which Back returns from to this one.
+ */
 function recenterOn(node: BracketModuleNode) {
   return buildModulePageLocation(node.moduleName, { depth: props.depth })
 }
 
-/** The inside view of the module in the middle, Direct Run open on its first target. */
+/**
+ * The inside view of the module in the middle, Direct Run open on its first
+ * target: the same module, so it replaces the address, as the page's own view
+ * switch does.
+ */
 function directRunLocation(node: BracketCenterNode) {
   return buildModulePageLocation(node.moduleName, {
     depth: props.depth,
@@ -753,6 +760,7 @@ const isLegendOpen = ref(false)
             <UButton
               v-if="data.stats.runnableNodeIds.length"
               :to="directRunLocation(data)"
+              replace
               color="neutral"
               variant="solid"
               block
@@ -820,6 +828,7 @@ const isLegendOpen = ref(false)
             <UButton
               v-if="data.stats.runnableNodeIds.length"
               :to="directRunLocation(data)"
+              replace
               color="neutral"
               variant="solid"
               block
