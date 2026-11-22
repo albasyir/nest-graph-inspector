@@ -102,7 +102,6 @@ import {
   countGraphModules,
   shouldWarnAboutBrightLine
 } from '~/utils/graph-viewer-bright-line'
-import { encodeModuleId } from '~/utils/module-id'
 import {
   buildModulePageLocation,
   buildPreviewModulePageLocation,
@@ -3062,7 +3061,7 @@ const moduleHeaderAction = computed(() =>
 /** Leaves the whole graph for one module's own page. */
 function openModuleDeepDive(moduleName: string) {
   closeJsDocHoverCard()
-  void navigateTo(`/view/navigator/modules/${encodeModuleId(moduleName)}`)
+  void navigateTo(buildModulePageLocation(moduleName))
 }
 
 function setAllModulesOpen(isOpen: boolean | 'indeterminate') {
