@@ -1091,7 +1091,8 @@ through what the visitor did:
   a gap has lanes to spare (the layout's tests check both on every edge of the
   demo-shaped graph, the first on a 300-module one too — on a compact
   bracket, whose gaps hold two lanes a side, the links drawn on demand may
-  share one, and a link's label with nowhere clear to go is left off). An
+  share one, a module's loop to itself is drawn at half size to keep within
+  its gap, and a cycle label with nowhere clear to go is left off). An
   import back into
   the middle is never drawn on its own side — the module making it always
   stands one level into the other side. Each side shows its own depth, `left`

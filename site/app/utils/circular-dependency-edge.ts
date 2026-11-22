@@ -283,16 +283,26 @@ export function getCircularEdgeBounds(
   return label ? unionRects([curve, label]) ?? curve : curve
 }
 
-/** The smallest box holding every box, or `null` for none. */
+/**
+ * The smallest box holding every box, or `null` for none. One box at a time:
+ * a large graph's bracket holds more boxes than a call can take arguments,
+ * so they are never spread into one.
+ */
 export function unionRects(rects: readonly CircularEdgeRect[]): CircularEdgeRect | null {
   if (rects.length === 0) {
     return null
   }
 
-  const left = Math.min(...rects.map(rect => rect.x))
-  const top = Math.min(...rects.map(rect => rect.y))
-  const right = Math.max(...rects.map(rect => rect.x + rect.width))
-  const bottom = Math.max(...rects.map(rect => rect.y + rect.height))
+  let left = Number.POSITIVE_INFINITY
+  let top = Number.POSITIVE_INFINITY
+  let right = Number.NEGATIVE_INFINITY
+  let bottom = Number.NEGATIVE_INFINITY
+  for (const rect of rects) {
+    left = Math.min(left, rect.x)
+    top = Math.min(top, rect.y)
+    right = Math.max(right, rect.x + rect.width)
+    bottom = Math.max(bottom, rect.y + rect.height)
+  }
 
   return { x: left, y: top, width: right - left, height: bottom - top }
 }

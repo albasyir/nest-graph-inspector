@@ -278,11 +278,17 @@ type BracketMetrics = {
   labelCharacterWidth: number
   labelHeight: number
   /**
-   * Whether a link's label with nowhere clear to go is drawn anyway, over what
-   * it must cover, or left off — where the gaps are too narrow for one to
-   * cover only a little.
+   * Whether a label with nowhere clear to go is drawn anyway, over what it
+   * must cover, or left off — where the gaps are too narrow for one to cover
+   * only a little.
    */
   isCrowdedLabelDrawn: boolean
+  /**
+   * How large a module's loop to itself is drawn, against the loop the
+   * navigator draws: drawn in towards its handle where the gap beside the
+   * card is narrower than that loop reaches.
+   */
+  selfLoopScale: number
 }
 
 const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
@@ -312,7 +318,8 @@ const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
     labelChromeWidth: 31,
     labelCharacterWidth: 7,
     labelHeight: 20,
-    isCrowdedLabelDrawn: true
+    isCrowdedLabelDrawn: true,
+    selfLoopScale: 1
   },
   // A 390px phone holds the module and both first levels: 105 + 26 + 100 +
   // 26 + 105 = 362 flow pixels, drawn at 0.98. Module names are set at
@@ -345,7 +352,10 @@ const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
     labelChromeWidth: 10,
     labelCharacterWidth: 7,
     labelHeight: 20,
-    isCrowdedLabelDrawn: false
+    isCrowdedLabelDrawn: false,
+    // The navigator's loop reaches 44px out, past a 26px gap: half of it
+    // keeps within, clear of the next column's cards.
+    selfLoopScale: 0.5
   }
 }
 
@@ -675,7 +685,11 @@ function layoutSide(params: {
       const ordered = putCycleStepsAtTheEnds(sorted, moduleName => isCycleStep(parent, moduleName))
 
       children.set(parent, ordered)
-      column.push(...ordered)
+      // A module at a time: one module of a large graph can import more than a
+      // call can take arguments.
+      for (const moduleName of ordered) {
+        column.push(moduleName)
+      }
     }
 
     columns.push(column)
@@ -838,7 +852,12 @@ function getLevelLabels(
   layouts: Readonly<Record<BracketSide, SideLayout>>,
   m: BracketMetrics
 ): BracketLevelNode[] {
-  const top = Math.min(...nodes.map(node => node.position.y))
+  // One node at a time: a large graph draws more cards than a call can take
+  // arguments.
+  let top = Number.POSITIVE_INFINITY
+  for (const node of nodes) {
+    top = Math.min(top, node.position.y)
+  }
   const labels: BracketLevelNode[] = []
 
   for (const side of BRACKET_SIDES) {
@@ -1126,8 +1145,14 @@ function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[]
 
   for (const { edge, label } of routed) {
     if (edge.cycleIds.length > 0 && label) {
+      const box = getLabelBox(label, formatCircularEdgeLabel(edge.cycleIds), m)
+      // Where the gaps are too narrow for a label to cover only a little,
+      // one that would cover a card or another label is left off.
+      if (!m.isCrowdedLabelDrawn && taken.some(other => boxesOverlap(box, other))) {
+        continue
+      }
       edge.label = label
-      taken.push(getLabelBox(label, formatCircularEdgeLabel(edge.cycleIds), m))
+      taken.push(box)
     }
   }
 
@@ -1511,7 +1536,11 @@ function createRouter(
 
     const cards: CircularEdgeRect[] = []
     for (let column = nearer + 1; column < further; column += 1) {
-      cards.push(...(cardsByColumn.get(column) ?? []))
+      // A card at a time: a column of a large graph holds more than a call
+      // can take arguments.
+      for (const card of cardsByColumn.get(column) ?? []) {
+        cards.push(card)
+      }
     }
     const crossed = getCrossedColumns(cards, m)
     crossedByRun.set(key, crossed)
@@ -1770,7 +1799,9 @@ function createRouter(
   /**
    * A module importing itself: a loop out of its outer side — or, for the
    * module in the middle, out of its top, clear of both sides' brackets —
-   * drawn as the module deep dive draws one.
+   * drawn as the module deep dive draws one, or smaller, drawn in towards its
+   * handle, where the gap beside the card is narrower than that loop reaches
+   * (`selfLoopScale`).
    */
   function selfLoop(
     node: BracketCenterNode | BracketModuleNode,
@@ -1790,9 +1821,19 @@ function createRouter(
       targetPosition: loopSide,
       isSelfLoop: true
     })
+    const s = m.selfLoopScale
+    const inwards = (point: EdgePoint): EdgePoint => s === 1
+      ? point
+      : { x: anchor.x + (point.x - anchor.x) * s, y: anchor.y + (point.y - anchor.y) * s }
+    const [start, first, second, end] = geometry.points
+    const points = [inwards(start), inwards(first), inwards(second), inwards(end)] as const
+    const path = s === 1
+      ? geometry.path
+      : `M ${points[0].x},${points[0].y} C ${points[1].x},${points[1].y} ${points[2].x},${points[2].y} ${points[3].x},${points[3].y}`
+    const labelSpot = inwards({ x: geometry.labelX, y: geometry.labelY })
 
     // A Bézier curve stays inside its control points.
-    routePoints.push(...geometry.points)
+    routePoints.push(...points)
 
     return {
       edge: {
@@ -1804,13 +1845,13 @@ function createRouter(
         kind: 'self',
         side,
         cycleIds,
-        path: geometry.path,
+        path,
         label: null
       },
-      points: geometry.points,
+      points: [...points],
       label: {
-        labelX: geometry.labelX,
-        labelY: geometry.labelY,
+        labelX: labelSpot.x,
+        labelY: labelSpot.y,
         labelTransform: geometry.labelTransform,
         labelAnchor: geometry.labelAnchor
       },

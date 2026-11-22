@@ -591,6 +591,84 @@ describe('the bracket', () => {
     }
   })
 
+  test('odd names, an import of a module the graph lacks, and a self-import lay out cleanly', () => {
+    // Names come from whatever graph is opened: an object's own keys, a
+    // colon, nothing at all. `Ghost` is imported but never declared.
+    const imports: Record<string, string[]> = Object.fromEntries([
+      ['Root', ['__proto__', 'constructor', 'a:b', '']],
+      ['__proto__', ['constructor', 'Ghost']],
+      ['constructor', ['a:b']],
+      ['a:b', ['a:b']],
+      ['', []]
+    ])
+    const odd = graph(imports, { root: 'Root', cycles: [cycle(5, ['a:b', 'a:b'])] })
+
+    for (const size of SIZES) {
+      for (const center of Object.keys(imports)) {
+        assertLaysOutCleanly(build(odd, center, { left: 99, right: 99 }, size), `centre ${JSON.stringify(center)}, ${size}`)
+      }
+    }
+  })
+
+  test('a loop to itself keeps off every other card, its label too, at both sizes', () => {
+    // A, on the left, imports itself and B, which stands one column further
+    // out on A's row: a loop out of A's outer side reaches towards B. A
+    // compact gap is narrower than the navigator's loop reaches.
+    const looped = graph({ C: ['A'], A: ['A', 'B'], B: [] }, { cycles: [cycle(1, ['A', 'A'])] })
+    const boxOf = (node: BracketNode) => ({ ...node.position, width: node.width, height: node.height })
+
+    for (const size of SIZES) {
+      for (const center of ['C', 'A']) {
+        const bracket = build(looped, center, {}, size)
+        const loop = bracket.edges.find(edge => edge.kind === 'self')
+        assert.ok(loop, `${center}, ${size}: the loop is drawn`)
+
+        // A Bézier curve stays inside its four points.
+        const points = routeOf(loop.path)
+        const xs = points.map(point => point.x)
+        const ys = points.map(point => point.y)
+        const hull = {
+          x: Math.min(...xs),
+          y: Math.min(...ys),
+          width: Math.max(...xs) - Math.min(...xs),
+          height: Math.max(...ys) - Math.min(...ys)
+        }
+        const others = bracket.nodes.filter(node => node.kind !== 'level' && node.id !== loop.source)
+        for (const node of others) {
+          assert.equal(boxesOverlap(hull, boxOf(node)), false, `${center}, ${size}: the loop reaches over ${node.id}`)
+        }
+
+        if (loop.label) {
+          const label = getBracketLabelBox(loop.label, formatCircularEdgeLabel(loop.cycleIds), size)
+          for (const node of bracket.nodes.filter(candidate => candidate.kind !== 'level')) {
+            assert.equal(boxesOverlap(label, boxOf(node)), false, `${center}, ${size}: the loop's label covers ${node.id}`)
+          }
+        }
+        if (size === 'regular') {
+          assert.ok(loop.label, `${center}: a regular bracket has room for the loop's label`)
+        }
+      }
+    }
+  })
+
+  test('a graph whose routes pass more points than a call can take arguments still lays out', () => {
+    // A module importing 30,000 others: a card for each and points along every
+    // route, some 150,000 boxes to bound — past what spreading them into one
+    // Math.min call survives.
+    const names = Array.from({ length: 30_000 }, (_, index) => `M${index}`)
+    const hub = graph({ Hub: names, ...Object.fromEntries(names.map(name => [name, []])) })
+    const bracket = build(hub, 'Hub', { left: 1, right: 1 })
+
+    // Every module drawn and joined to the hub by a route of its own; nothing
+    // imports the hub, so its right side is one empty card.
+    assert.equal(modulesOn(bracket, 'left').length, names.length)
+    const branches = bracket.edges.filter(edge => edge.kind === 'tree' && edge.target === BRACKET_CENTER_ID)
+    assert.equal(branches.length, names.length)
+    assert.ok(branches.every(edge => edge.path.startsWith('M ')))
+    assert.deepEqual(bracket.nodes.filter(node => node.kind === 'empty').map(node => node.side), ['right'])
+    assert.ok(Number.isFinite(bracket.bounds.height) && bracket.bounds.height > 0)
+  })
+
   test('a compact bracket is the same bracket, smaller', () => {
     for (const center of Object.keys(SHOP.modules)) {
       const regular = build(SHOP, center, { left: 99, right: 99 })
