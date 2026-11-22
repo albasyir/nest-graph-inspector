@@ -314,10 +314,12 @@ const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
     centerPortCornerClearance: 18,
     treeLabelInset: 28,
     channelStep: 4,
-    // The navigator's label, with its icon: more than the bracket's pill needs.
+    // The navigator's label, with its icon, across: more than the bracket's
+    // pill needs. Down, the pill itself: `.module-bracket__cycle` is drawn
+    // 22px tall, and a label is kept clear of cards as tall as it is drawn.
     labelChromeWidth: 31,
     labelCharacterWidth: 7,
-    labelHeight: 20,
+    labelHeight: 22,
     isCrowdedLabelDrawn: true,
     selfLoopScale: 1
   },
@@ -349,6 +351,7 @@ const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
     centerPortCornerClearance: 14,
     treeLabelInset: 13,
     channelStep: 3,
+    // `.module-bracket--compact .module-bracket__cycle`: 20px tall.
     labelChromeWidth: 10,
     labelCharacterWidth: 7,
     labelHeight: 20,

@@ -1711,6 +1711,7 @@ const isLegendOpen = ref(false)
 }
 
 /* A cycle's number on its connector: press it to keep the cycle traced. */
+/* 22px tall, as `labelHeight` in `utils/module-dependency-bracket.ts` keeps it clear. */
 .module-bracket__cycle {
   display: inline-flex;
   align-items: center;
@@ -2109,6 +2110,7 @@ const isLegendOpen = ref(false)
   font-size: 12px;
 }
 
+/* 20px tall, as the compact `labelHeight` keeps it clear. */
 .module-bracket--compact .module-bracket__cycle {
   height: 20px;
   padding: 0 4px;
