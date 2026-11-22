@@ -225,9 +225,8 @@ const flowEdges = computed<FlowEdge[]>(() =>
   (bracket.value?.edges ?? []).map((edge) => {
     const isCircular = edge.cycleIds.length > 0
     const isLit = isEdgeLit(edge)
-    const color = edge.kind === 'stub'
-      ? 'var(--ui-border-accented)'
-      : isCircular ? CIRCULAR_DEPENDENCY_EDGE_COLOR : MODULE_EDGE_COLOR
+    // A stub's connector is an import like the bracket's own: drawn as one.
+    const color = isCircular ? CIRCULAR_DEPENDENCY_EDGE_COLOR : MODULE_EDGE_COLOR
     const classes = [
       'bracket-edge',
       `bracket-edge--${edge.kind}`,
@@ -249,7 +248,7 @@ const flowEdges = computed<FlowEdge[]>(() =>
       zIndex: isLit ? 2 : isCircular ? 1 : 0,
       class: classes.filter(Boolean).join(' '),
       style: getEdgeStyle(edge, color, isLit),
-      ...(edge.kind === 'stub' ? {} : { markerEnd: { type: MarkerType.ArrowClosed, color } })
+      markerEnd: { type: MarkerType.ArrowClosed, color }
     }
   })
 )
@@ -264,7 +263,7 @@ function getEdgeStyle(edge: BracketEdge, color: string, isLit: boolean): EdgeStr
     case 'link':
       return { stroke: color, strokeWidth: isLit ? 2.25 : 1.5, strokeDasharray: '6 5' }
     case 'stub':
-      return { stroke: color, strokeWidth: 1.5, strokeDasharray: '2 4' }
+      return { stroke: color, strokeWidth: 1.75 }
     default: {
       const _exhaustive: never = edge.kind
       return _exhaustive
@@ -309,10 +308,22 @@ function stepDepth(side: BracketSide, by: number, isAllowed: boolean): void {
 
 /** A stub's name: its own words first, then what pressing it does. */
 function describeStub(stub: BracketStubNode): string {
-  const shown = `+${pluralize(stub.moduleCount, 'module')}`
+  const shown = `+${pluralize(stub.moduleCount, 'more module')}`
   return stub.side === 'left'
     ? `${shown}: show one more level of what ${props.moduleName} needs`
     : `${shown}: show one more level of what needs ${props.moduleName}`
+}
+
+/** How many of the modules past a stub its tooltip names before counting the rest. */
+const STUB_NAMES_LISTED = 6
+
+/** What a stub holds back, by name: its tooltip. */
+function listStubModules(stub: BracketStubNode): string {
+  const listed = stub.moduleNames.slice(0, STUB_NAMES_LISTED)
+  const rest = stub.moduleNames.length - listed.length
+  return rest > 0
+    ? `${listed.join(', ')} and ${rest} more`
+    : listed.join(', ')
 }
 
 /** What being on both sides means, for a module on one of them. */
@@ -824,19 +835,21 @@ const isLegendOpen = ref(false)
             type="source"
             :position="Position.Left"
           />
+          <!-- An action: one more level of its side, pointing the way it goes. -->
           <button
             type="button"
             class="module-bracket-stub"
             :class="[`module-bracket-stub--${data.side}`, { 'module-bracket-stub--cut': cutCardIds.has(data.id) }]"
             :aria-label="describeStub(data)"
+            :title="listStubModules(data)"
             @click="stepDepth(data.side, 1, true)"
           >
             <UIcon
-              :name="data.side === 'left' ? 'i-lucide-chevrons-left' : 'i-lucide-chevrons-right'"
-              class="size-4 shrink-0"
+              :name="data.side === 'left' ? 'i-lucide-arrow-left' : 'i-lucide-arrow-right'"
+              class="module-bracket-stub__arrow"
               aria-hidden="true"
             />
-            +{{ pluralize(data.moduleCount, 'module') }}
+            +{{ data.moduleCount }} more
           </button>
           <Handle
             id="right-target"
@@ -1052,8 +1065,8 @@ const isLegendOpen = ref(false)
           <span
             class="module-bracket__legend-stub"
             aria-hidden="true"
-          >+N</span>
-          More one level further: select to show it
+          >+N more</span>
+          One level further: select to show it
         </li>
         <li
           v-if="hasLinks"
@@ -1098,6 +1111,10 @@ const isLegendOpen = ref(false)
   --bracket-cycle-ink: #92400e;
   --bracket-cycle-tint: #fef3c7;
   --bracket-cycle-edge: #f59e0b;
+  /* A stub wears the imports' own colour: a pale tint of it, ink of its hue. */
+  --bracket-stub-ink: #075985;
+  --bracket-stub-tint: color-mix(in srgb, var(--mg-edge-module) 10%, var(--ui-bg));
+  --bracket-stub-tint-pointed: color-mix(in srgb, var(--mg-edge-module) 20%, var(--ui-bg));
 }
 
 .dark .module-bracket {
@@ -1107,6 +1124,7 @@ const isLegendOpen = ref(false)
   --bracket-cycle-ink: #fde68a;
   --bracket-cycle-tint: rgb(250 204 21 / 0.14);
   --bracket-cycle-edge: rgb(250 204 21 / 0.55);
+  --bracket-stub-ink: #bae6fd;
 }
 
 /*
@@ -1502,7 +1520,11 @@ const isLegendOpen = ref(false)
   font-size: 13px;
 }
 
-/* Where a branch goes on: a button asking for one more level. */
+/*
+ * Where a branch goes on: a button asking for one more level, in the imports'
+ * own colour — filled, bordered, its arrow pointing the way the side goes —
+ * so it reads as something to press, not a slot left empty.
+ */
 .module-bracket-stub {
   display: flex;
   align-items: center;
@@ -1510,17 +1532,16 @@ const isLegendOpen = ref(false)
   gap: 6px;
   width: 100%;
   height: 100%;
-  border: 1.5px dashed var(--ui-border-accented);
+  border: 1.5px solid var(--mg-edge-module);
   border-radius: 8px;
-  background: var(--ui-bg);
-  color: var(--ui-text-toned);
+  background: var(--bracket-stub-tint);
+  color: var(--bracket-stub-ink);
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
-    border-color 120ms ease,
-    color 120ms ease,
+    background-color 120ms ease,
     opacity 120ms ease;
 }
 
@@ -1528,9 +1549,15 @@ const isLegendOpen = ref(false)
   flex-direction: row-reverse;
 }
 
-.module-bracket-stub:hover {
-  border-color: var(--ui-border-inverted);
-  color: var(--ui-text-highlighted);
+.module-bracket-stub__arrow {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.module-bracket-stub:hover,
+.module-bracket-stub:focus-visible {
+  background: var(--bracket-stub-tint-pointed);
 }
 
 .module-bracket-stub:focus-visible {
@@ -1778,9 +1805,11 @@ const isLegendOpen = ref(false)
 }
 
 .module-bracket__legend-stub {
-  padding: 0 4px;
-  border: 1px dashed var(--ui-border-accented);
+  padding: 0 5px;
+  border: 1px solid var(--mg-edge-module);
   border-radius: 4px;
+  background: var(--bracket-stub-tint);
+  color: var(--bracket-stub-ink);
   font-weight: 600;
 }
 
