@@ -10,7 +10,7 @@ import {
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { ControlButton, Controls } from '@vue-flow/controls'
-import { useDebounceFn, useMediaQuery, useResizeObserver } from '@vueuse/core'
+import { useDebounceFn, useElementSize, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import type { Edge, Node } from '@vue-flow/core'
 import type { CSSProperties } from 'vue'
 import type { GraphOutput } from 'nest-graph-inspector'
@@ -44,6 +44,7 @@ import {
   type BracketSide,
   type BracketStubNode
 } from '~/utils/module-dependency-bracket'
+import { splitNameIntoWords } from '~/utils/module-name-words'
 import { buildModulePageLocation } from '~/utils/module-page-route'
 
 /**
@@ -77,10 +78,24 @@ const emit = defineEmits<{
 const flowId = `module-bracket-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
 
+/**
+ * Below this width a canvas draws the bracket compact — narrower cards,
+ * names over two lines, tighter gaps — so a phone opens on the module and
+ * the first level of each side at a size their names read at.
+ */
+const COMPACT_BELOW_WIDTH = 640
+const isPhone = useMediaQuery('(max-width: 639.98px)')
+const { width: canvasWidth } = useElementSize(containerRef)
+/** Until the canvas is measured, the window says. */
+const isCompact = computed(() =>
+  canvasWidth.value > 0 ? canvasWidth.value < COMPACT_BELOW_WIDTH : isPhone.value
+)
+
 const bracket = computed(() => buildModuleDependencyBracket({
   graph: props.graphData,
   center: props.moduleName,
-  depth: props.depth
+  depth: props.depth,
+  size: isCompact.value ? 'compact' : 'regular'
 }))
 
 const nodeById = computed(() =>
@@ -350,7 +365,6 @@ function getCycleLabelStyle(edge: BracketEdge): CSSProperties {
 const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
 const fitTracker = createDeepDiveFitTracker()
 const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-const isPhone = useMediaQuery('(max-width: 639.98px)')
 /** The strip of column headings pinned across the top of the canvas. */
 const HEADINGS_HEIGHT = 32
 const REVEAL_DURATION_MS = 280
@@ -430,10 +444,11 @@ watch(
   { immediate: true }
 )
 
-// Another module, or another depth, is a new bracket: framed afresh, whatever
-// the reader did to the last one.
+// Another module, another depth, or the other size of bracket — a phone
+// turned, a window narrowed — is a new bracket: framed afresh, whatever the
+// reader did to the last one.
 watch(
-  [() => props.moduleName, () => props.depth.left, () => props.depth.right],
+  [() => props.moduleName, () => props.depth.left, () => props.depth.right, isCompact],
   async ([moduleName], [previousModuleName]) => {
     if (moduleName !== previousModuleName) {
       pointedNodeId.value = null
@@ -464,7 +479,12 @@ const offscreen = computed(() =>
     : null
 )
 
-type EdgeChip = { edge: BracketSide, kind: 'levels' | 'middle', text: string, label: string }
+/**
+ * A chip at a side edge of the canvas: toward the levels it cuts off — which
+ * levels, and how many modules they hold — or back to the module, cut off
+ * itself.
+ */
+type EdgeChip = { edge: BracketSide, kind: 'levels' | 'middle', text: string, count: string, label: string }
 
 const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeChip[] => {
   const current = offscreen.value
@@ -473,7 +493,7 @@ const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeC
   }
 
   if (current.middle === edge) {
-    return [{ edge, kind: 'middle', text: props.moduleName, label: `Back to ${props.moduleName}` }]
+    return [{ edge, kind: 'middle', text: props.moduleName, count: '', label: `Back to ${props.moduleName}` }]
   }
 
   const levels = current.levels[edge]
@@ -482,13 +502,16 @@ const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeC
   }
 
   const range = formatLevelRange(levels)
+  const modules = current.modules[edge]
+  const where = edge === 'left'
+    ? `of what ${props.moduleName} needs`
+    : `of what needs ${props.moduleName}`
   return [{
     edge,
     kind: 'levels',
     text: range,
-    label: edge === 'left'
-      ? `Show ${range.toLowerCase()} of what ${props.moduleName} needs`
-      : `Show ${range.toLowerCase()} of what needs ${props.moduleName}`
+    count: `${modules} more`,
+    label: `Show ${range.toLowerCase()} ${where}: ${pluralize(modules, 'more module')}`
   }]
 }))
 
@@ -543,7 +566,10 @@ const isLegendOpen = ref(false)
 </script>
 
 <template>
-  <div class="module-bracket flex h-full min-h-0 flex-col">
+  <div
+    class="module-bracket flex h-full min-h-0 flex-col"
+    :class="{ 'module-bracket--compact': isCompact }"
+  >
     <div class="module-bracket__toolbar">
       <div
         v-for="entry in sides"
@@ -681,7 +707,71 @@ const isLegendOpen = ref(false)
             type="source"
             :position="Position.Left"
           />
-          <div class="module-bracket-center">
+          <!-- Compact, the card stacks: the name over two lines, its counts
+               one to a line, Direct Run at its foot. -->
+          <div
+            v-if="isCompact"
+            class="module-bracket-center module-bracket-center--compact"
+          >
+            <span
+              class="module-bracket-center__name"
+              translate="no"
+              :title="data.moduleName"
+            >
+              <template
+                v-for="(word, index) in splitNameIntoWords(data.moduleName)"
+                :key="index"
+              ><wbr v-if="index > 0">{{ word }}</template>
+            </span>
+            <span
+              v-if="data.isRoot || data.isOnCycle"
+              class="module-bracket-center__tags"
+            >
+              <span
+                v-if="data.isRoot"
+                class="module-bracket-tag"
+              >Root</span>
+              <span
+                v-if="data.isOnCycle"
+                class="module-bracket-cycle-mark"
+              >
+                <UIcon
+                  name="i-lucide-repeat-2"
+                  class="size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                On a cycle
+              </span>
+            </span>
+            <ul class="module-bracket-center__counts">
+              <li>{{ pluralize(data.stats.providers, 'provider') }}</li>
+              <li>{{ pluralize(data.stats.controllers, 'controller') }}</li>
+              <li>{{ pluralize(data.stats.imports, 'import') }}</li>
+              <li>{{ pluralize(data.stats.exports, 'export') }}</li>
+            </ul>
+            <!-- No icon: its words alone fill the card's width. -->
+            <UButton
+              v-if="data.stats.runnableNodeIds.length"
+              :to="directRunLocation(data)"
+              color="neutral"
+              variant="solid"
+              block
+              class="module-bracket-center__run"
+              :aria-label="`Direct Run · ${data.stats.runnableNodeIds.length} runnable`"
+            >
+              Direct Run
+            </UButton>
+            <p
+              v-else
+              class="module-bracket-center__run-none"
+            >
+              Nothing to run
+            </p>
+          </div>
+          <div
+            v-else
+            class="module-bracket-center"
+          >
             <div class="module-bracket-center__title">
               <UIcon
                 name="i-lucide-package"
@@ -788,28 +878,40 @@ const isLegendOpen = ref(false)
             @focus="focusOn(data)"
             @blur="blurFrom(data)"
           >
+            <!-- Breaks between its words where a compact card has to. -->
             <span
               class="module-bracket-module__name"
               translate="no"
               :title="data.moduleName"
-            >{{ data.moduleName }}</span>
-            <span
-              v-if="data.isRoot"
-              class="module-bracket-tag"
-            >Root</span>
-            <span
-              v-if="data.isOnCycleWithCenter"
-              class="module-bracket-twin"
-              data-cycle-badge
-              :title="describeTwin(data)"
             >
-              <UIcon
-                name="i-lucide-repeat-2"
-                class="size-3.5 shrink-0"
-                aria-hidden="true"
-              />
-              also {{ data.side === 'left' ? 'right' : 'left' }}
-              <span class="sr-only">— {{ describeTwin(data) }}</span>
+              <template
+                v-for="(word, index) in splitNameIntoWords(data.moduleName)"
+                :key="index"
+              ><wbr v-if="index > 0">{{ word }}</template>
+            </span>
+            <!-- Compact, the marks ride the card's top edge, off its name. -->
+            <span
+              v-if="data.isRoot || data.isOnCycleWithCenter"
+              class="module-bracket-module__marks"
+            >
+              <span
+                v-if="data.isRoot"
+                class="module-bracket-tag"
+              >Root</span>
+              <span
+                v-if="data.isOnCycleWithCenter"
+                class="module-bracket-twin"
+                data-cycle-badge
+                :title="describeTwin(data)"
+              >
+                <UIcon
+                  name="i-lucide-repeat-2"
+                  class="size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                <span class="module-bracket-twin__text">also {{ data.side === 'left' ? 'right' : 'left' }}</span>
+                <span class="sr-only">— {{ describeTwin(data) }}</span>
+              </span>
             </span>
           </NuxtLink>
           <Handle
@@ -938,9 +1040,14 @@ const isLegendOpen = ref(false)
           :data-side="header.side"
           :data-level="header.level"
           :style="{ left: `${header.left}px`, width: `${header.width}px` }"
+          :title="`Level ${header.level} · ${pluralize(header.moduleCount, 'module')}`"
         >
           Level {{ header.level }}
-          <span class="module-bracket__heading-count">· {{ pluralize(header.moduleCount, 'module') }}</span>
+          <!-- A compact column is too narrow for its count: read out, not shown. -->
+          <span
+            class="module-bracket__heading-count"
+            :class="{ 'sr-only': isCompact }"
+          >· {{ pluralize(header.moduleCount, 'module') }}</span>
         </p>
       </div>
 
@@ -961,10 +1068,18 @@ const isLegendOpen = ref(false)
           class="size-4 shrink-0"
           aria-hidden="true"
         />
+        <!-- Which levels, and how many modules: mirrored on the right, and
+             over two lines on a compact canvas. -->
         <span
           class="module-bracket__chip-text"
           :translate="chip.kind === 'middle' ? 'no' : undefined"
-        >{{ chip.text }}</span>
+        >
+          <span class="module-bracket__chip-range">{{ chip.text }}</span>
+          <span
+            v-if="chip.count"
+            class="module-bracket__chip-count"
+          >{{ chip.count }}</span>
+        </span>
         <UIcon
           v-if="chip.edge === 'right'"
           name="i-lucide-arrow-right"
@@ -1485,6 +1600,11 @@ const isLegendOpen = ref(false)
   text-align: right;
 }
 
+/* A card's marks stand beside its name, as items of the card itself. */
+.module-bracket-module__marks {
+  display: contents;
+}
+
 /* The root module is a fact, not a warning: a neutral tag. */
 .module-bracket-tag {
   display: inline-flex;
@@ -1693,10 +1813,40 @@ const isLegendOpen = ref(false)
   outline-offset: 2px;
 }
 
+/* Which levels, then how many modules — mirrored on the right: "2 more · Levels 2–3". */
 .module-bracket__chip-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.module-bracket__chip-range,
+.module-bracket__chip-count {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.module-bracket__chip-count {
+  color: var(--ui-text-toned);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.module-bracket__chip--left .module-bracket__chip-count::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+.module-bracket__chip--right .module-bracket__chip-text {
+  flex-direction: row-reverse;
+}
+
+.module-bracket__chip--right .module-bracket__chip-count::after {
+  content: "·";
+  margin-left: 6px;
 }
 
 /*
@@ -1824,6 +1974,164 @@ const isLegendOpen = ref(false)
     flex-basis: 100%;
     padding-bottom: 6px;
   }
+}
+
+/*
+ * Compact: the bracket a phone opens on, the module and the first level of
+ * each side across it at a size their names read at. Names wrap over two
+ * lines between their words, set at 11.5px — 11px drawn at the zoom that
+ * fits — and nothing on the canvas is set smaller than 11px.
+ */
+.module-bracket--compact .module-bracket-module {
+  position: relative;
+  gap: 0;
+  padding: 0 2px;
+  border-width: 1px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 14px;
+}
+
+.module-bracket--compact .module-bracket-module__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* The marks ride the card's top edge, at its end nearer the middle. */
+.module-bracket--compact .module-bracket-module__marks {
+  position: absolute;
+  top: -9px;
+  display: flex;
+  gap: 3px;
+}
+
+.module-bracket--compact .module-bracket-module--left .module-bracket-module__marks {
+  right: 6px;
+}
+
+.module-bracket--compact .module-bracket-module--right .module-bracket-module__marks {
+  left: 6px;
+}
+
+.module-bracket--compact .module-bracket-tag {
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+/* On both sides: the cycle's mark alone, its words read out and in the key. */
+.module-bracket--compact .module-bracket-twin {
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--bracket-cycle-edge);
+  border-radius: 999px;
+  background: var(--bracket-cycle-tint);
+}
+
+.module-bracket--compact .module-bracket-module .module-bracket-twin__text {
+  display: none;
+}
+
+.module-bracket--compact .module-bracket-stub {
+  gap: 3px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.module-bracket--compact .module-bracket-stub__arrow {
+  width: 14px;
+  height: 14px;
+}
+
+.module-bracket--compact .module-bracket-empty {
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 15px;
+}
+
+/* The module in the middle stacks: name, marks, counts, Direct Run. */
+.module-bracket-center--compact {
+  gap: 5px;
+  padding: 8px 7px;
+  border-radius: 10px;
+}
+
+.module-bracket-center--compact .module-bracket-center__name {
+  display: -webkit-box;
+  flex: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.module-bracket-center__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.module-bracket-center--compact .module-bracket-cycle-mark {
+  margin-left: 0;
+  font-size: 11.5px;
+}
+
+.module-bracket-center__counts {
+  margin: 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-text-highlighted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  list-style: none;
+}
+
+.module-bracket-center--compact .module-bracket-center__run,
+.module-bracket-center--compact .module-bracket-center__run-none {
+  min-height: 36px;
+  margin-top: auto;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.module-bracket--compact .module-bracket__cycle {
+  height: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+/* A chip's levels over its count, two short lines rather than one cut off. */
+.module-bracket--compact .module-bracket__chip {
+  height: auto;
+  min-height: 40px;
+  padding: 3px 12px;
+}
+
+.module-bracket--compact .module-bracket__chip-text,
+.module-bracket--compact .module-bracket__chip--right .module-bracket__chip-text {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  line-height: 16px;
+}
+
+.module-bracket--compact .module-bracket__chip--right .module-bracket__chip-text {
+  align-items: flex-end;
+}
+
+.module-bracket--compact .module-bracket__chip-count {
+  font-size: 12px;
+}
+
+.module-bracket--compact .module-bracket__chip-count::before,
+.module-bracket--compact .module-bracket__chip-count::after {
+  content: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

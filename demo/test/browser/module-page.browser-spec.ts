@@ -41,6 +41,12 @@ const CYCLE_LAYOUT_BOUND_MS = 15_000;
 /** The smallest size, in CSS pixels, a name on the canvas is drawn at when the page opens. */
 const READABLE_PX = 12;
 
+/**
+ * The same on a phone, where the page draws its compact bracket so the first
+ * level of each side fits beside the module.
+ */
+const READABLE_PHONE_PX = 11;
+
 const SIDE_LABELS: Record<DependencySide, string> = {
   left: 'Needs',
   right: 'Needed by',
@@ -101,13 +107,16 @@ async function showWholeBracket(page: Page): Promise<void> {
  * Waits until a piece of text on the canvas is drawn at a size to read —
  * once any pan the canvas is making has come to rest.
  */
-async function expectReadable(text: Locator): Promise<void> {
+async function expectReadable(
+  text: Locator,
+  smallest = READABLE_PX,
+): Promise<void> {
   await expect(text).toBeInViewport();
   await expect
     .poll(() => renderedFontSize(text), {
       message: 'The text is drawn at a size to read',
     })
-    .toBeGreaterThanOrEqual(READABLE_PX);
+    .toBeGreaterThanOrEqual(smallest);
 }
 
 /** The size a piece of text on the canvas is drawn at: its font size, scaled by the zoom. */
@@ -123,18 +132,78 @@ async function renderedFontSize(text: Locator): Promise<number> {
   });
 }
 
-/** The chip at a side's edge of the canvas that brings that side's hidden levels into view. */
+/**
+ * The chip at a side's edge of the canvas that brings that side's hidden
+ * levels into view, naming them and counting their modules.
+ */
 function levelsChip(
   page: Page,
   side: DependencySide,
   moduleName: string,
 ): Locator {
+  const count = ': \\d+ more modules?';
   return page.getByRole('button', {
     name:
       side === 'left'
-        ? new RegExp(`^Show levels? [\\d–]+ of what ${moduleName} needs$`)
-        : new RegExp(`^Show levels? [\\d–]+ of what needs ${moduleName}$`),
+        ? new RegExp(
+            `^Show levels? [\\d–]+ of what ${moduleName} needs${count}$`,
+          )
+        : new RegExp(
+            `^Show levels? [\\d–]+ of what needs ${moduleName}${count}$`,
+          ),
   });
+}
+
+/**
+ * How many of a side's modules at one level are drawn wholly inside the
+ * canvas, below its pinned headings, at `smallest` pixels or more — the
+ * canvas draws only the cards in view, so a card it skipped counts as none.
+ */
+async function readableAtLevel(
+  page: Page,
+  graph: GraphOutput,
+  {
+    moduleName,
+    side,
+    level,
+    smallest,
+  }: {
+    moduleName: string;
+    side: DependencySide;
+    level: number;
+    smallest: number;
+  },
+): Promise<number> {
+  const canvas = await page.locator('.module-bracket__canvas').boundingBox();
+  const headings = await page
+    .locator('.module-bracket__headings')
+    .boundingBox();
+  if (!canvas) {
+    return 0;
+  }
+  const top = headings ? headings.y + headings.height : canvas.y;
+
+  let readable = 0;
+  for (const name of dependencyLevels(graph, moduleName, side)[level - 1] ??
+    []) {
+    const text = bracketModule(page, side, name).locator(
+      '.module-bracket-module__name',
+    );
+    if ((await text.count()) === 0) {
+      continue;
+    }
+    const box = await text.boundingBox();
+    const isInside =
+      box !== null &&
+      box.x >= canvas.x - 1 &&
+      box.x + box.width <= canvas.x + canvas.width + 1 &&
+      box.y >= top - 1 &&
+      box.y + box.height <= canvas.y + canvas.height + 1;
+    if (isInside && (await renderedFontSize(text)) >= smallest) {
+      readable += 1;
+    }
+  }
+  return readable;
 }
 
 /** The modules drawn on a side, level by level, each level's names sorted. */
@@ -659,22 +728,44 @@ test.describe('on a phone', () => {
       expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
     }
 
-    // The module is framed at a size to read; each side is a chip away, and
-    // the chip brings its first level in at that size.
+    // The page opens on the module with its neighbours: the first level of
+    // each side inside the canvas beside it, every name at a size to read.
     await expectReadable(center(page).locator('.module-bracket-center__name'));
     for (const side of ['left', 'right'] as const) {
       await expectDepth(page, side, DEFAULT_DEPTH);
+      await expect
+        .poll(
+          () =>
+            readableAtLevel(page, graph, {
+              moduleName,
+              side,
+              level: 1,
+              smallest: READABLE_PHONE_PX,
+            }),
+          {
+            message: `A first-level module on the ${side} is drawn inside the canvas at ${READABLE_PHONE_PX}px or more`,
+          },
+        )
+        .toBeGreaterThanOrEqual(1);
     }
-    const [first] = dependencyLevels(graph, moduleName, 'left')[0] ?? [];
-    if (!first) {
-      throw new Error(`${moduleName} needs no module`);
-    }
+
+    // The levels further out are a chip away, and it brings the next one in
+    // at that size.
     await levelsChip(page, 'left', moduleName).tap();
-    await expectReadable(
-      bracketModule(page, 'left', first).locator(
-        '.module-bracket-module__name',
-      ),
-    );
+    await expect
+      .poll(
+        () =>
+          readableAtLevel(page, graph, {
+            moduleName,
+            side: 'left',
+            level: 2,
+            smallest: READABLE_PHONE_PX,
+          }),
+        {
+          message: `A second-level module on the left is drawn inside the canvas at ${READABLE_PHONE_PX}px or more`,
+        },
+      )
+      .toBeGreaterThanOrEqual(1);
 
     await depthGroup(page, 'right')
       .getByRole('button', { name: 'Show one more level' })

@@ -3,6 +3,7 @@ import type {
   BracketModuleNode,
   BracketNode,
   BracketSide,
+  BracketSize,
   BracketStubNode,
   ModuleDependencyBracket
 } from './module-dependency-bracket.ts'
@@ -22,37 +23,53 @@ export type BracketCanvas = {
 }
 
 /**
- * The smallest zoom a bracket opens at: its module names are set at 14px, so
- * at this zoom they are drawn at 12.6px — readable on a desktop and on a
- * phone. A bracket that only fits smaller opens on its module at this zoom
- * instead, the rest a pan away.
+ * The smallest zoom a bracket opens at, for each size of bracket: at it the
+ * module names are drawn readable — a regular bracket's 14px names at 12.6px,
+ * a compact one's 11.5px names at 11px. A bracket that only fits smaller
+ * opens on its module at this zoom instead, the rest a pan away.
  */
-export const READABLE_ZOOM = 0.9
+export const READABLE_ZOOM: Readonly<Record<BracketSize, number>> = {
+  regular: 0.9,
+  compact: 0.96
+}
 /** A bracket small enough to fit is not enlarged past its own size. */
 export const FRAME_MAX_ZOOM = 1
 /** Room left between the canvas edge and a bracket framed whole, or a column panned to. */
 export const FRAME_PADDING = 24
+/**
+ * Room left either side of a compact bracket's first levels, framed across a
+ * phone: enough that no card touches the canvas edge, and no more — the
+ * width is what keeps their names readable.
+ */
+export const FIRST_LEVELS_INSET = 4
 /** A card this far past an edge of the view still counts as in it: rounding, not hiding. */
 const EDGE_TOLERANCE = 1
 
 /**
  * The frame a bracket opens at. All of it, centred, when it fits at a zoom
- * its names read at — never enlarged past its own size. Otherwise the module
- * in the middle, centred, at `READABLE_ZOOM`; the canvas then holds as much
- * of the bracket as it can, so a side with less to show never leaves part of
- * the canvas empty while the other side runs off it.
+ * its names read at — never enlarged past its own size. Otherwise a compact
+ * bracket opens on its module and the first level of each side across the
+ * canvas (`frameFirstLevels`), and a regular one on its module, centred, at
+ * its `READABLE_ZOOM`; the canvas then holds as much of the bracket as it can,
+ * so a side with less to show never leaves part of the canvas empty while the
+ * other side runs off it.
  */
 export function getBracketFrame(bracket: ModuleDependencyBracket, canvas: BracketCanvas): BracketViewport {
   const { bounds } = bracket
   const room = getRoom(canvas)
+  const readableZoom = READABLE_ZOOM[bracket.size]
   const fitZoom = Math.min(room.width / bounds.width, room.height / bounds.height)
 
-  if (fitZoom >= READABLE_ZOOM) {
+  if (fitZoom >= readableZoom) {
     const zoom = Math.min(fitZoom, FRAME_MAX_ZOOM)
     return centreOn(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, zoom, canvas)
   }
 
-  const zoom = READABLE_ZOOM
+  if (bracket.size === 'compact') {
+    return frameFirstLevels(bracket, canvas)
+  }
+
+  const zoom = readableZoom
   const center = bracket.nodes.find(node => node.kind === 'center')
   const middle = center
     ? { x: center.position.x + center.width / 2, y: center.position.y + center.height / 2 }
@@ -62,6 +79,38 @@ export function getBracketFrame(bracket: ModuleDependencyBracket, canvas: Bracke
 
   return {
     x: center ? showNearlyWholeSide(x, bounds, center, zoom, canvas) : x,
+    y: keepContentAcross(frame.y, bounds.y, bounds.y + bounds.height, zoom, canvas.top + FRAME_PADDING, canvas.height - FRAME_PADDING),
+    zoom
+  }
+}
+
+/**
+ * A compact bracket's opening frame: the module and the first level of each
+ * side — or the empty card standing in for one — across the canvas, as large
+ * as that fits, never larger than itself and never smaller than its names
+ * read at (a canvas too narrow for that cuts the first levels at its edges,
+ * the module still in the middle). Down the canvas, all of the first levels
+ * when they fit, else the module in the middle.
+ */
+function frameFirstLevels(bracket: ModuleDependencyBracket, canvas: BracketCanvas): BracketViewport {
+  const { bounds } = bracket
+  const first = bracket.nodes.filter(node => node.kind === 'center'
+    || node.kind === 'empty'
+    || (node.kind === 'module' && node.level === 1))
+  const left = minLeft(first)
+  const right = maxRight(first)
+  const top = Math.min(...first.map(node => node.position.y))
+  const bottom = Math.max(...first.map(node => node.position.y + node.height))
+  const acrossZoom = (canvas.width - FIRST_LEVELS_INSET * 2) / (right - left)
+  const zoom = Math.max(READABLE_ZOOM.compact, Math.min(FRAME_MAX_ZOOM, acrossZoom))
+
+  const center = bracket.nodes.find(node => node.kind === 'center')
+  const middle = (bottom - top) * zoom <= getRoom(canvas).height || !center
+    ? (top + bottom) / 2
+    : center.position.y + center.height / 2
+  const frame = centreOn((left + right) / 2, middle, zoom, canvas)
+  return {
+    x: frame.x,
     y: keepContentAcross(frame.y, bounds.y, bounds.y + bounds.height, zoom, canvas.top + FRAME_PADDING, canvas.height - FRAME_PADDING),
     zoom
   }
@@ -113,6 +162,11 @@ export type BracketOffscreen = {
    * lies back towards the middle, past `middle`.
    */
   levels: Record<BracketSide, number[]>
+  /**
+   * How many modules those levels of each side hold — the modules drawn there,
+   * and those past a stub there, each once — what a chip toward them counts.
+   */
+  modules: Record<BracketSide, number>
   /** The edge of the canvas the module in the middle is cut off by, if one is. */
   middle: BracketSide | null
   /** Modules in the columns in view whose middle is above the view, or below it. */
@@ -127,6 +181,8 @@ export function getBracketOffscreen(
 ): BracketOffscreen {
   const view = getView(viewport, canvas)
   const levels: Record<BracketSide, Set<number>> = { left: new Set(), right: new Set() }
+  const drawn: Record<BracketSide, number> = { left: 0, right: 0 }
+  const pastStubs: Record<BracketSide, Set<string>> = { left: new Set(), right: new Set() }
   const pastLeft = (node: BracketNode) => node.position.x < view.left - EDGE_TOLERANCE
   const pastRight = (node: BracketNode) => node.position.x + node.width > view.right + EDGE_TOLERANCE
   let middle: BracketSide | null = null
@@ -139,6 +195,17 @@ export function getBracketOffscreen(
       middle = pastLeft(node) === pastRight(node) ? null : pastLeft(node) ? 'left' : 'right'
       continue
     }
+    if (node.kind === 'stub') {
+      // One more level that way, its modules counted once however many stubs
+      // name them.
+      if (node.side === 'left' ? pastLeft(node) : pastRight(node)) {
+        levels[node.side].add(node.level)
+        for (const moduleName of node.moduleNames) {
+          pastStubs[node.side].add(moduleName)
+        }
+      }
+      continue
+    }
     if (node.kind !== 'module') {
       continue
     }
@@ -146,6 +213,7 @@ export function getBracketOffscreen(
     const isOutward = node.side === 'left' ? pastLeft(node) : pastRight(node)
     if (isOutward) {
       levels[node.side].add(node.level)
+      drawn[node.side] += 1
       continue
     }
     if (pastLeft(node) || pastRight(node)) {
@@ -161,7 +229,13 @@ export function getBracketOffscreen(
   }
 
   const ascending = (side: BracketSide) => [...levels[side]].sort((first, second) => first - second)
-  return { levels: { left: ascending('left'), right: ascending('right') }, middle, above, below }
+  return {
+    levels: { left: ascending('left'), right: ascending('right') },
+    modules: { left: drawn.left + pastStubs.left.size, right: drawn.right + pastStubs.right.size },
+    middle,
+    above,
+    below
+  }
 }
 
 /**
@@ -191,8 +265,9 @@ export function getCutCardIds(
  * Where to look to see the levels of `side` the view cuts off: the nearest
  * one wholly in view, and as many further out with it as the canvas holds,
  * the furthest of them against the canvas edge. Stubs ending the last of
- * them come with it. The zoom stays; the view moves up or down only if none
- * of those levels' modules would be in it.
+ * them come with it, and a column of stubs cut off is a level like any
+ * other. The zoom stays; the view moves up or down only if none of those
+ * levels' cards would be in it.
  */
 export function getLevelRevealViewport(
   bracket: ModuleDependencyBracket,
@@ -204,7 +279,10 @@ export function getLevelRevealViewport(
   const { zoom } = viewport
   const room = getRoom(canvas)
   const columns = hidden
-    .map(level => ({ level, cards: getColumnCards(bracket, side, level) }))
+    .map((level): { level: number, cards: BracketNode[] } => ({
+      level,
+      cards: [...getColumnCards(bracket, side, level), ...getStubCards(bracket, side, level)]
+    }))
     .filter(column => column.cards.length > 0)
   const nearest = columns[0]
   if (!nearest) {
