@@ -33,7 +33,6 @@ import type { GraphOutput, GraphOutputModule } from 'nest-graph-inspector'
 import {
   formatCircularEdgeLabel,
   getCircularEdgeGeometry,
-  getCircularLabelBox,
   unionRects,
   type CircularEdgeRect,
   type CircularEdgeSide,
@@ -64,6 +63,8 @@ export type ModuleDependencyBracketInput = {
    * levels shows all it has.
    */
   depth: Readonly<Record<BracketSide, number>>
+  /** `regular` when absent. */
+  size?: BracketSize
 }
 
 /** Where a node is drawn, in flow coordinates, and its size. */
@@ -122,6 +123,8 @@ export type BracketStubNode = NodeBox & {
   parentId: string
   /** Distinct modules one level further along the branch, none of them drawn. */
   moduleCount: number
+  /** Their names, in code-unit order. */
+  moduleNames: string[]
 }
 
 /** Stands in for a side with no module on it at all. */
@@ -198,6 +201,8 @@ export type BracketSideSummary = {
 
 export type ModuleDependencyBracket = {
   center: string
+  /** The size it was laid out at. */
+  size: BracketSize
   nodes: BracketNode[]
   edges: BracketEdge[]
   sides: Record<BracketSide, BracketSideSummary>
@@ -206,48 +211,167 @@ export type ModuleDependencyBracket = {
 }
 
 /**
- * The module in the middle is the page's subject, so its card is the largest
- * thing on the canvas: about one and a half module cards wide, and tall enough
- * for its name, its four counts and the Direct Run button.
+ * How large a bracket is drawn: at its full size, or compact enough for a
+ * phone to show the module and the first level of each side at once, at a
+ * size their names read at.
  */
-const BRACKET_CENTER_WIDTH = 360
-const BRACKET_CENTER_HEIGHT = 196
-const BRACKET_MODULE_WIDTH = 264
-const BRACKET_MODULE_HEIGHT = 44
-const BRACKET_STUB_WIDTH = 148
-const STUB_HEIGHT = BRACKET_MODULE_HEIGHT
-const EMPTY_WIDTH = BRACKET_MODULE_WIDTH
-const EMPTY_HEIGHT = 72
-const LEVEL_LABEL_HEIGHT = 28
-/** Between the top of the tallest column and the column headings. */
-const LEVEL_LABEL_GAP = 20
+export type BracketSize = 'regular' | 'compact'
+
+/** Every length the layout works in, in flow pixels, for one size of bracket. */
+type BracketMetrics = {
+  /**
+   * The module in the middle is the page's subject, so its card is the
+   * largest on the canvas, and tall enough for its name, its four counts and
+   * the Direct Run button.
+   */
+  centerWidth: number
+  centerHeight: number
+  moduleWidth: number
+  moduleHeight: number
+  stubWidth: number
+  emptyHeight: number
+  levelLabelHeight: number
+  /** Between the top of the tallest column and the column headings. */
+  levelLabelGap: number
+  /**
+   * Between two columns: room for the bracket's connectors, which turn
+   * halfway across, for the lanes either side of that — a cycle's own way
+   * into its module, and the links — and for a cycle label on a connector's
+   * own stretch.
+   */
+  columnGap: number
+  /** Between the rows a column's modules stand on: room to breathe, and for a channel. */
+  rowGap: number
+  /** How far out of its column a link's first lane runs, and how far apart lanes are. */
+  laneStart: number
+  laneStep: number
+  /** Lanes beside a column: they stay clear of the gap's middle, where the brackets turn. */
+  laneCount: number
+  /** How far apart two links turning in one lane keep: a corner's radius each. */
+  laneClearance: number
+  /** How round an edge's corners are. */
+  cornerRadius: number
+  /**
+   * How near the middle of a module's side, where the bracket's own connector
+   * comes in, a cycle's port may be, and how close two ports may be: for a
+   * module card, and for the taller card in the middle, whose ports spread
+   * down its height.
+   */
+  portStepModule: number
+  portStepCenter: number
+  /**
+   * How near its corner a module's last port may be — and the middle card's,
+   * whose corners are rounder: past the curve, so an arrow meets a flat side.
+   */
+  portCornerClearance: number
+  centerPortCornerClearance: number
+  /** How far along its own stretch of connector a tree edge's label sits. */
+  treeLabelInset: number
+  /** How far apart two links crossing in one gap between rows run. */
+  channelStep: number
+  /**
+   * A cycle label's size, as `getBracketLabelBox` reckons it: the padding and
+   * border around its text, a character of its text, generously, and its
+   * height.
+   */
+  labelChromeWidth: number
+  labelCharacterWidth: number
+  labelHeight: number
+  /**
+   * Whether a link's label with nowhere clear to go is drawn anyway, over what
+   * it must cover, or left off — where the gaps are too narrow for one to
+   * cover only a little.
+   */
+  isCrowdedLabelDrawn: boolean
+}
+
+const METRICS: Readonly<Record<BracketSize, BracketMetrics>> = {
+  regular: {
+    centerWidth: 360,
+    centerHeight: 196,
+    moduleWidth: 264,
+    moduleHeight: 44,
+    stubWidth: 148,
+    emptyHeight: 72,
+    levelLabelHeight: 28,
+    levelLabelGap: 20,
+    columnGap: 112,
+    rowGap: 24,
+    laneStart: 16,
+    laneStep: 8,
+    laneCount: 5,
+    laneClearance: 8,
+    cornerRadius: 8,
+    portStepModule: 8,
+    portStepCenter: 24,
+    portCornerClearance: 6,
+    centerPortCornerClearance: 18,
+    treeLabelInset: 28,
+    channelStep: 4,
+    // The navigator's label, with its icon: more than the bracket's pill needs.
+    labelChromeWidth: 31,
+    labelCharacterWidth: 7,
+    labelHeight: 20,
+    isCrowdedLabelDrawn: true
+  },
+  // A 390px phone holds the module and both first levels: 105 + 26 + 100 +
+  // 26 + 105 = 362 flow pixels, drawn at 0.98. Module names are set at
+  // 11.5px, two lines at most, broken between their words: the demo's
+  // longest word, "Recommendation", takes 97 of a card's 105. In a 26px gap
+  // the lanes beside each column, 6 and 9 out, keep 4px off its middle, at 13,
+  // and a cycle's "#1" fits between the cards, 24px wide.
+  compact: {
+    centerWidth: 100,
+    centerHeight: 182,
+    moduleWidth: 105,
+    moduleHeight: 46,
+    stubWidth: 84,
+    emptyHeight: 58,
+    levelLabelHeight: 24,
+    levelLabelGap: 12,
+    columnGap: 26,
+    rowGap: 12,
+    laneStart: 6,
+    laneStep: 3,
+    laneCount: 2,
+    laneClearance: 6,
+    cornerRadius: 4,
+    portStepModule: 7,
+    portStepCenter: 16,
+    portCornerClearance: 5,
+    centerPortCornerClearance: 14,
+    treeLabelInset: 13,
+    channelStep: 3,
+    labelChromeWidth: 10,
+    labelCharacterWidth: 7,
+    labelHeight: 20,
+    isCrowdedLabelDrawn: false
+  }
+}
+
 /**
- * Between two columns: room for the bracket's connectors, which turn halfway
- * across, for the lanes either side of that — a cycle's own way into its
- * module, and the links — and for a cycle label on a connector's own stretch.
+ * The box a cycle label takes up on the canvas, as the layout keeps it clear
+ * of cards and other labels: the pill the view draws at that size, with room
+ * to spare.
  */
-const COLUMN_GAP = 112
-/** Between the rows a column's modules stand on: room to breathe, and for a channel. */
-const ROW_PITCH = BRACKET_MODULE_HEIGHT + 24
-/** How far out of its column a link's first lane runs, and how far apart lanes are. */
-const LANE_START = 16
-const LANE_STEP = 8
-/** Lanes beside a column: they stay clear of the gap's middle, where the brackets turn. */
-const LANE_COUNT = 5
-/** How far apart two links turning in one lane keep: a corner's radius each. */
-const LANE_CLEARANCE = 8
-/** How round an edge's corners are. */
-const CORNER_RADIUS = 8
-/**
- * How far apart the ports a cycle's connectors come into a module by are, up
- * or down from the middle of its side, where the bracket's own connector
- * comes in; and how near its corner the last one may be.
- */
-const PORT_STEP_MODULE = 8
-const PORT_STEP_CENTER = 14
-const PORT_CORNER_CLEARANCE = 6
-/** How far along its own stretch of connector a tree edge's label sits. */
-const TREE_LABEL_INSET = COLUMN_GAP / 4
+export function getBracketLabelBox(spot: CircularLabelSpot, text: string, size: BracketSize): CircularEdgeRect {
+  return getLabelBox(spot, text, METRICS[size])
+}
+
+function getLabelBox(spot: CircularLabelSpot, text: string, m: BracketMetrics): CircularEdgeRect {
+  const width = m.labelChromeWidth + m.labelCharacterWidth * text.length
+  return {
+    x: spot.labelX - spot.labelAnchor.x * width,
+    y: spot.labelY - spot.labelAnchor.y * m.labelHeight,
+    width,
+    height: m.labelHeight
+  }
+}
+
+/** The pitch between rows, and half the gap between them, where a channel between them runs. */
+function rowPitchOf(m: BracketMetrics): number {
+  return m.moduleHeight + m.rowGap
+}
 
 const LABEL_CENTERED = {
   labelTransform: 'translate(-50%, -50%)',
@@ -271,6 +395,8 @@ export function buildModuleDependencyBracket(
   input: ModuleDependencyBracketInput
 ): ModuleDependencyBracket | null {
   const { graph, center } = input
+  const size = input.size ?? 'regular'
+  const m = METRICS[size]
   const centerModule = Object.hasOwn(graph.modules, center)
     ? graph.modules[center]
     : undefined
@@ -279,6 +405,7 @@ export function buildModuleDependencyBracket(
   }
 
   const adjacency = buildAdjacency(graph.modules)
+  const cycleIdsByImport = indexModuleCycles(graph.cycles?.modules)
   const walks: Record<BracketSide, SideWalk> = {
     left: walkSide(adjacency.left, center),
     right: walkSide(adjacency.right, center)
@@ -293,9 +420,9 @@ export function buildModuleDependencyBracket(
     kind: 'center',
     id: BRACKET_CENTER_ID,
     moduleName: center,
-    position: { x: -BRACKET_CENTER_WIDTH / 2, y: -BRACKET_CENTER_HEIGHT / 2 },
-    width: BRACKET_CENTER_WIDTH,
-    height: BRACKET_CENTER_HEIGHT,
+    position: { x: -m.centerWidth / 2, y: -m.centerHeight / 2 },
+    width: m.centerWidth,
+    height: m.centerHeight,
     isRoot: graph.root === center,
     isOnCycle: importsItself || [...walks.left.distance.keys()].some(isOnBothSides),
     stats: getCenterStats(center, centerModule)
@@ -313,7 +440,13 @@ export function buildModuleDependencyBracket(
       neighbours: adjacency[side],
       parentsOf: adjacency[otherSide(side)],
       isRoot: moduleName => graph.root === moduleName,
-      isOnBothSides
+      isOnBothSides,
+      // On the left the parent imports the module; on the right the module
+      // imports its parent.
+      isCycleStep: (parent, moduleName) => cycleIdsByImport.has(side === 'left'
+        ? getImportKey(parent, moduleName)
+        : getImportKey(moduleName, parent)),
+      m
     })
     const summary: BracketSideSummary = {
       requested,
@@ -332,7 +465,7 @@ export function buildModuleDependencyBracket(
   const layouts: Record<BracketSide, SideLayout> = { left: left.layout, right: right.layout }
 
   const nodes: BracketNode[] = [centerNode, ...left.layout.nodes, ...right.layout.nodes]
-  nodes.push(...getLevelLabels(nodes, layouts))
+  nodes.push(...getLevelLabels(nodes, layouts, m))
 
   const routePoints: EdgePoint[] = []
   const edges = routeEdges({
@@ -341,17 +474,19 @@ export function buildModuleDependencyBracket(
     layouts,
     walks,
     adjacency,
-    cycleIdsByImport: indexModuleCycles(graph.cycles?.modules),
+    cycleIdsByImport,
     nodes,
-    routePoints
+    routePoints,
+    m
   })
 
   return {
     center,
+    size,
     nodes,
     edges,
     sides: { left: left.summary, right: right.summary },
-    bounds: getBracketBounds(nodes, edges, routePoints)
+    bounds: getBracketBounds(nodes, edges, routePoints, m)
   }
 }
 
@@ -471,7 +606,10 @@ type SideLayout = {
  * before — every module there importing them on the left, or imported by them
  * on the right, not only the one the walk came from — which keeps the dashed
  * links between branches short; the first column, whose one parent is the
- * middle, is in name order.
+ * middle, is in name order. A parent's children on a reported cycle with it
+ * stand above or below the rest, by where they would have stood, so the
+ * cycle's own connectors come into the parent clear of the upright its other
+ * branches share, never across it.
  */
 function layoutSide(params: {
   side: BracketSide
@@ -483,8 +621,11 @@ function layoutSide(params: {
   parentsOf: ReadonlyMap<string, readonly string[]>
   isRoot: (moduleName: string) => boolean
   isOnBothSides: (moduleName: string) => boolean
+  /** Whether the import joining a module to its parent on the walk is on a reported cycle. */
+  isCycleStep: (parent: string, moduleName: string) => boolean
+  m: BracketMetrics
 }): SideLayout {
-  const { side, center, walk, depth, neighbours, parentsOf } = params
+  const { side, center, walk, depth, neighbours, parentsOf, isCycleStep, m } = params
   const layout: SideLayout = { depth, nodes: [], modules: new Map(), stubs: [] }
   const direction = side === 'left' ? -1 : 1
 
@@ -493,9 +634,9 @@ function layoutSide(params: {
       kind: 'empty',
       id: `empty-${side}`,
       side,
-      position: { x: getColumnX(direction, EMPTY_WIDTH), y: -EMPTY_HEIGHT / 2 },
-      width: EMPTY_WIDTH,
-      height: EMPTY_HEIGHT
+      position: { x: getColumnX(direction, m.moduleWidth, m), y: -m.emptyHeight / 2 },
+      width: m.moduleWidth,
+      height: m.emptyHeight
     })
     return layout
   }
@@ -522,7 +663,7 @@ function layoutSide(params: {
     const column: string[] = []
 
     for (const parent of previous) {
-      const ordered = (children.get(parent) ?? [])
+      const sorted = (children.get(parent) ?? [])
         .map(moduleName => ({
           moduleName,
           key: level === 1 ? 0 : getBarycenter(parentsOf.get(moduleName) ?? [], indexInPrevious)
@@ -531,6 +672,7 @@ function layoutSide(params: {
           left.key - right.key || compareText(left.moduleName, right.moduleName)
         )
         .map(entry => entry.moduleName)
+      const ordered = putCycleStepsAtTheEnds(sorted, moduleName => isCycleStep(parent, moduleName))
 
       children.set(parent, ordered)
       column.push(...ordered)
@@ -575,11 +717,11 @@ function layoutSide(params: {
         side,
         level,
         position: {
-          x: getColumnX(direction * level, BRACKET_MODULE_WIDTH),
-          y: (rowCenter.get(moduleName) ?? 0) * ROW_PITCH - BRACKET_MODULE_HEIGHT / 2
+          x: getColumnX(direction * level, m.moduleWidth, m),
+          y: (rowCenter.get(moduleName) ?? 0) * rowPitchOf(m) - m.moduleHeight / 2
         },
-        width: BRACKET_MODULE_WIDTH,
-        height: BRACKET_MODULE_HEIGHT,
+        width: m.moduleWidth,
+        height: m.moduleHeight,
         isRoot: params.isRoot(moduleName),
         isOnCycleWithCenter: params.isOnBothSides(moduleName)
       }
@@ -588,14 +730,14 @@ function layoutSide(params: {
     }
   }
 
-  // A branch that goes on past the last level drawn ends in a stub counting
+  // A branch that goes on past the last level drawn ends in a stub naming
   // the distinct modules one level further along it.
   for (const moduleName of columns[depth - 1] ?? []) {
     const branch = layout.modules.get(moduleName)
-    const moduleCount = (neighbours.get(moduleName) ?? [])
+    const moduleNames = (neighbours.get(moduleName) ?? [])
       .filter(next => walk.distance.get(next) === depth + 1)
-      .length
-    if (!branch || moduleCount === 0) {
+      .sort(compareText)
+    if (!branch || moduleNames.length === 0) {
       continue
     }
 
@@ -605,19 +747,46 @@ function layoutSide(params: {
       side,
       level: depth + 1,
       parentId: branch.id,
-      moduleCount,
+      moduleCount: moduleNames.length,
+      moduleNames,
       position: {
-        x: getColumnX(direction * (depth + 1), BRACKET_STUB_WIDTH),
-        y: branch.position.y + (BRACKET_MODULE_HEIGHT - STUB_HEIGHT) / 2
+        x: getColumnX(direction * (depth + 1), m.stubWidth, m),
+        y: branch.position.y
       },
-      width: BRACKET_STUB_WIDTH,
-      height: STUB_HEIGHT
+      width: m.stubWidth,
+      height: m.moduleHeight
     }
     layout.nodes.push(stub)
     layout.stubs.push({ stub, branch })
   }
 
   return layout
+}
+
+/**
+ * A parent's children with those on a reported cycle with it moved to the
+ * ends, so their own lines into the parent pass above and below the upright
+ * its other children share, never across it: the first half of them, in the
+ * order they sorted in, above the rest, the others below — an odd one out
+ * above if it sorted into the first half of all the children. As many above
+ * as below keeps the parent, which stands halfway down its children, level
+ * with the ones between. With no child of the bracket's own — no upright to
+ * keep clear of — or no cycle among them, the order stands.
+ */
+function putCycleStepsAtTheEnds(sorted: readonly string[], isCycleStep: (moduleName: string) => boolean): string[] {
+  const steps = sorted.filter(isCycleStep)
+  if (steps.length === 0 || steps.length === sorted.length) {
+    return [...sorted]
+  }
+
+  const oddOne = steps.length % 2 === 1 ? steps[(steps.length - 1) / 2] : undefined
+  const isOddOneAbove = oddOne !== undefined && sorted.indexOf(oddOne) < sorted.length / 2
+  const aboveCount = Math.floor(steps.length / 2) + (isOddOneAbove ? 1 : 0)
+  return [
+    ...steps.slice(0, aboveCount),
+    ...sorted.filter(moduleName => !isCycleStep(moduleName)),
+    ...steps.slice(aboveCount)
+  ]
 }
 
 function sumRows(moduleNames: readonly string[], rows: ReadonlyMap<string, number>): number {
@@ -651,14 +820,14 @@ function getBarycenter(
  * run left and positive ones right. A node narrower than a column — a stub —
  * keeps to the column's side nearer the middle, beside the branch it ends.
  */
-function getColumnX(column: number, width: number): number {
+function getColumnX(column: number, width: number, m: BracketMetrics): number {
   if (column === 0) {
-    return -BRACKET_CENTER_WIDTH / 2
+    return -m.centerWidth / 2
   }
 
-  const reach = BRACKET_CENTER_WIDTH / 2
-    + COLUMN_GAP
-    + (Math.abs(column) - 1) * (BRACKET_MODULE_WIDTH + COLUMN_GAP)
+  const reach = m.centerWidth / 2
+    + m.columnGap
+    + (Math.abs(column) - 1) * (m.moduleWidth + m.columnGap)
 
   return column > 0 ? reach : -reach - width
 }
@@ -666,7 +835,8 @@ function getColumnX(column: number, width: number): number {
 /** Every column drawn gets a heading, level with the others above the tallest column. */
 function getLevelLabels(
   nodes: readonly BracketNode[],
-  layouts: Readonly<Record<BracketSide, SideLayout>>
+  layouts: Readonly<Record<BracketSide, SideLayout>>,
+  m: BracketMetrics
 ): BracketLevelNode[] {
   const top = Math.min(...nodes.map(node => node.position.y))
   const labels: BracketLevelNode[] = []
@@ -686,11 +856,11 @@ function getLevelLabels(
         level,
         moduleCount: counts.get(level) ?? 0,
         position: {
-          x: getColumnX(side === 'left' ? -level : level, BRACKET_MODULE_WIDTH),
-          y: top - LEVEL_LABEL_GAP - LEVEL_LABEL_HEIGHT
+          x: getColumnX(side === 'left' ? -level : level, m.moduleWidth, m),
+          y: top - m.levelLabelGap - m.levelLabelHeight
         },
-        width: BRACKET_MODULE_WIDTH,
-        height: LEVEL_LABEL_HEIGHT
+        width: m.moduleWidth,
+        height: m.levelLabelHeight
       })
     }
   }
@@ -776,8 +946,9 @@ function routeEdges(params: {
   nodes: readonly BracketNode[]
   /** Collects every point a route turns at or passes, for the bounds. */
   routePoints: EdgePoint[]
+  m: BracketMetrics
 }): BracketEdge[] {
-  const { center, layouts, walks, adjacency, cycleIdsByImport } = params
+  const { center, layouts, walks, adjacency, cycleIdsByImport, m } = params
   const cardsByColumn = new Map<number, CircularEdgeRect[]>()
   for (const node of params.nodes) {
     if (node.kind === 'module' || node.kind === 'stub') {
@@ -787,7 +958,7 @@ function routeEdges(params: {
       cardsByColumn.set(column, cards)
     }
   }
-  const router = createRouter(params.routePoints, cardsByColumn)
+  const router = createRouter(params.routePoints, cardsByColumn, m)
   const edges: RoutedEdge[] = []
   const cycleIdsOf = (importer: string, imported: string) =>
     [...(cycleIdsByImport.get(getImportKey(importer, imported)) ?? [])]
@@ -827,7 +998,7 @@ function routeEdges(params: {
       }
     }
 
-    for (const step of assignCyclePorts(cycleSteps)) {
+    for (const step of assignCyclePorts(cycleSteps, m)) {
       edges.push(routeStep(step, step.port))
     }
 
@@ -870,7 +1041,7 @@ function routeEdges(params: {
     }
   }
 
-  return labelEdges(edges, params.nodes)
+  return labelEdges(edges, params.nodes, m)
 }
 
 /** A connector of the bracket on a reported cycle: a module and the one the walk came from. */
@@ -882,13 +1053,17 @@ type CycleStep = {
 
 /**
  * Where each step of a cycle comes into the module nearer the middle: a port
- * of its own up that module's side for a module standing higher, down it for
- * one standing level or lower, clear of the middle the bracket's own
- * connector comes in by. The module furthest away takes the port furthest
- * out, and is routed first, to the lane nearest the module it comes into —
- * so a module's cycle connectors nest, and never cross one another.
+ * of its own on that module's side — level with the module it comes from when
+ * that height is on the side, so the connector runs straight across, else as
+ * near it as the side allows — above the middle the bracket's own connector
+ * comes in by for a module standing higher, below it for one standing level
+ * or lower, and never nearer the middle, or another port, than a step. On the
+ * tall card in the middle the ports spread down its height. The module
+ * furthest away takes the port furthest out, and is routed first, to the lane
+ * nearest the module it comes into — so a module's cycle connectors nest, and
+ * never cross one another.
  */
-function assignCyclePorts(steps: readonly CycleStep[]): Array<CycleStep & { port: number }> {
+function assignCyclePorts(steps: readonly CycleStep[], m: BracketMetrics): Array<CycleStep & { port: number }> {
   const byParent = new Map<string, CycleStep[]>()
   for (const step of steps) {
     const group = byParent.get(step.parent.id) ?? []
@@ -904,8 +1079,8 @@ function assignCyclePorts(steps: readonly CycleStep[]): Array<CycleStep & { port
     }
 
     const middle = parent.position.y + parent.height / 2
-    const step = parent.kind === 'center' ? PORT_STEP_CENTER : PORT_STEP_MODULE
-    const reach = parent.height / 2 - PORT_CORNER_CLEARANCE
+    const step = parent.kind === 'center' ? m.portStepCenter : m.portStepModule
+    const reach = parent.height / 2 - (parent.kind === 'center' ? m.centerPortCornerClearance : m.portCornerClearance)
     const distanceOf = (entry: CycleStep) => entry.node.position.y + entry.node.height / 2 - middle
 
     for (const isAbove of [true, false]) {
@@ -914,10 +1089,15 @@ function assignCyclePorts(steps: readonly CycleStep[]): Array<CycleStep & { port
         .sort((first, second) =>
           Math.abs(distanceOf(second)) - Math.abs(distanceOf(first))
           || compareText(first.node.id, second.node.id))
+      // A step apart, or as far apart as the side has room for.
+      const spacing = half.length > 1 ? Math.min(step, (reach - step) / (half.length - 1)) : step
 
+      let outermost = reach
       for (const [index, entry] of half.entries()) {
-        const offset = Math.min((half.length - index) * step, reach)
+        const innermost = step + (half.length - 1 - index) * spacing
+        const offset = Math.max(innermost, Math.min(outermost, Math.abs(distanceOf(entry))))
         placed.push({ ...entry, port: isAbove ? -offset : offset })
+        outermost = offset - spacing
       }
     }
   }
@@ -936,7 +1116,7 @@ function assignCyclePorts(steps: readonly CycleStep[]): Array<CycleStep & { port
  * hugs — at the first height, from the middle out, where it covers no card and
  * no label placed before it.
  */
-function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[]): BracketEdge[] {
+function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[], m: BracketMetrics): BracketEdge[] {
   const taken: CircularEdgeRect[] = nodes.map(node => ({
     x: node.position.x,
     y: node.position.y,
@@ -947,7 +1127,7 @@ function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[]
   for (const { edge, label } of routed) {
     if (edge.cycleIds.length > 0 && label) {
       edge.label = label
-      taken.push(getCircularLabelBox(label, formatCircularEdgeLabel(edge.cycleIds)))
+      taken.push(getLabelBox(label, formatCircularEdgeLabel(edge.cycleIds), m))
     }
   }
 
@@ -957,8 +1137,10 @@ function labelEdges(routed: readonly RoutedEdge[], nodes: readonly BracketNode[]
     }
 
     const text = formatCircularEdgeLabel(edge.cycleIds)
-    edge.label = placeLaneLabel({ lane, route: points, text, taken })
-    taken.push(getCircularLabelBox(edge.label, text))
+    edge.label = placeLaneLabel({ lane, route: points, text, taken, m })
+    if (edge.label) {
+      taken.push(getLabelBox(edge.label, text, m))
+    }
   }
 
   return routed.map(({ edge }) => edge)
@@ -1001,15 +1183,17 @@ const LANE_LABEL_STEP = 6
  * hugs, at the first height from the lane's middle out that is clear; else
  * centred on the first clear spot along the rest of its route — a lane with
  * both ends on one row has no height to offer — longest stretch first, each
- * from its middle out; else at the lane's middle, covering what it must.
+ * from its middle out; else at the lane's middle, covering what it must — or,
+ * at a size whose gaps leave nothing it could cover only a little of, nowhere.
  */
 function placeLaneLabel(params: {
   lane: LabelLane
   route: readonly EdgePoint[]
   text: string
   taken: readonly CircularEdgeRect[]
-}): CircularLabelSpot {
-  const { lane, route, text, taken } = params
+  m: BracketMetrics
+}): CircularLabelSpot | null {
+  const { lane, route, text, taken, m } = params
   const spotAt = (y: number): CircularLabelSpot => {
     switch (lane.reach) {
       case 'left':
@@ -1046,13 +1230,13 @@ function placeLaneLabel(params: {
     ...getStretchSpots(route).map(point => ({ labelX: point.x, labelY: point.y, ...LABEL_CENTERED }))
   ]
   for (const spot of candidates) {
-    const box = grow(getCircularLabelBox(spot, text), LANE_LABEL_CLEARANCE)
+    const box = grow(getLabelBox(spot, text, m), LANE_LABEL_CLEARANCE)
     if (!taken.some(other => boxesOverlap(box, other))) {
       return spot
     }
   }
 
-  return spotAt(middle)
+  return m.isCrowdedLabelDrawn ? spotAt(middle) : null
 }
 
 /** Points along a route a label may be centred on: longest stretch first, each from its middle out. */
@@ -1079,21 +1263,25 @@ function getStretchSpots(route: readonly EdgePoint[]): EdgePoint[] {
   })
 }
 
-/** Half the gap between two rows of cards: where a channel between them runs. */
-const HALF_ROW_GAP = (ROW_PITCH - BRACKET_MODULE_HEIGHT) / 2
 /** How far a channel keeps from the cards it runs between. */
 const CHANNEL_CLEARANCE = 2
-/** How far apart two links crossing in one gap between rows run. */
-const CHANNEL_STEP = 4
-/** Where in a gap a link may cross: its middle first, then a step to either side. */
-const CHANNEL_SHIFTS = [0, -CHANNEL_STEP, CHANNEL_STEP] as const
+
 /**
- * What running a step off a gap's middle costs, in detour: more than the
- * step saves, so a link takes the middle of a free gap whenever one is near.
+ * A channel's working lengths for one size: where in a gap a link may cross
+ * — its middle first, then a step to either side — what running a step off
+ * the middle costs in detour (more than the step saves, so a link takes the
+ * middle of a free gap whenever one is near), and the longest way round a
+ * link takes to keep off another link's crossing.
  */
-const CHANNEL_SHIFT_COST = CHANNEL_STEP * 2 + 1
-/** The longest way round a link takes to keep off another link's crossing. */
-const CHANNEL_DETOUR_LIMIT = ROW_PITCH * 4
+function channelOf(m: BracketMetrics) {
+  return {
+    halfRowGap: m.rowGap / 2,
+    step: m.channelStep,
+    shifts: [0, -m.channelStep, m.channelStep] as const,
+    shiftCost: m.channelStep * 2 + 1,
+    detourLimit: rowPitchOf(m) * 4
+  }
+}
 
 /** Where a link reaching back past the next column crosses the columns between. */
 type Crossing = { y: number, left: number, right: number }
@@ -1110,7 +1298,8 @@ type CrossedColumns = {
   gapMiddles: readonly number[]
 }
 
-function getCrossedColumns(cards: readonly CircularEdgeRect[]): CrossedColumns {
+function getCrossedColumns(cards: readonly CircularEdgeRect[], m: BracketMetrics): CrossedColumns {
+  const { halfRowGap } = channelOf(m)
   const spans = cards
     .map((card): [number, number] => [card.y - CHANNEL_CLEARANCE, card.y + card.height + CHANNEL_CLEARANCE])
     .sort((above, below) => above[0] - below[0])
@@ -1128,8 +1317,8 @@ function getCrossedColumns(cards: readonly CircularEdgeRect[]): CrossedColumns {
 
   const gapMiddles = new Set<number>()
   for (const card of cards) {
-    gapMiddles.add(card.y - HALF_ROW_GAP)
-    gapMiddles.add(card.y + card.height + HALF_ROW_GAP)
+    gapMiddles.add(card.y - halfRowGap)
+    gapMiddles.add(card.y + card.height + halfRowGap)
   }
 
   return { blocked, gapMiddles: [...gapMiddles] }
@@ -1158,8 +1347,10 @@ function findChannel(params: {
   toY: number
   left: number
   right: number
+  m: BracketMetrics
 }): number {
   const { columns: { blocked, gapMiddles }, crossings, stubs, fromY, toY, left, right } = params
+  const channel = channelOf(params.m)
   const isClearOfCards = (y: number) => {
     let low = 0
     let high = blocked.length - 1
@@ -1181,8 +1372,8 @@ function findChannel(params: {
   }
   const nearby = crossings.filter(crossing => crossing.left < right && crossing.right > left)
   const isClearOfLinks = (y: number) =>
-    !stubs.some(stub => hasValueNear(stub.heights, y, CHANNEL_STEP, stub.own))
-    && !nearby.some(crossing => Math.abs(crossing.y - y) < CHANNEL_STEP)
+    !stubs.some(stub => hasValueNear(stub.heights, y, channel.step, stub.own))
+    && !nearby.some(crossing => Math.abs(crossing.y - y) < channel.step)
 
   let nearest: { y: number, cost: number } | null = null
   let nearestFree: { y: number, cost: number } | null = null
@@ -1192,13 +1383,13 @@ function findChannel(params: {
     || (cost === than.cost && Math.abs(y - fromY) < Math.abs(than.y - fromY))
 
   for (const middle of [fromY, toY, ...gapMiddles]) {
-    for (const shift of CHANNEL_SHIFTS) {
+    for (const shift of channel.shifts) {
       const y = middle + shift
       if (!isClearOfCards(y)) {
         continue
       }
 
-      const cost = (shift === 0 ? 0 : CHANNEL_SHIFT_COST) + Math.abs(y - fromY) + Math.abs(y - toY)
+      const cost = (shift === 0 ? 0 : channel.shiftCost) + Math.abs(y - fromY) + Math.abs(y - toY)
       if (isBetter(y, cost, nearest)) {
         nearest = { y, cost }
       }
@@ -1208,7 +1399,7 @@ function findChannel(params: {
     }
   }
 
-  if (nearestFree && nearest && nearestFree.cost <= nearest.cost + CHANNEL_DETOUR_LIMIT) {
+  if (nearestFree && nearest && nearestFree.cost <= nearest.cost + channel.detourLimit) {
     return nearestFree.y
   }
   return nearest?.y ?? fromY
@@ -1295,7 +1486,8 @@ function getColumn(node: RoutedNode): number {
 function createRouter(
   routePoints: EdgePoint[],
   /** The cards standing in each column, by column. */
-  cardsByColumn: ReadonlyMap<number, readonly CircularEdgeRect[]>
+  cardsByColumn: ReadonlyMap<number, readonly CircularEdgeRect[]>,
+  m: BracketMetrics
 ) {
   /** Each family of lanes beside a column, and the heights each lane is taken over. */
   const lanes = new Map<string, Array<Array<readonly [number, number]>>>()
@@ -1321,7 +1513,7 @@ function createRouter(
     for (let column = nearer + 1; column < further; column += 1) {
       cards.push(...(cardsByColumn.get(column) ?? []))
     }
-    const crossed = getCrossedColumns(cards)
+    const crossed = getCrossedColumns(cards, m)
     crossedByRun.set(key, crossed)
     return crossed
   }
@@ -1334,14 +1526,14 @@ function createRouter(
    * there lanes go on out as far as the links need.
    */
   const takeLane = (key: string, fromY: number, toY: number, isOuterGap = false): number => {
-    const top = Math.min(fromY, toY) - LANE_CLEARANCE
-    const bottom = Math.max(fromY, toY) + LANE_CLEARANCE
+    const top = Math.min(fromY, toY) - m.laneClearance
+    const bottom = Math.max(fromY, toY) + m.laneClearance
     const family = lanes.get(key) ?? []
     lanes.set(key, family)
     const meets = ([start, end]: readonly [number, number]) => start < bottom && end > top
 
     let chosen = family.findIndex(taken => !taken.some(meets))
-    if (chosen === -1 && (isOuterGap || family.length < LANE_COUNT)) {
+    if (chosen === -1 && (isOuterGap || family.length < m.laneCount)) {
       chosen = family.length
       family.push([])
     }
@@ -1357,11 +1549,44 @@ function createRouter(
     }
 
     family[chosen]?.push([top, bottom])
-    return chosen * LANE_STEP + LANE_START
+    return chosen * m.laneStep + m.laneStart
   }
   /** Whether nothing stands beyond a column, on the side away from the middle. */
   const isOutermost = (side: BracketSide, column: number) =>
     !cardsByColumn.has(side === 'left' ? column - 1 : column + 1)
+  /** Whether a card of `column`, other than the one whose middle is `own`, has its middle near `y`. */
+  const isLevelWithAnother = (column: number, y: number, own: number) =>
+    hasValueNear(stubHeightsByColumn.get(column) ?? [], y, m.laneStep, own)
+
+  /**
+   * Where a link between neighbouring columns turns, given the points it
+   * leaves and enters by on the module nearer the middle (`inner`) and the one
+   * further out (`outer`). It turns in a lane beside the column further out,
+   * crossing the gap level with the module nearer the middle, where only that
+   * module's own connectors run. Where a module further out stands level with
+   * that one, the links into it would run along the crossing: the link turns
+   * beside the column nearer the middle instead, and crosses level with the
+   * module further out — unless a module stands level with that one too.
+   */
+  const turnBetweenNeighbours = (
+    side: BracketSide,
+    inner: EdgePoint,
+    outer: EdgePoint,
+    innerColumn: number,
+    outerColumn: number
+  ): { x: number, reach: LabelLane['reach'] } => {
+    // From the column further out towards the middle.
+    const inwards = side === 'left' ? 1 : -1
+    const hugsInner = isLevelWithAnother(outerColumn, inner.y, outer.y)
+      && !isLevelWithAnother(innerColumn, outer.y, inner.y)
+    if (hugsInner) {
+      const offset = takeLane(`same:${side}:${innerColumn}`, inner.y, outer.y)
+      return { x: inner.x - inwards * offset, reach: side }
+    }
+
+    const offset = takeLane(`back:${side}:${Math.min(innerColumn, outerColumn)}`, inner.y, outer.y)
+    return { x: outer.x + inwards * offset, reach: side === 'left' ? 'right' : 'left' }
+  }
 
   function route(params: {
     kind: Exclude<BracketEdgeKind, 'self'>
@@ -1392,18 +1617,18 @@ function createRouter(
     if (sourceColumn < targetColumn && kind === 'link') {
       // A link into the next column out that is no branch of the bracket
       // would, turning halfway across, run along the upright of another
-      // module's branches and read as one of them. It turns in a lane beside
-      // the column further out, and crosses the gap level with the module
-      // nearer the middle, where only that module's own branches run.
+      // module's branches and read as one of them: it turns in a lane instead
+      // (`turnBetweenNeighbours`).
       const from = rightOf(source)
       const to = leftOf(target)
-      const offset = takeLane(`back:${side}:${sourceColumn}`, from.y, to.y)
-      const turn = side === 'left' ? from.x + offset : to.x - offset
+      const turn = side === 'left'
+        ? turnBetweenNeighbours(side, to, from, targetColumn, sourceColumn)
+        : turnBetweenNeighbours(side, from, to, sourceColumn, targetColumn)
       points = from.y === to.y
         ? [from, to]
-        : [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
+        : [from, { x: turn.x, y: from.y }, { x: turn.x, y: to.y }, to]
       handles = ['right-source', 'left-target']
-      lane = upright(turn, from, to, side === 'left' ? 'right' : 'left')
+      lane = upright(turn.x, from, to, turn.reach)
     } else if (sourceColumn < targetColumn && cyclePort !== undefined) {
       // A step of a reported cycle leaves the bracket's shared upright, so its
       // colour is not lost in the branches' own: it turns in a lane beside the
@@ -1420,8 +1645,8 @@ function createRouter(
         const to = { x: leftOf(target).x, y: leftOf(target).y + cyclePort }
         points = [from, to]
         label = side === 'left'
-          ? { labelX: from.x + TREE_LABEL_INSET, labelY: from.y, ...LABEL_CENTERED }
-          : { labelX: to.x - TREE_LABEL_INSET, labelY: to.y, ...LABEL_CENTERED }
+          ? { labelX: from.x + m.treeLabelInset, labelY: from.y, ...LABEL_CENTERED }
+          : { labelX: to.x - m.treeLabelInset, labelY: to.y, ...LABEL_CENTERED }
       } else if (side === 'left') {
         // The module nearer the middle is the one importing: the target.
         const from = rightOf(source)
@@ -1430,7 +1655,7 @@ function createRouter(
         points = from.y === port.y
           ? [from, port]
           : [from, { x: turn, y: from.y }, { x: turn, y: port.y }, port]
-        label = { labelX: from.x + TREE_LABEL_INSET, labelY: from.y, ...LABEL_CENTERED }
+        label = { labelX: from.x + m.treeLabelInset, labelY: from.y, ...LABEL_CENTERED }
       } else {
         // The module nearer the middle is the one imported: the source.
         const port = { x: rightOf(source).x, y: rightOf(source).y + cyclePort }
@@ -1439,7 +1664,7 @@ function createRouter(
         points = port.y === to.y
           ? [port, to]
           : [port, { x: turn, y: port.y }, { x: turn, y: to.y }, to]
-        label = { labelX: to.x - TREE_LABEL_INSET, labelY: to.y, ...LABEL_CENTERED }
+        label = { labelX: to.x - m.treeLabelInset, labelY: to.y, ...LABEL_CENTERED }
       }
     } else if (sourceColumn < targetColumn) {
       const from = rightOf(source)
@@ -1453,8 +1678,8 @@ function createRouter(
       // module further out, before the branches of its parent join.
       if (kind === 'tree') {
         const spot = side === 'left'
-          ? { x: from.x + TREE_LABEL_INSET, y: from.y }
-          : { x: to.x - TREE_LABEL_INSET, y: to.y }
+          ? { x: from.x + m.treeLabelInset, y: from.y }
+          : { x: to.x - m.treeLabelInset, y: to.y }
         label = { labelX: spot.x, labelY: spot.y, ...LABEL_CENTERED }
       }
     } else if (sourceColumn > targetColumn) {
@@ -1463,14 +1688,16 @@ function createRouter(
       const turnKey = `back:${side}:${targetColumn}`
       // On the left the lane hugs the column it ends in, on the right the
       // column across the gap from it: its label reaches away from either.
-      const turnAt = (offset: number) => side === 'left' ? to.x + offset : to.x + COLUMN_GAP - offset
+      const turnAt = (offset: number) => side === 'left' ? to.x + offset : to.x + m.columnGap - offset
       const reach = side === 'left' ? 'right' : 'left'
       handles = ['left-source', 'right-target']
 
       if (sourceColumn - targetColumn === 1) {
-        const turn = turnAt(takeLane(turnKey, from.y, to.y))
-        points = [from, { x: turn, y: from.y }, { x: turn, y: to.y }, to]
-        lane = upright(turn, from, to, reach)
+        const turn = side === 'left'
+          ? turnBetweenNeighbours(side, from, to, sourceColumn, targetColumn)
+          : turnBetweenNeighbours(side, to, from, targetColumn, sourceColumn)
+        points = [from, { x: turn.x, y: from.y }, { x: turn.x, y: to.y }, to]
+        lane = upright(turn.x, from, to, turn.reach)
       } else {
         // Further than the next column, a straight run would pass behind the
         // cards of the columns between and read as an edge of theirs. It
@@ -1489,7 +1716,8 @@ function createRouter(
           fromY: from.y,
           toY: to.y,
           left: to.x,
-          right: from.x
+          right: from.x,
+          m
         })
         const exit = side === 'left'
           ? from.x - takeLane(`same:${side}:${sourceColumn}`, from.y, channel, isOutermost(side, sourceColumn))
@@ -1530,7 +1758,7 @@ function createRouter(
         kind,
         side,
         cycleIds,
-        path: roundedPolylinePath(points, CORNER_RADIUS),
+        path: roundedPolylinePath(points, m.cornerRadius),
         label: null
       },
       points,
@@ -1612,7 +1840,8 @@ function rightOf(node: NodeBox): EdgePoint {
 function getBracketBounds(
   nodes: readonly BracketNode[],
   edges: readonly BracketEdge[],
-  routePoints: readonly EdgePoint[]
+  routePoints: readonly EdgePoint[],
+  m: BracketMetrics
 ): CircularEdgeRect {
   const rects: CircularEdgeRect[] = [
     ...nodes.map(node => ({
@@ -1626,7 +1855,7 @@ function getBracketBounds(
 
   for (const edge of edges) {
     if (edge.label) {
-      rects.push(getCircularLabelBox(edge.label, formatCircularEdgeLabel(edge.cycleIds)))
+      rects.push(getLabelBox(edge.label, formatCircularEdgeLabel(edge.cycleIds), m))
     }
   }
 

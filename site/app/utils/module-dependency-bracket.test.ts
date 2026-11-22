@@ -1,21 +1,25 @@
 import { strict as assert } from 'node:assert'
 import { describe, test } from 'node:test'
 import type { GraphOutputCycle, GraphOutputModule } from 'nest-graph-inspector'
-import { formatCircularEdgeLabel, getCircularLabelBox } from './circular-dependency-edge.ts'
+import { formatCircularEdgeLabel } from './circular-dependency-edge.ts'
 import {
   BRACKET_CENTER_ID,
   DEFAULT_BRACKET_DEPTH,
   buildModuleDependencyBracket,
+  getBracketLabelBox,
   getBracketModuleNodeId,
   type BracketCenterNode,
   type BracketEdge,
   type BracketModuleNode,
   type BracketNode,
   type BracketSide,
+  type BracketSize,
   type BracketStubNode,
   type ModuleDependencyBracket,
   type ModuleDependencyBracketInput
 } from './module-dependency-bracket.ts'
+
+const SIZES: readonly BracketSize[] = ['regular', 'compact']
 
 type BracketGraph = ModuleDependencyBracketInput['graph']
 
@@ -94,7 +98,8 @@ const CHAIN = graph(Object.fromEntries(
 function build(
   bracketGraph: BracketGraph,
   center: string,
-  depth: { left?: number, right?: number } = {}
+  depth: { left?: number, right?: number } = {},
+  size?: BracketSize
 ): ModuleDependencyBracket {
   const bracket = buildModuleDependencyBracket({
     graph: bracketGraph,
@@ -102,10 +107,19 @@ function build(
     depth: {
       left: depth.left ?? DEFAULT_BRACKET_DEPTH,
       right: depth.right ?? DEFAULT_BRACKET_DEPTH
-    }
+    },
+    ...(size ? { size } : {})
   })
   assert.ok(bracket, `the graph has ${center}`)
   return bracket
+}
+
+/** Every centre of the shop, at every depth that changes what is drawn, at both sizes. */
+function everyShopBracket(depths: readonly number[] = [1, 2, 3, 99]): Array<{ bracket: ModuleDependencyBracket, where: string }> {
+  return SIZES.flatMap(size => Object.keys(SHOP.modules).flatMap(center => depths.map(depth => ({
+    bracket: build(SHOP, center, { left: depth, right: depth }, size),
+    where: `centre ${center}, depth ${depth}, ${size}`
+  }))))
 }
 
 function modulesOn(bracket: ModuleDependencyBracket, side: BracketSide): BracketModuleNode[] {
@@ -350,7 +364,12 @@ describe('depth', () => {
     assert.equal(bracket.sides.left.total, 5)
 
     const stub = bracket.nodes.find(node => node.kind === 'stub' && node.parentId === getBracketModuleNodeId('left', 'A'))
-    assert.ok(stub)
+    assert.ok(stub?.kind === 'stub')
+    // It names what it holds back, in name order, for the reader to see
+    // before asking for it.
+    assert.deepEqual(stub.moduleNames, ['X', 'Y', 'Z'])
+    const other = bracket.nodes.find(node => node.kind === 'stub' && node.parentId === getBracketModuleNodeId('left', 'B'))
+    assert.deepEqual(other?.kind === 'stub' ? other.moduleNames : null, ['Z'])
     const branch = nodeOf(bracket, 'left', 'A')
     assert.equal(centerY(stub), centerY(branch), 'a stub stands beside the branch it ends')
     assert.ok(stub.position.x + stub.width < branch.position.x, 'one column further out')
@@ -383,13 +402,16 @@ describe('cycles', () => {
   test('the shop: both cycles through OrderModule, at every depth, without going round', () => {
     const bracket = build(SHOP, 'OrderModule', { left: 99, right: 99 })
 
+    // A module's branches go by name, except those on a cycle with it: they
+    // stand at the ends, above if their name comes in the first half, below
+    // if in the second, so their own lines never cross the bracket's.
     assert.deepEqual(levelsOf(bracket, 'left'), [
-      ['CustomerLoyaltyModule', 'DatabaseModule', 'PaymentModule', 'StoreProductModule', 'VoucherModule'],
+      ['PaymentModule', 'CustomerLoyaltyModule', 'DatabaseModule', 'VoucherModule', 'StoreProductModule'],
       ['CustomerModule', 'ProductModule', 'StoreModule'],
       ['RecommendationModule']
     ])
     assert.deepEqual(levelsOf(bracket, 'right'), [
-      ['AppModule', 'PaymentModule', 'RecommendationModule'],
+      ['PaymentModule', 'AppModule', 'RecommendationModule'],
       ['ProductModule'],
       ['StoreProductModule']
     ])
@@ -560,100 +582,137 @@ describe('the bracket', () => {
   })
 
   test('columns run out from the middle, a branch never crosses another, and nothing overlaps', () => {
-    for (const center of Object.keys(SHOP.modules)) {
-      for (const depth of [1, 2, 3, 99]) {
-        const bracket = build(SHOP, center, { left: depth, right: depth })
-        const middle = bracket.nodes.find(node => node.kind === 'center')
-        assert.ok(middle)
-
-        for (const node of bracket.nodes) {
-          if (node.kind !== 'module' && node.kind !== 'stub') {
-            continue
-          }
-          if (node.side === 'left') {
-            assert.ok(node.position.x + node.width < middle.position.x, `${node.id} is left of the middle`)
-          } else {
-            assert.ok(node.position.x > middle.position.x + middle.width, `${node.id} is right of the middle`)
-          }
-        }
-
-        // Boxes on the canvas never overlap.
-        const boxes = bracket.nodes.filter(node => node.kind !== 'level')
-        for (const [index, box] of boxes.entries()) {
-          for (const other of boxes.slice(index + 1)) {
-            const overlaps = box.position.x < other.position.x + other.width
-              && other.position.x < box.position.x + box.width
-              && box.position.y < other.position.y + other.height
-              && other.position.y < box.position.y + box.height
-            assert.equal(overlaps, false, `${box.id} overlaps ${other.id} (centre ${center}, depth ${depth})`)
-          }
-        }
-
-        // A bracket: each module stands level with its own branch, which
-        // keeps to its own rows.
-        for (const side of ['left', 'right'] as const) {
-          const nodes = modulesOn(bracket, side)
-          const byId = new Map(nodes.map(node => [node.id, node]))
-          for (const node of nodes) {
-            const children = bracket.edges
-              .filter(edge => edge.kind === 'tree' && (side === 'left' ? edge.target : edge.source) === node.id)
-              .map(edge => byId.get(side === 'left' ? edge.source : edge.target))
-              .filter((child): child is BracketModuleNode => Boolean(child))
-            if (children.length === 0) {
-              continue
-            }
-            const ys = children.map(centerY)
-            assert.ok(
-              centerY(node) >= Math.min(...ys) - 0.001 && centerY(node) <= Math.max(...ys) + 0.001,
-              `${node.id} stands level with its branch`
-            )
-          }
-        }
-
-        // No edge passes behind a card it does not join.
-        for (const edge of bracket.edges.filter(candidate => candidate.kind !== 'self')) {
-          assert.deepEqual(cardsCrossed(bracket, edge), [], `${edge.id} passes behind cards (centre ${center}, depth ${depth})`)
-        }
-
-        const ids = new Set(bracket.nodes.map(node => node.id))
-        assert.equal(ids.size, bracket.nodes.length, 'node ids are unique')
-        assert.equal(new Set(bracket.edges.map(edge => edge.id)).size, bracket.edges.length, 'edge ids are unique')
-        for (const edge of bracket.edges) {
-          assert.ok(ids.has(edge.source) && ids.has(edge.target), `${edge.id} joins drawn nodes`)
-          assert.ok(edge.path.startsWith('M '), `${edge.id} has a path`)
-        }
-
-        // Cycle labels cover no card, and no other label.
-        const labels = bracket.edges.flatMap(edge => edge.label
-          ? [{ id: edge.id, box: getCircularLabelBox(edge.label, formatCircularEdgeLabel(edge.cycleIds)) }]
-          : [])
-        for (const [index, label] of labels.entries()) {
-          for (const other of labels.slice(index + 1)) {
-            assert.equal(
-              boxesOverlap(label.box, other.box), false,
-              `${label.id}'s label overlaps ${other.id}'s (centre ${center}, depth ${depth})`
-            )
-          }
-          for (const node of boxes) {
-            assert.equal(
-              boxesOverlap(label.box, { ...node.position, width: node.width, height: node.height }), false,
-              `${label.id}'s label covers ${node.id} (centre ${center}, depth ${depth})`
-            )
-          }
-        }
-
-        const { bounds } = bracket
-        for (const node of bracket.nodes) {
-          assert.ok(
-            node.position.x >= bounds.x && node.position.y >= bounds.y
-            && node.position.x + node.width <= bounds.x + bounds.width
-            && node.position.y + node.height <= bounds.y + bounds.height,
-            `${node.id} is inside the bounds`
-          )
+    for (const size of SIZES) {
+      for (const center of Object.keys(SHOP.modules)) {
+        for (const depth of [1, 2, 3, 99]) {
+          assertLaysOutCleanly(build(SHOP, center, { left: depth, right: depth }, size), `centre ${center}, depth ${depth}, ${size}`)
         }
       }
     }
   })
+
+  test('a compact bracket is the same bracket, smaller', () => {
+    for (const center of Object.keys(SHOP.modules)) {
+      const regular = build(SHOP, center, { left: 99, right: 99 })
+      const compact = build(SHOP, center, { left: 99, right: 99 }, 'compact')
+      assert.equal(regular.size, 'regular')
+      assert.equal(compact.size, 'compact')
+
+      // The same modules, in the same order down each column, joined the same way.
+      for (const side of ['left', 'right'] as const) {
+        assert.deepEqual(levelsOf(compact, side), levelsOf(regular, side), `${center}, ${side}`)
+      }
+      const joins = (bracket: ModuleDependencyBracket) =>
+        bracket.edges.map(edge => [edge.id, edge.kind, edge.cycleIds.join()].join(' ')).sort()
+      assert.deepEqual(joins(compact), joins(regular), center)
+      assert.ok(compact.bounds.width < regular.bounds.width / 2, `${center} draws less than half as wide`)
+    }
+
+    // A phone's width holds the module and the first level of each side.
+    const order = build(SHOP, 'OrderModule', {}, 'compact')
+    const firstLevel = order.nodes.filter(node => node.kind === 'center'
+      || (node.kind === 'module' && node.level === 1))
+    const left = Math.min(...firstLevel.map(node => node.position.x))
+    const right = Math.max(...firstLevel.map(node => node.position.x + node.width))
+    assert.ok(right - left <= 362, `the first levels span ${right - left} flow pixels`)
+  })
+
+  /**
+   * Every rule a bracket's drawing keeps: columns either side of the middle,
+   * no card over another, each module level with its branch, no edge behind a
+   * card it does not join, no cycle label over a card or another label, and
+   * everything inside the bounds.
+   */
+  function assertLaysOutCleanly(bracket: ModuleDependencyBracket, where: string): void {
+    const middle = bracket.nodes.find(node => node.kind === 'center')
+    assert.ok(middle)
+
+    for (const node of bracket.nodes) {
+      if (node.kind !== 'module' && node.kind !== 'stub') {
+        continue
+      }
+      if (node.side === 'left') {
+        assert.ok(node.position.x + node.width < middle.position.x, `${node.id} is left of the middle`)
+      } else {
+        assert.ok(node.position.x > middle.position.x + middle.width, `${node.id} is right of the middle`)
+      }
+    }
+
+    // Boxes on the canvas never overlap.
+    const boxes = bracket.nodes.filter(node => node.kind !== 'level')
+    for (const [index, box] of boxes.entries()) {
+      for (const other of boxes.slice(index + 1)) {
+        const overlaps = box.position.x < other.position.x + other.width
+          && other.position.x < box.position.x + box.width
+          && box.position.y < other.position.y + other.height
+          && other.position.y < box.position.y + box.height
+        assert.equal(overlaps, false, `${box.id} overlaps ${other.id} (${where})`)
+      }
+    }
+
+    // A bracket: each module stands level with its own branch, which
+    // keeps to its own rows.
+    for (const side of ['left', 'right'] as const) {
+      const nodes = modulesOn(bracket, side)
+      const byId = new Map(nodes.map(node => [node.id, node]))
+      for (const node of nodes) {
+        const children = bracket.edges
+          .filter(edge => edge.kind === 'tree' && (side === 'left' ? edge.target : edge.source) === node.id)
+          .map(edge => byId.get(side === 'left' ? edge.source : edge.target))
+          .filter((child): child is BracketModuleNode => Boolean(child))
+        if (children.length === 0) {
+          continue
+        }
+        const ys = children.map(centerY)
+        assert.ok(
+          centerY(node) >= Math.min(...ys) - 0.001 && centerY(node) <= Math.max(...ys) + 0.001,
+          `${node.id} stands level with its branch`
+        )
+      }
+    }
+
+    // No edge passes behind a card it does not join.
+    for (const edge of bracket.edges.filter(candidate => candidate.kind !== 'self')) {
+      assert.deepEqual(cardsCrossed(bracket, edge), [], `${edge.id} passes behind cards (${where})`)
+    }
+
+    const ids = new Set(bracket.nodes.map(node => node.id))
+    assert.equal(ids.size, bracket.nodes.length, 'node ids are unique')
+    assert.equal(new Set(bracket.edges.map(edge => edge.id)).size, bracket.edges.length, 'edge ids are unique')
+    for (const edge of bracket.edges) {
+      assert.ok(ids.has(edge.source) && ids.has(edge.target), `${edge.id} joins drawn nodes`)
+      assert.ok(edge.path.startsWith('M '), `${edge.id} has a path`)
+    }
+
+    // Cycle labels cover no card, and no other label.
+    const labels = bracket.edges.flatMap(edge => edge.label
+      ? [{ id: edge.id, box: getBracketLabelBox(edge.label, formatCircularEdgeLabel(edge.cycleIds), bracket.size) }]
+      : [])
+    for (const [index, label] of labels.entries()) {
+      for (const other of labels.slice(index + 1)) {
+        assert.equal(
+          boxesOverlap(label.box, other.box), false,
+          `${label.id}'s label overlaps ${other.id}'s (${where})`
+        )
+      }
+      for (const node of boxes) {
+        assert.equal(
+          boxesOverlap(label.box, { ...node.position, width: node.width, height: node.height }), false,
+          `${label.id}'s label covers ${node.id} (${where})`
+        )
+      }
+    }
+
+    const { bounds } = bracket
+    for (const node of bracket.nodes) {
+      assert.ok(
+        node.position.x >= bounds.x && node.position.y >= bounds.y
+        && node.position.x + node.width <= bounds.x + bounds.width
+        && node.position.y + node.height <= bounds.y + bounds.height,
+        `${node.id} is inside the bounds`
+      )
+    }
+  }
 
   test('a link back over a column goes round its cards, never behind one', () => {
     // E, two columns out, imports A, which stands in the first column level
@@ -694,37 +753,37 @@ describe('the bracket', () => {
   test('a cycle keeps its own line from module to module: its own port, off the shared upright', () => {
     let cycleStepsSeen = 0
 
-    for (const center of Object.keys(SHOP.modules)) {
-      for (const depth of [1, 3, 99]) {
-        const bracket = build(SHOP, center, { left: depth, right: depth })
-        const byId = new Map(bracket.nodes.map(node => [node.id, node]))
-        const branches = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length === 0)
-        const cycleSteps = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length > 0)
-        cycleStepsSeen += cycleSteps.length
+    for (const { bracket, where } of everyShopBracket([1, 3, 99])) {
+      const byId = new Map(bracket.nodes.map(node => [node.id, node]))
+      const branches = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length === 0)
+      const cycleSteps = bracket.edges.filter(edge => edge.kind === 'tree' && edge.cycleIds.length > 0)
+      cycleStepsSeen += cycleSteps.length
 
-        for (const step of cycleSteps) {
-          // It comes into the module nearer the middle by a port of its own,
-          // up or down that module's side, never the middle the bracket's
-          // connectors share.
-          const route = routeOf(step.path)
-          const parent = byId.get(step.side === 'left' ? step.target : step.source)
-          const port = step.side === 'left' ? route.at(-1) : route[0]
-          assert.ok(parent && port, step.id)
-          assert.notEqual(port.y, centerY(parent), `${step.id} comes in by the shared port (centre ${center})`)
-          assert.ok(Math.abs(port.y - centerY(parent)) < parent.height / 2, `${step.id} comes in on its module's side`)
+      for (const step of cycleSteps) {
+        // It comes into the module nearer the middle by a port of its own,
+        // up or down that module's side, never the middle the bracket's
+        // connectors share.
+        const route = routeOf(step.path)
+        const parent = byId.get(step.side === 'left' ? step.target : step.source)
+        const port = step.side === 'left' ? route.at(-1) : route[0]
+        assert.ok(parent && port, step.id)
+        assert.notEqual(port.y, centerY(parent), `${step.id} comes in by the shared port (${where})`)
+        assert.ok(Math.abs(port.y - centerY(parent)) < parent.height / 2, `${step.id} comes in on its module's side`)
 
-          // Nowhere does it run along a blue connector, even one meeting it at a card.
-          for (const branch of branches) {
-            assert.ok(!runAlongEachOther(step, branch), `${step.id} runs along ${branch.id} (centre ${center}, depth ${depth})`)
-          }
+        // Nowhere does it run along a blue connector, even one meeting it at a
+        // card, nor cut across one: the modules on a cycle with their parent
+        // stand above and below its other branches.
+        for (const branch of branches) {
+          assert.ok(!runAlongEachOther(step, branch), `${step.id} runs along ${branch.id} (${where})`)
+          assert.ok(!crossEachOther(step, branch), `${step.id} cuts across ${branch.id} (${where})`)
+        }
 
-          // And the steps coming into one module nest: none cuts across another.
-          for (const other of cycleSteps.filter(candidate => candidate !== step)) {
-            const sameModule = (step.side === 'left' ? step.target : step.source)
-              === (other.side === 'left' ? other.target : other.source)
-            if (sameModule && step.side === other.side) {
-              assert.ok(!crossEachOther(step, other), `${step.id} cuts across ${other.id} (centre ${center})`)
-            }
+        // And the steps coming into one module nest: none cuts across another.
+        for (const other of cycleSteps.filter(candidate => candidate !== step)) {
+          const sameModule = (step.side === 'left' ? step.target : step.source)
+            === (other.side === 'left' ? other.target : other.source)
+          if (sameModule && step.side === other.side) {
+            assert.ok(!crossEachOther(step, other), `${step.id} cuts across ${other.id} (${where})`)
           }
         }
       }
@@ -733,14 +792,53 @@ describe('the bracket', () => {
     assert.ok(cycleStepsSeen > 0, 'the shop graph puts connectors on its cycles')
   })
 
+  test('the module in the middle takes its connectors spread down its side, its own branches at the middle', () => {
+    for (const size of SIZES) {
+      const bracket = build(SHOP, 'OrderModule', {}, size)
+      const middle = middleOf(bracket)
+      const entries = (side: BracketSide) => bracket.edges
+        .filter(edge => edge.kind === 'tree' && edge.side === side)
+        .filter(edge => (side === 'left' ? edge.target : edge.source) === BRACKET_CENTER_ID)
+        .map((edge) => {
+          const route = routeOf(edge.path)
+          const port = side === 'left' ? route.at(-1) : route[0]
+          assert.ok(port, edge.id)
+          return { y: port.y - centerY(middle), onCycle: edge.cycleIds.length > 0 }
+        })
+
+      // The shop's OrderModule is on a cycle with a module above its other
+      // branches on the left, and with one below them: they come in at either
+      // end of its side, the bracket's own connector at the middle.
+      const left = entries('left')
+      assert.deepEqual(new Set(left.filter(entry => !entry.onCycle).map(entry => entry.y)), new Set([0]), size)
+      const ports = [...new Set(left.map(entry => entry.y))].sort((above, below) => above - below)
+      assert.equal(ports.length, 3, `${size}: three ways in on the left`)
+      for (const [index, port] of ports.slice(1).entries()) {
+        assert.ok(port - (ports[index] ?? port) >= middle.height / 3, `${size}: ports ${ports.join(', ')} spread down the side`)
+      }
+
+      // On the right every module stands within the middle's height, so each
+      // comes in level with itself: straight across, nothing to cross.
+      for (const edge of bracket.edges.filter(candidate => candidate.side === 'right' && candidate.source === BRACKET_CENTER_ID)) {
+        assert.equal(routeOf(edge.path).length, 2, `${edge.id} runs straight (${size})`)
+      }
+    }
+  })
+
   test('no two edges joining no card in common run along one stretch', () => {
     // DatabaseModule in the middle stands every other module in one column,
     // joined by a score of links that all turn beside it.
-    for (const center of Object.keys(SHOP.modules)) {
-      for (const depth of [1, 2, 3, 99]) {
-        const bracket = build(SHOP, center, { left: depth, right: depth })
-        assert.deepEqual(sharedStretches(bracket), [], `centre ${center}, depth ${depth}`)
+    for (const { bracket, where } of everyShopBracket()) {
+      if (bracket.size === 'regular') {
+        assert.deepEqual(sharedStretches(bracket), [], where)
+        continue
       }
+
+      // A compact gap has two lanes beside each column, not five: the links,
+      // drawn only on demand there, may share one where more cross a gap. The
+      // bracket's own connectors, and a cycle's, never do.
+      const drawn = { ...bracket, edges: bracket.edges.filter(edge => edge.kind !== 'link') }
+      assert.deepEqual(sharedStretches(drawn), [], where)
     }
   })
 
