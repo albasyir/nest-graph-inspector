@@ -44,7 +44,7 @@
     "langchain": "^1.6.6",
     "mermaid": "^12.3.0",
     "minimark": "^0.2.0",
-    "monaco-editor": "^0.55.1",
+    "monaco-editor": "^0.57.0",
     "nest-graph-inspector": "workspace:*",
     "nuxt": "^4.6.4",
     "nuxt-llms": "0.3.2",
