@@ -40,7 +40,7 @@
     "apexcharts": "^8.8.2",
     "better-sqlite3": "^13.2.0",
     "elkjs": "^0.12.1",
-    "h3": "1.15.11",
+    "h3": "2.0.8",
     "langchain": "^1.6.6",
     "mermaid": "^12.3.0",
     "minimark": "^0.2.0",
