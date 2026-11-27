@@ -140,6 +140,7 @@ function reset(): void {
         label="Reset"
         color="neutral"
         variant="ghost"
+        size="lg"
         :aria-label="`Reset to ${BLAST_DEMO_MODULE}`"
         class="cursor-pointer"
         @click="reset"
@@ -151,6 +152,7 @@ function reset(): void {
         label="Open this module in the viewer"
         color="neutral"
         variant="outline"
+        size="lg"
       />
       <UButton
         to="/view?preview=true"
@@ -158,6 +160,7 @@ function reset(): void {
         label="Open full graph"
         color="neutral"
         variant="solid"
+        size="lg"
       />
     </div>
 
@@ -349,6 +352,7 @@ function reset(): void {
   .blast-demo__actions > * {
     flex: 1 1 100%;
     justify-content: center;
+    min-height: 44px;
   }
 }
 </style>
