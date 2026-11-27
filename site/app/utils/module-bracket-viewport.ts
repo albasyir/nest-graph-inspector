@@ -159,14 +159,17 @@ export type BracketOffscreen = {
    * Levels of each side with a module cut off by that side's own edge of the
    * canvas — the left edge for what the module needs, the right for what
    * needs it — nearest the middle first. A level cut off by the other edge
-   * lies back towards the middle, past `middle`.
+   * lies back towards the middle, past `middle`. Only levels drawn: never the
+   * one past the depth a "+N more" stub stands for, which says its own count.
    */
   levels: Record<BracketSide, number[]>
-  /**
-   * How many modules those levels of each side hold — the modules drawn there,
-   * and those past a stub there, each once — what a chip toward them counts.
-   */
+  /** How many modules drawn on those levels are cut off: what a chip toward them counts. */
   modules: Record<BracketSide, number>
+  /**
+   * The modules waiting past stubs that edge cuts off, each once however many
+   * stubs name them: what a chip says when stubs are all the edge cuts off.
+   */
+  stubModules: Record<BracketSide, number>
   /** The edge of the canvas the module in the middle is cut off by, if one is. */
   middle: BracketSide | null
   /** Modules in the columns in view whose middle is above the view, or below it. */
@@ -179,8 +182,21 @@ export function getBracketOffscreen(
   viewport: BracketViewport,
   canvas: BracketCanvas
 ): BracketOffscreen {
+  return scanOffscreen(bracket, viewport, canvas).offscreen
+}
+
+/**
+ * What a view leaves out, and the levels of the stubs it cuts off — which no
+ * chip names, but a reveal brings into view all the same.
+ */
+function scanOffscreen(
+  bracket: ModuleDependencyBracket,
+  viewport: BracketViewport,
+  canvas: BracketCanvas
+): { offscreen: BracketOffscreen, stubLevels: Record<BracketSide, number[]> } {
   const view = getView(viewport, canvas)
   const levels: Record<BracketSide, Set<number>> = { left: new Set(), right: new Set() }
+  const stubLevels: Record<BracketSide, Set<number>> = { left: new Set(), right: new Set() }
   const drawn: Record<BracketSide, number> = { left: 0, right: 0 }
   const pastStubs: Record<BracketSide, Set<string>> = { left: new Set(), right: new Set() }
   const pastLeft = (node: BracketNode) => node.position.x < view.left - EDGE_TOLERANCE
@@ -196,10 +212,11 @@ export function getBracketOffscreen(
       continue
     }
     if (node.kind === 'stub') {
-      // One more level that way, its modules counted once however many stubs
-      // name them.
+      // One more level that way, past the depth drawn: the stub says its own
+      // count, so its level is no chip's to name, and its modules are counted
+      // apart from the ones drawn, once however many stubs name them.
       if (node.side === 'left' ? pastLeft(node) : pastRight(node)) {
-        levels[node.side].add(node.level)
+        stubLevels[node.side].add(node.level)
         for (const moduleName of node.moduleNames) {
           pastStubs[node.side].add(moduleName)
         }
@@ -228,13 +245,20 @@ export function getBracketOffscreen(
     }
   }
 
-  const ascending = (side: BracketSide) => [...levels[side]].sort((first, second) => first - second)
+  const ascending = (found: Record<BracketSide, Set<number>>) => ({
+    left: [...found.left].sort((first, second) => first - second),
+    right: [...found.right].sort((first, second) => first - second)
+  })
   return {
-    levels: { left: ascending('left'), right: ascending('right') },
-    modules: { left: drawn.left + pastStubs.left.size, right: drawn.right + pastStubs.right.size },
-    middle,
-    above,
-    below
+    offscreen: {
+      levels: ascending(levels),
+      modules: drawn,
+      stubModules: { left: pastStubs.left.size, right: pastStubs.right.size },
+      middle,
+      above,
+      below
+    },
+    stubLevels: ascending(stubLevels)
   }
 }
 
@@ -275,7 +299,9 @@ export function getLevelRevealViewport(
   canvas: BracketCanvas,
   side: BracketSide
 ): BracketViewport {
-  const hidden = getBracketOffscreen(bracket, viewport, canvas).levels[side]
+  const { offscreen, stubLevels } = scanOffscreen(bracket, viewport, canvas)
+  const hidden = [...new Set([...offscreen.levels[side], ...stubLevels[side]])]
+    .sort((first, second) => first - second)
   const { zoom } = viewport
   const room = getRoom(canvas)
   const columns = hidden

@@ -525,10 +525,11 @@ const offscreen = computed(() =>
 
 /**
  * A chip at a side edge of the canvas: toward the levels it cuts off — which
- * levels, and how many modules they hold — or back to the module, cut off
- * itself.
+ * levels drawn, and how many of their modules — or, where stubs are all it
+ * cuts off, toward them, saying what they say; or back to the module, cut off
+ * itself. No chip names a level past the depth shown.
  */
-type EdgeChip = { edge: BracketSide, kind: 'levels' | 'middle', text: string, count: string, label: string }
+type EdgeChip = { edge: BracketSide, kind: 'levels' | 'stubs' | 'middle', text: string, count: string, label: string }
 
 const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeChip[] => {
   const current = offscreen.value
@@ -540,16 +541,25 @@ const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeC
     return [{ edge, kind: 'middle', text: props.moduleName, count: '', label: `Back to ${props.moduleName}` }]
   }
 
+  const where = edge === 'left'
+    ? `of what ${props.moduleName} needs`
+    : `of what needs ${props.moduleName}`
   const levels = current.levels[edge]
   if (levels.length === 0) {
-    return []
+    const pastStubs = current.stubModules[edge]
+    return pastStubs > 0
+      ? [{
+          edge,
+          kind: 'stubs',
+          text: `+${pastStubs} more`,
+          count: '',
+          label: `Show +${pastStubs} more, one level further out ${where}`
+        }]
+      : []
   }
 
   const range = formatLevelRange(levels)
   const modules = current.modules[edge]
-  const where = edge === 'left'
-    ? `of what ${props.moduleName} needs`
-    : `of what needs ${props.moduleName}`
   return [{
     edge,
     kind: 'levels',

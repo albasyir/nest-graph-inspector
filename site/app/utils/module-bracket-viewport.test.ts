@@ -96,6 +96,16 @@ function modulesAt(bracket: ModuleDependencyBracket, side: 'left' | 'right', lev
     node.kind === 'module' && node.side === side && node.level === level)
 }
 
+/** A view that leaves nothing out: no chip, nothing above or below. */
+const NOTHING_OFFSCREEN = {
+  levels: { left: [], right: [] },
+  modules: { left: 0, right: 0 },
+  stubModules: { left: 0, right: 0 },
+  middle: null,
+  above: 0,
+  below: 0
+}
+
 describe('module bracket viewport', () => {
   test('a bracket that fits at a readable zoom opens whole, centred, and never larger than itself', () => {
     const bracket = build(graph({ A: ['B'], B: [] }), 'A')
@@ -105,13 +115,7 @@ describe('module bracket viewport', () => {
     for (const node of bracket.nodes.filter(candidate => candidate.kind !== 'level')) {
       assert.ok(isWhollyInView(node, frame, DESKTOP), `${node.id} is in view`)
     }
-    assert.deepEqual(getBracketOffscreen(bracket, frame, DESKTOP), {
-      levels: { left: [], right: [] },
-      modules: { left: 0, right: 0 },
-      middle: null,
-      above: 0,
-      below: 0
-    })
+    assert.deepEqual(getBracketOffscreen(bracket, frame, DESKTOP), NOTHING_OFFSCREEN)
   })
 
   test('a bracket too wide to read whole opens on its module, at the zoom its names read at', () => {
@@ -127,8 +131,10 @@ describe('module bracket viewport', () => {
     const offscreen = getBracketOffscreen(bracket, frame, DESKTOP)
     assert.ok(offscreen.levels.left.length > 0 && offscreen.levels.right.length > 0)
     assert.deepEqual(offscreen.levels.left, [...offscreen.levels.left].sort((a, b) => a - b))
-    // The furthest is the stub's, a level past the depth drawn.
-    assert.equal(offscreen.levels.left.at(-1), DEFAULT_BRACKET_DEPTH + 1)
+    // The furthest named is the last level drawn, never the one past the
+    // depth a stub stands for: the stub says its own count.
+    assert.equal(offscreen.levels.left.at(-1), DEFAULT_BRACKET_DEPTH)
+    assert.equal(offscreen.stubModules.left, 1)
   })
 
   test('on a phone a compact bracket opens on its module and the first level of each side, readable', () => {
@@ -144,12 +150,14 @@ describe('module bracket viewport', () => {
       assert.ok(box.left >= FIRST_LEVELS_INSET - 1 && box.right <= PHONE.width - FIRST_LEVELS_INSET + 1, `${node.id} keeps off the edge`)
     }
 
-    // The chips name only what the frame leaves out — levels 2 and 3, and
-    // the stub past them — and count it; the first levels are not drawn back
-    // as cut.
+    // The chips name only the levels drawn that the frame leaves out — 2 and
+    // 3, never the one past the depth the stubs stand for — and count their
+    // modules; the stubs keep their own count, and the first levels are not
+    // drawn back as cut.
     const opening = getBracketOffscreen(bracket, frame, PHONE)
-    assert.deepEqual(opening.levels, { left: [2, 3, 4], right: [2, 3, 4] })
-    assert.deepEqual(opening.modules, { left: 3, right: 3 })
+    assert.deepEqual(opening.levels, { left: [2, 3], right: [2, 3] })
+    assert.deepEqual(opening.modules, { left: 2, right: 2 })
+    assert.deepEqual(opening.stubModules, { left: 1, right: 1 })
     assert.equal(opening.middle, null)
     const cut = getCutCardIds(bracket, frame, PHONE)
     for (const node of [...modulesAt(bracket, 'left', 1), ...modulesAt(bracket, 'right', 1)]) {
@@ -194,23 +202,27 @@ describe('module bracket viewport', () => {
     assert.ok(Math.abs((center.left + center.right) / 2 - narrow.width / 2) < 1)
   })
 
-  test('a chip counts the modules in the levels it leads to, and those past a stub there, each once', () => {
+  test('a chip counts the modules drawn in the levels it leads to; the stubs past them keep their own count, each module once', () => {
     const bracket = build(CHAIN, 'M5')
     const frame = getBracketFrame(bracket, DESKTOP)
     const offscreen = getBracketOffscreen(bracket, frame, DESKTOP)
     for (const side of ['left', 'right'] as const) {
       const drawn = offscreen.levels[side].reduce((total, level) => total + modulesAt(bracket, side, level).length, 0)
       const pastStubs = new Set(bracket.nodes.flatMap(node =>
-        node.kind === 'stub' && node.side === side && offscreen.levels[side].includes(node.level) ? node.moduleNames : []))
+        node.kind === 'stub' && node.side === side ? node.moduleNames : []))
       assert.ok(drawn > 0 && pastStubs.size > 0, side)
-      assert.equal(offscreen.modules[side], drawn + pastStubs.size, side)
+      assert.equal(offscreen.modules[side], drawn, side)
+      assert.equal(offscreen.stubModules[side], pastStubs.size, side)
+      assert.ok(offscreen.levels[side].every(level => level <= DEFAULT_BRACKET_DEPTH), `${side}: no level past the depth drawn`)
     }
 
-    // Z waits past both A and B: two stubs, one module.
+    // Z waits past both A and B: two stubs, one module; nothing drawn is cut
+    // off, so no level is named.
     const fan = build(graph({ C: ['A', 'B'], A: ['Z'], B: ['Z'], Z: [] }), 'C', 1, 'compact')
     const fanOpening = getBracketOffscreen(fan, getBracketFrame(fan, PHONE), PHONE)
-    assert.deepEqual(fanOpening.levels.left, [2])
-    assert.equal(fanOpening.modules.left, 1)
+    assert.deepEqual(fanOpening.levels.left, [])
+    assert.equal(fanOpening.modules.left, 0)
+    assert.equal(fanOpening.stubModules.left, 1)
   })
 
   test('a side whose only cards past the edge are stubs has a chip toward them all the same', () => {
@@ -218,15 +230,16 @@ describe('module bracket viewport', () => {
     const bracket = build(CHAIN, 'M5', 1, 'compact')
     const frame = getBracketFrame(bracket, PHONE)
     const opening = getBracketOffscreen(bracket, frame, PHONE)
-    assert.deepEqual(opening.levels.left, [2])
-    assert.equal(opening.modules.left, 1)
+    assert.deepEqual(opening.levels.left, [])
+    assert.equal(opening.modules.left, 0)
+    assert.equal(opening.stubModules.left, 1)
 
     // Its chip brings the stub wholly into view, ready to press.
     const revealed = getLevelRevealViewport(bracket, frame, PHONE, 'left')
     const stub = bracket.nodes.find(node => node.kind === 'stub' && node.side === 'left')
     assert.ok(stub)
     assert.ok(isWhollyInView(stub, revealed, PHONE))
-    assert.deepEqual(getBracketOffscreen(bracket, revealed, PHONE).levels.left, [])
+    assert.equal(getBracketOffscreen(bracket, revealed, PHONE).stubModules.left, 0)
   })
 
   test('on a desktop a reveal brings in every level cut off that fits, the furthest against the edge', () => {
