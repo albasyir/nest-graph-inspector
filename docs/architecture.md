@@ -1142,7 +1142,8 @@ opened from, however much was changed on it:
   back, the bracket laid out at its other size — is drawn wherever the new
   frame puts it rather than left out of it. Each size is laid out only when
   asked for, and again only for another module, depth or graph: a module's
-  page lays out the size its width gives it, never both.
+  page lays out the size its width gives it, never both, and only the landing
+  demo, framed whole, lays out both to pick between them.
 - **Inside Module** (`?view=inside`): what the module declares —
   `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
   fields the graph already carries (horizontally on desktop, or vertically on
