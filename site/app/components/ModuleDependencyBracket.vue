@@ -294,16 +294,28 @@ const flowNodes = computed<FlowNode[]>(() =>
 )
 
 // Vue Flow draws only the cards in view, and tells them by `computedPosition`
-// — where it last drew each one, which only a drawn card's own wrapper
-// updates. A card moved while undrawn — the page re-centred on another
-// module and back, the bracket laid out at its other size — would stay
-// undrawn wherever it now stands, its place in the frame left empty. So once
-// Vue Flow has taken a layout, every card's is set to where the card now is.
+// and `dimensions` — where it last drew each one, and at what size — which
+// only a drawn card's own wrapper updates. A card moved or resized while
+// undrawn — the page re-centred on another module and back, the bracket laid
+// out at its other size — would stay undrawn wherever it now stands, its
+// place in the frame left empty. So once Vue Flow has taken a layout, every
+// card is given where it now stands, and its size if Vue Flow has measured it
+// before; one never drawn has no size yet, and is drawn once to be measured.
 watch(flowNodes, () => {
   for (const node of nodes.value) {
-    const { x, y } = node.position
+    const card = nodeById.value.get(node.id)
+    if (!card) {
+      continue
+    }
+
+    const { x, y } = card.position
     if (node.computedPosition.x !== x || node.computedPosition.y !== y) {
       node.computedPosition = { ...node.computedPosition, x, y }
+    }
+
+    const { width, height } = card
+    if (node.dimensions.width > 0 && (node.dimensions.width !== width || node.dimensions.height !== height)) {
+      node.dimensions = { width, height }
     }
   }
 }, { flush: 'post' })

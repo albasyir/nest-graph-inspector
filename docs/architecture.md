@@ -1133,12 +1133,16 @@ opened from, however much was changed on it:
   headings are pinned across the canvas top at a size of their own.
   Vue Flow draws only the cards in view (`only-render-visible-elements`), so
   the browser tests count what a side holds after "Show the whole bracket".
-  It tells a card in view by `computedPosition`, where it last drew the card,
-  which only a drawn card's own wrapper updates; so each time Vue Flow takes a
-  layout the bracket sets every card's to where the card now is, and a card
-  moved while undrawn — the page re-centred on another module and back, the
-  bracket laid out at its other size — is drawn wherever the new frame puts
-  it rather than left out of it.
+  It tells a card in view by `computedPosition` and `dimensions`, where it
+  last drew the card and at what size, which only a drawn card's own wrapper
+  updates; so each time Vue Flow takes a layout the bracket gives every card
+  where it now stands, and its size once Vue Flow has measured it (one never
+  drawn is drawn once to be measured, as Vue Flow always does), and a card
+  moved or resized while undrawn — the page re-centred on another module and
+  back, the bracket laid out at its other size — is drawn wherever the new
+  frame puts it rather than left out of it. Each size is laid out only when
+  asked for, and again only for another module, depth or graph: a module's
+  page lays out the size its width gives it, never both.
 - **Inside Module** (`?view=inside`): what the module declares —
   `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
   fields the graph already carries (horizontally on desktop, or vertically on
@@ -2057,8 +2061,9 @@ Facts a code change can invalidate, and the file to check:
   in `RuntimeGraphBlastEffectPreview.vue`, with the hero's spacing in
   `site/content/index.md`; that a chip never names a level past the depth
   shown — `getBracketOffscreen` there; and that Vue Flow culls by a node's
-  `computedPosition` and sets it only while it draws the node, which is why
-  the bracket sets every card's itself each time Vue Flow takes a layout —
+  `computedPosition` and `dimensions` and sets them only while it draws the
+  node, which is why the bracket sets every card's itself each time Vue Flow
+  takes a layout —
   the node wrapper and `getNodesInside` in the installed `@vue-flow/core`, and
   the watcher on `flowNodes` in `ModuleDependencyBracket.vue`
 - The facts the e2e suites cannot read from the running demo — its ports,
