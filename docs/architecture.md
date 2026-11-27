@@ -1104,11 +1104,12 @@ opened from, however much was changed on it:
   and `right` in the query, 3 when they are absent (`DEFAULT_BRACKET_DEPTH`);
   a branch going on past the last level ends in a "+N more" stub that asks
   for one more — a button in the imports' own colour, its connector drawn as
-  the bracket's are, naming in its tooltip the modules it holds back. Every
-  other module is a link to its own page, keeping the
+  the bracket's are, naming in its tooltip the modules it holds back. On a
+  module's page every other module is a link to its own page, keeping the
   depths; the card in the middle, the largest on the canvas, says how many of
   the module's providers and controllers Direct Run can call, and its Direct
-  Run button opens the inside view on the first of them.
+  Run button opens the inside view on the first of them. The landing page
+  draws the same bracket kept in place instead (below).
 
   A canvas narrower than 640px draws the bracket compact, the same bracket
   smaller: narrower cards whose names wrap over two lines between their words
@@ -1148,11 +1149,29 @@ on a provider or controller its module's inside view open on it
 (`module-page-navigation` on `GraphViewer.vue`, which then draws no Direct Run
 drawer; a drag never counts as a click, since Vue Flow reports one only for a
 press that did not move the node). The navigator's own `direct-run-on`, from
-before, is sent on to that target's page. The landing page's hero preview does
-the same through `/view`: its link is `/view?preview=true&module=<name>`, with
-the page's query beside it, and `/view` hands over the preview's graph — the
-static one, or the running demo — as it does for "Open full-screen demo", then
-replaces itself with the module's page, so Back returns to the landing page.
+before, is sent on to that target's page. The landing page's full-graph
+preview does the same through `/view`: its link is
+`/view?preview=true&module=<name>`, with the page's query beside it, and
+`/view` hands over the preview's graph — the static one, or the running demo —
+as it does for "Open full-screen demo", then replaces itself with the module's
+page, so Back returns to the landing page.
+
+The landing page's hero is a module's bracket itself, kept in place:
+`RuntimeGraphBlastEffectPreview.vue` draws `ModuleDependencyBracket.vue` with
+`navigation: { kind: 'in-place' }` on the previews' graph, opening on
+`CustomerModule` (`BLAST_DEMO_MODULE` in `app/utils/landing-blast-demo.ts`),
+the demo module a change to which reaches furthest — nine modules, five levels
+deep — as the line beside it says (`measureBlastRadius`, the bracket's own
+right-side walk). There a stepper or a stub changes a depth and a module card
+re-centres the demo with `recenter`, all in the component's state
+(`useState`, for the document): the address stays `/`, so none of it is a
+step of Back, and Reset returns to the opening module. Its ways out are links
+through the same hand-off — "Open this module in the viewer" and the card's
+Direct Run (`leaveFor`) to `/view?preview=true&module=<name>`, "Open full
+graph" to `/view?preview=true` — so Back returns to the landing page and
+finds the demo as it was left. Its root says `data-ready="true"` only once it
+has a graph and the bracket has said `framed`, which it says when Vue Flow has
+taken the viewport the bracket opens at — a signal, never a timer.
 The documentation's Direct Run preview keeps its drawer
 (`DirectRunDrawer.vue`, the same panel in a drawer). `nuxt.config.ts` renders
 `/view/**` client-side only — neither the tab's session nor the developer's
@@ -1408,8 +1427,8 @@ runs it right after building the payload. The viewer's browser suite
 **Boot sequence.**
 
 ```
-1. The visitor asks for it: "Load Example" on the landing page's hero or
-   Direct Run preview, or on the /view landing card. Nothing else starts it —
+1. The visitor asks for it: "Load Example" on the landing page's full-graph
+   or Direct Run preview, or on the /view landing card. Nothing else starts it —
    not the landing page (/) opening, and not /view or the pages under it on
    arrival (see below)
 2. nodepod-demo store downloads manifest.json, main.js, sources.json, and the
@@ -1442,8 +1461,8 @@ with `nest-graph-inspector export` from the demo project. A missing
 `graph.json` is an inline error in each preview, with "Load Example" still
 offered.
 
-"Load Example" — on the hero preview, the Direct Run preview, and the `/view`
-landing card — is the only thing that runs the demo, and it boots it exactly as
+"Load Example" — on the full-graph preview, the Direct Run preview, and the
+`/view` landing card — is the only thing that runs the demo, and it boots it exactly as
 step 2 onwards describes. Once it is running, every preview on the page draws
 the live graph instead (`useNodepodDemoGraph`, `app/composables/`; the
 decision itself is `resolveDemoPreviewView` in
@@ -1990,6 +2009,11 @@ Facts a code change can invalidate, and the file to check:
   640px — `COMPACT_BELOW_WIDTH` in `ModuleDependencyBracket.vue` — with the
   compact lengths in `METRICS` of `app/utils/module-dependency-bracket.ts`
   that fit both first levels across a 390px phone
+- The module the landing page's blast-effect demo opens on, `CustomerModule` —
+  `BLAST_DEMO_MODULE` in `site/app/utils/landing-blast-demo.ts` (the browser
+  suite's `LANDING_MODULE` mirrors it); and that its `data-ready` waits on the
+  bracket's `framed` — `frameBracket` in `ModuleDependencyBracket.vue`, and
+  `RuntimeGraphBlastEffectPreview.vue`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
