@@ -61,6 +61,24 @@ export type ModulePageLocation = {
   query: Record<string, string>
 }
 
+/**
+ * Where the links of a module's dependency bracket lead.
+ *
+ * - `pages` — the bracket is a module's page in the viewer. Another module is
+ *   a link to its own page, a new step Back returns from; Direct Run is a
+ *   link to this module's inside view, in place of the address.
+ * - `in-place` — the bracket is a demo on a page of its own, which keeps the
+ *   visitor there: another module is asked for with `recenter`, and the
+ *   address is left alone. Direct Run leaves that page for where `leaveFor`
+ *   says, a new step Back returns from.
+ */
+export type BracketNavigation
+  = | { kind: 'pages' }
+    | {
+      kind: 'in-place'
+      leaveFor: (moduleName: string, state: ModulePageStateInput) => ModulePageLocation
+    }
+
 /** A module's page, and what it opens on, before it becomes an address. */
 export type ModulePageTarget = {
   moduleName: string

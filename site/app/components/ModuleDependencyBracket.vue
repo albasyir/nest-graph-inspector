@@ -45,7 +45,12 @@ import {
   type BracketStubNode
 } from '~/utils/module-dependency-bracket'
 import { splitNameIntoWords } from '~/utils/module-name-words'
-import { buildModulePageLocation } from '~/utils/module-page-route'
+import {
+  buildModulePageLocation,
+  type BracketNavigation,
+  type ModulePageLocation
+} from '~/utils/module-page-route'
+import { NuxtLink } from '#components'
 
 /**
  * A module among the others, as a tournament bracket opening both ways: what
@@ -59,20 +64,35 @@ import { buildModulePageLocation } from '~/utils/module-page-route'
  * module under the pointer or the keyboard, for a cycle whose label is
  * pointed at or pressed, or for all of them at once from the legend.
  *
- * Every other module on the canvas is a link to its own page, keeping the
- * depths asked for; a stub where a branch goes on asks for one more level on
- * its side, as the steppers above the canvas do. The page owns the address,
- * so a new depth is asked for with `depthChange` rather than set here.
+ * On a module's page every other module on the canvas is a link to its own
+ * page, keeping the depths asked for; kept in place — the landing page's
+ * demo — it asks for that module in the middle with `recenter` instead (see
+ * `BracketNavigation`). A stub where a branch goes on asks for one more level
+ * on its side, as the steppers above the canvas do. Whoever holds the bracket
+ * owns its depths, so a new one is asked for with `depthChange` rather than
+ * set here.
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   graphData: GraphOutput
   moduleName: string
-  /** The depths the page's address asks for, each side its own. */
+  /** The depths asked for, each side its own: by a page's address, or by its host. */
   depth: Record<BracketSide, number>
-}>()
+  /** Where the bracket's links lead: `pages` on a module's page, the default. */
+  navigation?: BracketNavigation
+}>(), {
+  navigation: () => ({ kind: 'pages' })
+})
 
 const emit = defineEmits<{
   depthChange: [side: BracketSide, depth: number]
+  /** In place: the reader asked for another module in the middle. */
+  recenter: [moduleName: string]
+  /**
+   * The bracket on screen is framed: the viewport is where the bracket opens,
+   * set once Vue Flow could take it — after mounting, and again whenever a
+   * change frames it afresh.
+   */
+  framed: []
 }>()
 
 const flowId = `module-bracket-${useId()}`
@@ -303,20 +323,34 @@ const hasTwins = computed(() =>
  * Another module's page, keeping the depths asked for here: a place of its
  * own, which Back returns from to this one.
  */
-function recenterOn(node: BracketModuleNode) {
+function recenterOn(node: BracketModuleNode): ModulePageLocation {
   return buildModulePageLocation(node.moduleName, { depth: props.depth })
 }
 
+/** What a module card is: a link to its own page, or — in place — a button asking for it in the middle. */
+type ModuleCardAttrs
+  = | { to: ModulePageLocation }
+    | { type: 'button', onClick: () => void }
+
+function moduleCardAttrs(node: BracketModuleNode): ModuleCardAttrs {
+  return props.navigation.kind === 'in-place'
+    ? { type: 'button', onClick: () => emit('recenter', node.moduleName) }
+    : { to: recenterOn(node) }
+}
+
 /**
- * The inside view of the module in the middle, Direct Run open on its first
- * target: the same module, so it replaces the address, as the page's own view
- * switch does.
+ * Direct Run on the module in the middle, open on its first target. On its
+ * page that is the same module's inside view, so it replaces the address, as
+ * the page's own view switch does; in place it leaves for where the host
+ * says, a step Back returns from.
  */
-function directRunLocation(node: BracketCenterNode) {
-  return buildModulePageLocation(node.moduleName, {
-    depth: props.depth,
-    directRunOn: node.stats.runnableNodeIds[0] ?? null
-  })
+function directRunLink(node: BracketCenterNode): { to: ModulePageLocation, replace: boolean } {
+  const state = { depth: props.depth, directRunOn: node.stats.runnableNodeIds[0] ?? null }
+  const navigation = props.navigation
+
+  return navigation.kind === 'in-place'
+    ? { to: navigation.leaveFor(node.moduleName, state), replace: false }
+    : { to: buildModulePageLocation(node.moduleName, state), replace: true }
 }
 
 function stepDepth(side: BracketSide, by: number, isAllowed: boolean): void {
@@ -400,6 +434,9 @@ async function frameBracket(): Promise<void> {
   const isFramed = await setViewport(getBracketFrame(current, canvas.value))
   if (isCurrent()) {
     isFramePending = !isFramed
+    if (isFramed) {
+      emit('framed')
+    }
   }
 }
 
@@ -759,8 +796,7 @@ const isLegendOpen = ref(false)
             <!-- No icon: its words alone fill the card's width. -->
             <UButton
               v-if="data.stats.runnableNodeIds.length"
-              :to="directRunLocation(data)"
-              replace
+              v-bind="directRunLink(data)"
               color="neutral"
               variant="solid"
               block
@@ -827,8 +863,7 @@ const isLegendOpen = ref(false)
             </dl>
             <UButton
               v-if="data.stats.runnableNodeIds.length"
-              :to="directRunLocation(data)"
-              replace
+              v-bind="directRunLink(data)"
               color="neutral"
               variant="solid"
               block
@@ -874,8 +909,9 @@ const isLegendOpen = ref(false)
             type="source"
             :position="Position.Left"
           />
-          <NuxtLink
-            :to="recenterOn(data)"
+          <component
+            :is="props.navigation.kind === 'in-place' ? 'button' : NuxtLink"
+            v-bind="moduleCardAttrs(data)"
             class="module-bracket-module"
             :class="[`module-bracket-module--${data.side}`, {
               'module-bracket-module--active': activeNodeIds.has(data.id),
@@ -922,7 +958,7 @@ const isLegendOpen = ref(false)
                 <span class="sr-only">— {{ describeTwin(data) }}</span>
               </span>
             </span>
-          </NuxtLink>
+          </component>
           <Handle
             id="right-target"
             type="target"
@@ -1545,6 +1581,8 @@ const isLegendOpen = ref(false)
   color: var(--ui-text-highlighted);
   font-size: 14px;
   font-weight: 600;
+  /* A card kept in place is a button, which would centre its name. */
+  text-align: start;
   text-decoration: none;
   cursor: pointer;
   transition:
