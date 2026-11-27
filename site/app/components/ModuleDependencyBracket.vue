@@ -107,7 +107,18 @@ const emit = defineEmits<{
 
 const flowId = `module-bracket-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
-const { viewport, dimensions, nodes, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
+const {
+  viewport,
+  dimensions,
+  nodes,
+  setNodes,
+  setEdges,
+  setViewport,
+  viewportHelper,
+  zoomIn,
+  zoomOut,
+  fitView
+} = useVueFlow(flowId)
 
 /** The strip of column headings pinned across the top of the canvas. */
 const HEADINGS_HEIGHT = 32
@@ -293,15 +304,17 @@ const flowNodes = computed<FlowNode[]>(() =>
     }))
 )
 
-// Vue Flow draws only the cards in view, and tells them by `computedPosition`
-// and `dimensions` — where it last drew each one, and at what size — which
-// only a drawn card's own wrapper updates. A card moved or resized while
-// undrawn — the page re-centred on another module and back, the bracket laid
-// out at its other size — would stay undrawn wherever it now stands, its
-// place in the frame left empty. So once Vue Flow has taken a layout, every
-// card is given where it now stands, and its size if Vue Flow has measured it
-// before; one never drawn has no size yet, and is drawn once to be measured.
-watch(flowNodes, () => {
+/**
+ * Vue Flow draws only the cards in view, and tells them by `computedPosition`
+ * and `dimensions` — where it last drew each one, and at what size — which
+ * only a drawn card's own wrapper updates. A card moved or resized while
+ * undrawn — the page re-centred on another module and back, the bracket laid
+ * out at its other size — would stay undrawn wherever it now stands, its
+ * place in the frame left empty. So once Vue Flow has a layout, every card is
+ * given where it now stands, and its size if Vue Flow has measured it before;
+ * one never drawn has no size yet, and is drawn once to be measured.
+ */
+function placeEveryCard(): void {
   for (const node of nodes.value) {
     const card = nodeById.value.get(node.id)
     if (!card) {
@@ -318,7 +331,7 @@ watch(flowNodes, () => {
       node.dimensions = { width, height }
     }
   }
-}, { flush: 'post' })
+}
 
 /** What a test, or a stylesheet, can tell a node by. */
 function getNodeAttributes(node: BracketNode): Record<string, string> {
@@ -369,6 +382,22 @@ const flowEdges = computed<FlowEdge[]>(() =>
     }
   })
 )
+
+// Vue Flow is handed the bracket here rather than through its `nodes` and
+// `edges` props: after each update, a prop's watcher stands still until the
+// next tick, so a layout following another inside it — the canvas measured
+// as the bracket opens and the bracket laid out at its other size — would be
+// dropped, and the canvas would keep the first one for good. The cards go in
+// before the connectors that name them, and are placed as soon as they are in.
+watch([flowNodes, flowEdges], ([nextNodes, nextEdges], [previousNodes, previousEdges]) => {
+  if (nextNodes !== previousNodes) {
+    setNodes(nextNodes)
+    placeEveryCard()
+  }
+  if (nextEdges !== previousEdges) {
+    setEdges(nextEdges)
+  }
+}, { immediate: true })
 
 type EdgeStroke = { stroke: string, strokeWidth: number, strokeDasharray?: string }
 
@@ -801,8 +830,6 @@ const isLegendOpen = ref(false)
     >
       <VueFlow
         :id="flowId"
-        :nodes="flowNodes"
-        :edges="flowEdges"
         :nodes-draggable="false"
         :nodes-connectable="false"
         :elements-selectable="false"

@@ -1140,9 +1140,14 @@ opened from, however much was changed on it:
   drawn is drawn once to be measured, as Vue Flow always does), and a card
   moved or resized while undrawn — the page re-centred on another module and
   back, the bracket laid out at its other size — is drawn wherever the new
-  frame puts it rather than left out of it. Each size is laid out only when
-  asked for, and again only for another module, depth or graph: a module's
-  page lays out the size its width gives it, never both, and only the landing
+  frame puts it rather than left out of it. Vue Flow is handed the bracket
+  with `setNodes` and `setEdges`, not through its `nodes` and `edges` props:
+  after each update a prop's watcher stands still until the next tick, so a
+  layout following another inside it — the canvas measured as the bracket
+  opens and the bracket laid out at its other size — would be dropped, the
+  canvas keeping the first for good. Each size is laid out only when asked
+  for, and again only for another module, depth or graph: a module's page
+  lays out the size its width gives it, never both, and only the landing
   demo, framed whole, lays out both to pick between them.
 - **Inside Module** (`?view=inside`): what the module declares —
   `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
@@ -2065,12 +2070,14 @@ Facts a code change can invalidate, and the file to check:
   a 1440×900 first screen, `calc(100svh - 28.5rem)` between 27rem and 32rem,
   in `RuntimeGraphBlastEffectPreview.vue`, with the hero's spacing in
   `site/content/index.md`; that a chip never names a level past the depth
-  shown — `getBracketOffscreen` there; and that Vue Flow culls by a node's
+  shown — `getBracketOffscreen` there; that Vue Flow culls by a node's
   `computedPosition` and `dimensions` and sets them only while it draws the
-  node, which is why the bracket sets every card's itself each time Vue Flow
-  takes a layout —
-  the node wrapper and `getNodesInside` in the installed `@vue-flow/core`, and
-  the watcher on `flowNodes` in `ModuleDependencyBracket.vue`
+  node, which is why the bracket sets every card's itself each time it hands
+  Vue Flow a layout; and that Vue Flow's `nodes` and `edges` prop watchers
+  stand still for a tick after each update, which is why it hands them over
+  with `setNodes` and `setEdges` — the node wrapper, `getNodesInside` and
+  `useWatchProps` in the installed `@vue-flow/core`, and `placeEveryCard` and
+  the watcher on `flowNodes` and `flowEdges` in `ModuleDependencyBracket.vue`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
