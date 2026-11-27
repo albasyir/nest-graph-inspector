@@ -46,15 +46,87 @@ export const FIRST_LEVELS_INSET = 4
 const EDGE_TOLERANCE = 1
 
 /**
- * The frame a bracket opens at. All of it, centred, when it fits at a zoom
- * its names read at — never enlarged past its own size. Otherwise a compact
- * bracket opens on its module and the first level of each side across the
- * canvas (`frameFirstLevels`), and a regular one on its module, centred, at
- * its `READABLE_ZOOM`; the canvas then holds as much of the bracket as it can,
- * so a side with less to show never leaves part of the canvas empty while the
- * other side runs off it.
+ * How a bracket opens on its canvas.
+ *
+ * - `focus` — a module's page: all of it when it fits at a zoom its names
+ *   read at, otherwise on its module, the rest a chip away.
+ * - `whole` — a demo showing what a change reaches: all of it, every card
+ *   and stub, wherever it fits at a zoom its names read at, at either size
+ *   (`pickWholeFrameBracket`); where it fits at neither, as `focus`.
  */
-export function getBracketFrame(bracket: ModuleDependencyBracket, canvas: BracketCanvas): BracketViewport {
+export type BracketFraming = 'focus' | 'whole'
+
+/** Room left between the canvas edges and a bracket framed whole. */
+export const WHOLE_FRAME_PADDING = 16
+
+/**
+ * The largest zoom a whole frame draws at. A regular bracket keeps to its own
+ * size; a compact one may grow to 1.2 — its 11.5px names to 13.8px, short of
+ * a regular bracket's own 14px.
+ */
+export const WHOLE_FRAME_MAX_ZOOM: Readonly<Record<BracketSize, number>> = {
+  regular: FRAME_MAX_ZOOM,
+  compact: 1.2
+}
+
+/**
+ * The zoom a bracket fits whole at: what it draws filling the canvas below
+ * its pinned headings, `WHOLE_FRAME_PADDING` clear of every edge.
+ */
+function getWholeFitZoom(bracket: ModuleDependencyBracket, canvas: BracketCanvas): number {
+  const { drawnBounds } = bracket
+  const width = Math.max(1, canvas.width - WHOLE_FRAME_PADDING * 2)
+  const height = Math.max(1, canvas.height - canvas.top - WHOLE_FRAME_PADDING * 2)
+  return Math.min(width / drawnBounds.width, height / drawnBounds.height)
+}
+
+/**
+ * Whether a bracket framed whole on `canvas` draws its module names at a
+ * size to read: at its `READABLE_ZOOM` or more — 11px or more for a compact
+ * bracket's names, 12.6px or more for a regular one's.
+ */
+export function fitsWhole(bracket: ModuleDependencyBracket, canvas: BracketCanvas): boolean {
+  return getWholeFitZoom(bracket, canvas) >= READABLE_ZOOM[bracket.size]
+}
+
+/**
+ * Of one bracket laid out at each size, the one a whole frame draws on
+ * `canvas`: the first, in the order given — the regular one before the
+ * compact one — that fits whole at a zoom its names read at; `null` when none
+ * does, and the bracket opens in focus.
+ */
+export function pickWholeFrameBracket(
+  brackets: readonly ModuleDependencyBracket[],
+  canvas: BracketCanvas
+): ModuleDependencyBracket | null {
+  return brackets.find(bracket => fitsWhole(bracket, canvas)) ?? null
+}
+
+/**
+ * The frame a bracket opens at.
+ *
+ * Framed `whole` where it fits whole at a zoom its names read at: everything
+ * drawn, centred below the pinned headings, as large as fits up to
+ * `WHOLE_FRAME_MAX_ZOOM` — nothing past an edge, so no chip and no card drawn
+ * back. Otherwise, and always in `focus`: all of it, centred, when it fits at
+ * a zoom its names read at — never enlarged past its own size. Otherwise a
+ * compact bracket opens on its module and the first level of each side across
+ * the canvas (`frameFirstLevels`), and a regular one on its module, centred,
+ * at its `READABLE_ZOOM`; the canvas then holds as much of the bracket as it
+ * can, so a side with less to show never leaves part of the canvas empty while
+ * the other side runs off it.
+ */
+export function getBracketFrame(
+  bracket: ModuleDependencyBracket,
+  canvas: BracketCanvas,
+  framing: BracketFraming = 'focus'
+): BracketViewport {
+  if (framing === 'whole' && fitsWhole(bracket, canvas)) {
+    const { drawnBounds } = bracket
+    const zoom = Math.min(getWholeFitZoom(bracket, canvas), WHOLE_FRAME_MAX_ZOOM[bracket.size])
+    return centreOn(drawnBounds.x + drawnBounds.width / 2, drawnBounds.y + drawnBounds.height / 2, zoom, canvas)
+  }
+
   const { bounds } = bracket
   const room = getRoom(canvas)
   const readableZoom = READABLE_ZOOM[bracket.size]

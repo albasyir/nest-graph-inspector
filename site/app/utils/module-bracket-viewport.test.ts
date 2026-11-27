@@ -5,6 +5,9 @@ import {
   FRAME_MAX_ZOOM,
   FRAME_PADDING,
   READABLE_ZOOM,
+  WHOLE_FRAME_MAX_ZOOM,
+  WHOLE_FRAME_PADDING,
+  fitsWhole,
   formatLevelRange,
   getBracketFrame,
   getBracketLevelHeaders,
@@ -12,6 +15,7 @@ import {
   getCutCardIds,
   getLevelRevealViewport,
   getVerticalRevealViewport,
+  pickWholeFrameBracket,
   type BracketCanvas,
   type BracketViewport
 } from './module-bracket-viewport.ts'
@@ -240,6 +244,57 @@ describe('module bracket viewport', () => {
     assert.ok(stub)
     assert.ok(isWhollyInView(stub, revealed, PHONE))
     assert.equal(getBracketOffscreen(bracket, revealed, PHONE).stubModules.left, 0)
+  })
+
+  test('framed whole, a bracket that reads whole opens with every card and stub inside the canvas, below its headings', () => {
+    const bracket = build(CHAIN, 'M5', DEFAULT_BRACKET_DEPTH, 'compact')
+    assert.ok(fitsWhole(bracket, DESKTOP))
+    const frame = getBracketFrame(bracket, DESKTOP, 'whole')
+
+    assert.ok(frame.zoom >= READABLE_ZOOM.compact && frame.zoom <= WHOLE_FRAME_MAX_ZOOM.compact, `zoom ${frame.zoom}`)
+    const drawn = bracket.nodes.filter(node => node.kind !== 'level')
+    assert.ok(drawn.some(node => node.kind === 'stub'))
+    for (const node of drawn) {
+      const box = onScreen(node, frame)
+      assert.ok(
+        box.left >= WHOLE_FRAME_PADDING - 1
+        && box.right <= DESKTOP.width - WHOLE_FRAME_PADDING + 1
+        && box.top >= DESKTOP.top + WHOLE_FRAME_PADDING - 1
+        && box.bottom <= DESKTOP.height - WHOLE_FRAME_PADDING + 1,
+        `${node.id} is inside the canvas, below its headings`
+      )
+    }
+    assert.deepEqual(getBracketOffscreen(bracket, frame, DESKTOP), NOTHING_OFFSCREEN)
+    assert.equal(getCutCardIds(bracket, frame, DESKTOP).size, 0)
+  })
+
+  test('framed whole, the regular bracket is drawn where it reads whole, else the compact one, else neither', () => {
+    const pair = graph({ A: ['B'], B: [] })
+    const regular = build(pair, 'A')
+    const compact = build(pair, 'A', DEFAULT_BRACKET_DEPTH, 'compact')
+    assert.equal(pickWholeFrameBracket([regular, compact], DESKTOP), regular)
+
+    // Four levels each side: too wide whole at a regular size, not at a compact one.
+    const chainRegular = build(CHAIN, 'M5')
+    const chainCompact = build(CHAIN, 'M5', DEFAULT_BRACKET_DEPTH, 'compact')
+    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], DESKTOP), chainCompact)
+    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], PHONE), null)
+  })
+
+  test('framed whole, a bracket that reads whole at neither size opens in focus, as a module page opens it', () => {
+    const chain = build(CHAIN, 'M5')
+    assert.equal(fitsWhole(chain, DESKTOP), false)
+    assert.deepEqual(getBracketFrame(chain, DESKTOP, 'whole'), getBracketFrame(chain, DESKTOP))
+
+    const compactChain = build(CHAIN, 'M5', DEFAULT_BRACKET_DEPTH, 'compact')
+    assert.deepEqual(getBracketFrame(compactChain, PHONE, 'whole'), getBracketFrame(compactChain, PHONE))
+  })
+
+  test('a whole frame enlarges a small bracket only to its cap: a compact one past its own size, a regular one never', () => {
+    const pair = graph({ A: ['B'], B: [] })
+    const roomy: BracketCanvas = { width: 2400, height: 1400, top: 32 }
+    assert.equal(getBracketFrame(build(pair, 'A', DEFAULT_BRACKET_DEPTH, 'compact'), roomy, 'whole').zoom, WHOLE_FRAME_MAX_ZOOM.compact)
+    assert.equal(getBracketFrame(build(pair, 'A'), roomy, 'whole').zoom, WHOLE_FRAME_MAX_ZOOM.regular)
   })
 
   test('on a desktop a reveal brings in every level cut off that fits, the furthest against the edge', () => {

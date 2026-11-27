@@ -1013,6 +1013,28 @@ function syntheticGraph(count: number): BracketGraph {
   return graph(imports, { root: name(0, 0) })
 }
 
+describe('drawn bounds', () => {
+  test('hold every card, stub and route the canvas draws, inside the bounds, the column headings left out', () => {
+    for (const { bracket, where } of everyShopBracket()) {
+      const { bounds, drawnBounds } = bracket
+      const inside = (rect: { x: number, y: number, width: number, height: number }, outer: typeof bounds) =>
+        rect.x >= outer.x - 0.5
+        && rect.y >= outer.y - 0.5
+        && rect.x + rect.width <= outer.x + outer.width + 0.5
+        && rect.y + rect.height <= outer.y + outer.height + 0.5
+
+      assert.ok(inside(drawnBounds, bounds), `${where}: drawn bounds within the bounds`)
+      for (const node of bracket.nodes.filter(candidate => candidate.kind !== 'level')) {
+        assert.ok(inside({ ...node.position, width: node.width, height: node.height }, drawnBounds), `${node.id} in ${where}`)
+      }
+    }
+
+    // A side with modules has headings above them, which only the bounds hold.
+    const bracket = build(SHOP, 'CustomerModule')
+    assert.ok(bracket.drawnBounds.height < bracket.bounds.height)
+  })
+})
+
 describe('blast radius', () => {
   test('counts every module a change reaches, however far, each once', () => {
     // AppModule, AuthModule and CustomerLoyaltyModule import it; OrderModule

@@ -28,6 +28,7 @@
 import type { GraphOutput } from 'nest-graph-inspector'
 import { findDirectRunTarget } from './direct-run-provider.ts'
 import { getModuleNodeId } from './graph-viewer-focus.ts'
+import type { BracketFraming } from './module-bracket-viewport.ts'
 import { DEFAULT_BRACKET_DEPTH, type BracketSide } from './module-dependency-bracket.ts'
 import { encodeModuleId } from './module-id.ts'
 import {
@@ -70,13 +71,16 @@ export type ModulePageLocation = {
  * - `in-place` — the bracket is a demo on a page of its own, which keeps the
  *   visitor there: another module is asked for with `recenter`, and the
  *   address is left alone. Direct Run leaves that page for where `leaveFor`
- *   says, a new step Back returns from.
+ *   says, a new step Back returns from. `framing` says how it opens: `whole`
+ *   shows all of it wherever that reads, which only a demo asks for — a
+ *   module's page always opens in focus.
  */
 export type BracketNavigation
   = | { kind: 'pages' }
     | {
       kind: 'in-place'
       leaveFor: (moduleName: string, state: ModulePageStateInput) => ModulePageLocation
+      framing: BracketFraming
     }
 
 /** A module's page, and what it opens on, before it becomes an address. */

@@ -208,6 +208,12 @@ export type ModuleDependencyBracket = {
   sides: Record<BracketSide, BracketSideSummary>
   /** Everything drawn, edges and their labels included: what a fit frames. */
   bounds: CircularEdgeRect
+  /**
+   * The same without the column headings, which a canvas pins across its
+   * top instead of drawing them over their columns: what a frame showing the
+   * whole bracket fits below those pinned headings.
+   */
+  drawnBounds: CircularEdgeRect
 }
 
 /**
@@ -499,7 +505,8 @@ export function buildModuleDependencyBracket(
     nodes,
     edges,
     sides: { left: left.summary, right: right.summary },
-    bounds: getBracketBounds(nodes, edges, routePoints, m)
+    bounds: getBracketBounds(nodes, edges, routePoints, m),
+    drawnBounds: getBracketBounds(nodes.filter(node => node.kind !== 'level'), edges, routePoints, m)
   }
 }
 

@@ -55,11 +55,14 @@ const isAtStart = computed(() => isBlastDemoAtStart(state.value))
 /**
  * In place: another module is put in the middle here, and Direct Run leaves
  * for the module's page through `/view`, which hands it the demo's graph —
- * the way the full graph's previews open a module.
+ * the way the full graph's previews open a module. Framed whole: everything a
+ * change reaches at the depth shown is on screen at once wherever its names
+ * still read — a desktop — and a phone opens on the module, as its page does.
  */
 const navigation: BracketNavigation = {
   kind: 'in-place',
-  leaveFor: buildPreviewModulePageLocation
+  leaveFor: buildPreviewModulePageLocation,
+  framing: 'whole'
 }
 
 /** The module in the middle, opened on its own page in the viewer as the demo shows it. */
@@ -72,8 +75,9 @@ const moduleLocation = computed(() =>
 /**
  * Whether the bracket on screen has been framed: set by the bracket's own
  * `framed`, once Vue Flow has taken the viewport it opens at, and cleared by
- * anything that frames it afresh. With a graph to draw, it is what the root's
- * `data-ready` says — a signal from the canvas, never a timer.
+ * its `framing` and by anything here that frames it afresh. With a graph to
+ * draw, it is what the root's `data-ready` says — a signal from the canvas,
+ * never a timer.
  */
 const isFramed = ref(false)
 watch(
@@ -175,6 +179,7 @@ function reset(): void {
           :navigation="navigation"
           @recenter="recenter"
           @depth-change="setDepth"
+          @framing="isFramed = false"
           @framed="isFramed = true"
         />
         <div
@@ -304,12 +309,14 @@ function reset(): void {
 
 /*
  * The bracket fills the panel: its depth steppers, the canvas, and its key.
- * Tall enough on a desktop for the module and its whole first level each
- * side at a size their names read at.
+ * On a desktop it takes what the first screen has left below the hero — the
+ * whole panel on screen at 1440×900 — and never less than the height at
+ * which the opening module's whole bracket still draws its names at 11px or
+ * more (27rem); a taller screen gets up to 32rem.
  */
 .blast-demo__panel {
   grid-area: panel;
-  height: clamp(24rem, 50vh, 30rem);
+  height: clamp(27rem, calc(100svh - 28.5rem), 32rem);
   overflow: hidden;
   border: 1px solid var(--ui-border);
   border-radius: 12px;
@@ -323,7 +330,7 @@ function reset(): void {
       "text actions"
       "panel panel";
     align-items: end;
-    gap: 16px 24px;
+    gap: 12px 24px;
   }
 }
 

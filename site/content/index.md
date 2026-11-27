@@ -8,7 +8,9 @@ seo:
 ---
 orientation: vertical
 ui:
-  container: py-12 sm:py-14 lg:py-14 gap-8 sm:gap-y-8
+  container: py-8 sm:py-10 lg:py-8 gap-6 sm:gap-y-6
+  description: mt-4
+  footer: mt-6
 ---
 #top
 :hero-background

@@ -30,7 +30,9 @@ import {
   getCutCardIds,
   getLevelRevealViewport,
   getVerticalRevealViewport,
+  pickWholeFrameBracket,
   type BracketCanvas,
+  type BracketFraming,
   type BracketViewport
 } from '~/utils/module-bracket-viewport'
 import { createDeepDiveFitTracker } from '~/utils/module-deep-dive'
@@ -42,7 +44,9 @@ import {
   type BracketModuleNode,
   type BracketNode,
   type BracketSide,
-  type BracketStubNode
+  type BracketSize,
+  type BracketStubNode,
+  type ModuleDependencyBracket
 } from '~/utils/module-dependency-bracket'
 import { splitNameIntoWords } from '~/utils/module-name-words'
 import {
@@ -87,6 +91,8 @@ const emit = defineEmits<{
   depthChange: [side: BracketSide, depth: number]
   /** In place: the reader asked for another module in the middle. */
   recenter: [moduleName: string]
+  /** A frame is on its way: what is on screen may not be where the bracket opens. */
+  framing: []
   /**
    * The bracket on screen is framed: the viewport is where the bracket opens,
    * set once Vue Flow could take it — after mounting, and again whenever a
@@ -97,6 +103,28 @@ const emit = defineEmits<{
 
 const flowId = `module-bracket-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
+const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
+
+/** The strip of column headings pinned across the top of the canvas. */
+const HEADINGS_HEIGHT = 32
+const canvas = computed<BracketCanvas>(() => ({
+  width: dimensions.value.width,
+  height: dimensions.value.height,
+  top: HEADINGS_HEIGHT
+}))
+const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
+
+/**
+ * How the bracket opens: whole only where a host keeps it in place and asks.
+ * Framed whole, every card is drawn, not only those in view: such a bracket
+ * is a small demo meant to be seen all at once, and Vue Flow keeps a card it
+ * has not drawn where it last placed it (`computedPosition` is set by a drawn
+ * node only), so a card moved while undrawn — the bracket laid out again at
+ * the other size, say — would never be drawn where it now stands.
+ */
+const framing = computed<BracketFraming>(() =>
+  props.navigation.kind === 'in-place' ? props.navigation.framing : 'focus'
+)
 
 /**
  * Below this width a canvas draws the bracket compact — narrower cards,
@@ -106,17 +134,41 @@ const containerRef = ref<HTMLElement | null>(null)
 const COMPACT_BELOW_WIDTH = 640
 const isPhone = useMediaQuery('(max-width: 639.98px)')
 const { width: canvasWidth } = useElementSize(containerRef)
-/** Until the canvas is measured, the window says. */
-const isCompact = computed(() =>
-  canvasWidth.value > 0 ? canvasWidth.value < COMPACT_BELOW_WIDTH : isPhone.value
+/** The size the canvas's width gives the bracket; until it is measured, the window says. */
+const widthSize = computed<BracketSize>(() =>
+  (canvasWidth.value > 0 ? canvasWidth.value < COMPACT_BELOW_WIDTH : isPhone.value) ? 'compact' : 'regular'
 )
 
-const bracket = computed(() => buildModuleDependencyBracket({
-  graph: props.graphData,
-  center: props.moduleName,
-  depth: props.depth,
-  size: isCompact.value ? 'compact' : 'regular'
-}))
+function layOut(size: BracketSize): ModuleDependencyBracket | null {
+  return buildModuleDependencyBracket({
+    graph: props.graphData,
+    center: props.moduleName,
+    depth: props.depth,
+    size
+  })
+}
+
+const widthBracket = computed(() => layOut(widthSize.value))
+
+/**
+ * Framed whole, the bracket at a size it reads whole at on this canvas — the
+ * regular one when it does, else the compact one — or none, and it opens in
+ * focus at the size the canvas's width gives it. A module's page never lays
+ * a bracket out twice.
+ */
+const wholeBracket = computed(() => {
+  if (framing.value !== 'whole' || !hasCanvas.value) {
+    return null
+  }
+
+  const regular = widthSize.value === 'regular' ? widthBracket.value : layOut('regular')
+  const compact = widthSize.value === 'compact' ? widthBracket.value : layOut('compact')
+  const laidOut = [regular, compact].filter((candidate): candidate is ModuleDependencyBracket => candidate !== null)
+  return pickWholeFrameBracket(laidOut, canvas.value)
+})
+
+const bracket = computed(() => wholeBracket.value ?? widthBracket.value)
+const isCompact = computed(() => bracket.value?.size === 'compact')
 
 const nodeById = computed(() =>
   new Map<string, BracketNode>((bracket.value?.nodes ?? []).map(node => [node.id, node]))
@@ -401,37 +453,31 @@ function getCycleLabelStyle(edge: BracketEdge): CSSProperties {
 }
 
 // Framing. A bracket opens on its module at a zoom its names read at — all
-// of it when that fits — and what the canvas cuts off is a chip away.
+// of it when that fits — and what the canvas cuts off is a chip away; kept in
+// place to be framed whole, it opens on all of it wherever that reads.
 
-const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
 const fitTracker = createDeepDiveFitTracker()
 const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-/** The strip of column headings pinned across the top of the canvas. */
-const HEADINGS_HEIGHT = 32
 const REVEAL_DURATION_MS = 280
 let isFramePending = true
-
-const canvas = computed<BracketCanvas>(() => ({
-  width: dimensions.value.width,
-  height: dimensions.value.height,
-  top: HEADINGS_HEIGHT
-}))
-const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
 
 /**
  * Frames the bracket. Until Vue Flow's viewport exists a frame does nothing,
  * so it stays owed and is made the moment the viewport is ready; a newer
- * frame supersedes one still running.
+ * frame supersedes one still running. It says `framing` as it starts — what
+ * is on screen may not be this frame — and `framed` once Vue Flow has taken
+ * it.
  */
 async function frameBracket(): Promise<void> {
   const isCurrent = fitTracker.begin()
   isFramePending = true
+  emit('framing')
   const current = bracket.value
   if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value) {
     return
   }
 
-  const isFramed = await setViewport(getBracketFrame(current, canvas.value))
+  const isFramed = await setViewport(getBracketFrame(current, canvas.value, framing.value))
   if (isCurrent()) {
     isFramePending = !isFramed
     if (isFramed) {
@@ -589,7 +635,7 @@ function followEdgeChip(chip: EdgeChip): void {
 
   if (chip.kind === 'middle') {
     fitTracker.reset()
-    void setViewport(getBracketFrame(current, canvas.value), panOptions())
+    void setViewport(getBracketFrame(current, canvas.value, framing.value), panOptions())
     return
   }
 
@@ -712,7 +758,7 @@ const isLegendOpen = ref(false)
         :elements-selectable="false"
         :nodes-focusable="false"
         :edges-focusable="false"
-        only-render-visible-elements
+        :only-render-visible-elements="framing === 'focus'"
         :min-zoom="0.05"
         :max-zoom="1.5"
         :zoom-on-double-click="false"
