@@ -90,32 +90,32 @@ export function isControllerEdge(source: string, target: string): boolean {
 }
 
 /**
- * Whether an edge is drawn while no bright line is lit.
+ * Whether an edge is drawn, given the viewer's line settings.
  *
- * `isNormallyVisible` is what the toggle governing the edge says. An edge with
+ * `isShownBySetting` is what the setting governing the edge says. An edge with
  * a controller at either end must also pass "Show controller lines", whichever
  * way it points. So must one that names `relationship: 'controller'`, such as
  * a controller's dependency drawn onto the collapsed module hiding it; naming
  * any other relationship never exempts an edge with a controller end. Edges
- * with neither are untouched by that toggle.
+ * with neither are untouched by that setting.
  */
-export function isEdgeNormallyVisible({
+export function isEdgeVisible({
   source,
   target,
-  isNormallyVisible,
+  isShownBySetting,
   showControllerLines,
   relationship
 }: {
   source: string
   target: string
-  isNormallyVisible: boolean
+  isShownBySetting: boolean
   showControllerLines: boolean
   relationship?: EdgeRelationship
 }): boolean {
   const isControllerLine
     = relationship === 'controller' || isControllerEdge(source, target)
 
-  return isNormallyVisible && (!isControllerLine || showControllerLines)
+  return isShownBySetting && (!isControllerLine || showControllerLines)
 }
 
 /** The colour an edge of this relationship is drawn in. */

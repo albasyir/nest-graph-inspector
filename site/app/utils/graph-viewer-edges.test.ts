@@ -9,7 +9,7 @@ import {
   getEdgeColor,
   getEdgeRelationClass,
   isControllerEdge,
-  isEdgeNormallyVisible,
+  isEdgeVisible,
   pickModuleEdgeHandles,
   placeDependencyEdge,
   resolveEdgeRelationship,
@@ -250,7 +250,7 @@ describe('isControllerEdge', () => {
   })
 })
 
-describe('isEdgeNormallyVisible', () => {
+describe('isEdgeVisible', () => {
   const controllerToProvider = {
     source: 'controller-UserModule-UserController',
     target: 'provider-UserModule-UserService'
@@ -258,9 +258,9 @@ describe('isEdgeNormallyVisible', () => {
 
   test('hiding controller lines hides a controller-to-provider edge its own toggle shows', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         ...controllerToProvider,
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       false
@@ -269,10 +269,10 @@ describe('isEdgeNormallyVisible', () => {
 
   test('hiding controller lines hides a provider-to-controller edge too', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'provider-UserModule-UserService',
         target: 'controller-UserModule-UserController',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       false
@@ -281,17 +281,17 @@ describe('isEdgeNormallyVisible', () => {
 
   test('showing controller lines leaves the edge to its own toggle', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         ...controllerToProvider,
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: true
       }),
       true
     )
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         ...controllerToProvider,
-        isNormallyVisible: false,
+        isShownBySetting: false,
         showControllerLines: true
       }),
       false
@@ -300,10 +300,10 @@ describe('isEdgeNormallyVisible', () => {
 
   test('the controller toggle never hides an edge without a controller', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'provider-UserModule-UserRepository',
         target: 'provider-UserModule-UserService',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       true
@@ -315,21 +315,21 @@ describe('isEdgeNormallyVisible', () => {
   // still says a controller is involved.
   test('the controller toggle governs an edge that names a controller relationship', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'provider-PaymentModule-PaymentService',
         target: 'module-OrderModule',
         relationship: 'controller',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       false
     )
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'provider-PaymentModule-PaymentService',
         target: 'module-OrderModule',
         relationship: 'controller',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: true
       }),
       true
@@ -338,11 +338,11 @@ describe('isEdgeNormallyVisible', () => {
 
   test('naming another relationship never exempts an edge with a controller end', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'controller-PaymentModule-PaymentController',
         target: 'module-OrderModule',
         relationship: 'provider',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       false
@@ -351,11 +351,11 @@ describe('isEdgeNormallyVisible', () => {
 
   test('the controller toggle never hides a provider edge between two collapsed modules', () => {
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         source: 'module-PaymentModule',
         target: 'module-OrderModule',
         relationship: 'provider',
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       true
@@ -452,17 +452,17 @@ describe('placeDependencyEdge', () => {
     }
     assert.equal(resolveEdgeRelationship(edge), 'controller')
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         ...edge,
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: false
       }),
       false
     )
     assert.equal(
-      isEdgeNormallyVisible({
+      isEdgeVisible({
         ...edge,
-        isNormallyVisible: true,
+        isShownBySetting: true,
         showControllerLines: true
       }),
       true

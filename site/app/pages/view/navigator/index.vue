@@ -16,7 +16,6 @@ const {
   hasLoadError,
   graphRevision,
   showCircularDependencies,
-  showBrightLine,
   openModuleDetail,
   layoutData,
   layoutPersistence,
@@ -105,7 +104,6 @@ watch(
       :key="graphRevision"
       ref="graphViewerRef"
       v-model:show-circular-dependencies="showCircularDependencies"
-      v-model:show-bright-line="showBrightLine"
       :data="graphData"
       :default-open-module-detail="openModuleDetail"
       :layout-data="layoutData"

@@ -61,7 +61,7 @@ import {
   collectCircularEdgeInfo,
   getEdgeColor,
   getEdgeRelationClass,
-  isEdgeNormallyVisible,
+  isEdgeVisible,
   pickModuleEdgeHandles,
   placeDependencyEdge,
   resolveEdgeRelationship,
@@ -97,11 +97,6 @@ import {
   resolveModuleFocusTargetNodeIds,
   resolveModuleHeaderAction
 } from '~/utils/graph-viewer-focus'
-import {
-  BRIGHT_LINE_LARGE_GRAPH_WARNING,
-  countGraphModules,
-  shouldWarnAboutBrightLine
-} from '~/utils/graph-viewer-bright-line'
 import {
   buildModulePageLocation,
   buildPreviewModulePageLocation,
@@ -170,7 +165,8 @@ type ModuleItemDependencyGraph = {
 type CircularEdgeInfo = CircularDependencyIssue
 
 type CircularEdgeData = {
-  isNormallyVisible: boolean
+  /** Whether the line settings draw the edge; a hidden one keeps its place. */
+  isVisible: boolean
   relationship: EdgeRelationship
   circularIds: number[]
   circularReason: string
@@ -180,7 +176,8 @@ type CircularEdgeData = {
 }
 
 type StandardEdgeData = {
-  isNormallyVisible: boolean
+  /** Whether the line settings draw the edge; a hidden one keeps its place. */
+  isVisible: boolean
   relationship: EdgeRelationship
   /** For an edge between two modules, the automatic layout's route for it. */
   route?: ModuleEdgeRoute
@@ -252,13 +249,7 @@ const props = withDefaults(
     flush?: boolean
     flowId?: string
     defaultOpenModuleDetail?: boolean
-    fixBightline?: boolean | string
     excludeModules?: string[] | string
-    /**
-     * Whether the viewer offers Bright Line at all: its toggle and the hover
-     * highlight. Whether it is on is `v-model:show-bright-line`.
-     */
-    enableBrightLine?: boolean
     collapsedModules?: string[] | string
     directRunUrl?: string
     directRunHeaders?: Record<string, string>
@@ -330,9 +321,7 @@ const props = withDefaults(
     showControls: true,
     showMiniMap: true,
     defaultOpenModuleDetail: false,
-    fixBightline: false,
     excludeModules: () => [],
-    enableBrightLine: true,
     collapsedModules: () => []
   }
 )
@@ -370,21 +359,11 @@ const MODULE_COLLAPSED_HEIGHT = 40
 const MODULE_MIN_WIDTH = NODE_WIDTH + MODULE_PADDING * 2
 const GRAPH_FIT_PADDING = 0.12
 const GRAPH_RESIZE_CENTER_DEBOUNCE_MS = 250
-const DEFAULT_FIXED_BRIGHT_LINE_TARGET = 'CustomerRepository'
-const BRIGHT_LINE_NODE_CLASS = 'bright-line-node'
-const BRIGHT_LINE_NODE_ACTIVE_CLASS = 'bright-line-node--active'
-const BRIGHT_LINE_NODE_CONNECTED_CLASS = 'bright-line-node--connected'
-const BRIGHT_LINE_NODE_DIMMED_CLASS = 'bright-line-node--dimmed'
-const BRIGHT_LINE_NODE_FIXED_CLASS = 'bright-line-node--fixed'
-const BRIGHT_LINE_EDGE_CLASS = 'bright-line-edge'
-const BRIGHT_LINE_EDGE_DIMMED_CLASS = 'bright-line-edge--dimmed'
-const BRIGHT_LINE_EDGE_HIDDEN_CLASS = 'bright-line-edge--hidden'
-const BRIGHT_LINE_EDGE_COLOR = 'var(--ui-primary)'
 /**
- * Vue Flow folds a marker's fields into the id of the `<marker>` it defines,
- * so this ends up in that id — which is how `[id*="highlighted"]` finds it.
+ * An edge whose line setting is off: still on the canvas, but transparent and
+ * out of the pointer's way.
  */
-const BRIGHT_LINE_MARKER_ID = 'highlighted'
+const HIDDEN_EDGE_CLASS = 'edge--hidden'
 /** How long a pointer has to rest on a node before its JSDoc appears. */
 const JSDOC_HOVER_OPEN_DELAY_MS = 240
 /**
@@ -812,13 +791,13 @@ function getModuleItemHierarchy(
 
 function getEdgeDataProps(
   info: CircularEdgeInfo[] | undefined,
-  isNormallyVisible: boolean,
+  isVisible: boolean,
   relationship: EdgeRelationship
 ): {
   data: FlowEdgeData
 } {
   if (!info?.length) {
-    return { data: { isNormallyVisible, relationship } }
+    return { data: { isVisible, relationship } }
   }
 
   const normalizedInfo = Array.from(
@@ -832,7 +811,7 @@ function getEdgeDataProps(
 
   return {
     data: {
-      isNormallyVisible,
+      isVisible,
       relationship,
       circularIds: normalizedInfo.map(item => item.id),
       circularDetails: normalizedInfo.map(item => ({
@@ -909,35 +888,20 @@ function hasNodeBox(node: GraphNode, box: ModuleEdgeBox): boolean {
 }
 
 /**
- * The arrowhead an edge points with. Vue Flow defines one shared `<marker>`
- * per configuration, outside every edge, so no rule scoped to an edge can
- * reach its arrowhead; a bright-lined edge gets a marker of its own instead.
+ * The arrowhead an edge points with, in its relationship's colour. Vue Flow
+ * defines one shared `<marker>` per configuration, outside every edge.
  */
-function getEdgeMarkerEnd(
-  relationship: EdgeRelationship,
-  isHighlighted: boolean
-): EdgeMarker {
-  if (isHighlighted) {
-    return {
-      type: MarkerType.ArrowClosed,
-      color: BRIGHT_LINE_EDGE_COLOR,
-      id: BRIGHT_LINE_MARKER_ID
-    }
-  }
-
+function getEdgeMarkerEnd(relationship: EdgeRelationship): EdgeMarker {
   return { type: MarkerType.ArrowClosed, color: getEdgeColor(relationship) }
 }
 
-function isSameMarker(
-  current: FlowEdge['markerEnd'],
-  next: EdgeMarker
-): boolean {
-  return (
-    typeof current === 'object'
-    && current.type === next.type
-    && current.color === next.color
-    && current.id === next.id
-  )
+/** An edge's classes: its relationship's, and hidden while its setting is off. */
+function getEdgeClasses(
+  relationship: EdgeRelationship,
+  isVisible: boolean
+): string[] {
+  const relationClass = getEdgeRelationClass(relationship)
+  return isVisible ? [relationClass] : [relationClass, HIDDEN_EDGE_CLASS]
 }
 
 function deduplicateCircularEdgeLabels(
@@ -1057,11 +1021,9 @@ function getWarningEdgeLabelStyle(edgeProps: WarningEdgeProps): CSSProperties {
 
 /**
  * Every cycle edge drawn along a route gets its label on that route, clear of
- * every module and of every label placed before it: the labels always shown
- * first, then those Bright Line shows only while it lights their edge, so
- * lighting one never moves a label already on screen. Where it can, a label
- * also keeps off the other cycle edges on screen, so it hides none of their
- * turns.
+ * every module and of every label placed before it. Where it can, a label also
+ * keeps off the other cycle edges on screen, so it hides none of their turns.
+ * An edge its line setting hides shows no label, so it gets none.
  */
 function withRouteLabels(
   edges: FlowEdge[],
@@ -1069,7 +1031,10 @@ function withRouteLabels(
 ): FlowEdge[] {
   const labelled = edges.flatMap((edge) => {
     const data = edge.data
-    return edge.type === 'warning' && hasCircularEdgeLabel(data) && data.route
+    return edge.type === 'warning'
+      && hasCircularEdgeLabel(data)
+      && data.isVisible
+      && data.route
       ? [{ id: edge.id, data, points: data.route.points }]
       : []
   })
@@ -1078,17 +1043,14 @@ function withRouteLabels(
   }
 
   const placements = placeRouteLabels({
-    labels: [
-      ...labelled.filter(({ data }) => data.isNormallyVisible),
-      ...labelled.filter(({ data }) => !data.isNormallyVisible)
-    ].map(({ id, data, points }) => ({
+    labels: labelled.map(({ id, data, points }) => ({
       key: id,
       route: points,
       text: formatCircularEdgeLabel(data.circularIds)
     })),
     obstacles,
     lines: edges.flatMap(edge =>
-      edge.type === 'warning' && edge.data?.isNormallyVisible && edge.data.route
+      edge.type === 'warning' && edge.data?.isVisible && edge.data.route
         ? [edge.data.route.points]
         : []
     )
@@ -1597,8 +1559,7 @@ function buildGraph(
         minHeight: size.height,
         jsdoc: mod.jsdoc
       },
-      style: { width: `${size.width}px`, height: `${size.height}px` },
-      class: node => getBrightLineNodeClass(node.id)
+      style: { width: `${size.width}px`, height: `${size.height}px` }
     })
   }
 
@@ -1652,8 +1613,7 @@ function buildGraph(
             moduleName: item.moduleName,
             jsdoc: item.jsdoc
           },
-          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` },
-          class: node => getBrightLineNodeClass(node.id)
+          style: { width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }
         })
       }
     }
@@ -1687,7 +1647,6 @@ function buildGraph(
           isCircular: Boolean(circularInfo)
         })
         const edgeColor = getEdgeColor(relationship)
-        const edgeRelationClass = getEdgeRelationClass(relationship)
         const route = autoRoute(moduleName, imp)
 
         edges.push({
@@ -1702,15 +1661,8 @@ function buildGraph(
           // is curved, so the two directions of a mutual import stay apart.
           type: circularInfo ? 'warning' : route ? 'routed' : 'smoothstep',
           style: { stroke: edgeColor, strokeWidth: circularInfo ? 2.2 : 1.5 },
-          class: edge => [
-            edgeRelationClass,
-            ...getBrightLineEdgeClass(
-              edge.source,
-              edge.target,
-              edge.data?.isNormallyVisible ?? true
-            )
-          ],
-          markerEnd: getEdgeMarkerEnd(relationship, false),
+          class: getEdgeClasses(relationship, showModuleToModuleLine),
+          markerEnd: getEdgeMarkerEnd(relationship),
           ...withRoute(
             getEdgeDataProps(
               circularLabelInfo,
@@ -1732,7 +1684,7 @@ function buildGraph(
   function addDependencyEdge(
     sourceId: string,
     targetId: string,
-    isNormallyVisible: boolean,
+    isShownBySetting: boolean,
     overrides: {
       relationship?: EdgeRelationship
       id?: string
@@ -1771,11 +1723,10 @@ function buildGraph(
       relationship: overrides.relationship
     })
     const edgeColor = getEdgeColor(relationship)
-    const edgeRelationClass = getEdgeRelationClass(relationship)
-    const effectiveNormallyVisible = isEdgeNormallyVisible({
+    const isVisible = isEdgeVisible({
       source: sourceId,
       target: targetId,
-      isNormallyVisible,
+      isShownBySetting,
       showControllerLines,
       relationship: overrides.relationship
     })
@@ -1792,19 +1743,12 @@ function buildGraph(
         stroke: edgeColor,
         strokeWidth: isCircular ? 2.2 : 1.5
       },
-      class: edge => [
-        edgeRelationClass,
-        ...getBrightLineEdgeClass(
-          edge.source,
-          edge.target,
-          edge.data?.isNormallyVisible ?? true
-        )
-      ],
-      markerEnd: getEdgeMarkerEnd(relationship, false),
+      class: getEdgeClasses(relationship, isVisible),
+      markerEnd: getEdgeMarkerEnd(relationship),
       ...withRoute(
         getEdgeDataProps(
           circularLabelInfo,
-          effectiveNormallyVisible,
+          isVisible,
           relationship
         ),
         route
@@ -2024,36 +1968,10 @@ const isUnmounted = ref(false)
 const showGraphSettings = ref(false)
 const autoAdjustGraphView = ref(true)
 const showLegends = ref(true)
-/**
- * Whether Bright Line is switched on. `enableBrightLine` only says whether the
- * viewer offers it at all; a page that decides when it starts on — the
- * navigator does, by graph size — binds this, and anything else starts on.
- */
-const showBrightLine = defineModel<boolean>('showBrightLine', { default: true })
-/** Whether hovering a node lights its path: offered here, and switched on. */
-const isBrightLineOn = computed(
-  () => props.enableBrightLine && showBrightLine.value
-)
-/**
- * Whether to show the large-graph advisory: Bright Line is on, and the graph
- * is at or past the cutoff. Counted from the `GraphOutput` as given, as the
- * navigator's default is, so the two agree on what a large graph is.
- */
-const showBrightLineWarning = computed(() =>
-  shouldWarnAboutBrightLine({
-    moduleCount: countGraphModules(props.data),
-    isOn: isBrightLineOn.value
-  })
-)
-const activeBrightLineNodeId = ref<string | null>(null)
-const hasInitialFixedBrightLine
-  = isBrightLineOn.value
-    && props.fixBightline !== false
-    && props.fixBightline !== undefined
-const showModuleToModuleLine = ref(!hasInitialFixedBrightLine)
-const showProviderToProviderInsideModule = ref(!hasInitialFixedBrightLine)
+const showModuleToModuleLine = ref(true)
+const showProviderToProviderInsideModule = ref(true)
 const showProviderToProviderAcrossModule = ref(false)
-const showControllerLines = ref(!hasInitialFixedBrightLine)
+const showControllerLines = ref(true)
 const showJsDocOnHover = ref(true)
 const jsDocHoverCard = ref<JsDocHoverCardState | null>(null)
 const jsDocHoverCardRef = ref<HTMLElement | null>(null)
@@ -2084,58 +2002,6 @@ const nodePositionOverrides = new Map<string, NodePosition>()
 const activeCircularTooltipEdgeId = ref<string | null>(null)
 const showCircularDetailDialog = ref(false)
 const circularDetailDialogData = ref<CircularEdgeDialogData | null>(null)
-const fixedBrightLineTarget = computed(() => {
-  if (!props.enableBrightLine) {
-    return null
-  }
-
-  if (props.fixBightline === false || props.fixBightline === undefined) {
-    return null
-  }
-
-  if (typeof props.fixBightline === 'string') {
-    const target = props.fixBightline.trim()
-    return target || DEFAULT_FIXED_BRIGHT_LINE_TARGET
-  }
-
-  return DEFAULT_FIXED_BRIGHT_LINE_TARGET
-})
-const activeBrightLineConnectedNodeIds = computed(() => {
-  const activeNodeId = activeBrightLineNodeId.value
-  const connectedNodeIds = new Set<string>()
-  if (!isBrightLineOn.value || !activeNodeId) {
-    return connectedNodeIds
-  }
-
-  const edgesByNodeId = new Map<string, FlowEdge[]>()
-  for (const edge of flowEdges.value) {
-    const sourceEdges = edgesByNodeId.get(edge.source) || []
-    sourceEdges.push(edge)
-    edgesByNodeId.set(edge.source, sourceEdges)
-  }
-
-  const queue = [activeNodeId]
-  connectedNodeIds.add(activeNodeId)
-
-  while (queue.length > 0) {
-    const currentNodeId = queue.shift()
-    if (!currentNodeId) {
-      continue
-    }
-
-    for (const edge of edgesByNodeId.get(currentNodeId) || []) {
-      const nextNodeId = edge.target
-      if (connectedNodeIds.has(nextNodeId)) {
-        continue
-      }
-
-      connectedNodeIds.add(nextNodeId)
-      queue.push(nextNodeId)
-    }
-  }
-
-  return connectedNodeIds
-})
 const expandableModuleNames = computed(() =>
   Object.entries(graphData.value.modules)
     .filter(([, mod]) => hasModuleComponents(mod))
@@ -2174,93 +2040,6 @@ function syncDirectRunOn(): void {
   if (nodeId && selectedDirectRunNodeId.value !== nodeId) {
     selectedDirectRunNodeId.value = nodeId
   }
-}
-
-function resolveBrightLineNodeId(target: string): string | null {
-  const matchedNode = flowNodes.value.find(
-    node =>
-      node.id === target
-      || node.data?.label === target
-      || node.id.endsWith(`-${target}`)
-  )
-
-  return matchedNode?.id || null
-}
-
-function syncFixedBrightLineNode(): void {
-  const target = fixedBrightLineTarget.value
-  // Off, no node is active — a fixed one included. Switching on syncs it.
-  if (!target || !isBrightLineOn.value) {
-    return
-  }
-
-  activeBrightLineNodeId.value = resolveBrightLineNodeId(target)
-}
-
-function hasActiveBrightLine(): boolean {
-  return isBrightLineOn.value && activeBrightLineNodeId.value !== null
-}
-
-function getBrightLineNodeClass(nodeId: string): string[] {
-  if (!hasActiveBrightLine()) {
-    return []
-  }
-
-  if (activeBrightLineNodeId.value === nodeId) {
-    const classes = [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_ACTIVE_CLASS]
-    const fixedTarget = fixedBrightLineTarget.value
-    if (fixedTarget && resolveBrightLineNodeId(fixedTarget) === nodeId) {
-      classes.push(BRIGHT_LINE_NODE_FIXED_CLASS)
-    }
-
-    return classes
-  }
-
-  if (activeBrightLineConnectedNodeIds.value.has(nodeId)) {
-    return [BRIGHT_LINE_NODE_CLASS, BRIGHT_LINE_NODE_CONNECTED_CLASS]
-  }
-
-  return [BRIGHT_LINE_NODE_DIMMED_CLASS]
-}
-
-function isBrightLineEdgeActive(sourceId: string, targetId: string): boolean {
-  const activeNodeId = activeBrightLineNodeId.value
-  if (!isBrightLineOn.value || !activeNodeId) {
-    return false
-  }
-
-  const connectedNodeIds = activeBrightLineConnectedNodeIds.value
-  return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)
-}
-
-function getBrightLineEdgeClass(
-  sourceId: string,
-  targetId: string,
-  isNormallyVisible: boolean
-): string[] {
-  if (isBrightLineEdgeActive(sourceId, targetId)) {
-    return [BRIGHT_LINE_EDGE_CLASS]
-  }
-
-  if (!isNormallyVisible) {
-    return [BRIGHT_LINE_EDGE_HIDDEN_CLASS]
-  }
-
-  if (hasActiveBrightLine()) {
-    return [BRIGHT_LINE_EDGE_DIMMED_CLASS]
-  }
-
-  return []
-}
-
-function shouldShowCircularEdgeWarning(
-  sourceId: string,
-  targetId: string,
-  edgeData: CircularEdgeData
-): boolean {
-  return (
-    edgeData.isNormallyVisible || isBrightLineEdgeActive(sourceId, targetId)
-  )
 }
 
 /**
@@ -2431,33 +2210,6 @@ function hasJsDocHoverCard(jsdoc: string | undefined): boolean {
   return showJsDocOnHover.value && hasJsDocPreview(jsdoc)
 }
 
-function setActiveBrightLineNode(event: NodeMouseEvent): void {
-  // Off, a hover lights nothing, so no node is recorded as active.
-  if (!isBrightLineOn.value) {
-    return
-  }
-
-  activeBrightLineNodeId.value = event.node.id
-}
-
-function clearActiveBrightLineNode(event?: NodeMouseEvent): void {
-  if (!props.enableBrightLine) {
-    activeBrightLineNodeId.value = null
-    return
-  }
-
-  if (fixedBrightLineTarget.value) {
-    if (!event || activeBrightLineNodeId.value === event.node.id) {
-      syncFixedBrightLineNode()
-    }
-    return
-  }
-
-  if (!event || activeBrightLineNodeId.value === event.node.id) {
-    activeBrightLineNodeId.value = null
-  }
-}
-
 function handlePaneClick(): void {
   closeJsDocHoverCard()
   if (!props.modulePageNavigation) {
@@ -2568,7 +2320,6 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   }
 
   activeCircularTooltipEdgeId.value = null
-  activeBrightLineNodeId.value = null
   // The card is anchored to a node this rebuild may move or drop entirely.
   closeJsDocHoverCard()
   if (
@@ -2605,7 +2356,6 @@ function refreshGraph(options: { preservePositions?: boolean } = {}) {
   }
   flowNodes.value = graph.nodes
   flowEdges.value = graph.edges
-  syncFixedBrightLineNode()
 }
 
 /**
@@ -3082,61 +2832,6 @@ watch(showCircularDependencies, () => {
   refreshGraph()
 })
 
-// Covers `enableBrightLine` too. It never writes `showBrightLine`: what the
-// viewer offers is not the visitor's choice, and the navigator keeps whatever
-// is written there as exactly that.
-watch(isBrightLineOn, (isOn) => {
-  if (!isOn) {
-    activeBrightLineNodeId.value = null
-    return
-  }
-
-  syncFixedBrightLineNode()
-})
-
-watch(
-  fixedBrightLineTarget,
-  (target) => {
-    if (target) {
-      syncFixedBrightLineNode()
-      return
-    }
-
-    activeBrightLineNodeId.value = null
-  },
-  { immediate: true }
-)
-
-// The watched set reads `flowEdges` itself, so the ref is only triggered when
-// an arrowhead actually changed — an unconditional trigger re-fires this
-// watcher forever.
-watch(
-  activeBrightLineConnectedNodeIds,
-  () => {
-    let hasChangedMarker = false
-    for (const edge of flowEdges.value) {
-      const relationship = edge.data?.relationship
-      if (!relationship) {
-        continue
-      }
-
-      const markerEnd = getEdgeMarkerEnd(
-        relationship,
-        isBrightLineEdgeActive(edge.source, edge.target)
-      )
-      if (!isSameMarker(edge.markerEnd, markerEnd)) {
-        edge.markerEnd = markerEnd
-        hasChangedMarker = true
-      }
-    }
-
-    if (hasChangedMarker) {
-      triggerRef(flowEdges)
-    }
-  },
-  { immediate: true }
-)
-
 watch(showModuleToModuleLine, () => {
   refreshGraph()
 })
@@ -3372,40 +3067,6 @@ defineExpose({ centerGraph, focusModule })
                 />
               </UTooltip>
             </div>
-            <div
-              v-if="props.enableBrightLine"
-              class="graph-viewer-settings__row"
-            >
-              <UCheckbox
-                v-model="showBrightLine"
-                label="Bright Line"
-              />
-              <UTooltip
-                text="Highlight the full path of modules, providers, or controllers that depend on the hovered item."
-                :delay-duration="0"
-              >
-                <UButton
-                  type="button"
-                  icon="i-lucide-circle-help"
-                  color="neutral"
-                  variant="ghost"
-                  square
-                  class="graph-viewer-settings__help"
-                  aria-label="Bright Line help"
-                />
-              </UTooltip>
-            </div>
-            <p
-              v-if="showBrightLineWarning"
-              class="graph-viewer-settings__warning"
-              role="status"
-            >
-              <UIcon
-                name="i-lucide-triangle-alert"
-                class="graph-viewer-settings__warning-icon"
-              />
-              <span>{{ BRIGHT_LINE_LARGE_GRAPH_WARNING }}</span>
-            </p>
             <div class="graph-viewer-settings__row">
               <UCheckbox
                 v-model="showModuleToModuleLine"
@@ -3636,8 +3297,6 @@ defineExpose({ centerGraph, focusModule })
       :zoom-on-pinch="props.interactive"
       :zoom-on-double-click="props.interactive"
       class="graph-flow"
-      @node-mouse-enter="setActiveBrightLineNode"
-      @node-mouse-leave="clearActiveBrightLineNode"
       @node-click="handleNodeClick"
       @node-drag-start="closeJsDocHoverCard"
       @node-drag-stop="handleNodeDragStop"
@@ -3665,14 +3324,7 @@ defineExpose({ centerGraph, focusModule })
         />
 
         <EdgeLabelRenderer
-          v-if="
-            hasCircularEdgeLabel(edgeProps.data)
-              && shouldShowCircularEdgeWarning(
-                edgeProps.source,
-                edgeProps.target,
-                edgeProps.data
-              )
-          "
+          v-if="hasCircularEdgeLabel(edgeProps.data) && edgeProps.data.isVisible"
         >
           <UTooltip
             :open="activeCircularTooltipEdgeId === edgeProps.id"
@@ -4270,24 +3922,6 @@ defineExpose({ centerGraph, focusModule })
   flex: 0 0 24px;
 }
 
-/* Sits under the Bright Line toggle it qualifies, closer than the next row. */
-.graph-viewer-settings__warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: -4px 0 0;
-  color: var(--ui-warning);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.graph-viewer-settings__warning-icon {
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
-  margin-top: 2px;
-}
-
 .graph-viewer-legends {
   position: absolute;
   top: 12px;
@@ -4436,12 +4070,6 @@ defineExpose({ centerGraph, focusModule })
   background: var(--mg-edge-circular);
 }
 
-.graph-viewer .vue-flow__node {
-  transition:
-    opacity 140ms ease,
-    filter 140ms ease;
-}
-
 /*
  * Vue Flow draws each edge in an SVG of its own with a z-index, so a blend
  * mode inside it has only that edge to blend with. Blending the SVG itself
@@ -4451,25 +4079,18 @@ defineExpose({ centerGraph, focusModule })
   mix-blend-mode: var(--mg-edge-blend-mode);
 }
 
-.graph-viewer .vue-flow__edges:has(> .bright-line-edge) {
-  mix-blend-mode: normal;
-}
-
+/* A line setting switched on or off fades its edges rather than cutting them. */
 .graph-viewer .vue-flow__edge {
   transition: opacity 140ms ease;
 }
 
 .graph-viewer .vue-flow__edge-path {
   stroke-opacity: var(--mg-edge-opacity);
-  transition:
-    stroke 140ms ease,
-    stroke-width 140ms ease,
-    filter 140ms ease;
+  transition: stroke 140ms ease;
 }
 
 .graph-viewer .vue-flow__arrowhead polyline {
   opacity: var(--mg-edge-opacity);
-  transition: opacity 140ms ease;
 }
 
 .graph-viewer .edge-relation--module .vue-flow__edge-path {
@@ -4491,57 +4112,7 @@ defineExpose({ centerGraph, focusModule })
   stroke-linecap: round;
 }
 
-.graph-viewer .bright-line-node--dimmed {
-  opacity: 0.28;
-  filter: saturate(0.55);
-}
-
-.graph-viewer .bright-line-node--active .module-subgraph,
-.graph-viewer .bright-line-node--connected .module-subgraph,
-.graph-viewer .bright-line-node--active .mermaid-node,
-.graph-viewer .bright-line-node--connected .mermaid-node {
-  border-color: var(--ui-primary) !important;
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--ui-primary) 34%, transparent),
-    0 10px 26px rgba(15, 23, 42, 0.2);
-}
-
-.graph-viewer .bright-line-node--active .module-subgraph,
-.graph-viewer .bright-line-node--active .mermaid-node {
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--ui-primary) 42%, transparent),
-    0 12px 30px rgba(15, 23, 42, 0.24);
-}
-
-.graph-viewer .bright-line-node--fixed .module-subgraph,
-.graph-viewer .bright-line-node--fixed .mermaid-node {
-  outline: 2px dashed var(--ui-primary);
-  outline-offset: 4px;
-}
-
-.graph-viewer .bright-line-edge {
-  opacity: 1;
-  z-index: 12;
-}
-
-.graph-viewer .bright-line-edge .vue-flow__edge-path {
-  stroke: var(--ui-primary) !important;
-  stroke-width: 3.2px !important;
-  stroke-opacity: 1 !important;
-  filter: drop-shadow(
-    0 0 5px color-mix(in srgb, var(--ui-primary) 52%, transparent)
-  );
-}
-
-.graph-viewer .vue-flow__arrowhead[id*="highlighted"] polyline {
-  opacity: 1 !important;
-}
-
-.graph-viewer .bright-line-edge--dimmed {
-  opacity: 0.16;
-}
-
-.graph-viewer .bright-line-edge--hidden {
+.graph-viewer .edge--hidden {
   opacity: 0;
   pointer-events: none;
 }

@@ -20,6 +20,10 @@ for the published history.
 
 - **Direct Run opens on a module's page, beside its graph, instead of in a drawer over it.** Clicking a provider or controller in the navigator opens its module's page on **Inside Module** — what the module declares, as the module deep dive drew it — with Direct Run docked beside the graph, or below it on a phone; clicking another provider or controller there moves the panel to it, and its close button puts it away. The panel runs and inspects exactly as the drawer did, keeps each target's last run while it is put away, and links to the trace as before. A link that opened the drawer on the navigator now opens the module's page on that target. The documentation's Direct Run preview keeps its drawer. Site only: `lib/` is unchanged, so this needs no npm release.
 
+### Removed
+
+- **Bright Line is gone from the web viewer.** The navigator no longer lights the path of a module, provider or controller under the pointer and fades the rest: the hover highlight, its **Bright Line** toggle in Graph settings, and the advisory that it may slow a large graph are removed, and so is the landing page's section about it. To see what a change to a module would hit, open the module's page: its two-way bracket draws what the module needs on the left and everything that needs it — level by level — on the right. The line settings for module, provider and controller lines work as before and start shown; a Bright Line choice an earlier visit left in the tab is ignored. Site only: `lib/` is unchanged, so this needs no npm release.
+
 ## [0.17.0] - 2026-11-21
 
 ### Added

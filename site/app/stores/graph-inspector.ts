@@ -9,12 +9,6 @@ import {
 } from '~/utils/graph-layout-persistence'
 import { requiresVersionAcknowledgement } from '~/utils/graph-inspector-version-gate'
 import {
-  countGraphModules,
-  readBrightLineChoice,
-  resolveShowBrightLine,
-  writeBrightLineChoice
-} from '~/utils/graph-viewer-bright-line'
-import {
   INSPECTOR_ACCESS_TOKEN_HEADER,
   accessTokenHeaders,
   readAccessToken,
@@ -116,12 +110,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   const dependencyTraceEnabled = ref(false)
   const showCircularDependencies = ref(true)
   const openModuleDetail = ref(false)
-  /**
-   * The visitor's own Bright Line choice for the graph being viewed, or `null`
-   * while they have made none and the graph's size decides. A choice belongs
-   * to one graph, so it is read again whenever the endpoint changes.
-   */
-  const brightLineChoice = ref<boolean | null>(null)
   let resolveVersionAcknowledgement: ((acknowledged: boolean) => void) | undefined
 
   const endpointUrl = computed(() => endpoint.value)
@@ -299,26 +287,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
   )
 
   /**
-   * Whether the navigator's Bright Line is on: the visitor's choice for this
-   * graph, else on for a small graph and off for a large one.
-   *
-   * Setting it is the visitor choosing, so it is kept for this graph for the
-   * life of the tab: a refresh remounts the viewer and a reload starts the page
-   * over, and neither may undo it.
-   */
-  const showBrightLine = computed({
-    get: () =>
-      resolveShowBrightLine({
-        moduleCount: countGraphModules(graphData.value),
-        choice: brightLineChoice.value
-      }),
-    set: (isOn: boolean) => {
-      brightLineChoice.value = isOn
-      writeBrightLineChoice(endpoint.value, isOn)
-    }
-  })
-
-  /**
    * Whether the graph being viewed is this site's own demo, running in this tab.
    *
    * Its address is the only one the viewer invents for itself — the segment the
@@ -478,9 +446,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       graphRevision.value += 1
       endpoint.value = nextEndpointUrl
       accessToken.value = ''
-      // Another graph starts from its own default, or from what the visitor
-      // chose for it earlier in this tab — never from the last graph's choice.
-      brightLineChoice.value = readBrightLineChoice(nextEndpointUrl)
       clearGraph()
     }
 
@@ -518,7 +483,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
       fileGraph.value = null
       fileLayoutKey.value = ''
       clearGraph()
-      brightLineChoice.value = null
     }
 
     clearGraphFileSession()
@@ -548,9 +512,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     // The text the tab keeps the graph as for a reload, so the key worked out
     // again then is this one.
     fileLayoutKey.value = graphFileKey(source, JSON.stringify(graph))
-    // A Bright Line choice is kept for the tab by endpoint; a file's lives in
-    // memory, for as long as the file is open.
-    brightLineChoice.value = null
     layoutData.value = readStoredLayout(fileLayoutKey.value)
 
     return writeGraphFileSession(source, graph)
@@ -597,7 +558,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     fileSource.value = source
     fileGraph.value = result.graph
     fileLayoutKey.value = graphFileKey(source, session.graphText)
-    brightLineChoice.value = null
     layoutData.value = readStoredLayout(fileLayoutKey.value)
 
     return true
@@ -1098,7 +1058,6 @@ export const useGraphInspectorStore = defineStore('graph-inspector', () => {
     shouldShowVersionAcknowledgement,
     dependencyTraceEnabled,
     showCircularDependencies,
-    showBrightLine,
     openModuleDetail,
     setSession,
     setDemoSession,

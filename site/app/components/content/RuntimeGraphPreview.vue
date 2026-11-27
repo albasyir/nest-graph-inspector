@@ -4,11 +4,9 @@ type ModuleListProp = string[] | string
 
 const props = withDefaults(defineProps<{
   previewId?: string
-  fixBightline?: boolean | string
   height?: string
   excludeModules?: ModuleListProp
   showCircularDependencies?: BooleanProp
-  showBrightLine?: BooleanProp
   collapsedModules?: ModuleListProp
   caption?: string
   interactive?: BooleanProp
@@ -25,11 +23,9 @@ const props = withDefaults(defineProps<{
   openModulePages?: BooleanProp
 }>(), {
   previewId: undefined,
-  fixBightline: false,
   height: 'clamp(14rem, 52vh, 28rem)',
   excludeModules: () => [],
   showCircularDependencies: true,
-  showBrightLine: true,
   collapsedModules: () => [],
   caption: undefined,
   interactive: true,
@@ -60,10 +56,6 @@ const shouldShowCircularDependencies = computed(() =>
   parseBooleanProp(props.showCircularDependencies, true)
 )
 
-const shouldShowBrightLine = computed(() =>
-  parseBooleanProp(props.showBrightLine, true)
-)
-
 const isInteractive = computed(() => parseBooleanProp(props.interactive, true))
 const shouldShowLoadExample = computed(() => parseBooleanProp(props.showLoadExample, false))
 const shouldShowControls = computed(() => parseBooleanProp(props.showControls, false))
@@ -71,28 +63,6 @@ const shouldShowMiniMap = computed(() => parseBooleanProp(props.showMiniMap, fal
 const modulePageNavigation = computed(() =>
   parseBooleanProp(props.openModulePages, false) ? 'preview' as const : undefined
 )
-
-const previewCaption = computed(() => {
-  if (fixedBrightLineLabel.value) {
-    return null
-  }
-
-  return props.caption
-})
-
-const fixedBrightLineLabel = computed(() => {
-  const fixedTarget = props.fixBightline
-  if (fixedTarget === false || fixedTarget === undefined) {
-    return null
-  }
-
-  if (typeof fixedTarget === 'string') {
-    const label = fixedTarget.trim()
-    return label || 'CustomerRepository'
-  }
-
-  return 'CustomerRepository'
-})
 
 const {
   view,
@@ -124,11 +94,9 @@ const sourceSentence = computed(() =>
         :interactive="isInteractive"
         :show-controls="shouldShowControls"
         :show-mini-map="shouldShowMiniMap"
-        :fix-bightline="props.fixBightline"
         :exclude-modules="props.excludeModules"
         :collapsed-modules="props.collapsedModules"
         :show-circular-dependencies="shouldShowCircularDependencies"
-        :enable-bright-line="shouldShowBrightLine"
         :module-page-navigation="modulePageNavigation"
         default-open-module-detail
       />
@@ -208,12 +176,8 @@ const sourceSentence = computed(() =>
 
     <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <p class="min-w-0 flex-1 basis-64 text-sm text-muted">
-        <template v-if="fixedBrightLineLabel">
-          This example shows what happens when you hover
-          <span class="font-medium text-highlighted">{{ fixedBrightLineLabel }}</span>.
-        </template>
-        <template v-else-if="previewCaption">
-          {{ previewCaption }}
+        <template v-if="props.caption">
+          {{ props.caption }}
         </template>
         {{ sourceSentence }}
         <template v-if="view.source !== 'live'">
