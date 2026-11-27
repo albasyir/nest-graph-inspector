@@ -5,6 +5,7 @@ import {
   dependencyLevels,
   dependencyStubCounts,
 } from '../support/graph-facts';
+import { type Box, isInside } from './box';
 import type { BrowserState } from './browser-state';
 import {
   DEFAULT_DEPTH,
@@ -73,6 +74,31 @@ function resetButton(page: Page): Locator {
   return blastDemo(page).getByRole('button', {
     name: `Reset to ${LANDING_MODULE}`,
   });
+}
+
+/**
+ * Where the demo's canvas shows the bracket on screen: its box, below the
+ * column headings pinned across its top when it has them. `null` while there
+ * is no canvas to measure.
+ */
+async function visibleCanvas(page: Page): Promise<Box | null> {
+  const canvas = await blastDemo(page)
+    .locator('.module-bracket__canvas')
+    .boundingBox();
+  if (!canvas) {
+    return null;
+  }
+
+  const headings = blastDemo(page).locator('.module-bracket__headings');
+  const strip =
+    (await headings.count()) > 0 ? await headings.boundingBox() : null;
+  const top = strip ? strip.y + strip.height : canvas.y;
+  return {
+    x: canvas.x,
+    y: top,
+    width: canvas.width,
+    height: canvas.y + canvas.height - top,
+  };
 }
 
 /** How far a change to a module reaches, as the line beside the demo says it. */
@@ -178,20 +204,10 @@ async function expectWholeBracket(
     if (!box) {
       continue;
     }
-    const isInside = (outer: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    }) =>
-      box.x >= outer.x - 1 &&
-      box.y >= outer.y - 1 &&
-      box.x + box.width <= outer.x + outer.width + 1 &&
-      box.y + box.height <= outer.y + outer.height + 1;
-    expect(isInside(canvas), `${what} is inside the canvas`).toBe(true);
-    expect(isInside(panel), `${what} is inside the panel`).toBe(true);
+    expect(isInside(box, canvas), `${what} is inside the canvas`).toBe(true);
+    expect(isInside(box, panel), `${what} is inside the panel`).toBe(true);
     expect(
-      isInside({ x: 0, y: 0, width: screen.width, height: screen.height }),
+      isInside(box, { x: 0, y: 0, width: screen.width, height: screen.height }),
       `${what} is on the first screen`,
     ).toBe(true);
   }
@@ -542,23 +558,34 @@ test.describe('on a phone', () => {
 
     await blastDemo(page).scrollIntoViewIfNeeded();
     await expect(center(page)).toBeInViewport();
+    const size = page.viewportSize();
+    if (!size) {
+      throw new Error('The phone has no viewport size.');
+    }
+    const screen: Box = { x: 0, y: 0, width: size.width, height: size.height };
     for (const side of ['left', 'right'] as const) {
       const [first = []] = dependencyLevels(graph, LANDING_MODULE, side);
       const cards = first.map((name) => bracketModule(page, side, name));
       await expect
         .poll(
           async () => {
+            const canvas = await visibleCanvas(page);
             let inView = 0;
             for (const card of cards) {
+              // The canvas draws only the cards in view, and a card it has
+              // not drawn would keep `boundingBox` waiting: it counts as none.
+              if (!canvas || (await card.count()) === 0) {
+                continue;
+              }
               const box = await card.boundingBox();
-              if (box && box.x >= 0 && box.x + box.width <= 390) {
+              if (box && isInside(box, screen) && isInside(box, canvas)) {
                 inView += 1;
               }
             }
             return inView;
           },
           {
-            message: `A first-level module on the ${side} is drawn beside ${LANDING_MODULE}, inside the screen`,
+            message: `A first-level module on the ${side} is drawn beside ${LANDING_MODULE}, wholly inside the screen and the canvas`,
           },
         )
         .toBeGreaterThanOrEqual(1);
