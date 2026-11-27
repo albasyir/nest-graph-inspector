@@ -6,7 +6,9 @@ seo:
 
 ::u-page-hero{class="dark:bg-gradient-to-b from-neutral-900 to-neutral-950"}
 ---
-orientation: horizontal
+orientation: vertical
+ui:
+  container: py-12 sm:py-14 lg:py-14 gap-8 sm:gap-y-8
 ---
 #top
 :hero-background
@@ -48,6 +50,61 @@ Nest Graph Inspector turns your live NestJS runtime into **architecture intellig
   target: _blank
   ---
   GitHub
+  :::
+
+#default
+  :runtime-graph-blast-effect-preview
+::
+
+::u-page-section
+---
+class: dark:bg-neutral-950
+orientation: horizontal
+reverse: true
+ui:
+  container: py-10 sm:py-12 lg:py-16 gap-8 sm:gap-10
+---
+#title
+::span{class="inline-flex items-center gap-3"}
+  :u-icon{name="i-lucide-network" class="size-9 shrink-0 text-primary"}
+  Explore the Whole Runtime Graph
+::
+
+#description
+Every module your application wires at runtime, with its providers and controllers, laid out the way its imports run. Click a module to open its page: what it needs, and what needs it.
+
+#features
+  :::u-page-feature
+  ---
+  icon: i-lucide-layers
+  ---
+  #title
+  Laid Out by Imports
+
+  #description
+  Each module sits above the modules it imports, and the import closing a cycle points back up.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-mouse-pointer-click
+  ---
+  #title
+  Open Any Module
+
+  #description
+  A module opens its own page; a provider or controller opens Direct Run on it.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-play
+  ---
+  #title
+  Run the Real Demo
+
+  #description
+  Load Example starts the demo application in your browser, and the graph turns live.
   :::
 
 #default
