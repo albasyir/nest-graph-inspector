@@ -1182,7 +1182,9 @@ tablet, a module whose bracket is too tall — it opens in focus, as a module's
 page does. Every change frames it afresh the same way, and a module's page,
 whose navigation is `pages`, can never ask for it. Its cards are culled as a
 module page's are, and laid out again at the other size once the canvas is
-measured, they are drawn where they now stand, for the same reason. On
+measured, they are drawn where they now stand, for the same reason; a canvas
+resized picks between the two layouts again rather than laying either out
+afresh. On
 a desktop the panel takes what the first screen has left below the hero
 (`calc(100svh - 28.5rem)`, between 27rem and 32rem), so at 1440×900 it is all
 on the first screen. There a stepper or a stub changes a depth and a module

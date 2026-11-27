@@ -145,22 +145,28 @@ function layOut(size: BracketSize): ModuleDependencyBracket | null {
   })
 }
 
-const widthBracket = computed(() => layOut(widthSize.value))
+// The bracket at each size, laid out only once asked for, and then only again
+// for another module, depth or graph: a canvas resized picks between them
+// again rather than laying either out afresh. A module's page asks for the
+// size its width gives it alone, so it never lays a bracket out twice.
+const regularBracket = computed(() => layOut('regular'))
+const compactBracket = computed(() => layOut('compact'))
+const widthBracket = computed(() =>
+  widthSize.value === 'compact' ? compactBracket.value : regularBracket.value
+)
 
 /**
  * Framed whole, the bracket at a size it reads whole at on this canvas — the
  * regular one when it does, else the compact one — or none, and it opens in
- * focus at the size the canvas's width gives it. A module's page never lays
- * a bracket out twice.
+ * focus at the size the canvas's width gives it.
  */
 const wholeBracket = computed(() => {
   if (framing.value !== 'whole' || !hasCanvas.value) {
     return null
   }
 
-  const regular = widthSize.value === 'regular' ? widthBracket.value : layOut('regular')
-  const compact = widthSize.value === 'compact' ? widthBracket.value : layOut('compact')
-  const laidOut = [regular, compact].filter((candidate): candidate is ModuleDependencyBracket => candidate !== null)
+  const laidOut = [regularBracket.value, compactBracket.value]
+    .filter((candidate): candidate is ModuleDependencyBracket => candidate !== null)
   return pickWholeFrameBracket(laidOut, canvas.value)
 })
 
