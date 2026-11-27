@@ -139,7 +139,12 @@ export async function showWholeBracket(page: Page): Promise<void> {
     .click();
 }
 
-/** The modules drawn on a side, level by level, each level's names sorted. */
+/**
+ * The modules drawn on a side, level by level, each level's names sorted.
+ * It frames the whole bracket first, as a reader's own zoom would, so from
+ * then on a resize leaves the canvas where it is: a check of the frame the
+ * bracket opens at goes before it, or after a change that frames it afresh.
+ */
 export async function drawnLevels(
   page: Page,
   side: DependencySide,
@@ -190,7 +195,7 @@ export async function expectLevels({
     .toEqual(expected);
 }
 
-/** The "+N modules" counts on a side's stubs, sorted. */
+/** The "+N modules" counts on a side's stubs, sorted. It frames the whole bracket first, as `drawnLevels` does. */
 export async function drawnStubCounts(
   page: Page,
   side: DependencySide,
