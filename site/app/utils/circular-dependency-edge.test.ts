@@ -209,6 +209,16 @@ describe('getCircularLabelBox and getCircularEdgeBounds', () => {
     )
     assert.equal(unionRects([]), null)
   })
+
+  test('unionRects joins more boxes than a call can take arguments', () => {
+    // A large graph's bracket bounds a box for every card and every point its
+    // routes pass: hundreds of thousands, past what spreading them into one
+    // Math.min call survives.
+    const count = 400_000
+    const rects = Array.from({ length: count }, (_, index) => ({ x: index, y: -index, width: 1, height: 2 }))
+
+    assert.deepEqual(unionRects(rects), { x: 0, y: -(count - 1), width: count, height: count + 1 })
+  })
 })
 
 describe('formatCircularEdgeLabel', () => {

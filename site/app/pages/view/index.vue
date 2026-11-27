@@ -3,6 +3,7 @@ import { useEventListener } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { describeGraphEndpoint } from '~/utils/graph-viewer-analytics'
 import { canOpenWithoutAccessToken } from '~/utils/inspector-access-token'
+import { resolvePreviewModulePage } from '~/utils/module-page-route'
 import {
   resolveViewerLandingAction,
   resolveViewerLandingPath
@@ -105,8 +106,11 @@ async function openDemo() {
   // Replaced rather than pushed, like every hand-off from this page: Back from
   // the viewer should leave it, not return to the card that opened it — which,
   // reached from a preview, would only join the demo and send the visitor
-  // forward again.
-  await navigateTo(resolveViewerLandingPath(route.query), { replace: true })
+  // forward again. A preview that handed over a module lands on its page.
+  await navigateTo(
+    resolvePreviewModulePage(route.query) ?? resolveViewerLandingPath(route.query),
+    { replace: true }
+  )
 }
 
 /**
@@ -224,7 +228,11 @@ async function openExampleOnArrival() {
   graphStore.openModuleDetail = true
   isNavigating.value = true
 
-  if (await fileOpener.openExample({ beforeOpen: isCurrent })) {
+  // A preview's click on a module hands that module's page over with it.
+  if (await fileOpener.openExample({
+    beforeOpen: isCurrent,
+    to: resolvePreviewModulePage(route.query)
+  })) {
     return
   }
 

@@ -139,3 +139,171 @@ export function cycleCount(graph: GraphOutput): number {
     graph.cycles.controllers.length
   );
 }
+
+/**
+ * A side of a module's dependencies, as the viewer's module page draws them:
+ * what the module needs — its imports, theirs, and so on (`left`) — or what
+ * needs it (`right`).
+ */
+export type DependencySide = 'left' | 'right';
+
+/**
+ * Each module's neighbours on one side: the modules it imports (`left`), or
+ * the modules importing it (`right`). Only modules the graph describes, each
+ * once, in the graph's order.
+ */
+export function dependencyNeighbours(
+  graph: GraphOutput,
+  side: DependencySide,
+): ReadonlyMap<string, readonly string[]> {
+  const neighbours = new Map<string, string[]>(
+    Object.keys(graph.modules).map((name) => [name, []]),
+  );
+
+  for (const [name, module] of Object.entries(graph.modules)) {
+    for (const imported of new Set(module.imports)) {
+      if (!neighbours.has(imported)) {
+        continue;
+      }
+
+      const [from, to] = side === 'left' ? [name, imported] : [imported, name];
+      neighbours.get(from)?.push(to);
+    }
+  }
+
+  return neighbours;
+}
+
+/**
+ * The levels of one side of a module's dependencies: the modules one import
+ * away, then two, and so on, each module once at its shortest distance, the
+ * module itself on neither side. Each level's names sorted.
+ */
+export function dependencyLevels(
+  graph: GraphOutput,
+  moduleName: string,
+  side: DependencySide,
+): string[][] {
+  const neighbours = dependencyNeighbours(graph, side);
+  const seen = new Set([moduleName]);
+  const levels: string[][] = [];
+  let current = [moduleName];
+
+  while (current.length > 0) {
+    const next = current.flatMap((name) =>
+      (neighbours.get(name) ?? []).filter((candidate) => {
+        if (seen.has(candidate)) {
+          return false;
+        }
+        seen.add(candidate);
+        return true;
+      }),
+    );
+
+    if (next.length > 0) {
+      levels.push([...next].sort(compareText));
+    }
+    current = next;
+  }
+
+  return levels;
+}
+
+/**
+ * What the module page's stubs say past the last level drawn on a side: for
+ * each module on that level whose branch goes on, how many modules one level
+ * further it reaches — sorted, as a multiset.
+ */
+export function dependencyStubCounts(
+  graph: GraphOutput,
+  moduleName: string,
+  side: DependencySide,
+  depth: number,
+): number[] {
+  const levels = dependencyLevels(graph, moduleName, side);
+  const beyond = new Set(levels[depth] ?? []);
+  const neighbours = dependencyNeighbours(graph, side);
+
+  return (levels[depth - 1] ?? [])
+    .map(
+      (name) =>
+        (neighbours.get(name) ?? []).filter((next) => beyond.has(next)).length,
+    )
+    .filter((count) => count > 0)
+    .sort((left, right) => left - right);
+}
+
+/**
+ * The first module, by name, with more than `depth` levels on both sides of
+ * its dependencies: one whose page has more to show either way than it shows
+ * at that depth. Throws when there is none.
+ */
+export function moduleWithDeepDependencies(
+  graph: GraphOutput,
+  depth: number,
+): string {
+  const found = Object.keys(graph.modules)
+    .sort(compareText)
+    .find(
+      (name) =>
+        dependencyLevels(graph, name, 'left').length > depth &&
+        dependencyLevels(graph, name, 'right').length > depth,
+    );
+
+  if (!found) {
+    throw new Error(
+      `No module of the graph has more than ${depth} levels of dependencies each way, so the module page has no deeper level to show on either side. Give the demo a deeper chain of imports.`,
+    );
+  }
+
+  return found;
+}
+
+/**
+ * The first module, by name, whose page draws a link among what it needs
+ * within `depth` levels: an import between two modules drawn there besides
+ * the one the page joins them by, which it draws only on demand. Each module
+ * drawn is joined to the level before by one import, so a side has links
+ * when the modules on it — and the module in the middle — import one another
+ * more often than there are modules drawn. Throws when there is none.
+ */
+export function moduleWithLinks(graph: GraphOutput, depth: number): string {
+  const neighbours = dependencyNeighbours(graph, 'left');
+  const found = Object.keys(graph.modules)
+    .sort(compareText)
+    .find((name) => {
+      const drawn = new Set(
+        dependencyLevels(graph, name, 'left').slice(0, depth).flat(),
+      );
+      const imports = [name, ...drawn].reduce(
+        (count, importer) =>
+          count +
+          (neighbours.get(importer) ?? []).filter(
+            (imported) => imported !== importer && drawn.has(imported),
+          ).length,
+        0,
+      );
+      return imports > drawn.size;
+    });
+
+  if (!found) {
+    throw new Error(
+      `No module of the graph imports among what it needs, within ${depth} levels, more than one way: the module page has no link to show on demand.`,
+    );
+  }
+
+  return found;
+}
+
+/** The module a reported module cycle starts from. Throws when the graph reports none. */
+export function moduleOnCycle(graph: GraphOutput): string {
+  const [cycle] = graph.cycles.modules;
+
+  if (!cycle) {
+    throw new Error(
+      'The graph reports no module cycle, so there is no module on one to check. The demo keeps two on purpose.',
+    );
+  }
+
+  return cycle.from;
+}

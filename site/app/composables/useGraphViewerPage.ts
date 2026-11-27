@@ -160,11 +160,21 @@ export function useGraphViewerPage() {
     void loadGraphResources('manual_refresh', true)
   }
 
+  /**
+   * Loads the graph the tab moved to under a page that stayed mounted: a
+   * module's page keeps itself from one module to the next, and the bootstrap
+   * middleware may put the running demo in the tab's session on the way.
+   */
+  function reload() {
+    void loadGraphResources('route_change')
+  }
+
   return {
     endpointUrl,
     isGraphLoading,
     /** What the viewer is waiting on, when it is waiting on the demo. */
     startupMessage,
-    refresh
+    refresh,
+    reload
   }
 }

@@ -1056,15 +1056,108 @@ printed link ending in `/execution-sequence` lands there too. Everything on
 `issues` except the cycles is derived in the viewer by
 `app/utils/architecture-issues.ts` from fields the graph already carries, so
 it needs no change to `GraphOutput` and works against any library version the
-viewer supports. A module's deep dive lives under the navigator at
+viewer supports. A module's page lives under the navigator at
 `/view/navigator/modules/<id>`, where `<id>` is the module name through
 `encodeModuleId` (`app/utils/module-id.ts`); it is the one viewer URL deeper
-than `/view/<page>`, so the bootstrap middleware matches it explicitly, and it
-draws the module alone, laid out by `app/utils/module-deep-dive.ts` from fields
-the graph already carries (horizontally on desktop, or vertically on mobile
-viewports with dependencies at the top and dependents below). `nuxt.config.ts` renders `/view/**` client-side only —
-neither the tab's session nor the developer's local endpoint exists on a server
-— while `/view` itself keeps SSR so it still unfurls as a link.
+than `/view/<page>`, so the bootstrap middleware matches it explicitly. It has
+two views, and its query says which and how — `app/utils/module-page-route.ts`
+reads and writes it, so an address can be shared and a reload opens the page
+as it was. History holds places, not states: opening a module's page from the
+navigator or the landing page, and re-centring on another module, each add a
+step to Back; a change of depth (a stepper or a stub), of view, or of Direct
+Run's target replaces the address in place. Back from a module's page so
+returns to the module it was re-centred from, or straight to the graph it was
+opened from, however much was changed on it:
+
+- **Dependencies**, the default: the module among the others, drawn by
+  `ModuleDependencyBracket.vue` as a tournament bracket that opens both ways —
+  what it imports in the column to its left, what those import further left,
+  and what imports it fanning out to its right the same way. The layout is
+  `app/utils/module-dependency-bracket.ts`, pure: one breadth-first walk per
+  side, linear in modules and imports, so a module stands once per side, at
+  its shortest distance, and a cycle never makes a walk go round. The bracket
+  reads first: each module joined only to the one the walk came from. A module
+  standing on both sides is on a cycle with the one in the middle and is
+  marked "also left" or "also right" on each of its cards, pointing at either
+  lighting the other; an import on a reported module cycle keeps the circular
+  colour in a lane and a port of its own, off the upright the bracket's
+  connectors share, with one `#id` label that traces the cycle while pointed
+  at and keeps it traced once pressed. The modules on a cycle with their
+  parent stand at the ends of its branches, half above the others and half
+  below, so their lines pass the upright rather than cross it; on the card in
+  the middle their ports spread down its side, the bracket's own connector at
+  its middle. Any other import between two modules
+  already drawn on a side is a dashed link, drawn on demand only — for the
+  module under the pointer or the keyboard, for a traced cycle, or all of
+  them from the legend's "Show all imports". Links turn in lanes of their own
+  beside the columns, off the uprights the brackets turn on, and cross a
+  column between the rows of its cards, so no line passes behind a card it
+  does not join; two edges that join no card in common share no stretch while
+  a gap has lanes to spare (the layout's tests check both on every edge of the
+  demo-shaped graph, the first on a 300-module one too — on a compact
+  bracket, whose gaps hold two lanes a side, the links drawn on demand may
+  share one, a module's loop to itself is drawn at half size to keep within
+  its gap, and a cycle label with nowhere clear to go is left off). An
+  import back into
+  the middle is never drawn on its own side — the module making it always
+  stands one level into the other side. Each side shows its own depth, `left`
+  and `right` in the query, 3 when they are absent (`DEFAULT_BRACKET_DEPTH`);
+  a branch going on past the last level ends in a "+N more" stub that asks
+  for one more — a button in the imports' own colour, its connector drawn as
+  the bracket's are, naming in its tooltip the modules it holds back. Every
+  other module is a link to its own page, keeping the
+  depths; the card in the middle, the largest on the canvas, says how many of
+  the module's providers and controllers Direct Run can call, and its Direct
+  Run button opens the inside view on the first of them.
+
+  A canvas narrower than 640px draws the bracket compact, the same bracket
+  smaller: narrower cards whose names wrap over two lines between their words
+  (`app/utils/module-name-words.ts`), a card in the middle that stacks its
+  counts, and tighter gaps — so a 390px phone holds the module and the first
+  level of each side at once.
+
+  Where the canvas looks is `app/utils/module-bracket-viewport.ts`, pure too:
+  the bracket opens whole when it fits at a zoom its names read at, and
+  otherwise a regular one opens on its module at that zoom
+  (`READABLE_ZOOM.regular`, module names drawn at 12.6px) and a compact one on
+  its module and both first levels across the canvas, its names drawn at 11px
+  or more (`READABLE_ZOOM.compact`). A chip at each edge of the canvas names
+  the levels it cuts off — a column of stubs among them — and counts their
+  modules ("← Levels 2–3 · 4 more", "2 more · Levels 2–3 →"), and pans to them
+  at the same zoom; a card the edge cuts through steps back as part of them,
+  and the column headings are pinned across the canvas top at a size of their
+  own.
+  Vue Flow draws only the cards in view (`only-render-visible-elements`), so
+  the browser tests count what a side holds after "Show the whole bracket".
+- **Inside Module** (`?view=inside`): what the module declares —
+  `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
+  fields the graph already carries (horizontally on desktop, or vertically on
+  mobile viewports with dependencies at the top and dependents below) — with
+  Direct Run docked beside it, or below it on a narrow screen
+  (`DirectRunPanel.vue`, a region, never a dialog). Clicking a provider or
+  controller opens it there and puts it in the query as `direct-run-on`, its
+  graph node id; an address with `direct-run-on` opens on this view whatever
+  `view` says, as a deep-dive link from before the page had two views does.
+
+The page keeps itself from one module to the next — its page key is fixed —
+so re-centring on another module does not load the graph again; it loads one
+only when the tab moved to another graph on the way, and then forgets what
+Direct Run recorded on the last one, a node id there being free to name
+another class. A click on a module in the navigator opens its page, and one
+on a provider or controller its module's inside view open on it
+(`module-page-navigation` on `GraphViewer.vue`, which then draws no Direct Run
+drawer; a drag never counts as a click, since Vue Flow reports one only for a
+press that did not move the node). The navigator's own `direct-run-on`, from
+before, is sent on to that target's page. The landing page's hero preview does
+the same through `/view`: its link is `/view?preview=true&module=<name>`, with
+the page's query beside it, and `/view` hands over the preview's graph — the
+static one, or the running demo — as it does for "Open full-screen demo", then
+replaces itself with the module's page, so Back returns to the landing page.
+The documentation's Direct Run preview keeps its drawer
+(`DirectRunDrawer.vue`, the same panel in a drawer). `nuxt.config.ts` renders
+`/view/**` client-side only — neither the tab's session nor the developer's
+local endpoint exists on a server — while `/view` itself keeps SSR so it still
+unfurls as a link.
 
 **The graph file source.** The viewer has a second kind of graph besides an
 endpoint: a `GraphOutput` file — what `nest-graph-inspector export` writes, the
@@ -1157,7 +1250,8 @@ that lays a graph out, never preloaded or prefetched (`build:manifest` in
 `nuxt.config.ts` drops ELK's files from every page's hints), and warmed early
 where a graph is coming: `plugins/module-layout-warm-up.client.ts` starts it on
 arriving at the navigator or `/view?preview=true` — while the page itself
-loads — and on any navigation to the navigator, and the in-browser demo starts
+loads; not when the preview hands over a module (`&module=`), whose page lays
+itself out without ELK — and on any navigation to the navigator, and the in-browser demo starts
 it while its payload downloads and boots. A warm-up lays a small graph shaped
 like a real one out three times, so the first real layout finds ELK compiled
 and optimised. Where no worker can be made at all, ELK's bundled build lays
@@ -1878,6 +1972,24 @@ Facts a code change can invalidate, and the file to check:
   `start()` in `site/app/stores/nodepod-demo.ts`; the size of ELK's worker
   script, `~1.6 MB` (`~477 KB` gzipped) — the `elkjs` version in
   `site/package.json`
+- A module page's address — `view`, `left`, `right`, `direct-run-on`, the
+  depth each side shows when it says none (3), and the preview hand-off
+  `/view?preview=true&module=<name>` — `app/utils/module-page-route.ts` and
+  `DEFAULT_BRACKET_DEPTH` in `app/utils/module-dependency-bracket.ts` (the
+  browser suite's `DEFAULT_DEPTH` mirrors it); that dragging a navigator node
+  never fires its click, which opens a module page — `useDrag` and the node
+  wrapper in the installed `@vue-flow/core`; and that a bracket node takes the
+  pointer for its links only by overriding the inline `pointer-events: none`
+  Vue Flow gives a node nobody can select, drag or click —
+  `ModuleDependencyBracket.vue`; the size a bracket's module names are drawn
+  at when the page opens, 12.6px on a regular bracket and 11px or more on a
+  compact one — `READABLE_ZOOM` in `app/utils/module-bracket-viewport.ts`
+  times the 14px and 11.5px names in `ModuleDependencyBracket.vue` (the
+  browser suite's `READABLE_PX`, 12, and `READABLE_PHONE_PX`, 11, are the
+  floors it checks); and the canvas width below which the bracket is compact,
+  640px — `COMPACT_BELOW_WIDTH` in `ModuleDependencyBracket.vue` — with the
+  compact lengths in `METRICS` of `app/utils/module-dependency-bracket.ts`
+  that fit both first levels across a 390px phone
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that

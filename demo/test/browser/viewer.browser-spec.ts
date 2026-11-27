@@ -151,7 +151,7 @@ test('the issues page lists every cycle of the graph', async ({
   }
 });
 
-test('running a list endpoint from its node in the navigator shows the trace it recorded', async ({
+test('running a list endpoint from its node in the navigator, on its module page, shows the trace it recorded', async ({
   page,
   state,
   graph,
@@ -159,26 +159,35 @@ test('running a list endpoint from its node in the navigator shows the trace it 
 }) => {
   const handler = listEndpointOf(graph);
 
+  const controllerNodeId = `controller-${handler.moduleName}-${handler.controllerName}`;
+
   await openPrintedLink({ page, state, information });
   // The navigator draws modules closed; a module's items are drawn once it
   // is opened.
   await page
     .getByRole('button', { name: `Open ${handler.moduleName}`, exact: true })
     .click();
-  await graphNode(
-    page,
-    `controller-${handler.moduleName}-${handler.controllerName}`,
-  ).click();
+  await graphNode(page, controllerNodeId).click();
 
-  const drawer = page
-    .getByRole('dialog')
+  // The click opens the controller's module's page, Direct Run docked beside
+  // the module's own graph: a region of the page, not a dialog over it.
+  await expect(page).toHaveURL(
+    new URL(
+      `view/navigator/modules/${encodeURIComponent(handler.moduleName)}?view=inside&direct-run-on=${controllerNodeId}`,
+      state.siteBaseUrl,
+    ).href,
+  );
+
+  const panel = page
+    .getByRole('region', { name: 'Direct Run' })
     .filter({ hasText: handler.controllerName });
 
-  await expect(drawer).toBeVisible();
-  await drawer
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await panel
     .getByRole('tab', { name: handler.methodName, exact: true })
     .click();
-  await drawer.getByRole('button', { name: 'Inspect' }).click();
+  await panel.getByRole('button', { name: 'Inspect' }).click();
 
   await expect(page).toHaveURL(new URL('view/trace', state.siteBaseUrl).href);
   await expect(
