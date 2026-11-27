@@ -1123,11 +1123,14 @@ opened from, however much was changed on it:
   (`READABLE_ZOOM.regular`, module names drawn at 12.6px) and a compact one on
   its module and both first levels across the canvas, its names drawn at 11px
   or more (`READABLE_ZOOM.compact`). A chip at each edge of the canvas names
-  the levels it cuts off — a column of stubs among them — and counts their
-  modules ("← Levels 2–3 · 4 more", "2 more · Levels 2–3 →"), and pans to them
-  at the same zoom; a card the edge cuts through steps back as part of them,
-  and the column headings are pinned across the canvas top at a size of their
-  own.
+  the levels drawn that it cuts off and counts their modules ("← Levels 2–3 ·
+  4 more", "2 more · Levels 2–3 →"), and pans to them at the same zoom, any
+  "+N more" stubs past them coming along. It never names a level past the
+  depth shown: a stub says its own count, so the modules on screen and a chip
+  add up to the side's count in the steppers' row, and where stubs are all an
+  edge cuts off the chip says what they say ("+1 more →"). A card the edge
+  cuts through steps back as part of what the chip leads to, and the column
+  headings are pinned across the canvas top at a size of their own.
   Vue Flow draws only the cards in view (`only-render-visible-elements`), so
   the browser tests count what a side holds after "Show the whole bracket".
 - **Inside Module** (`?view=inside`): what the module declares —
@@ -1158,12 +1161,27 @@ page, so Back returns to the landing page.
 
 The landing page's hero is a module's bracket itself, kept in place:
 `RuntimeGraphBlastEffectPreview.vue` draws `ModuleDependencyBracket.vue` with
-`navigation: { kind: 'in-place' }` on the previews' graph, opening on
-`CustomerModule` (`BLAST_DEMO_MODULE` in `app/utils/landing-blast-demo.ts`),
-the demo module a change to which reaches furthest — nine modules, five levels
-deep — as the line beside it says (`measureBlastRadius`, the bracket's own
-right-side walk). There a stepper or a stub changes a depth and a module card
-re-centres the demo with `recenter`, all in the component's state
+`navigation: { kind: 'in-place', framing: 'whole' }` on the previews' graph,
+opening on `CustomerModule` (`BLAST_DEMO_MODULE` in
+`app/utils/landing-blast-demo.ts`), the demo module a change to which reaches
+furthest — nine modules, five levels deep — as the line beside it says
+(`measureBlastRadius`, the bracket's own right-side walk). Framed `whole`, it
+opens on all of it — every card and stub of the depths shown, centred below
+the pinned headings, nothing past an edge, so no chip — wherever that reads:
+`pickWholeFrameBracket` takes the regular bracket when it fits whole at its
+`READABLE_ZOOM`, else the compact one at its own (names at 11px or more),
+fitting `drawnBounds`, the bracket without the heading band the canvas pins
+instead, up to `WHOLE_FRAME_MAX_ZOOM`. Where neither fits — a phone, a narrow
+tablet, a module whose bracket is too tall — it opens in focus, as a module's
+page does. Every change frames it afresh the same way, and a module's page,
+whose navigation is `pages`, can never ask for it. Framed whole, every card is
+drawn rather than only those in view: Vue Flow keeps a card it has not drawn
+where it last drew it, so one moved while undrawn — the bracket laid out at
+the other size once the canvas is measured — would never be drawn at all. On
+a desktop the panel takes what the first screen has left below the hero
+(`calc(100svh - 28.5rem)`, between 27rem and 32rem), so at 1440×900 it is all
+on the first screen. There a stepper or a stub changes a depth and a module
+card re-centres the demo with `recenter`, all in the component's state
 (`useState`, for the document): the address stays `/`, so none of it is a
 step of Back, and Reset returns to the opening module. Its ways out are links
 through the same hand-off — "Open this module in the viewer" and the card's
@@ -1171,7 +1189,9 @@ Direct Run (`leaveFor`) to `/view?preview=true&module=<name>`, "Open full
 graph" to `/view?preview=true` — so Back returns to the landing page and
 finds the demo as it was left. Its root says `data-ready="true"` only once it
 has a graph and the bracket has said `framed`, which it says when Vue Flow has
-taken the viewport the bracket opens at — a signal, never a timer.
+taken the viewport the bracket opens at; it says `framing` as any frame
+starts, and the root says `false` until the next `framed` — a signal, never a
+timer.
 The documentation's Direct Run preview keeps its drawer
 (`DirectRunDrawer.vue`, the same panel in a drawer). `nuxt.config.ts` renders
 `/view/**` client-side only — neither the tab's session nor the developer's
@@ -2014,6 +2034,17 @@ Facts a code change can invalidate, and the file to check:
   suite's `LANDING_MODULE` mirrors it); and that its `data-ready` waits on the
   bracket's `framed` — `frameBracket` in `ModuleDependencyBracket.vue`, and
   `RuntimeGraphBlastEffectPreview.vue`
+- How the landing demo frames its whole bracket — the sizes tried and the
+  floor they must read at (`READABLE_ZOOM`; the browser suite's
+  `WHOLE_READABLE_PX`, 11, checks it), `WHOLE_FRAME_PADDING` (16) and
+  `WHOLE_FRAME_MAX_ZOOM` (1 regular, 1.2 compact) in
+  `app/utils/module-bracket-viewport.ts`, and the panel height that keeps it on
+  a 1440×900 first screen, `calc(100svh - 28.5rem)` between 27rem and 32rem,
+  in `RuntimeGraphBlastEffectPreview.vue`, with the hero's spacing in
+  `site/content/index.md`; that a chip never names a level past the depth
+  shown — `getBracketOffscreen` there; and that Vue Flow sets a node's
+  `computedPosition` only while it draws it, which is why a bracket framed
+  whole draws every card — the node wrapper in the installed `@vue-flow/core`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that
