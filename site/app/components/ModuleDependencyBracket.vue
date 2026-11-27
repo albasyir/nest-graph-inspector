@@ -522,6 +522,8 @@ async function frameBracket(): Promise<void> {
     return
   }
 
+  // Vue Flow answers `false` only without its zoom handler, which a viewport
+  // it calls initialized always has; with no duration it answers at once.
   const isFramed = await setViewport(getBracketFrame(current, canvas.value, framing.value))
   if (isCurrent()) {
     isFramePending.value = !isFramed
