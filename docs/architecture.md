@@ -1187,11 +1187,16 @@ step of Back, and Reset returns to the opening module. Its ways out are links
 through the same hand-off — "Open this module in the viewer" and the card's
 Direct Run (`leaveFor`) to `/view?preview=true&module=<name>`, "Open full
 graph" to `/view?preview=true` — so Back returns to the landing page and
-finds the demo as it was left. Its root says `data-ready="true"` only once it
-has a graph and the bracket has said `framed`, which it says when Vue Flow has
-taken the viewport the bracket opens at; it says `framing` as any frame
-starts, and the root says `false` until the next `framed` — a signal, never a
-timer.
+finds the demo as it was left; Reset is offered only while the demo shows
+something else — a module asked for that the graph lacks draws the opening one
+instead, which is nothing to reset. Its root says `data-ready="true"` only
+once it has a graph and the bracket has said `framed`, which it says when Vue
+Flow has taken the viewport the bracket opens at. The bracket says `framing`
+the moment a frame is owed — as it opens, as its module, a depth or its size
+changes, and as each frame starts — so the demo watches for none of those
+itself, and the root says `false` until the next `framed`: a signal, never a
+timer. The bracket's own root says the same wherever it is drawn, as
+`data-framed`, and that is what the browser tests wait on for a module's page.
 The documentation's Direct Run preview keeps its drawer
 (`DirectRunDrawer.vue`, the same panel in a drawer). `nuxt.config.ts` renders
 `/view/**` client-side only — neither the tab's session nor the developer's

@@ -76,17 +76,12 @@ const moduleLocation = computed(() =>
 /**
  * Whether the bracket on screen has been framed: set by the bracket's own
  * `framed`, once Vue Flow has taken the viewport it opens at, and cleared by
- * its `framing` and by anything here that frames it afresh. With a graph to
- * draw, it is what the root's `data-ready` says — a signal from the canvas,
- * never a timer.
+ * its `framing`, which it says the moment a frame is owed — as it opens, a new
+ * one for another graph included, and as its module, a depth or its size
+ * changes. With a graph to draw, it is what the root's `data-ready` says — a
+ * signal from the canvas, never a timer.
  */
 const isFramed = ref(false)
-watch(
-  [center, () => state.value.depth.left, () => state.value.depth.right, () => view.value.source],
-  () => {
-    isFramed.value = false
-  }
-)
 const isReady = computed(() => Boolean(graph.value && center.value) && isFramed.value)
 
 function recenter(moduleName: string): void {

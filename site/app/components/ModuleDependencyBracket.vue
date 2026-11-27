@@ -91,7 +91,11 @@ const emit = defineEmits<{
   depthChange: [side: BracketSide, depth: number]
   /** In place: the reader asked for another module in the middle. */
   recenter: [moduleName: string]
-  /** A frame is on its way: what is on screen may not be where the bracket opens. */
+  /**
+   * A frame is owed: what is on screen may not be where the bracket opens.
+   * Said as the bracket opens, the moment its module, a depth or its size
+   * changes, and as each frame starts — so a host never has to watch for them.
+   */
   framing: []
   /**
    * The bracket on screen is framed: the viewport is where the bracket opens,
@@ -459,7 +463,23 @@ function getCycleLabelStyle(edge: BracketEdge): CSSProperties {
 const fitTracker = createDeepDiveFitTracker()
 const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 const REVEAL_DURATION_MS = 280
-let isFramePending = true
+/**
+ * Whether a frame is owed: the bracket on screen is not yet where it opens.
+ * The root says it as `data-framed`, a signal a test can wait on.
+ */
+const isFramePending = ref(true)
+
+/**
+ * A frame is owed from now, and the host hears it at once as `framing`: the
+ * bracket owes one as it opens, the moment anything it draws changes, and as
+ * each frame starts. A host binds `framing` and `framed`, nothing more.
+ */
+function oweFrame(): void {
+  isFramePending.value = true
+  emit('framing')
+}
+
+oweFrame()
 
 /**
  * Frames the bracket. Until Vue Flow's viewport exists a frame does nothing,
@@ -470,8 +490,7 @@ let isFramePending = true
  */
 async function frameBracket(): Promise<void> {
   const isCurrent = fitTracker.begin()
-  isFramePending = true
-  emit('framing')
+  oweFrame()
   const current = bracket.value
   if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value) {
     return
@@ -479,7 +498,7 @@ async function frameBracket(): Promise<void> {
 
   const isFramed = await setViewport(getBracketFrame(current, canvas.value, framing.value))
   if (isCurrent()) {
-    isFramePending = !isFramed
+    isFramePending.value = !isFramed
     if (isFramed) {
       emit('framed')
     }
@@ -527,7 +546,7 @@ async function moveTo(target: BracketViewport): Promise<void> {
 watch(
   () => viewportHelper.value.viewportInitialized,
   (isInitialized) => {
-    if (isInitialized && isFramePending) {
+    if (isInitialized && isFramePending.value) {
       void frameBracket()
     }
   },
@@ -536,7 +555,8 @@ watch(
 
 // Another module, another depth, or the other size of bracket — a phone
 // turned, a window narrowed — is a new bracket: framed afresh, whatever the
-// reader did to the last one.
+// reader did to the last one. The frame is owed from the moment it is laid
+// out, so the bracket is never drawn saying the last one's frame is its own.
 watch(
   [() => props.moduleName, () => props.depth.left, () => props.depth.right, isCompact],
   async ([moduleName], [previousModuleName]) => {
@@ -546,6 +566,7 @@ watch(
       pointedCycleIds.value = []
       pinnedCycleIds.value = []
     }
+    oweFrame()
     fitTracker.reset()
     await nextTick()
     void frameBracket()
@@ -555,7 +576,7 @@ watch(
 // A resize reframes a frame still owed, or one the reader has not moved away
 // from — never a view they panned or zoomed themselves.
 const debouncedFrame = useDebounceFn(() => {
-  if (isFramePending || fitTracker.shouldFitOnResize()) {
+  if (isFramePending.value || fitTracker.shouldFitOnResize()) {
     void frameBracket()
   }
 }, 200)
@@ -669,6 +690,7 @@ const isLegendOpen = ref(false)
   <div
     class="module-bracket flex h-full min-h-0 flex-col"
     :class="{ 'module-bracket--compact': isCompact }"
+    :data-framed="!isFramePending"
   >
     <div class="module-bracket__toolbar">
       <div
