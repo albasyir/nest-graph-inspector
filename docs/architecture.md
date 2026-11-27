@@ -2043,7 +2043,9 @@ Facts a code change can invalidate, and the file to check:
   `BLAST_DEMO_MODULE` in `site/app/utils/landing-blast-demo.ts` (the browser
   suite's `LANDING_MODULE` mirrors it); and that its `data-ready` waits on the
   bracket's `framed` — `frameBracket` in `ModuleDependencyBracket.vue`, and
-  `RuntimeGraphBlastEffectPreview.vue`
+  `RuntimeGraphBlastEffectPreview.vue` — as the module page's browser tests
+  wait on the bracket root's `data-framed` (`oweFrame` there, and
+  `drawnCardIds` in `demo/test/browser/module-bracket.ts`)
 - How the landing demo frames its whole bracket — the sizes tried and the
   floor they must read at (`READABLE_ZOOM`; the browser suite's
   `WHOLE_READABLE_PX`, 11, checks it), `WHOLE_FRAME_PADDING` (16) and

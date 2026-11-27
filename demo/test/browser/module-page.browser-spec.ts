@@ -14,8 +14,10 @@ import type { BrowserState } from './browser-state';
 import {
   DEFAULT_DEPTH,
   bracketModule,
+  cardsWellInside,
   center,
   depthGroup,
+  drawnCardIds,
   drawnStubCounts,
   expectDepth,
   expectLevels,
@@ -443,6 +445,48 @@ test('re-centring on another module is a step Back returns from; its depths and 
   );
   await expectGraphLayoutsReady(page);
   await expect(graphNode(page, `module-${moduleName}`)).toBeVisible();
+});
+
+test('back on a module from one beside it, every card it opened with well inside the canvas is drawn again', async ({
+  page,
+  state,
+  graph,
+  information,
+}) => {
+  // The module that needs the most modules directly: a first level taller
+  // than the canvas, so its frame draws some of those cards and not others.
+  const firstLevel = (name: string): string[] =>
+    dependencyLevels(graph, name, 'left')[0] ?? [];
+  const moduleName = Object.keys(graph.modules).reduce((widest, name) =>
+    firstLevel(name).length > firstLevel(widest).length ? name : widest,
+  );
+
+  await openFromNavigator({ page, state, information, moduleName });
+  const opened = await cardsWellInside(page);
+  const beside = firstLevel(moduleName).filter((name) =>
+    opened.includes(`left:${encodeURIComponent(name)}`),
+  );
+  if (beside.length === 0) {
+    throw new Error(`${moduleName} opens with none of its first level drawn`);
+  }
+
+  // The page keeps its canvas from one module to the next, so a card the
+  // other module's frame left undrawn must be drawn wherever this frame puts
+  // it — not left where it last stood.
+  for (const neighbour of beside) {
+    await bracketModule(page, 'left', neighbour).getByRole('link').click();
+    await expect(page).toHaveURL(modulePageUrl(state, neighbour));
+    await expect(center(page)).toContainText(neighbour);
+
+    await page.goBack();
+    await expect(page).toHaveURL(modulePageUrl(state, moduleName));
+    await expect(center(page)).toContainText(moduleName);
+    await expect
+      .poll(() => drawnCardIds(page), {
+        message: `${moduleName}, back from ${neighbour}, draws every card it opened with well inside the canvas`,
+      })
+      .toEqual(expect.arrayContaining(opened));
+  }
 });
 
 test('Direct Run opens beside the module, from its card, and runs a method', async ({

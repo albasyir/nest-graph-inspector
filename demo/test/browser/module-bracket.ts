@@ -42,6 +42,68 @@ export function center(page: Page): Locator {
   return page.locator('.vue-flow__node[data-bracket-node="center"]');
 }
 
+/**
+ * The bracket once Vue Flow has taken the frame it opens at, since it was
+ * last laid out: its root says so in `data-framed`, a signal, never a timer.
+ */
+function framedBracket(page: Page): Locator {
+  return page.locator('.module-bracket[data-framed="true"]');
+}
+
+/**
+ * The cards the canvas draws once the bracket is framed, by node id, sorted.
+ * Vue Flow draws only the cards in view, so these are what the frame shows.
+ */
+export async function drawnCardIds(page: Page): Promise<string[]> {
+  await expect(framedBracket(page)).toBeVisible();
+  const ids = await page
+    .locator('.module-bracket .vue-flow__node[data-id]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-id') ?? ''),
+    );
+
+  return ids.sort();
+}
+
+/**
+ * The cards the frame draws well inside the canvas, by node id, sorted:
+ * wholly inside it, below its pinned headings, and at least their own height
+ * clear of its top and bottom. A card at an edge is drawn or not by a pixel
+ * either way as the canvas settles on its size; one well inside is drawn
+ * however the frame settles.
+ */
+export async function cardsWellInside(page: Page): Promise<string[]> {
+  await expect(framedBracket(page)).toBeVisible();
+  const ids = await page.evaluate(() => {
+    const canvas = document
+      .querySelector('.module-bracket__canvas')
+      ?.getBoundingClientRect();
+    const headings = document
+      .querySelector('.module-bracket__headings')
+      ?.getBoundingClientRect();
+    if (!canvas) {
+      return [];
+    }
+    const top = headings ? headings.bottom : canvas.top;
+
+    return [
+      ...document.querySelectorAll('.module-bracket .vue-flow__node[data-id]'),
+    ]
+      .filter((node) => {
+        const box = node.getBoundingClientRect();
+        return (
+          box.left >= canvas.left &&
+          box.right <= canvas.right &&
+          box.top >= top + box.height &&
+          box.bottom <= canvas.bottom - box.height
+        );
+      })
+      .map((node) => node.getAttribute('data-id') ?? '');
+  });
+
+  return ids.sort();
+}
+
 /** A side's depth: its label, its two steppers, and the depth between them. */
 export function depthGroup(page: Page, side: DependencySide): Locator {
   return page.getByRole('group', { name: SIDE_LABELS[side], exact: true });
