@@ -16,6 +16,15 @@ function module(imports: string[] = []): GraphOutputModule {
   return { imports, exports: [], providers: [], controllers: [] }
 }
 
+const graph = {
+  root: 'AppModule',
+  modules: {
+    AppModule: module(['CustomerModule', 'AuthModule']),
+    AuthModule: module(['CustomerModule']),
+    CustomerModule: module()
+  }
+}
+
 describe('the demo as it opens', () => {
   test('is CustomerModule, three levels each side', () => {
     assert.equal(BLAST_DEMO_MODULE, 'CustomerModule')
@@ -23,7 +32,7 @@ describe('the demo as it opens', () => {
       center: 'CustomerModule',
       depth: { left: DEFAULT_BRACKET_DEPTH, right: DEFAULT_BRACKET_DEPTH }
     })
-    assert.equal(isBlastDemoAtStart(startBlastDemo()), true)
+    assert.equal(isBlastDemoAtStart(graph, startBlastDemo()), true)
   })
 
   test('is a fresh state each time, never one an earlier visitor changed', () => {
@@ -56,25 +65,24 @@ describe('what the visitor does', () => {
 
   test('any move off the opening state offers a reset, and coming back withdraws it', () => {
     const start = startBlastDemo()
-    assert.equal(isBlastDemoAtStart(recenterBlastDemo(start, 'AuthModule')), false)
-    assert.equal(isBlastDemoAtStart(setBlastDemoDepth(start, 'left', 1)), false)
-    assert.equal(isBlastDemoAtStart(setBlastDemoDepth(start, 'right', 4)), false)
+    assert.equal(isBlastDemoAtStart(graph, recenterBlastDemo(start, 'AuthModule')), false)
+    assert.equal(isBlastDemoAtStart(graph, setBlastDemoDepth(start, 'left', 1)), false)
+    assert.equal(isBlastDemoAtStart(graph, setBlastDemoDepth(start, 'right', 4)), false)
 
     const back = recenterBlastDemo(recenterBlastDemo(start, 'AuthModule'), BLAST_DEMO_MODULE)
-    assert.equal(isBlastDemoAtStart(back), true)
+    assert.equal(isBlastDemoAtStart(graph, back), true)
+  })
+
+  // The static graph has NestJSCoreModule; the live demo's graph does not, so
+  // a demo re-centred on it draws the opening module there instead.
+  test('a module asked for that the graph lacks is nothing to reset: the opening module is what is drawn', () => {
+    const lacking = recenterBlastDemo(startBlastDemo(), 'NestJSCoreModule')
+    assert.equal(isBlastDemoAtStart(graph, lacking), true)
+    assert.equal(isBlastDemoAtStart(graph, setBlastDemoDepth(lacking, 'right', 4)), false)
   })
 })
 
 describe('the module in the middle', () => {
-  const graph = {
-    root: 'AppModule',
-    modules: {
-      AppModule: module(['CustomerModule', 'AuthModule']),
-      AuthModule: module(['CustomerModule']),
-      CustomerModule: module()
-    }
-  }
-
   test('is the one asked for while the graph has it', () => {
     assert.equal(resolveBlastDemoCenter(graph, 'AuthModule'), 'AuthModule')
   })

@@ -50,7 +50,8 @@ const finding = computed(() => {
     : null
   return radius ? describeBlastRadius(radius) : null
 })
-const isAtStart = computed(() => isBlastDemoAtStart(state.value))
+// With no graph drawn there is nothing to reset.
+const isAtStart = computed(() => !graph.value || isBlastDemoAtStart(graph.value, state.value))
 
 /**
  * In place: another module is put in the middle here, and Direct Run leaves

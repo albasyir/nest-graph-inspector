@@ -50,10 +50,18 @@ export function setBlastDemoDepth(
   return { ...state, depth: { ...state.depth, [side]: depth } }
 }
 
-/** Whether the demo is as it opened, with nothing to reset. */
-export function isBlastDemoAtStart(state: BlastDemoState): boolean {
+/**
+ * Whether the demo drawn from `graph` is as it opened, with nothing to reset:
+ * the module it draws in the middle is the one it opens on there, at the
+ * depths it opens at. A module asked for that the graph lacks is not what is
+ * drawn, so it is nothing to reset.
+ */
+export function isBlastDemoAtStart(
+  graph: Pick<GraphOutput, 'modules' | 'root'>,
+  state: BlastDemoState
+): boolean {
   const start = startBlastDemo()
-  return state.center === start.center
+  return resolveBlastDemoCenter(graph, state.center) === resolveBlastDemoCenter(graph, start.center)
     && state.depth.left === start.depth.left
     && state.depth.right === start.depth.right
 }
