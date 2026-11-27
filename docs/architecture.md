@@ -1133,6 +1133,12 @@ opened from, however much was changed on it:
   headings are pinned across the canvas top at a size of their own.
   Vue Flow draws only the cards in view (`only-render-visible-elements`), so
   the browser tests count what a side holds after "Show the whole bracket".
+  It tells a card in view by `computedPosition`, where it last drew the card,
+  which only a drawn card's own wrapper updates; so each time Vue Flow takes a
+  layout the bracket sets every card's to where the card now is, and a card
+  moved while undrawn — the page re-centred on another module and back, the
+  bracket laid out at its other size — is drawn wherever the new frame puts
+  it rather than left out of it.
 - **Inside Module** (`?view=inside`): what the module declares —
   `ModuleGraphViewer.vue`, laid out by `app/utils/module-deep-dive.ts` from
   fields the graph already carries (horizontally on desktop, or vertically on
@@ -1174,10 +1180,9 @@ fitting `drawnBounds`, the bracket without the heading band the canvas pins
 instead, up to `WHOLE_FRAME_MAX_ZOOM`. Where neither fits — a phone, a narrow
 tablet, a module whose bracket is too tall — it opens in focus, as a module's
 page does. Every change frames it afresh the same way, and a module's page,
-whose navigation is `pages`, can never ask for it. Framed whole, every card is
-drawn rather than only those in view: Vue Flow keeps a card it has not drawn
-where it last drew it, so one moved while undrawn — the bracket laid out at
-the other size once the canvas is measured — would never be drawn at all. On
+whose navigation is `pages`, can never ask for it. Its cards are culled as a
+module page's are, and laid out again at the other size once the canvas is
+measured, they are drawn where they now stand, for the same reason. On
 a desktop the panel takes what the first screen has left below the hero
 (`calc(100svh - 28.5rem)`, between 27rem and 32rem), so at 1440×900 it is all
 on the first screen. There a stepper or a stub changes a depth and a module
@@ -2047,9 +2052,11 @@ Facts a code change can invalidate, and the file to check:
   a 1440×900 first screen, `calc(100svh - 28.5rem)` between 27rem and 32rem,
   in `RuntimeGraphBlastEffectPreview.vue`, with the hero's spacing in
   `site/content/index.md`; that a chip never names a level past the depth
-  shown — `getBracketOffscreen` there; and that Vue Flow sets a node's
-  `computedPosition` only while it draws it, which is why a bracket framed
-  whole draws every card — the node wrapper in the installed `@vue-flow/core`
+  shown — `getBracketOffscreen` there; and that Vue Flow culls by a node's
+  `computedPosition` and sets it only while it draws the node, which is why
+  the bracket sets every card's itself each time Vue Flow takes a layout —
+  the node wrapper and `getNodesInside` in the installed `@vue-flow/core`, and
+  the watcher on `flowNodes` in `ModuleDependencyBracket.vue`
 - The facts the e2e suites cannot read from the running demo — its ports,
   route prefix and outputs — `DEMO` in `demo/test/support/demo.fixture.ts`
 - Which e2e suites `test:e2e` and `test:e2e:browser` run, and the CI jobs that

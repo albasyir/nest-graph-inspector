@@ -107,7 +107,7 @@ const emit = defineEmits<{
 
 const flowId = `module-bracket-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
-const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
+const { viewport, dimensions, nodes, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
 
 /** The strip of column headings pinned across the top of the canvas. */
 const HEADINGS_HEIGHT = 32
@@ -118,14 +118,7 @@ const canvas = computed<BracketCanvas>(() => ({
 }))
 const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
 
-/**
- * How the bracket opens: whole only where a host keeps it in place and asks.
- * Framed whole, every card is drawn, not only those in view: such a bracket
- * is a small demo meant to be seen all at once, and Vue Flow keeps a card it
- * has not drawn where it last placed it (`computedPosition` is set by a drawn
- * node only), so a card moved while undrawn — the bracket laid out again at
- * the other size, say — would never be drawn where it now stands.
- */
+/** How the bracket opens: whole only where a host keeps it in place and asks. */
 const framing = computed<BracketFraming>(() =>
   props.navigation.kind === 'in-place' ? props.navigation.framing : 'focus'
 )
@@ -293,6 +286,21 @@ const flowNodes = computed<FlowNode[]>(() =>
       domAttributes: getNodeAttributes(node)
     }))
 )
+
+// Vue Flow draws only the cards in view, and tells them by `computedPosition`
+// — where it last drew each one, which only a drawn card's own wrapper
+// updates. A card moved while undrawn — the page re-centred on another
+// module and back, the bracket laid out at its other size — would stay
+// undrawn wherever it now stands, its place in the frame left empty. So once
+// Vue Flow has taken a layout, every card's is set to where the card now is.
+watch(flowNodes, () => {
+  for (const node of nodes.value) {
+    const { x, y } = node.position
+    if (node.computedPosition.x !== x || node.computedPosition.y !== y) {
+      node.computedPosition = { ...node.computedPosition, x, y }
+    }
+  }
+}, { flush: 'post' })
 
 /** What a test, or a stylesheet, can tell a node by. */
 function getNodeAttributes(node: BracketNode): Record<string, string> {
@@ -780,7 +788,7 @@ const isLegendOpen = ref(false)
         :elements-selectable="false"
         :nodes-focusable="false"
         :edges-focusable="false"
-        :only-render-visible-elements="framing === 'focus'"
+        only-render-visible-elements
         :min-zoom="0.05"
         :max-zoom="1.5"
         :zoom-on-double-click="false"
