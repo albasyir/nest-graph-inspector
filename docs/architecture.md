@@ -1194,7 +1194,11 @@ a desktop the panel takes what the first screen has left below the hero
 on the first screen. There a stepper or a stub changes a depth and a module
 card re-centres the demo with `recenter`, all in the component's state
 (`useState`, for the document): the address stays `/`, so none of it is a
-step of Back, and Reset returns to the opening module. Its ways out are links
+step of Back, and Reset returns to the opening module. A move made from the
+keyboard keeps focus in the demo: where the control it was made from is gone
+— a card now in the middle, a stub whose level is shown, Reset — focus goes
+to the demo's own region (`tabindex="-1"`), whose finding says what changed.
+Its ways out are links
 through the same hand-off — "Open this module in the viewer" and the card's
 Direct Run (`leaveFor`) to `/view?preview=true&module=<name>`, "Open full
 graph" to `/view?preview=true` — so Back returns to the landing page and

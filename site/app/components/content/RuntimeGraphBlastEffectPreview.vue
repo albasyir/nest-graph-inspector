@@ -84,23 +84,51 @@ const moduleLocation = computed(() =>
 const isFramed = ref(false)
 const isReady = computed(() => Boolean(graph.value && center.value) && isFramed.value)
 
+/** The demo itself: where keyboard focus goes when a move takes away the control it was on. */
+const demoRef = ref<HTMLElement | null>(null)
+
+/**
+ * Makes a move, keeping keyboard focus in the demo. The control a move is
+ * made from can be gone once it is made — a module card now in the middle, a
+ * "+N more" stub whose level is shown, Reset once the demo is back where it
+ * opened — and focus would fall back to the start of the page. It goes to
+ * the demo instead, whose finding says what changed; a stepper, still there,
+ * keeps it.
+ */
+async function move(change: () => void): Promise<void> {
+  const hadFocus = demoRef.value?.contains(document.activeElement) ?? false
+  change()
+  await nextTick()
+  if (hadFocus && demoRef.value && !demoRef.value.contains(document.activeElement)) {
+    demoRef.value.focus({ preventScroll: true })
+  }
+}
+
 function recenter(moduleName: string): void {
-  state.value = recenterBlastDemo(state.value, moduleName)
+  void move(() => {
+    state.value = recenterBlastDemo(state.value, moduleName)
+  })
 }
 
 function setDepth(side: BracketSide, depth: number): void {
-  state.value = setBlastDemoDepth(state.value, side, depth)
+  void move(() => {
+    state.value = setBlastDemoDepth(state.value, side, depth)
+  })
 }
 
 function reset(): void {
-  state.value = startBlastDemo()
+  void move(() => {
+    state.value = startBlastDemo()
+  })
 }
 </script>
 
 <template>
   <section
+    ref="demoRef"
     class="blast-demo"
     aria-label="Blast effect"
+    tabindex="-1"
     data-ui
     :data-ready="isReady ? 'true' : 'false'"
   >
