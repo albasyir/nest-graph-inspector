@@ -391,6 +391,40 @@ test('clicking another module puts it in the middle of the demo, on the landing 
   await expect(page).toHaveURL(state.siteBaseUrl);
 });
 
+test('a move made from the keyboard keeps focus in the demo, even when the control it was made from is gone', async ({
+  page,
+  state,
+}) => {
+  await openLanding(page, state);
+
+  // A card the demo draws on its right, put in the middle from the keyboard:
+  // once there, its card is gone.
+  const card = blastDemo(page)
+    .locator('.vue-flow__node[data-bracket-node="module"][data-side="right"]')
+    .first();
+  const name = card.locator('.module-bracket-module__name');
+  const target = (await name.textContent())?.trim();
+  if (!target) {
+    throw new Error('The first card the demo draws on its right has no name');
+  }
+  await card.getByRole('button').press('Enter');
+  await expect(center(page)).toContainText(target);
+  await expectDemoReady(page);
+  await expect(blastDemo(page)).toBeFocused();
+
+  // Reset, from the keyboard, is gone once the demo is back where it opened.
+  await resetButton(page).press('Enter');
+  await expect(center(page)).toContainText(LANDING_MODULE);
+  await expectDemoReady(page);
+  await expect(resetButton(page)).toHaveCount(0);
+  await expect(blastDemo(page)).toBeFocused();
+
+  // A stepper stays where it is, and so does focus.
+  await stepper(page, 'right', 'fewer').press('Enter');
+  await expectDemoReady(page);
+  await expect(stepper(page, 'right', 'fewer')).toBeFocused();
+});
+
 test('"Open full graph" opens the navigator on the example, and its Graph settings offer no Bright Line', async ({
   page,
   state,
