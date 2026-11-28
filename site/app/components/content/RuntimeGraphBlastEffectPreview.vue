@@ -222,12 +222,14 @@ function reset(): void {
       </ClientOnly>
     </div>
 
-    <!-- The caption row the neighbouring previews have: what the picture
-         says, then its ways out — quiet, so the page's accent stays on the
-         hero's call to action. -->
-    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+    <!-- A caption, as the neighbouring previews have under theirs: what the
+         picture says, on a line of its own, then its ways out on a row
+         beneath — quiet, so the page's accent stays on the hero's call to
+         action. Reset comes last, so the exits never move under the pointer
+         as it comes and goes. -->
+    <div class="space-y-2">
       <p
-        class="min-w-0 flex-1 basis-64 text-sm text-muted tabular-nums"
+        class="text-sm text-muted text-pretty tabular-nums"
         aria-live="polite"
       >
         <template v-if="center && finding?.kind === 'reaches'">
@@ -249,17 +251,6 @@ function reset(): void {
 
       <div class="blast-demo__actions">
         <UButton
-          v-if="!isAtStart"
-          icon="i-lucide-rotate-ccw"
-          label="Reset"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          :aria-label="`Reset to ${BLAST_DEMO_MODULE}`"
-          class="cursor-pointer"
-          @click="reset"
-        />
-        <UButton
           v-if="moduleLocation"
           :to="moduleLocation"
           icon="i-lucide-panel-top-open"
@@ -275,6 +266,17 @@ function reset(): void {
           color="neutral"
           variant="outline"
           size="sm"
+        />
+        <UButton
+          v-if="!isAtStart"
+          icon="i-lucide-rotate-ccw"
+          label="Reset"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :aria-label="`Reset to ${BLAST_DEMO_MODULE}`"
+          class="cursor-pointer"
+          @click="reset"
         />
       </div>
     </div>
@@ -315,7 +317,6 @@ function reset(): void {
 
 .blast-demo__actions {
   display: flex;
-  flex-shrink: 0;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
@@ -344,10 +345,6 @@ function reset(): void {
 @media (max-width: 639.98px) {
   .blast-demo__panel {
     --module-bracket-inset: 0px;
-  }
-
-  .blast-demo__actions {
-    flex-basis: 100%;
   }
 
   .blast-demo__actions > * {
