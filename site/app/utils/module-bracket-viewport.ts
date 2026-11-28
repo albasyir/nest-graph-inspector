@@ -74,7 +74,7 @@ const EDGE_TOLERANCE = 1
  *   read at, otherwise on its module, the rest a chip away.
  * - `whole` — a demo showing what a change reaches: all of it, every card
  *   and stub, wherever it fits at a zoom its names read at, at either size
- *   (`pickWholeFrameBracket`); where it fits at neither, as `focus`.
+ *   (`pickWholeFrameBracket`); where it fits at neither, as `focus`, compact.
  */
 export type BracketFraming = 'focus' | 'whole'
 
@@ -112,16 +112,20 @@ export function fitsWhole(bracket: ModuleDependencyBracket, canvas: BracketCanva
 }
 
 /**
- * Of one bracket laid out at each size, the one a whole frame draws on
- * `canvas`: the first, in the order given — the regular one before the
- * compact one — that fits whole at a zoom its names read at; `null` when none
- * does, and the bracket opens in focus.
+ * Of one bracket laid out at each size, the one a host that frames it whole
+ * draws on `canvas`: the first, in the order given — the regular one before
+ * the compact one — that fits whole at a zoom its names read at, and where
+ * none does — a canvas not yet measured included — the last, the compact
+ * one, to open in focus on its first levels. A canvas framed whole is a
+ * column or a panel of a page, never as wide as a regular bracket's first
+ * levels; a compact one's fit across it at a size their names read at.
+ * `null` only when there is no bracket to draw.
  */
 export function pickWholeFrameBracket(
   brackets: readonly ModuleDependencyBracket[],
   canvas: BracketCanvas
 ): ModuleDependencyBracket | null {
-  return brackets.find(bracket => fitsWhole(bracket, canvas)) ?? null
+  return brackets.find(bracket => fitsWhole(bracket, canvas)) ?? brackets.at(-1) ?? null
 }
 
 /**

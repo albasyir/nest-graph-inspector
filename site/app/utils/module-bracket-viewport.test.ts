@@ -270,7 +270,7 @@ describe('module bracket viewport', () => {
     assert.equal(getCutCardIds(bracket, frame, DESKTOP).size, 0)
   })
 
-  test('framed whole, the regular bracket is drawn where it reads whole, else the compact one, else neither', () => {
+  test('framed whole, the regular bracket is drawn where it reads whole, else the compact one, reading whole or not', () => {
     const pair = graph({ A: ['B'], B: [] })
     const regular = build(pair, 'A')
     const compact = build(pair, 'A', DEFAULT_BRACKET_DEPTH, 'compact')
@@ -280,7 +280,13 @@ describe('module bracket viewport', () => {
     const chainRegular = build(CHAIN, 'M5')
     const chainCompact = build(CHAIN, 'M5', DEFAULT_BRACKET_DEPTH, 'compact')
     assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], DESKTOP), chainCompact)
-    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], PHONE), null)
+
+    // Whole at neither size — a phone, a tablet's panel wider than the compact
+    // width, a canvas not yet measured — it is the compact one all the same.
+    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], PHONE), chainCompact)
+    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], { width: 686, height: 412, top: 32 }), chainCompact)
+    assert.equal(pickWholeFrameBracket([chainRegular, chainCompact], { width: 0, height: 0, top: 32 }), chainCompact)
+    assert.equal(pickWholeFrameBracket([], DESKTOP), null)
   })
 
   test('framed whole, a bracket that reads whole at neither size opens in focus, as a module page opens it', () => {

@@ -204,11 +204,13 @@ const widthBracket = computed(() =>
 
 /**
  * Framed whole, the bracket at a size it reads whole at on this canvas — the
- * regular one when it does, else the compact one — or none, and it opens in
- * focus at the size the canvas's width gives it.
+ * regular one when it does, else the compact one — and where it reads whole
+ * at neither, the compact one whatever the canvas's width, to open in focus
+ * on its first levels (`pickWholeFrameBracket`). Not framed whole, none: a
+ * module's page takes the size its canvas's width gives it.
  */
 const wholeBracket = computed(() => {
-  if (framing.value !== 'whole' || !hasCanvas.value) {
+  if (framing.value !== 'whole') {
     return null
   }
 
@@ -217,13 +219,7 @@ const wholeBracket = computed(() => {
   return pickWholeFrameBracket(laidOut, canvas.value)
 })
 
-// Framed whole and reading whole at neither size, the bracket is compact
-// whatever the canvas's width: a demo's canvas is a column or a panel of a
-// page, never as wide as a regular bracket's first levels, and a compact
-// one's fit across it at a size their names read at.
-const bracket = computed(() =>
-  wholeBracket.value ?? (framing.value === 'whole' ? compactBracket.value : widthBracket.value)
-)
+const bracket = computed(() => wholeBracket.value ?? widthBracket.value)
 const isCompact = computed(() => bracket.value?.size === 'compact')
 
 const nodeById = computed(() =>
