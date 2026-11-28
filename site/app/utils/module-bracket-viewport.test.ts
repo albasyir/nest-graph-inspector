@@ -388,7 +388,8 @@ describe('module bracket viewport', () => {
     assert.ok(Math.abs(moved.x - open.x - (3 + OVERLAY_GAP)) < 0.01, `moved across by ${moved.x - open.x}`)
     for (const node of small.nodes.filter(candidate => candidate.kind !== 'level')) {
       const box = onScreen(node, moved)
-      const isClear = box.right <= control.x + control.width + OVERLAY_GAP || box.left >= control.x + control.width + OVERLAY_GAP
+      // Clear of it to its left, its right, above or below it, by the gap.
+      const isClear = box.right <= control.x - OVERLAY_GAP || box.left >= control.x + control.width + OVERLAY_GAP
         || box.bottom <= control.y - OVERLAY_GAP || box.top >= control.y + control.height + OVERLAY_GAP
       assert.ok(isClear, `${node.id} stands clear of the control`)
       assert.ok(isWhollyInView(node, moved, canvas), `${node.id} is still in view`)
