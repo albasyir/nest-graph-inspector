@@ -537,17 +537,17 @@ function oweFrame(): void {
 oweFrame()
 
 /**
- * Frames the bracket. Until Vue Flow's viewport exists a frame does nothing,
- * so it stays owed and is made the moment the viewport is ready; a newer
- * frame supersedes one still running. It says `framing` as it starts — what
- * is on screen may not be this frame — and `framed` once Vue Flow has taken
- * it.
+ * Frames the bracket. Until Vue Flow's viewport exists, and the canvas's own
+ * width is measured, a frame does nothing, so it stays owed and is made the
+ * moment both are there; a newer frame supersedes one still running. It says
+ * `framing` as it starts — what is on screen may not be this frame — and
+ * `framed` once Vue Flow has taken it.
  */
 async function frameBracket(): Promise<void> {
   const isCurrent = fitTracker.begin()
   oweFrame()
   const current = bracket.value
-  if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value) {
+  if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value || canvasWidth.value === 0) {
     return
   }
 
@@ -608,6 +608,20 @@ watch(
     }
   },
   { immediate: true }
+)
+
+// Until the canvas's own width is measured, the bracket's size is the
+// window's guess (`isPhone`), and a frame taken then could be the frame of a
+// bracket about to be laid out at its other size — the landing's column, on
+// a desktop, is narrower than the window says. So the frame stays owed until
+// the measure comes: `framed` only ever names the bracket that stays.
+watch(
+  () => canvasWidth.value > 0,
+  (isMeasured) => {
+    if (isMeasured && isFramePending.value) {
+      void frameBracket()
+    }
+  }
 )
 
 // Another module, another depth, or the other size of bracket — a phone

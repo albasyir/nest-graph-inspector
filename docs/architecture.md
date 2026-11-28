@@ -1233,7 +1233,11 @@ finds the demo as it was left; Reset is offered only while the demo shows
 something else — a module asked for that the graph lacks draws the opening one
 instead, which is nothing to reset. Its root says `data-ready="true"` only
 once it has a graph and the bracket has said `framed`, which it says when Vue
-Flow has taken the viewport the bracket opens at. The bracket says `framing`
+Flow has taken the viewport the bracket opens at — and never before the
+canvas's own width is measured: until then the bracket's size is the
+window's guess (`isPhone`), and on a desktop a section's column is narrower
+than the window says, so a frame taken sooner would be the regular
+bracket's, laid out compact a moment later. The bracket says `framing`
 the moment a frame is owed — as it opens, as its module, a depth or its size
 changes, and as each frame starts — so the demo watches for none of those
 itself, and the root says `false` until the next `framed`: a signal, never a
