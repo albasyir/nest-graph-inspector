@@ -6,11 +6,7 @@ seo:
 
 ::u-page-hero{class="dark:bg-gradient-to-b from-neutral-900 to-neutral-950"}
 ---
-orientation: vertical
-ui:
-  container: py-8 sm:py-10 lg:py-8 gap-6 sm:gap-y-6
-  description: mt-4
-  footer: mt-6
+orientation: horizontal
 ---
 #top
 :hero-background
@@ -55,7 +51,7 @@ Nest Graph Inspector turns your live NestJS runtime into **architecture intellig
   :::
 
 #default
-  :runtime-graph-blast-effect-preview
+  :runtime-graph-complete-preview
 ::
 
 ::u-page-section
@@ -68,49 +64,49 @@ ui:
 ---
 #title
 ::span{class="inline-flex items-center gap-3"}
-  :u-icon{name="i-lucide-network" class="size-9 shrink-0 text-primary"}
-  Explore the Whole Runtime Graph
+  :u-icon{name="i-lucide-radar" class="size-9 shrink-0 text-primary"}
+  See the Blast Effect of a Change
 ::
 
 #description
-Every module your application wires at runtime, with its providers and controllers, laid out the way its imports run. Click a module to open its page: what it needs, and what needs it.
+**Blast effect:** pick a module and see everything that depends on it — the modules a change would hit.
 
 #features
-  :::u-page-feature
-  ---
-  icon: i-lucide-layers
-  ---
-  #title
-  Laid Out by Imports
-
-  #description
-  Each module sits above the modules it imports, and the import closing a cycle points back up.
-  :::
-
   :::u-page-feature
   ---
   icon: i-lucide-mouse-pointer-click
   ---
   #title
-  Open Any Module
+  Re-center on Any Module
 
   #description
-  A module opens its own page; a provider or controller opens Direct Run on it.
+  Click a module to put it in the middle and see what it reaches.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-play
+  icon: i-lucide-layers
   ---
   #title
-  Run the Real Demo
+  Go Level by Level
 
   #description
-  Load Example starts the demo application in your browser, and the graph turns live.
+  Step each side's depth, or open the next level from a +N more stub.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-panel-top-open
+  ---
+  #title
+  Open It in the Viewer
+
+  #description
+  Take the module to its own page, or open the full graph.
   :::
 
 #default
-  :runtime-graph-complete-preview
+  :runtime-graph-blast-effect-preview
 ::
 
 ::u-page-section

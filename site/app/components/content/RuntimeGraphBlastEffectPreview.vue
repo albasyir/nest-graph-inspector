@@ -18,12 +18,15 @@ import {
 } from '~/utils/module-page-route'
 
 /**
- * The landing page's blast effect: a module of the demo application in the
- * middle of its dependency bracket — what it needs on the left, and on the
- * right every module a change to it would hit — drawn from the demo's graph
- * as every preview draws it (the static export, or the live demo once it
- * runs), and kept in place. The steppers, a "+N more" stub and a click on
- * another module all change the demo here; only its two exits leave the page.
+ * The landing page's blast-effect section's picture: a module of the demo
+ * application in the middle of its dependency bracket — what it needs on the
+ * left, and on the right every module a change to it would hit — drawn from
+ * the demo's graph as every preview draws it (the static export, or the live
+ * demo once it runs), and kept in place. The section says what a blast effect
+ * is; this shows it, and under it, as the neighbouring previews' captions do,
+ * how far a change reaches and the ways out. The steppers, a "+N more" stub
+ * and a click on another module all change the demo here; only its two exits
+ * leave the page.
  */
 const {
   view,
@@ -56,9 +59,10 @@ const isAtStart = computed(() => !graph.value || isBlastDemoAtStart(graph.value,
 /**
  * In place: another module is put in the middle here, and Direct Run leaves
  * for the module's page through `/view`, which hands it the demo's graph —
- * the way the full graph's previews open a module. Framed whole: everything a
- * change reaches at the depth shown is on screen at once wherever its names
- * still read — a desktop — and a phone opens on the module, as its page does.
+ * the way the full graph's previews open a module. Framed whole wherever all
+ * of it reads: a section's column is narrower than that, so it opens on the
+ * module and the first level of each side, as a module's page on a phone
+ * does, the rest a chip or a step away.
  */
 const navigation: BracketNavigation = {
   kind: 'in-place',
@@ -126,72 +130,12 @@ function reset(): void {
 <template>
   <section
     ref="demoRef"
-    class="blast-demo"
+    class="blast-demo space-y-3"
     aria-label="Blast effect"
     tabindex="-1"
     data-ui
     :data-ready="isReady ? 'true' : 'false'"
   >
-    <div class="blast-demo__text">
-      <p class="blast-demo__lead">
-        <span class="blast-demo__term">Blast effect:</span>
-        pick a module and see everything that depends on it — the modules a change would hit.
-      </p>
-      <p
-        class="blast-demo__finding"
-        aria-live="polite"
-      >
-        <template v-if="center && finding?.kind === 'reaches'">
-          A change to
-          <span
-            class="blast-demo__module"
-            translate="no"
-          >{{ center }}</span>
-          reaches <span class="blast-demo__count">{{ finding.modules }}</span>, {{ finding.distance }}.
-        </template>
-        <template v-else-if="center && finding?.kind === 'contained'">
-          No module depends on
-          <span
-            class="blast-demo__module"
-            translate="no"
-          >{{ center }}</span>: a change to it stays inside it.
-        </template>
-      </p>
-    </div>
-
-    <!-- The page's own accent stays on the hero's call to action: the demo's
-         way out is filled, the rest outlined or plain. -->
-    <div class="blast-demo__actions">
-      <UButton
-        v-if="!isAtStart"
-        icon="i-lucide-rotate-ccw"
-        label="Reset"
-        color="neutral"
-        variant="ghost"
-        size="lg"
-        :aria-label="`Reset to ${BLAST_DEMO_MODULE}`"
-        class="cursor-pointer"
-        @click="reset"
-      />
-      <UButton
-        v-if="moduleLocation"
-        :to="moduleLocation"
-        icon="i-lucide-panel-top-open"
-        label="Open this module in the viewer"
-        color="neutral"
-        variant="outline"
-        size="lg"
-      />
-      <UButton
-        to="/view?preview=true"
-        icon="i-lucide-network"
-        label="Open full graph"
-        color="neutral"
-        variant="solid"
-        size="lg"
-      />
-    </div>
-
     <div class="blast-demo__panel">
       <ClientOnly>
         <ModuleDependencyBracket
@@ -276,108 +220,116 @@ function reset(): void {
         </template>
       </ClientOnly>
     </div>
+
+    <!-- The caption row the neighbouring previews have: what the picture
+         says, then its ways out — quiet, so the page's accent stays on the
+         hero's call to action. -->
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <p
+        class="min-w-0 flex-1 basis-64 text-sm text-muted tabular-nums"
+        aria-live="polite"
+      >
+        <template v-if="center && finding?.kind === 'reaches'">
+          A change to
+          <span
+            class="font-medium text-highlighted"
+            translate="no"
+          >{{ center }}</span>
+          reaches <span class="font-medium text-highlighted">{{ finding.modules }}</span>, {{ finding.distance }}.
+        </template>
+        <template v-else-if="center && finding?.kind === 'contained'">
+          No module depends on
+          <span
+            class="font-medium text-highlighted"
+            translate="no"
+          >{{ center }}</span>: a change to it stays inside it.
+        </template>
+      </p>
+
+      <div class="blast-demo__actions">
+        <UButton
+          v-if="!isAtStart"
+          icon="i-lucide-rotate-ccw"
+          label="Reset"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :aria-label="`Reset to ${BLAST_DEMO_MODULE}`"
+          class="cursor-pointer"
+          @click="reset"
+        />
+        <UButton
+          v-if="moduleLocation"
+          :to="moduleLocation"
+          icon="i-lucide-panel-top-open"
+          label="Open this module in the viewer"
+          color="neutral"
+          variant="outline"
+          size="sm"
+        />
+        <UButton
+          to="/view?preview=true"
+          icon="i-lucide-network"
+          label="Open full graph"
+          color="neutral"
+          variant="outline"
+          size="sm"
+        />
+      </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
 /*
- * What it shows and how far a change reaches, its ways out, then the demo.
- * Wide, the ways out stand beside the words; on a phone they follow the
- * demo, so the demo comes first after the words.
+ * The demo reads as the neighbouring previews do: the picture in a bordered,
+ * rounded frame filling the section's column, then a caption row under it.
  */
 .blast-demo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas:
-    "text"
-    "actions"
-    "panel";
-  gap: 12px;
-  min-width: 0;
-  text-align: start;
-}
-
-.blast-demo__text {
-  grid-area: text;
   min-width: 0;
 }
 
-.blast-demo__lead {
-  color: var(--ui-text-toned);
-  font-size: 16px;
-  line-height: 1.5;
-  text-wrap: pretty;
+/*
+ * The bracket fills the frame: its depth steppers, the canvas, and its key.
+ * The frame is the neighbouring graphs' own — GraphViewer's 12px corners and
+ * its --mg-subgraph-border, light and dark — and as tall as their pictures.
+ * In a desktop column the canvas keeps the bracket's own 16px margin, which
+ * keeps it under the compact width (634px at most, in a 668px column): the
+ * compact bracket is the one whose first levels fit across it.
+ */
+.blast-demo__panel {
+  height: clamp(18rem, 58vh, 34rem);
+  overflow: hidden;
+  border: 1px solid #bbb;
+  border-radius: 0.75rem;
+  background: var(--ui-bg);
 }
 
-.blast-demo__term,
-.blast-demo__module,
-.blast-demo__count {
-  color: var(--ui-text-highlighted);
-  font-weight: 600;
-}
-
-.blast-demo__finding {
-  margin-top: 4px;
-  color: var(--ui-text-muted);
-  font-size: 14px;
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
+.dark .blast-demo__panel {
+  border-color: #4a5568;
 }
 
 .blast-demo__actions {
-  grid-area: actions;
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
 /*
- * The bracket fills the panel: its depth steppers, the canvas, and its key.
- * On a desktop it takes what the first screen has left below the hero — the
- * whole panel on screen at 1440×900 — and never less than the height at
- * which the opening module's whole bracket still draws its names at 11px or
- * more (27rem); a taller screen gets up to 32rem.
- */
-.blast-demo__panel {
-  grid-area: panel;
-  height: clamp(27rem, calc(100svh - 28.5rem), 32rem);
-  overflow: hidden;
-  border: 1px solid var(--ui-border);
-  border-radius: 12px;
-  background: var(--ui-bg);
-}
-
-@media (min-width: 1024px) {
-  .blast-demo {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "text actions"
-      "panel panel";
-    align-items: end;
-    gap: 12px 24px;
-  }
-}
-
-/*
- * On a phone the panel runs to the screen's edges, past the page's 16px
- * gutter, so the compact bracket gets the width a module's own page gives it:
- * the module and the first level of each side, at a size their names read
- * at. Taller, too, for the steppers' two rows and the key. The ways out come
- * after it, as wide as the screen.
+ * On a phone the frame already stands in the page's 16px gutter, so the
+ * canvas runs to the frame (--module-bracket-inset): that is the width the
+ * module and both its first levels need at a size their names read at. The
+ * ways out run the column's width, each a thumb's height.
  */
 @media (max-width: 639.98px) {
-  .blast-demo {
-    grid-template-areas:
-      "text"
-      "panel"
-      "actions";
+  .blast-demo__panel {
+    --module-bracket-inset: 0px;
   }
 
-  .blast-demo__panel {
-    height: 36rem;
-    margin-inline: -16px;
-    border-inline: 0;
-    border-radius: 0;
+  .blast-demo__actions {
+    flex-basis: 100%;
   }
 
   .blast-demo__actions > * {
