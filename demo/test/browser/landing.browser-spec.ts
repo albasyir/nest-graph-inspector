@@ -256,12 +256,12 @@ async function cardsCovered(page: Page): Promise<string[]> {
     const covering = (overlay: Element): string =>
       overlay.matches('[data-chip]')
         ? `The chip "${overlay.getAttribute('aria-label') ?? overlay.textContent?.trim().replace(/\s+/g, ' ')}" covers`
-        : overlay.matches('.vue-flow__controls')
+        : overlay.matches('.module-bracket__controls')
           ? 'The zoom controls cover'
           : 'The column headings cover';
     const overlays = [
       ...demo.querySelectorAll(
-        '.vue-flow__controls, [data-chip], .module-bracket__headings',
+        '.module-bracket__controls, [data-chip], .module-bracket__headings',
       ),
     ].map((overlay) => ({
       covering: covering(overlay),
@@ -663,6 +663,14 @@ for (const { width, height, hasTouch = false } of OPENING_SCREENS) {
       await openLanding(page, state);
       await blastDemo(page).scrollIntoViewIfNeeded();
       await expectOpenOnModule(page, graph, LANDING_MODULE);
+      // What stands over the canvas is there to be checked against: a check
+      // that found none would pass whatever covered what.
+      await expect(
+        blastDemo(page).locator('.module-bracket__controls'),
+      ).toHaveCount(1);
+      await expect(
+        blastDemo(page).locator('.module-bracket__headings'),
+      ).toHaveCount(1);
       expect(
         await cardsCovered(page),
         'The zoom controls, the chips and the column headings stand clear of every card',

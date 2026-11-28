@@ -160,7 +160,7 @@ function getFrameCanvas(): BracketCanvas {
 /** The zoom controls' box on the canvas: a column up its side, or a row along its foot. */
 function measureControls(): CanvasBox[] {
   const container = containerRef.value
-  const controls = container?.querySelector('.vue-flow__controls')
+  const controls = container?.querySelector('.module-bracket__controls')
   if (!container || !controls) {
     return []
   }
