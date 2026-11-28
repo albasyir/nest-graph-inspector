@@ -208,6 +208,12 @@ export type ModuleDependencyBracket = {
   sides: Record<BracketSide, BracketSideSummary>
   /** Everything drawn, edges and their labels included: what a fit frames. */
   bounds: CircularEdgeRect
+  /**
+   * The same without the column headings, which a canvas pins across its
+   * top instead of drawing them over their columns: what a frame showing the
+   * whole bracket fits below those pinned headings.
+   */
+  drawnBounds: CircularEdgeRect
 }
 
 /**
@@ -499,7 +505,8 @@ export function buildModuleDependencyBracket(
     nodes,
     edges,
     sides: { left: left.summary, right: right.summary },
-    bounds: getBracketBounds(nodes, edges, routePoints, m)
+    bounds: getBracketBounds(nodes, edges, routePoints, m),
+    drawnBounds: getBracketBounds(nodes.filter(node => node.kind !== 'level'), edges, routePoints, m)
   }
 }
 
@@ -510,6 +517,32 @@ export function buildModuleDependencyBracket(
  */
 export function getBracketModuleNodeId(side: BracketSide, moduleName: string): string {
   return `${side}:${encodeModuleId(moduleName)}`
+}
+
+/** How far a change to a module reaches: the modules that need it, directly or not. */
+export type BlastRadius = {
+  /** Modules that need it, at any distance — the right side of its bracket, drawn or not. */
+  modules: number
+  /** How many imports away the furthest of them stands; `0` when none needs it. */
+  levels: number
+}
+
+/**
+ * The blast radius of a change to `center`: every module its bracket's right
+ * side reaches, by the same walk — so it agrees with that side's `total` and
+ * `available` whatever depth is drawn. `null` when the graph has no such
+ * module.
+ */
+export function measureBlastRadius(
+  graph: Pick<GraphOutput, 'modules'>,
+  center: string
+): BlastRadius | null {
+  if (!Object.hasOwn(graph.modules, center)) {
+    return null
+  }
+
+  const walk = walkSide(buildAdjacency(graph.modules).right, center)
+  return { modules: walk.distance.size - 1, levels: walk.deepest }
 }
 
 function getStubNodeId(side: BracketSide, moduleName: string): string {

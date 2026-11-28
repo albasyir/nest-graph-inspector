@@ -8,6 +8,7 @@ import {
   buildModuleDependencyBracket,
   getBracketLabelBox,
   getBracketModuleNodeId,
+  measureBlastRadius,
   type BracketCenterNode,
   type BracketEdge,
   type BracketModuleNode,
@@ -1011,3 +1012,68 @@ function syntheticGraph(count: number): BracketGraph {
 
   return graph(imports, { root: name(0, 0) })
 }
+
+describe('drawn bounds', () => {
+  test('hold every card, stub and route the canvas draws, inside the bounds, the column headings left out', () => {
+    for (const { bracket, where } of everyShopBracket()) {
+      const { bounds, drawnBounds } = bracket
+      const inside = (rect: { x: number, y: number, width: number, height: number }, outer: typeof bounds) =>
+        rect.x >= outer.x - 0.5
+        && rect.y >= outer.y - 0.5
+        && rect.x + rect.width <= outer.x + outer.width + 0.5
+        && rect.y + rect.height <= outer.y + outer.height + 0.5
+
+      assert.ok(inside(drawnBounds, bounds), `${where}: drawn bounds within the bounds`)
+      for (const node of bracket.nodes.filter(candidate => candidate.kind !== 'level')) {
+        assert.ok(inside({ ...node.position, width: node.width, height: node.height }, drawnBounds), `${node.id} in ${where}`)
+      }
+    }
+
+    // A side with modules has headings above them, which only the bounds hold.
+    const bracket = build(SHOP, 'CustomerModule')
+    assert.ok(bracket.drawnBounds.height < bracket.bounds.height)
+  })
+})
+
+describe('blast radius', () => {
+  test('counts every module a change reaches, however far, each once', () => {
+    // AppModule, AuthModule and CustomerLoyaltyModule import it; OrderModule
+    // and VoucherModule import those; PaymentModule and RecommendationModule
+    // the next; then ProductModule; then StoreProductModule.
+    assert.deepEqual(measureBlastRadius(SHOP, 'CustomerModule'), { modules: 9, levels: 5 })
+  })
+
+  test('a module every other one imports reaches them all, a level away', () => {
+    assert.deepEqual(measureBlastRadius(SHOP, 'DatabaseModule'), { modules: 11, levels: 1 })
+  })
+
+  test('reaches nothing from a module no other one imports', () => {
+    assert.deepEqual(measureBlastRadius(SHOP, 'AppModule'), { modules: 0, levels: 0 })
+  })
+
+  test('walks a cycle once, never counting the module itself', () => {
+    const radius = measureBlastRadius(SHOP, 'OrderModule')
+    assert.ok(radius)
+    // PaymentModule imports OrderModule back: it counts, OrderModule does not.
+    assert.equal(radius.modules, build(SHOP, 'OrderModule', { right: 99 }).sides.right.total)
+    assert.ok(radius.modules < Object.keys(SHOP.modules).length)
+  })
+
+  test('agrees with the right side of the bracket, whatever depth that draws', () => {
+    for (const center of Object.keys(SHOP.modules)) {
+      for (const depth of [1, 2, DEFAULT_BRACKET_DEPTH, 99]) {
+        const { right } = build(SHOP, center, { right: depth }).sides
+        assert.deepEqual(
+          measureBlastRadius(SHOP, center),
+          { modules: right.total, levels: right.available },
+          `centre ${center}, depth ${depth}`
+        )
+      }
+    }
+  })
+
+  test('is null for a module the graph does not have', () => {
+    assert.equal(measureBlastRadius(SHOP, 'MissingModule'), null)
+    assert.equal(measureBlastRadius(SHOP, 'toString'), null)
+  })
+})

@@ -80,7 +80,6 @@ function openTrace() {
           :show-controls="false"
           :show-mini-map="false"
           :show-circular-dependencies="false"
-          :enable-bright-line="false"
           :can-focus-module="false"
           default-open-module-detail
           @trace-open="openTrace"

@@ -1,7 +1,6 @@
 <template>
   <RuntimeGraphPreview
     preview-id="home-circular-depedencies"
-    :show-bright-line="false"
     collapsed-modules="ProductModule,RecommendationModule,StoreProductModule"
     exclude-modules="NestJSCoreModule,AppModule,DatabaseModule,AuthModule,CustomerModule,CustomerLoyaltyModule,StoreModule,VoucherModule"
     height="clamp(18rem, 58vh, 34rem)"

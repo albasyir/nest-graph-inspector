@@ -12,6 +12,19 @@ import {
 import type { InspectorInformation } from '../support/inspector-api';
 import type { BrowserState } from './browser-state';
 import {
+  DEFAULT_DEPTH,
+  bracketModule,
+  cardsWellInside,
+  center,
+  depthGroup,
+  drawnCardIds,
+  drawnStubCounts,
+  expectDepth,
+  expectLevels,
+  modulePageUrl,
+  showWholeBracket,
+} from './module-bracket';
+import {
   expect,
   expectGraphLayoutsReady,
   graphNode,
@@ -28,13 +41,6 @@ import {
  * of the demo: every module, level and count is read from the graph it serves.
  */
 
-/**
- * How many levels each side of the page shows when its address does not say:
- * a fact of the site (`DEFAULT_BRACKET_DEPTH` in
- * `site/app/utils/module-dependency-bracket.ts`), not of the demo.
- */
-const DEFAULT_DEPTH = 3;
-
 /** A module on a cycle draws every level of both sides in well under this. */
 const CYCLE_LAYOUT_BOUND_MS = 15_000;
 
@@ -46,62 +52,6 @@ const READABLE_PX = 12;
  * level of each side fits beside the module.
  */
 const READABLE_PHONE_PX = 11;
-
-const SIDE_LABELS: Record<DependencySide, string> = {
-  left: 'Needs',
-  right: 'Needed by',
-};
-
-function modulePageUrl(
-  state: BrowserState,
-  moduleName: string,
-  query = '',
-): string {
-  // Module names are class names, which `encodeModuleId` leaves as
-  // `encodeURIComponent` does.
-  return new URL(
-    `view/navigator/modules/${encodeURIComponent(moduleName)}${query}`,
-    state.siteBaseUrl,
-  ).href;
-}
-
-function center(page: Page): Locator {
-  return page.locator('.vue-flow__node[data-bracket-node="center"]');
-}
-
-function depthGroup(page: Page, side: DependencySide): Locator {
-  return page.getByRole('group', { name: SIDE_LABELS[side], exact: true });
-}
-
-async function expectDepth(
-  page: Page,
-  side: DependencySide,
-  depth: number,
-): Promise<void> {
-  await expect(depthGroup(page, side).locator('output')).toHaveText(
-    new RegExp(`^${depth} levels?$`),
-  );
-}
-
-/** A module card the page draws, by side and name. */
-function bracketModule(
-  page: Page,
-  side: DependencySide,
-  moduleName: string,
-): Locator {
-  return graphNode(page, `${side}:${encodeURIComponent(moduleName)}`);
-}
-
-/**
- * Frames the whole bracket, however small that draws it. The page opens on
- * its module at a size to read, and the canvas draws only the cards in view,
- * so what a side holds is counted from this overview.
- */
-async function showWholeBracket(page: Page): Promise<void> {
-  await page
-    .getByRole('button', { name: 'Show the whole bracket', exact: true })
-    .click();
-}
 
 /**
  * Waits until a piece of text on the canvas is drawn at a size to read —
@@ -204,72 +154,6 @@ async function readableAtLevel(
     }
   }
   return readable;
-}
-
-/** The modules drawn on a side, level by level, each level's names sorted. */
-async function drawnLevels(
-  page: Page,
-  side: DependencySide,
-): Promise<string[][]> {
-  await showWholeBracket(page);
-  const cards = await page
-    .locator(`.vue-flow__node[data-bracket-node="module"][data-side="${side}"]`)
-    .evaluateAll((nodes) =>
-      nodes.map((node) => ({
-        level: Number(node.getAttribute('data-level')),
-        name:
-          node
-            .querySelector('.module-bracket-module__name')
-            ?.textContent?.trim() ?? '',
-      })),
-    );
-  const levels: string[][] = [];
-
-  for (const { level, name } of cards) {
-    const names = levels[level - 1] ?? [];
-    names.push(name);
-    levels[level - 1] = names;
-  }
-
-  return Array.from(levels, (names = []) => [...names].sort());
-}
-
-/** Waits until a side draws exactly the levels the graph says it has, up to `depth`. */
-async function expectLevels({
-  page,
-  graph,
-  moduleName,
-  side,
-  depth,
-}: {
-  page: Page;
-  graph: GraphOutput;
-  moduleName: string;
-  side: DependencySide;
-  depth: number;
-}): Promise<void> {
-  const expected = dependencyLevels(graph, moduleName, side).slice(0, depth);
-
-  await expect
-    .poll(() => drawnLevels(page, side), {
-      message: `The ${side} side of ${moduleName} draws its first ${depth} levels`,
-    })
-    .toEqual(expected);
-}
-
-/** The "+N modules" counts on a side's stubs, sorted. */
-async function drawnStubCounts(
-  page: Page,
-  side: DependencySide,
-): Promise<number[]> {
-  await showWholeBracket(page);
-  const labels = await page
-    .locator(`.vue-flow__node[data-bracket-node="stub"][data-side="${side}"]`)
-    .allTextContents();
-
-  return labels
-    .map((label) => Number(/\+(\d+)/.exec(label)?.[1]))
-    .sort((left, right) => left - right);
 }
 
 /** Opens a module's page from the navigator, by clicking its module there. */
@@ -561,6 +445,48 @@ test('re-centring on another module is a step Back returns from; its depths and 
   );
   await expectGraphLayoutsReady(page);
   await expect(graphNode(page, `module-${moduleName}`)).toBeVisible();
+});
+
+test('back on a module from one beside it, every card it opened with well inside the canvas is drawn again', async ({
+  page,
+  state,
+  graph,
+  information,
+}) => {
+  // The module that needs the most modules directly: a first level taller
+  // than the canvas, so its frame draws some of those cards and not others.
+  const firstLevel = (name: string): string[] =>
+    dependencyLevels(graph, name, 'left')[0] ?? [];
+  const moduleName = Object.keys(graph.modules).reduce((widest, name) =>
+    firstLevel(name).length > firstLevel(widest).length ? name : widest,
+  );
+
+  await openFromNavigator({ page, state, information, moduleName });
+  const opened = await cardsWellInside(page);
+  const beside = firstLevel(moduleName).filter((name) =>
+    opened.includes(`left:${encodeURIComponent(name)}`),
+  );
+  if (beside.length === 0) {
+    throw new Error(`${moduleName} opens with none of its first level drawn`);
+  }
+
+  // The page keeps its canvas from one module to the next, so a card the
+  // other module's frame left undrawn must be drawn wherever this frame puts
+  // it — not left where it last stood.
+  for (const neighbour of beside) {
+    await bracketModule(page, 'left', neighbour).getByRole('link').click();
+    await expect(page).toHaveURL(modulePageUrl(state, neighbour));
+    await expect(center(page)).toContainText(neighbour);
+
+    await page.goBack();
+    await expect(page).toHaveURL(modulePageUrl(state, moduleName));
+    await expect(center(page)).toContainText(moduleName);
+    await expect
+      .poll(() => drawnCardIds(page), {
+        message: `${moduleName}, back from ${neighbour}, draws every card it opened with well inside the canvas`,
+      })
+      .toEqual(expect.arrayContaining(opened));
+  }
 });
 
 test('Direct Run opens beside the module, from its card, and runs a method', async ({

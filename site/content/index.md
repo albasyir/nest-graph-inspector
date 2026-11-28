@@ -64,49 +64,49 @@ ui:
 ---
 #title
 ::span{class="inline-flex items-center gap-3"}
-  :u-icon{name="i-lucide-route" class="size-9 shrink-0 text-primary"}
-  See Impact Paths Easily
+  :u-icon{name="i-lucide-radar" class="size-9 shrink-0 text-primary"}
+  See the Blast Effect of a Change
 ::
 
 #description
-No manual tracing. Hover a module, provider, or controller and the graph shows the impact path for you.
+**Blast effect:** pick a module and see everything that depends on it — the modules a change would hit.
 
 #features
   :::u-page-feature
   ---
-  icon: i-lucide-eye
+  icon: i-lucide-mouse-pointer-click
   ---
   #title
-  Hover Any Node
+  Re-center on Any Module
 
   #description
-  Start from the module, provider, or controller you plan to change.
+  Click a module to put it in the middle and see what it reaches.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-route
+  icon: i-lucide-layers
   ---
   #title
-  Follow the Highlight
+  Go Level by Level
 
   #description
-  Related paths stay visible while unrelated edges fade back.
+  Step each side's depth, or open the next level from a +N more stub.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-list-checks
+  icon: i-lucide-panel-top-open
   ---
   #title
-  Decide With Context
+  Open It in the Viewer
 
   #description
-  See affected app areas before making changes.
+  Take the module to its own page, or open the full graph.
   :::
 
 #default
-  :runtime-graph-brigh-line-preview
+  :runtime-graph-blast-effect-preview
 ::
 
 ::u-page-section

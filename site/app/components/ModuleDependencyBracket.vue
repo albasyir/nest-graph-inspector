@@ -30,8 +30,11 @@ import {
   getCutCardIds,
   getLevelRevealViewport,
   getVerticalRevealViewport,
+  pickWholeFrameBracket,
   type BracketCanvas,
-  type BracketViewport
+  type BracketFraming,
+  type BracketViewport,
+  type CanvasBox
 } from '~/utils/module-bracket-viewport'
 import { createDeepDiveFitTracker } from '~/utils/module-deep-dive'
 import {
@@ -42,10 +45,17 @@ import {
   type BracketModuleNode,
   type BracketNode,
   type BracketSide,
-  type BracketStubNode
+  type BracketSize,
+  type BracketStubNode,
+  type ModuleDependencyBracket
 } from '~/utils/module-dependency-bracket'
 import { splitNameIntoWords } from '~/utils/module-name-words'
-import { buildModulePageLocation } from '~/utils/module-page-route'
+import {
+  buildModulePageLocation,
+  type BracketNavigation,
+  type ModulePageLocation
+} from '~/utils/module-page-route'
+import { NuxtLink } from '#components'
 
 /**
  * A module among the others, as a tournament bracket opening both ways: what
@@ -59,24 +69,106 @@ import { buildModulePageLocation } from '~/utils/module-page-route'
  * module under the pointer or the keyboard, for a cycle whose label is
  * pointed at or pressed, or for all of them at once from the legend.
  *
- * Every other module on the canvas is a link to its own page, keeping the
- * depths asked for; a stub where a branch goes on asks for one more level on
- * its side, as the steppers above the canvas do. The page owns the address,
- * so a new depth is asked for with `depthChange` rather than set here.
+ * On a module's page every other module on the canvas is a link to its own
+ * page, keeping the depths asked for; kept in place — the landing page's
+ * demo — it asks for that module in the middle with `recenter` instead (see
+ * `BracketNavigation`). A stub where a branch goes on asks for one more level
+ * on its side, as the steppers above the canvas do. Whoever holds the bracket
+ * owns its depths, so a new one is asked for with `depthChange` rather than
+ * set here.
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   graphData: GraphOutput
   moduleName: string
-  /** The depths the page's address asks for, each side its own. */
+  /** The depths asked for, each side its own: by a page's address, or by its host. */
   depth: Record<BracketSide, number>
-}>()
+  /** Where the bracket's links lead: `pages` on a module's page, the default. */
+  navigation?: BracketNavigation
+}>(), {
+  navigation: () => ({ kind: 'pages' })
+})
 
 const emit = defineEmits<{
   depthChange: [side: BracketSide, depth: number]
+  /** In place: the reader asked for another module in the middle. */
+  recenter: [moduleName: string]
+  /**
+   * A frame is owed: what is on screen may not be where the bracket opens.
+   * Said as the bracket opens, the moment its module, a depth or its size
+   * changes, and as each frame starts — so a host never has to watch for them.
+   */
+  framing: []
+  /**
+   * The bracket on screen is framed: the viewport is where the bracket opens,
+   * set once Vue Flow could take it — after mounting, and again whenever a
+   * change frames it afresh.
+   */
+  framed: []
 }>()
 
 const flowId = `module-bracket-${useId()}`
 const containerRef = ref<HTMLElement | null>(null)
+const {
+  viewport,
+  dimensions,
+  nodes,
+  setNodes,
+  setEdges,
+  setViewport,
+  viewportHelper,
+  zoomIn,
+  zoomOut,
+  fitView
+} = useVueFlow(flowId)
+
+/** The strip of column headings pinned across the top of the canvas. */
+const HEADINGS_HEIGHT = 32
+const canvas = computed<BracketCanvas>(() => ({
+  width: dimensions.value.width,
+  height: dimensions.value.height,
+  top: HEADINGS_HEIGHT
+}))
+const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
+
+/** How the bracket opens: whole only where a host keeps it in place and asks. */
+const framing = computed<BracketFraming>(() =>
+  props.navigation.kind === 'in-place' ? props.navigation.framing : 'focus'
+)
+
+/**
+ * How far down the canvas the chips along its top reach: 12px under the
+ * headings, and 40px tall at most — compact, or under a finger — as the
+ * stylesheet sets them.
+ */
+const CHIPS_BOTTOM = HEADINGS_HEIGHT + 12 + 40
+
+/**
+ * The canvas a frame is made on. Framed whole — a demo in a column of a page,
+ * with little more room than the module and its first levels take — it names
+ * what else is drawn over it, so every card the bracket opens on stands clear:
+ * the chips along its top, and the zoom controls where the stylesheet stands
+ * them now. A module's page frames on the canvas as it always has.
+ */
+function getFrameCanvas(): BracketCanvas {
+  if (framing.value !== 'whole') {
+    return canvas.value
+  }
+
+  return { ...canvas.value, chipsBottom: CHIPS_BOTTOM, controls: measureControls() }
+}
+
+/** The zoom controls' box on the canvas: a column up its side, or a row along its foot. */
+function measureControls(): CanvasBox[] {
+  const container = containerRef.value
+  const controls = container?.querySelector('.module-bracket__controls')
+  if (!container || !controls) {
+    return []
+  }
+
+  const origin = container.getBoundingClientRect()
+  const box = controls.getBoundingClientRect()
+  return [{ x: box.left - origin.left, y: box.top - origin.top, width: box.width, height: box.height }]
+}
 
 /**
  * Below this width a canvas draws the bracket compact — narrower cards,
@@ -86,17 +178,49 @@ const containerRef = ref<HTMLElement | null>(null)
 const COMPACT_BELOW_WIDTH = 640
 const isPhone = useMediaQuery('(max-width: 639.98px)')
 const { width: canvasWidth } = useElementSize(containerRef)
-/** Until the canvas is measured, the window says. */
-const isCompact = computed(() =>
-  canvasWidth.value > 0 ? canvasWidth.value < COMPACT_BELOW_WIDTH : isPhone.value
+/** The size the canvas's width gives the bracket; until it is measured, the window says. */
+const widthSize = computed<BracketSize>(() =>
+  (canvasWidth.value > 0 ? canvasWidth.value < COMPACT_BELOW_WIDTH : isPhone.value) ? 'compact' : 'regular'
 )
 
-const bracket = computed(() => buildModuleDependencyBracket({
-  graph: props.graphData,
-  center: props.moduleName,
-  depth: props.depth,
-  size: isCompact.value ? 'compact' : 'regular'
-}))
+function layOut(size: BracketSize): ModuleDependencyBracket | null {
+  return buildModuleDependencyBracket({
+    graph: props.graphData,
+    center: props.moduleName,
+    depth: props.depth,
+    size
+  })
+}
+
+// The bracket at each size, laid out only once asked for, and then only again
+// for another module, depth or graph: a canvas resized picks between them
+// again rather than laying either out afresh. A module's page asks for the
+// size its width gives it alone, so it never lays a bracket out twice.
+const regularBracket = computed(() => layOut('regular'))
+const compactBracket = computed(() => layOut('compact'))
+const widthBracket = computed(() =>
+  widthSize.value === 'compact' ? compactBracket.value : regularBracket.value
+)
+
+/**
+ * Framed whole, the bracket at a size it reads whole at on this canvas — the
+ * regular one when it does, else the compact one — and where it reads whole
+ * at neither, the compact one whatever the canvas's width, to open in focus
+ * on its first levels (`pickWholeFrameBracket`). Not framed whole, none: a
+ * module's page takes the size its canvas's width gives it.
+ */
+const wholeBracket = computed(() => {
+  if (framing.value !== 'whole') {
+    return null
+  }
+
+  const laidOut = [regularBracket.value, compactBracket.value]
+    .filter((candidate): candidate is ModuleDependencyBracket => candidate !== null)
+  return pickWholeFrameBracket(laidOut, canvas.value)
+})
+
+const bracket = computed(() => wholeBracket.value ?? widthBracket.value)
+const isCompact = computed(() => bracket.value?.size === 'compact')
 
 const nodeById = computed(() =>
   new Map<string, BracketNode>((bracket.value?.nodes ?? []).map(node => [node.id, node]))
@@ -218,6 +342,35 @@ const flowNodes = computed<FlowNode[]>(() =>
     }))
 )
 
+/**
+ * Vue Flow draws only the cards in view, and tells them by `computedPosition`
+ * and `dimensions` — where it last drew each one, and at what size — which
+ * only a drawn card's own wrapper updates. A card moved or resized while
+ * undrawn — the page re-centred on another module and back, the bracket laid
+ * out at its other size — would stay undrawn wherever it now stands, its
+ * place in the frame left empty. So once Vue Flow has a layout, every card is
+ * given where it now stands, and its size if Vue Flow has measured it before;
+ * one never drawn has no size yet, and is drawn once to be measured.
+ */
+function placeEveryCard(): void {
+  for (const node of nodes.value) {
+    const card = nodeById.value.get(node.id)
+    if (!card) {
+      continue
+    }
+
+    const { x, y } = card.position
+    if (node.computedPosition.x !== x || node.computedPosition.y !== y) {
+      node.computedPosition = { ...node.computedPosition, x, y }
+    }
+
+    const { width, height } = card
+    if (node.dimensions.width > 0 && (node.dimensions.width !== width || node.dimensions.height !== height)) {
+      node.dimensions = { width, height }
+    }
+  }
+}
+
 /** What a test, or a stylesheet, can tell a node by. */
 function getNodeAttributes(node: BracketNode): Record<string, string> {
   switch (node.kind) {
@@ -268,6 +421,22 @@ const flowEdges = computed<FlowEdge[]>(() =>
   })
 )
 
+// Vue Flow is handed the bracket here rather than through its `nodes` and
+// `edges` props: after each update, a prop's watcher stands still until the
+// next tick, so a layout following another inside it — the canvas measured
+// as the bracket opens and the bracket laid out at its other size — would be
+// dropped, and the canvas would keep the first one for good. The cards go in
+// before the connectors that name them, and are placed as soon as they are in.
+watch([flowNodes, flowEdges], ([nextNodes, nextEdges], [previousNodes, previousEdges]) => {
+  if (nextNodes !== previousNodes) {
+    setNodes(nextNodes)
+    placeEveryCard()
+  }
+  if (nextEdges !== previousEdges) {
+    setEdges(nextEdges)
+  }
+}, { immediate: true })
+
 type EdgeStroke = { stroke: string, strokeWidth: number, strokeDasharray?: string }
 
 function getEdgeStyle(edge: BracketEdge, color: string, isLit: boolean): EdgeStroke {
@@ -303,20 +472,34 @@ const hasTwins = computed(() =>
  * Another module's page, keeping the depths asked for here: a place of its
  * own, which Back returns from to this one.
  */
-function recenterOn(node: BracketModuleNode) {
+function recenterOn(node: BracketModuleNode): ModulePageLocation {
   return buildModulePageLocation(node.moduleName, { depth: props.depth })
 }
 
+/** What a module card is: a link to its own page, or — in place — a button asking for it in the middle. */
+type ModuleCardAttrs
+  = | { to: ModulePageLocation }
+    | { type: 'button', onClick: () => void }
+
+function moduleCardAttrs(node: BracketModuleNode): ModuleCardAttrs {
+  return props.navigation.kind === 'in-place'
+    ? { type: 'button', onClick: () => emit('recenter', node.moduleName) }
+    : { to: recenterOn(node) }
+}
+
 /**
- * The inside view of the module in the middle, Direct Run open on its first
- * target: the same module, so it replaces the address, as the page's own view
- * switch does.
+ * Direct Run on the module in the middle, open on its first target. On its
+ * page that is the same module's inside view, so it replaces the address, as
+ * the page's own view switch does; in place it leaves for where the host
+ * says, a step Back returns from.
  */
-function directRunLocation(node: BracketCenterNode) {
-  return buildModulePageLocation(node.moduleName, {
-    depth: props.depth,
-    directRunOn: node.stats.runnableNodeIds[0] ?? null
-  })
+function directRunLink(node: BracketCenterNode): { to: ModulePageLocation, replace: boolean } {
+  const state = { depth: props.depth, directRunOn: node.stats.runnableNodeIds[0] ?? null }
+  const navigation = props.navigation
+
+  return navigation.kind === 'in-place'
+    ? { to: navigation.leaveFor(node.moduleName, state), replace: false }
+    : { to: buildModulePageLocation(node.moduleName, state), replace: true }
 }
 
 function stepDepth(side: BracketSide, by: number, isAllowed: boolean): void {
@@ -367,39 +550,53 @@ function getCycleLabelStyle(edge: BracketEdge): CSSProperties {
 }
 
 // Framing. A bracket opens on its module at a zoom its names read at — all
-// of it when that fits — and what the canvas cuts off is a chip away.
+// of it when that fits — and what the canvas cuts off is a chip away; kept in
+// place to be framed whole, it opens on all of it wherever that reads.
 
-const { viewport, dimensions, setViewport, viewportHelper, zoomIn, zoomOut, fitView } = useVueFlow(flowId)
 const fitTracker = createDeepDiveFitTracker()
 const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-/** The strip of column headings pinned across the top of the canvas. */
-const HEADINGS_HEIGHT = 32
 const REVEAL_DURATION_MS = 280
-let isFramePending = true
-
-const canvas = computed<BracketCanvas>(() => ({
-  width: dimensions.value.width,
-  height: dimensions.value.height,
-  top: HEADINGS_HEIGHT
-}))
-const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height > 0)
+/**
+ * Whether a frame is owed: the bracket on screen is not yet where it opens.
+ * The root says it as `data-framed`, a signal a test can wait on.
+ */
+const isFramePending = ref(true)
 
 /**
- * Frames the bracket. Until Vue Flow's viewport exists a frame does nothing,
- * so it stays owed and is made the moment the viewport is ready; a newer
- * frame supersedes one still running.
+ * A frame is owed from now, and the host hears it at once as `framing`: the
+ * bracket owes one as it opens, the moment anything it draws changes, and as
+ * each frame starts. A host binds `framing` and `framed`, nothing more.
+ */
+function oweFrame(): void {
+  isFramePending.value = true
+  emit('framing')
+}
+
+oweFrame()
+
+/**
+ * Frames the bracket. Until Vue Flow's viewport exists, and the canvas's own
+ * width is measured, a frame does nothing, so it stays owed and is made the
+ * moment both are there; a newer frame supersedes one still running. It says
+ * `framing` as it starts — what is on screen may not be this frame — and
+ * `framed` once Vue Flow has taken it.
  */
 async function frameBracket(): Promise<void> {
   const isCurrent = fitTracker.begin()
-  isFramePending = true
+  oweFrame()
   const current = bracket.value
-  if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value) {
+  if (!current || !viewportHelper.value.viewportInitialized || !hasCanvas.value || canvasWidth.value === 0) {
     return
   }
 
-  const isFramed = await setViewport(getBracketFrame(current, canvas.value))
+  // Vue Flow answers `false` only without its zoom handler, which a viewport
+  // it calls initialized always has; with no duration it answers at once.
+  const isFramed = await setViewport(getBracketFrame(current, getFrameCanvas(), framing.value))
   if (isCurrent()) {
-    isFramePending = !isFramed
+    isFramePending.value = !isFramed
+    if (isFramed) {
+      emit('framed')
+    }
   }
 }
 
@@ -444,16 +641,31 @@ async function moveTo(target: BracketViewport): Promise<void> {
 watch(
   () => viewportHelper.value.viewportInitialized,
   (isInitialized) => {
-    if (isInitialized && isFramePending) {
+    if (isInitialized && isFramePending.value) {
       void frameBracket()
     }
   },
   { immediate: true }
 )
 
+// Until the canvas's own width is measured, the bracket's size is the
+// window's guess (`isPhone`), and a frame taken then could be the frame of a
+// bracket about to be laid out at its other size — the landing's column, on
+// a desktop, is narrower than the window says. So the frame stays owed until
+// the measure comes: `framed` only ever names the bracket that stays.
+watch(
+  () => canvasWidth.value > 0,
+  (isMeasured) => {
+    if (isMeasured && isFramePending.value) {
+      void frameBracket()
+    }
+  }
+)
+
 // Another module, another depth, or the other size of bracket — a phone
 // turned, a window narrowed — is a new bracket: framed afresh, whatever the
-// reader did to the last one.
+// reader did to the last one. The frame is owed from the moment it is laid
+// out, so the bracket is never drawn saying the last one's frame is its own.
 watch(
   [() => props.moduleName, () => props.depth.left, () => props.depth.right, isCompact],
   async ([moduleName], [previousModuleName]) => {
@@ -463,6 +675,7 @@ watch(
       pointedCycleIds.value = []
       pinnedCycleIds.value = []
     }
+    oweFrame()
     fitTracker.reset()
     await nextTick()
     void frameBracket()
@@ -472,7 +685,7 @@ watch(
 // A resize reframes a frame still owed, or one the reader has not moved away
 // from — never a view they panned or zoomed themselves.
 const debouncedFrame = useDebounceFn(() => {
-  if (isFramePending || fitTracker.shouldFitOnResize()) {
+  if (isFramePending.value || fitTracker.shouldFitOnResize()) {
     void frameBracket()
   }
 }, 200)
@@ -488,10 +701,11 @@ const offscreen = computed(() =>
 
 /**
  * A chip at a side edge of the canvas: toward the levels it cuts off — which
- * levels, and how many modules they hold — or back to the module, cut off
- * itself.
+ * levels drawn, and how many of their modules — or, where stubs are all it
+ * cuts off, toward them, saying what they say; or back to the module, cut off
+ * itself. No chip names a level past the depth shown.
  */
-type EdgeChip = { edge: BracketSide, kind: 'levels' | 'middle', text: string, count: string, label: string }
+type EdgeChip = { edge: BracketSide, kind: 'levels' | 'stubs' | 'middle', text: string, count: string, label: string }
 
 const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeChip[] => {
   const current = offscreen.value
@@ -503,16 +717,25 @@ const edgeChips = computed<EdgeChip[]>(() => BRACKET_SIDES.flatMap((edge): EdgeC
     return [{ edge, kind: 'middle', text: props.moduleName, count: '', label: `Back to ${props.moduleName}` }]
   }
 
+  const where = edge === 'left'
+    ? `of what ${props.moduleName} needs`
+    : `of what needs ${props.moduleName}`
   const levels = current.levels[edge]
   if (levels.length === 0) {
-    return []
+    const pastStubs = current.stubModules[edge]
+    return pastStubs > 0
+      ? [{
+          edge,
+          kind: 'stubs',
+          text: `+${pastStubs} more`,
+          count: '',
+          label: `Show +${pastStubs} more, one level further out ${where}`
+        }]
+      : []
   }
 
   const range = formatLevelRange(levels)
   const modules = current.modules[edge]
-  const where = edge === 'left'
-    ? `of what ${props.moduleName} needs`
-    : `of what needs ${props.moduleName}`
   return [{
     edge,
     kind: 'levels',
@@ -542,7 +765,7 @@ function followEdgeChip(chip: EdgeChip): void {
 
   if (chip.kind === 'middle') {
     fitTracker.reset()
-    void setViewport(getBracketFrame(current, canvas.value), panOptions())
+    void setViewport(getBracketFrame(current, getFrameCanvas(), framing.value), panOptions())
     return
   }
 
@@ -576,6 +799,7 @@ const isLegendOpen = ref(false)
   <div
     class="module-bracket flex h-full min-h-0 flex-col"
     :class="{ 'module-bracket--compact': isCompact }"
+    :data-framed="!isFramePending"
   >
     <div class="module-bracket__toolbar">
       <div
@@ -658,8 +882,6 @@ const isLegendOpen = ref(false)
     >
       <VueFlow
         :id="flowId"
-        :nodes="flowNodes"
-        :edges="flowEdges"
         :nodes-draggable="false"
         :nodes-connectable="false"
         :elements-selectable="false"
@@ -759,8 +981,7 @@ const isLegendOpen = ref(false)
             <!-- No icon: its words alone fill the card's width. -->
             <UButton
               v-if="data.stats.runnableNodeIds.length"
-              :to="directRunLocation(data)"
-              replace
+              v-bind="directRunLink(data)"
               color="neutral"
               variant="solid"
               block
@@ -827,8 +1048,7 @@ const isLegendOpen = ref(false)
             </dl>
             <UButton
               v-if="data.stats.runnableNodeIds.length"
-              :to="directRunLocation(data)"
-              replace
+              v-bind="directRunLink(data)"
               color="neutral"
               variant="solid"
               block
@@ -874,8 +1094,9 @@ const isLegendOpen = ref(false)
             type="source"
             :position="Position.Left"
           />
-          <NuxtLink
-            :to="recenterOn(data)"
+          <component
+            :is="props.navigation.kind === 'in-place' ? 'button' : NuxtLink"
+            v-bind="moduleCardAttrs(data)"
             class="module-bracket-module"
             :class="[`module-bracket-module--${data.side}`, {
               'module-bracket-module--active': activeNodeIds.has(data.id),
@@ -922,7 +1143,7 @@ const isLegendOpen = ref(false)
                 <span class="sr-only">— {{ describeTwin(data) }}</span>
               </span>
             </span>
-          </NuxtLink>
+          </component>
           <Handle
             id="right-target"
             type="target"
@@ -1120,7 +1341,7 @@ const isLegendOpen = ref(false)
       aria-label="Legend"
     >
       <button
-        v-if="isPhone"
+        v-if="isCompact"
         type="button"
         class="module-bracket__legend-toggle"
         :aria-expanded="isLegendOpen"
@@ -1140,7 +1361,7 @@ const isLegendOpen = ref(false)
         />
       </button>
       <ul
-        v-show="!isPhone || isLegendOpen"
+        v-show="!isCompact || isLegendOpen"
         :id="`${flowId}-legend`"
         class="module-bracket__legend-items"
       >
@@ -1364,13 +1585,16 @@ const isLegendOpen = ref(false)
 /*
  * The canvas keeps the page's 16px margin, so a card cut off at its edge — and
  * its name — never runs into the window's edge, and the canvas shares one left
- * and one right edge with the toolbar above it and the legend below.
+ * and one right edge with the toolbar above it and the legend below. A host
+ * that frames the bracket itself inside the page's own margin — the landing
+ * page's bordered panel, on a phone — sets --module-bracket-inset to 0: its
+ * frame is that edge, and the canvas keeps the width the first levels need.
  */
 .module-bracket__canvas {
   position: relative;
   min-height: 0;
   flex: 1 1 auto;
-  margin: 0 16px;
+  margin: 0 var(--module-bracket-inset, 16px);
   overflow: hidden;
 }
 
@@ -1545,6 +1769,8 @@ const isLegendOpen = ref(false)
   color: var(--ui-text-highlighted);
   font-size: 14px;
   font-weight: 600;
+  /* A card kept in place is a button, which would centre its name. */
+  text-align: start;
   text-decoration: none;
   cursor: pointer;
   transition:
@@ -1973,17 +2199,18 @@ const isLegendOpen = ref(false)
   font-weight: 600;
 }
 
-/* On a phone the key folds behind a toggle, the switch beside it. */
-@media (max-width: 639.98px) {
-  .module-bracket__legend {
-    padding: 4px 16px;
-  }
+/*
+ * Compact — on a phone, or in a column as narrow — the key folds behind a
+ * toggle, the switch beside it, so its rows never take the canvas's height.
+ */
+.module-bracket--compact .module-bracket__legend {
+  padding: 4px 16px;
+}
 
-  .module-bracket__legend-items {
-    order: 3;
-    flex-basis: 100%;
-    padding-bottom: 6px;
-  }
+.module-bracket--compact .module-bracket__legend-items {
+  order: 3;
+  flex-basis: 100%;
+  padding-bottom: 6px;
 }
 
 /*
