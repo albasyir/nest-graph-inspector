@@ -14,12 +14,27 @@ import type {
  */
 export type BracketViewport = { x: number, y: number, zoom: number }
 
+/** A box on the canvas, in screen pixels from its top-left corner. */
+export type CanvasBox = { x: number, y: number, width: number, height: number }
+
 /** The canvas a bracket is drawn on, in screen pixels. */
 export type BracketCanvas = {
   width: number
   height: number
   /** How much of its top the pinned level headings cover. */
   top: number
+  /**
+   * How far down it the chips toward what a frame leaves out reach, for a
+   * host that asks every card the bracket opens on to stand clear of them: a
+   * frame on a compact bracket's first levels then hangs them just below.
+   */
+  chipsBottom?: number
+  /**
+   * Controls drawn over the canvas — its zoom buttons — for a host that asks
+   * every card a frame draws to stand clear of them: the frame then moves as
+   * little as it can to leave them clear.
+   */
+  controls?: readonly CanvasBox[]
 }
 
 /**
@@ -42,6 +57,13 @@ export const FRAME_PADDING = 24
  * width is what keeps their names readable.
  */
 export const FIRST_LEVELS_INSET = 4
+/** Room kept between a card and a chip or a control drawn over the canvas. */
+export const OVERLAY_GAP = 4
+/**
+ * How far above its card a compact module's marks — Root, its twin on a
+ * cycle — ride, as the stylesheet sets them: half their 18px, over the edge.
+ */
+export const COMPACT_MARKS_OVERHANG = 9
 /** A card this far past an edge of the view still counts as in it: rounding, not hiding. */
 const EDGE_TOLERANCE = 1
 
@@ -115,6 +137,11 @@ export function pickWholeFrameBracket(
  * at its `READABLE_ZOOM`; the canvas then holds as much of the bracket as it
  * can, so a side with less to show never leaves part of the canvas empty while
  * the other side runs off it.
+ *
+ * On a canvas that names what is drawn over it, the frame keeps the cards it
+ * opens on clear of that too: a compact bracket's first levels hang just below
+ * the chips along the top, and whatever the frame, it moves as little as it
+ * must for no card it draws to stand under a control (`clearOfControls`).
  */
 export function getBracketFrame(
   bracket: ModuleDependencyBracket,
@@ -124,7 +151,8 @@ export function getBracketFrame(
   if (framing === 'whole' && fitsWhole(bracket, canvas)) {
     const { drawnBounds } = bracket
     const zoom = Math.min(getWholeFitZoom(bracket, canvas), WHOLE_FRAME_MAX_ZOOM[bracket.size])
-    return centreOn(drawnBounds.x + drawnBounds.width / 2, drawnBounds.y + drawnBounds.height / 2, zoom, canvas)
+    const frame = centreOn(drawnBounds.x + drawnBounds.width / 2, drawnBounds.y + drawnBounds.height / 2, zoom, canvas)
+    return clearOfControls(bracket, frame, canvas, getCards(bracket), canvas.top)
   }
 
   const { bounds } = bracket
@@ -134,7 +162,8 @@ export function getBracketFrame(
 
   if (fitZoom >= readableZoom) {
     const zoom = Math.min(fitZoom, FRAME_MAX_ZOOM)
-    return centreOn(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, zoom, canvas)
+    const frame = centreOn(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, zoom, canvas)
+    return clearOfControls(bracket, frame, canvas, getCards(bracket), canvas.top)
   }
 
   if (bracket.size === 'compact') {
@@ -149,11 +178,11 @@ export function getBracketFrame(
   const frame = centreOn(middle.x, middle.y, zoom, canvas)
   const x = keepContentAcross(frame.x, bounds.x, bounds.x + bounds.width, zoom, FRAME_PADDING, canvas.width - FRAME_PADDING)
 
-  return {
+  return clearOfControls(bracket, {
     x: center ? showNearlyWholeSide(x, bounds, center, zoom, canvas) : x,
     y: keepContentAcross(frame.y, bounds.y, bounds.y + bounds.height, zoom, canvas.top + FRAME_PADDING, canvas.height - FRAME_PADDING),
     zoom
-  }
+  }, canvas, center ? [center] : [], canvas.top)
 }
 
 /**
@@ -163,6 +192,13 @@ export function getBracketFrame(
  * read at (a canvas too narrow for that cuts the first levels at its edges,
  * the module still in the middle). Down the canvas, all of the first levels
  * when they fit, else the module in the middle.
+ *
+ * On a canvas that names how far down its chips reach, the first levels hang
+ * just below them instead, the marks riding a card's top edge with them: as
+ * large as fits across the canvas and down to its foot, within the same
+ * bounds, and as high as the cards drawn in the columns in view let them
+ * stand — those cards' tops just below the chips too — so long as the first
+ * levels' foot stays in view.
  */
 function frameFirstLevels(bracket: ModuleDependencyBracket, canvas: BracketCanvas): BracketViewport {
   const { bounds } = bracket
@@ -174,18 +210,108 @@ function frameFirstLevels(bracket: ModuleDependencyBracket, canvas: BracketCanva
   const top = Math.min(...first.map(node => node.position.y))
   const bottom = Math.max(...first.map(node => node.position.y + node.height))
   const acrossZoom = (canvas.width - FIRST_LEVELS_INSET * 2) / (right - left)
-  const zoom = Math.max(READABLE_ZOOM.compact, Math.min(FRAME_MAX_ZOOM, acrossZoom))
 
+  if (canvas.chipsBottom !== undefined) {
+    const ceiling = canvas.chipsBottom + OVERLAY_GAP
+    const floor = canvas.height - FIRST_LEVELS_INSET
+    const firstTop = Math.min(...first.map(node => getDrawnTop(bracket, node)))
+    const downZoom = (floor - ceiling) / (bottom - firstTop)
+    const zoom = Math.max(READABLE_ZOOM.compact, Math.min(FRAME_MAX_ZOOM, acrossZoom, downZoom))
+    const x = canvas.width / 2 - (left + right) / 2 * zoom
+    const highest = Math.min(...getCards(bracket)
+      .filter(node => node.position.x * zoom + x < canvas.width && (node.position.x + node.width) * zoom + x > 0)
+      .map(node => getDrawnTop(bracket, node)))
+    const y = Math.max(ceiling - firstTop * zoom, Math.min(ceiling - highest * zoom, floor - bottom * zoom))
+    return clearOfControls(bracket, { x, y, zoom }, canvas, first, ceiling)
+  }
+
+  const zoom = Math.max(READABLE_ZOOM.compact, Math.min(FRAME_MAX_ZOOM, acrossZoom))
   const center = bracket.nodes.find(node => node.kind === 'center')
   const middle = (bottom - top) * zoom <= getRoom(canvas).height || !center
     ? (top + bottom) / 2
     : center.position.y + center.height / 2
   const frame = centreOn((left + right) / 2, middle, zoom, canvas)
-  return {
+  return clearOfControls(bracket, {
     x: frame.x,
     y: keepContentAcross(frame.y, bounds.y, bounds.y + bounds.height, zoom, canvas.top + FRAME_PADDING, canvas.height - FRAME_PADDING),
     zoom
+  }, canvas, first, canvas.top)
+}
+
+/**
+ * A frame moved, if need be, so no card it draws stands under one of the
+ * controls drawn over the canvas, nor within `OVERLAY_GAP` of one: by the
+ * least distance — across, up or down, or both — that clears them all and
+ * keeps every card it frames that it had wholly in view so, below `ceiling`
+ * and `FIRST_LEVELS_INSET` inside the other edges. A frame no such move
+ * clears stays as it is; a canvas naming no controls keeps it as it is too.
+ */
+function clearOfControls(
+  bracket: ModuleDependencyBracket,
+  frame: BracketViewport,
+  canvas: BracketCanvas,
+  framed: readonly BracketNode[],
+  ceiling: number
+): BracketViewport {
+  const controls = (canvas.controls ?? []).map(control => getBoxAround(control, OVERLAY_GAP))
+  if (controls.length === 0) {
+    return frame
   }
+
+  const room: ScreenBox = {
+    left: FIRST_LEVELS_INSET,
+    top: ceiling,
+    right: canvas.width - FIRST_LEVELS_INSET,
+    bottom: canvas.height - FIRST_LEVELS_INSET
+  }
+  const whole: ScreenBox = { left: 0, top: 0, right: canvas.width, bottom: canvas.height }
+  const cards = getCards(bracket)
+  const kept = framed.filter(node => isWithin(toScreen(bracket, node, frame), room))
+  const isClear = (viewport: BracketViewport): boolean =>
+    kept.every(node => isWithin(toScreen(bracket, node, viewport), room))
+    && cards.every((node) => {
+      const box = toScreen(bracket, node, viewport)
+      return !overlaps(box, whole) || controls.every(control => !overlaps(box, control))
+    })
+
+  if (isClear(frame)) {
+    return frame
+  }
+
+  const drawn = cards.map(node => toScreen(bracket, node, frame)).filter(box => overlaps(box, whole))
+  return getClearingMoves(drawn, controls)
+    .map(move => ({ x: frame.x + move.x, y: frame.y + move.y, zoom: frame.zoom }))
+    .find(isClear) ?? frame
+}
+
+/**
+ * The moves that each put a card drawn just past a control — above or below
+ * it, left or right of it — and each pair of those at once, shortest first.
+ */
+function getClearingMoves(
+  cards: readonly ScreenBox[],
+  controls: readonly ScreenBox[]
+): Array<{ x: number, y: number }> {
+  const across = new Set<number>()
+  const down = new Set<number>()
+  for (const card of cards) {
+    for (const control of controls) {
+      if (card.left < control.right && card.right > control.left) {
+        down.add(control.top - card.bottom)
+        down.add(control.bottom - card.top)
+      }
+      if (card.top < control.bottom && card.bottom > control.top) {
+        across.add(control.left - card.right)
+        across.add(control.right - card.left)
+      }
+    }
+  }
+
+  return [
+    ...[...down].map(y => ({ x: 0, y })),
+    ...[...across].map(x => ({ x, y: 0 })),
+    ...[...across].flatMap(x => [...down].map(y => ({ x, y })))
+  ].sort((first, second) => Math.hypot(first.x, first.y) - Math.hypot(second.x, second.y))
 }
 
 /** How much of the canvas width a frame moves off its module to show a side whole. */
@@ -564,4 +690,48 @@ function minLeft(cards: readonly BracketNode[]): number {
 
 function maxRight(cards: readonly BracketNode[]): number {
   return Math.max(...cards.map(card => card.position.x + card.width))
+}
+
+/** Everything the canvas draws as a card: modules, stubs, the module in the middle and the empty places. */
+function getCards(bracket: ModuleDependencyBracket): BracketNode[] {
+  return bracket.nodes.filter(node => node.kind !== 'level')
+}
+
+/** Where a card is drawn from, down: a compact module's marks ride above its top edge. */
+function getDrawnTop(bracket: ModuleDependencyBracket, node: BracketNode): number {
+  const hasMarks = node.kind === 'module' && (node.isRoot || node.isOnCycleWithCenter)
+  return bracket.size === 'compact' && hasMarks ? node.position.y - COMPACT_MARKS_OVERHANG : node.position.y
+}
+
+/** A box on screen by its edges. */
+type ScreenBox = { left: number, top: number, right: number, bottom: number }
+
+/** A card's box on screen under a viewport, the marks riding its top edge included. */
+function toScreen(bracket: ModuleDependencyBracket, node: BracketNode, viewport: BracketViewport): ScreenBox {
+  return {
+    left: node.position.x * viewport.zoom + viewport.x,
+    top: getDrawnTop(bracket, node) * viewport.zoom + viewport.y,
+    right: (node.position.x + node.width) * viewport.zoom + viewport.x,
+    bottom: (node.position.y + node.height) * viewport.zoom + viewport.y
+  }
+}
+
+/** A box on the canvas grown by `margin` all round. */
+function getBoxAround(box: CanvasBox, margin: number): ScreenBox {
+  return {
+    left: box.x - margin,
+    top: box.y - margin,
+    right: box.x + box.width + margin,
+    bottom: box.y + box.height + margin
+  }
+}
+
+function overlaps(first: ScreenBox, second: ScreenBox): boolean {
+  return first.left < second.right && first.right > second.left
+    && first.top < second.bottom && first.bottom > second.top
+}
+
+function isWithin(box: ScreenBox, area: ScreenBox): boolean {
+  return box.left >= area.left - EDGE_TOLERANCE && box.right <= area.right + EDGE_TOLERANCE
+    && box.top >= area.top - EDGE_TOLERANCE && box.bottom <= area.bottom + EDGE_TOLERANCE
 }
