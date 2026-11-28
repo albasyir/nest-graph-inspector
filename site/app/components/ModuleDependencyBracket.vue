@@ -33,7 +33,8 @@ import {
   pickWholeFrameBracket,
   type BracketCanvas,
   type BracketFraming,
-  type BracketViewport
+  type BracketViewport,
+  type CanvasBox
 } from '~/utils/module-bracket-viewport'
 import { createDeepDiveFitTracker } from '~/utils/module-deep-dive'
 import {
@@ -133,6 +134,41 @@ const hasCanvas = computed(() => canvas.value.width > 0 && canvas.value.height >
 const framing = computed<BracketFraming>(() =>
   props.navigation.kind === 'in-place' ? props.navigation.framing : 'focus'
 )
+
+/**
+ * How far down the canvas the chips along its top reach: 12px under the
+ * headings, and 40px tall at most — compact, or under a finger — as the
+ * stylesheet sets them.
+ */
+const CHIPS_BOTTOM = HEADINGS_HEIGHT + 12 + 40
+
+/**
+ * The canvas a frame is made on. Framed whole — a demo in a column of a page,
+ * with little more room than the module and its first levels take — it names
+ * what else is drawn over it, so every card the bracket opens on stands clear:
+ * the chips along its top, and the zoom controls where the stylesheet stands
+ * them now. A module's page frames on the canvas as it always has.
+ */
+function getFrameCanvas(): BracketCanvas {
+  if (framing.value !== 'whole') {
+    return canvas.value
+  }
+
+  return { ...canvas.value, chipsBottom: CHIPS_BOTTOM, controls: measureControls() }
+}
+
+/** The zoom controls' box on the canvas: a column up its side, or a row along its foot. */
+function measureControls(): CanvasBox[] {
+  const container = containerRef.value
+  const controls = container?.querySelector('.vue-flow__controls')
+  if (!container || !controls) {
+    return []
+  }
+
+  const origin = container.getBoundingClientRect()
+  const box = controls.getBoundingClientRect()
+  return [{ x: box.left - origin.left, y: box.top - origin.top, width: box.width, height: box.height }]
+}
 
 /**
  * Below this width a canvas draws the bracket compact — narrower cards,
@@ -559,7 +595,7 @@ async function frameBracket(): Promise<void> {
 
   // Vue Flow answers `false` only without its zoom handler, which a viewport
   // it calls initialized always has; with no duration it answers at once.
-  const isFramed = await setViewport(getBracketFrame(current, canvas.value, framing.value))
+  const isFramed = await setViewport(getBracketFrame(current, getFrameCanvas(), framing.value))
   if (isCurrent()) {
     isFramePending.value = !isFramed
     if (isFramed) {
@@ -733,7 +769,7 @@ function followEdgeChip(chip: EdgeChip): void {
 
   if (chip.kind === 'middle') {
     fitTracker.reset()
-    void setViewport(getBracketFrame(current, canvas.value, framing.value), panOptions())
+    void setViewport(getBracketFrame(current, getFrameCanvas(), framing.value), panOptions())
     return
   }
 

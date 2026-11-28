@@ -60,9 +60,10 @@ const isAtStart = computed(() => !graph.value || isBlastDemoAtStart(graph.value,
  * In place: another module is put in the middle here, and Direct Run leaves
  * for the module's page through `/view`, which hands it the demo's graph —
  * the way the full graph's previews open a module. Framed whole wherever all
- * of it reads: a section's column is narrower than that, so it opens on the
- * module and the first level of each side, as a module's page on a phone
- * does, the rest a chip or a step away.
+ * of it reads: a section's column is narrower than that, so it opens compact,
+ * on the module and the first level of each side, as a module's page on a
+ * phone does — hung below the chips along the canvas top and clear of its
+ * zoom controls — the rest a chip or a step away.
  */
 const navigation: BracketNavigation = {
   kind: 'in-place',
@@ -292,13 +293,16 @@ function reset(): void {
 /*
  * The bracket fills the frame: its depth steppers, the canvas, and its key.
  * The frame is the neighbouring graphs' own — GraphViewer's 12px corners and
- * its --mg-subgraph-border, light and dark — and as tall as their pictures.
- * In a desktop column the canvas keeps the bracket's own 16px margin, which
- * keeps it under the compact width (634px at most, in a 668px column): the
- * compact bracket is the one whose first levels fit across it.
+ * its --mg-subgraph-border, light and dark — and as tall as their pictures,
+ * never shorter than the bracket needs to open clear of what is drawn over
+ * its canvas: 88px down to below the chips, 239px for the module and its
+ * first levels with the Root mark riding the top card — at their own size,
+ * or as small as their names read at — and 4px at the foot, on top of the
+ * 132px the steppers and the key take in a desktop column. In a desktop
+ * column the canvas keeps the bracket's own 16px margin.
  */
 .blast-demo__panel {
-  height: clamp(18rem, 58vh, 34rem);
+  height: clamp(29rem, 58vh, 34rem);
   overflow: hidden;
   border: 1px solid #bbb;
   border-radius: 0.75rem;
@@ -315,6 +319,20 @@ function reset(): void {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/*
+ * Where the canvas's zoom controls stand in a row along its foot — a phone,
+ * or any touch screen — the frame is as tall as it ever is, for the row to
+ * stay clear of the module's card too: the canvas needs 88px down to below
+ * the chips, 230px for the module and its first levels, Root mark and all,
+ * at a size their names read at, and 70px for the row and the room around
+ * it — 388px — and the steppers and the key take another 148px on a phone.
+ */
+@media (pointer: coarse), (max-width: 639.98px) {
+  .blast-demo__panel {
+    height: 34rem;
+  }
 }
 
 /*
