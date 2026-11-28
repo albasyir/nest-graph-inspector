@@ -1190,29 +1190,50 @@ furthest — nine modules, five levels deep — as the line under it says
 (`measureBlastRadius`, the bracket's own right-side walk). It reads as the
 neighbouring previews do: the bracket in a bordered, rounded frame filling the
 section's column (GraphViewer's own corners and `--mg-subgraph-border`), as
-tall as their pictures (`clamp(18rem, 58vh, 34rem)`), then a caption row — how
-far a change reaches, and the ways out, quiet `sm` neutral buttons — with the
-section's description saying what a blast effect is. Framed `whole`, it would
+tall as their pictures but never shorter than the bracket needs to open clear
+of what is drawn over its canvas — `clamp(29rem, 58vh, 34rem)`, and `34rem` on
+a phone or any touch screen, where the zoom controls stand in a row along the
+canvas foot — then a caption: how far a change reaches, on a line of its own,
+and the ways out on a row beneath it, quiet `sm` neutral buttons with Reset
+last, so the exits never move under the pointer as it comes and goes. The
+section's description says what a blast effect is. Framed `whole`, it would
 open on all of it — every card and stub of the depths shown, centred below
 the pinned headings, nothing past an edge — wherever that reads:
 `pickWholeFrameBracket` takes the regular bracket when it fits whole at its
 `READABLE_ZOOM`, else the compact one at its own (names at 11px or more),
 fitting `drawnBounds`, the bracket without the heading band the canvas pins
-instead, up to `WHOLE_FRAME_MAX_ZOOM`. A section's column is narrower than
-that (the compact bracket's 734px would need a canvas of about 737px), so it
-opens in focus, as a module's page on a phone does: compact — the column's
-canvas, 634px at most (a 668px column less the bracket's 16px margins), is
-under the 640px compact width — on the module and the first level of each
-side, names at 11.5px, the rest a chip or a step away. Measured on the static
-build: at 1440×900 a 668×522 panel, 1280×800 588×464, 1024×768 460×445, and
-390×844 358×490, the module and both first levels wholly inside the canvas at
-each. A compact bracket folds its key behind a toggle — a phone's, or a
-column's this narrow — so its rows never take the canvas's height; on a phone
-the frame already stands in the page's 16px gutter, so the demo sets
-`--module-bracket-inset` to 0 and the canvas runs to the frame, the width
-(356px) the module and both its first levels need at 0.96. Every change frames
-it afresh the same way, and a module's page, whose navigation is `pages`, can
-never ask for `whole`. Its cards are culled as a module page's are, and laid
+instead, up to `WHOLE_FRAME_MAX_ZOOM`. That reads on a tablet's stacked panel
+at 820×1180 (the compact bracket's 734px at 0.962 across a 738px canvas). A
+section's column is narrower, and so is a tablet's panel at 768×1024, so there
+it opens in focus, as a module's page on a phone does: on the module and the
+first level of each side, the rest a chip or a step away — and compact,
+whatever the canvas's width, for framed whole a bracket that reads whole at
+neither size is the compact one (`bracket` in `ModuleDependencyBracket.vue`):
+a regular bracket's first levels span 1112px, wider than any canvas the
+landing page gives it, and the 686px canvas at 768×1024 would otherwise open
+regular with every first level cut. Framed whole, the bracket also names what
+is drawn over its canvas (`getFrameCanvas`): the foot of the chips along its
+top (`CHIPS_BOTTOM`, 84px — 12px under the 32px headings, 40px tall at most)
+and the zoom controls' box as the stylesheet lays them out now, a column up
+the left side or a row along the foot (`measureControls`). The first levels
+then hang just below the chips, the marks riding a card's top edge with them
+(`COMPACT_MARKS_OVERHANG`), as large as fits across the canvas and down to its
+foot — never larger than their own size, nor smaller than their names read at
+— and the frame moves by the least it must for no card it draws to stand
+under the controls (`clearOfControls` in `app/utils/module-bracket-viewport.ts`).
+A module's page names neither, and frames as it always has. Measured on the
+static build once the demo says it is ready — panel, canvas, zoom: 1440×900
+668×522, 634×390, 1; 1280×800 588×464, 554×332, 1; 1024×768 460×464, 426×332,
+1; 820×1180 772×544, 738×448, 0.962 (whole); 768×1024 720×544, 686×412, 1; and
+390×844 358×544, 356×396, 0.961 — the module and both first levels wholly
+inside the canvas at each, and no card, mark or Direct Run under the zoom
+controls, a chip or the headings, by mouse or by touch. A compact bracket
+folds its key behind a toggle — a phone's, or a column's this narrow — so its
+rows never take the canvas's height; on a phone the frame already stands in
+the page's 16px gutter, so the demo sets `--module-bracket-inset` to 0 and the
+canvas runs to the frame, the width (356px) the module and both its first
+levels need at 0.96. Every change frames it afresh the same way, and a
+module's page, whose navigation is `pages`, can never ask for `whole`. Its cards are culled as a module page's are, and laid
 out again at the other size once the canvas is measured, they are drawn where
 they now stand, for the same reason; a canvas resized picks between the two
 layouts again rather than laying either out afresh. On a phone the section
@@ -1234,10 +1255,10 @@ something else — a module asked for that the graph lacks draws the opening one
 instead, which is nothing to reset. Its root says `data-ready="true"` only
 once it has a graph and the bracket has said `framed`, which it says when Vue
 Flow has taken the viewport the bracket opens at — and never before the
-canvas's own width is measured: until then the bracket's size is the
-window's guess (`isPhone`), and on a desktop a section's column is narrower
-than the window says, so a frame taken sooner would be the regular
-bracket's, laid out compact a moment later. The bracket says `framing`
+canvas's own width is measured: a frame is made for the canvas it is shown
+on, and until then a bracket the host does not frame whole takes its size
+from the window's guess (`isPhone`), so a frame taken sooner could be the
+other size's. The bracket says `framing`
 the moment a frame is owed — as it opens, as its module, a depth or its size
 changes, and as each frame starts — so the demo watches for none of those
 itself, and the root says `false` until the next `framed`: a signal, never a
@@ -2094,13 +2115,23 @@ Facts a code change can invalidate, and the file to check:
   them); the sizes tried and the floor they must read at (`READABLE_ZOOM`; the
   suite's `READABLE_PX`, 11, checks it), `WHOLE_FRAME_PADDING` (16) and
   `WHOLE_FRAME_MAX_ZOOM` (1 regular, 1.2 compact) in
-  `app/utils/module-bracket-viewport.ts`; the panel height its neighbours
-  share, `clamp(18rem, 58vh, 34rem)`, and the phone-only
-  `--module-bracket-inset: 0` in `RuntimeGraphBlastEffectPreview.vue`; that a
-  desktop column's canvas stays under the 640px compact width only with the
-  bracket's own 16px margins (`.module-bracket__canvas` in
-  `ModuleDependencyBracket.vue`), and that a compact bracket folds its key
-  (`isCompact` on the key's toggle there); that a chip never names a level past the depth
+  `app/utils/module-bracket-viewport.ts`; the panel height,
+  `clamp(29rem, 58vh, 34rem)` and `34rem` where the zoom controls stand in a
+  row, and the phone-only `--module-bracket-inset: 0` in
+  `RuntimeGraphBlastEffectPreview.vue`, each sized to the room the bracket
+  needs to open clear of what is drawn over its canvas — the chips' foot,
+  `CHIPS_BOTTOM` in `ModuleDependencyBracket.vue` (the chips' `top` and their
+  compact `min-height` in its stylesheet), the marks' overhang,
+  `COMPACT_MARKS_OVERHANG` in `module-bracket-viewport.ts`
+  (`.module-bracket--compact .module-bracket-module__marks`), and
+  `OVERLAY_GAP` there — and to what the steppers and the key take; that
+  framed whole a bracket reading whole at neither size is the compact one
+  (`bracket` in `ModuleDependencyBracket.vue`), and that a compact bracket
+  folds its key (`isCompact` on the key's toggle there); that the frame
+  finds the zoom controls where the stylesheet stands them, by measuring
+  them (`measureControls`), and moves clear of them (`clearOfControls`) —
+  the suite's `OPENING_SCREENS` and `cardsCovered` in
+  `landing.browser-spec.ts` check it; that a chip never names a level past the depth
   shown — `getBracketOffscreen` there; that Vue Flow culls by a node's
   `computedPosition` and `dimensions` and sets them only while it draws the
   node, which is why the bracket sets every card's itself each time it hands
