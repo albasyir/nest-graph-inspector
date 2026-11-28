@@ -252,9 +252,10 @@ async function cardsCovered(page: Page): Promise<string[]> {
         bottom: Math.max(...boxes.map((box) => box.bottom)),
       };
     };
+    // A chip by its accessible name: its words stand on two lines.
     const covering = (overlay: Element): string =>
       overlay.matches('[data-chip]')
-        ? `The chip "${overlay.textContent?.trim().replace(/\s+/g, ' ')}" covers`
+        ? `The chip "${overlay.getAttribute('aria-label') ?? overlay.textContent?.trim().replace(/\s+/g, ' ')}" covers`
         : overlay.matches('.vue-flow__controls')
           ? 'The zoom controls cover'
           : 'The column headings cover';
