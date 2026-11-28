@@ -26,11 +26,14 @@ import {
 } from './viewer.fixtures';
 
 /**
- * The landing page's hero in Chromium: the blast effect of one module of the
- * demo — its dependency bracket, kept in place on the page — and the two ways
- * out of it. The landing page draws the demo's static graph, exported from
- * the same build as the demo these tests run, so every module, level and
- * count expected here is read from the graph that demo serves.
+ * The landing page in Chromium: its hero, the demo's whole graph as the page
+ * has always opened on, and the sections after it, each a picture beside its
+ * words, the pictures alternating left and right. The second is the blast
+ * effect: one module of the demo in its dependency bracket, kept in place on
+ * the page, and the two ways out of it. The landing page draws the demo's
+ * static graph, exported from the same build as the demo these tests run, so
+ * every module, level and count expected here is read from the graph that
+ * demo serves.
  */
 
 /**
@@ -39,11 +42,68 @@ import {
  */
 const LANDING_MODULE = 'CustomerModule';
 
+/** The blast effect's section, by its heading: a fact of `site/content/index.md`. */
+const BLAST_SECTION = 'See the Blast Effect of a Change';
+
+/**
+ * The sections after the hero, in the order the page sets them, the first
+ * with its picture on the left of its words and each next on the other side
+ * (`reverse` in `site/content/index.md`).
+ */
+const SECTIONS = [
+  BLAST_SECTION,
+  'Find Circular Dependencies Fast',
+  'Context-Aware AI Assistant',
+  'Run Providers From The Graph',
+] as const;
+
 /** Bright Line, however it is written: gone from the site, and to stay gone. */
 const BRIGHT_LINE = /bright[\s-]*line/i;
 
+/**
+ * The smallest size, in CSS pixels, a module's name is drawn at where the
+ * demo opens: the site's `READABLE_ZOOM` for a compact bracket, 0.96, times
+ * its 11.5px names (`site/app/utils/module-bracket-viewport.ts`).
+ */
+const READABLE_PX = 11;
+
+/** The landing page's hero: the block its one `h1` heads. */
+function hero(page: Page): Locator {
+  return page
+    .getByRole('heading', { level: 1 })
+    .locator('xpath=ancestor::*[@data-slot="root"][1]');
+}
+
+/** A section of the landing page, by its heading. */
+function pageSection(page: Page, title: string): Locator {
+  return page
+    .getByRole('heading', { level: 2, name: title, exact: true })
+    .locator('xpath=ancestor::section[@data-slot="root"][1]');
+}
+
+/**
+ * A section's own container: the one directly inside it, not one of a
+ * component set in its picture.
+ */
+function sectionContainer(section: Locator): Locator {
+  return section.locator(':scope > [data-slot="container"]');
+}
+
+/** A section's words — its heading, description and features — and its picture beside them. */
+function sectionParts(section: Locator): { words: Locator; picture: Locator } {
+  const container = sectionContainer(section);
+  return {
+    words: container.locator(':scope > [data-slot="wrapper"]'),
+    picture: container.locator(':scope > :not([data-slot="wrapper"])').first(),
+  };
+}
+
+/** The blast-effect demo, found by its section's heading. */
 function blastDemo(page: Page): Locator {
-  return page.getByRole('region', { name: 'Blast effect', exact: true });
+  return pageSection(page, BLAST_SECTION).getByRole('region', {
+    name: 'Blast effect',
+    exact: true,
+  });
 }
 
 /**
@@ -101,7 +161,7 @@ async function visibleCanvas(page: Page): Promise<Box | null> {
   };
 }
 
-/** How far a change to a module reaches, as the line beside the demo says it. */
+/** How far a change to a module reaches, as the line under the demo says it. */
 function describeReach(graph: GraphOutput, moduleName: string): string {
   const levels = dependencyLevels(graph, moduleName, 'right');
   const modules = levels.flat().length;
@@ -116,127 +176,60 @@ function describeReach(graph: GraphOutput, moduleName: string): string {
   return `A change to ${moduleName} reaches ${count}, ${distance}.`;
 }
 
-/**
- * The smallest size, in CSS pixels, a module's name is drawn at when the
- * demo opens on its whole bracket: the site's `READABLE_ZOOM` for a compact
- * bracket, 0.96, times its 11.5px names (`site/app/utils/module-bracket-viewport.ts`).
- */
-const WHOLE_READABLE_PX = 11;
-
-type Depths = Record<DependencySide, number>;
-
-/** How many modules the tallest column of a module's bracket holds, each side to its depth. */
-function tallestColumn(
-  graph: GraphOutput,
-  moduleName: string,
-  depth: Depths,
-): number {
-  return Math.max(
-    1,
-    ...(['left', 'right'] as const).flatMap((side) =>
-      dependencyLevels(graph, moduleName, side)
-        .slice(0, depth[side])
-        .map((level) => level.length),
-    ),
-  );
+/** The size a card's name is drawn at: its font size, scaled by the zoom. */
+async function drawnNameSize(card: Locator): Promise<number> {
+  return card.evaluate((node) => {
+    const name = node.querySelector(
+      '.module-bracket-module__name, .module-bracket-center__name',
+    );
+    if (!(node instanceof HTMLElement) || !name || node.offsetWidth === 0) {
+      throw new Error('The card has no name drawn');
+    }
+    const zoom = node.getBoundingClientRect().width / node.offsetWidth;
+    return Number.parseFloat(getComputedStyle(name).fontSize) * zoom;
+  });
 }
 
 /**
- * Waits for the demo to be ready, then requires it framed on its whole
- * bracket at `depth`: the module, every module the graph has on each side to
- * that depth, and every "+N more" stub past them, each wholly inside the
- * canvas, the panel and the first screen; no chip toward anything left out,
- * no card drawn back as cut off; every name at a size to read; and the panel
- * itself — steppers, canvas, zoom controls, key — on the first screen.
+ * Waits for the demo to be ready, then requires it opened on `moduleName` as
+ * a section's column draws it: the module and every module of the first
+ * level on each side drawn wholly inside the canvas, below its pinned
+ * headings, each name at a size to read. The whole bracket is wider than a
+ * column draws it at that size, so the rest is a chip or a step away.
  */
-async function expectWholeBracket(
+async function expectOpenOnModule(
   page: Page,
   graph: GraphOutput,
   moduleName: string,
-  depth: Depths,
 ): Promise<void> {
   await expectDemoReady(page);
   await expect(center(page)).toContainText(moduleName);
-  await page.evaluate(() => window.scrollTo(0, 0));
-
-  const screen = page.viewportSize();
-  const panel = await blastDemo(page).locator('.module-bracket').boundingBox();
-  const canvas = await blastDemo(page)
-    .locator('.module-bracket__canvas')
-    .boundingBox();
-  if (!screen || !panel || !canvas) {
-    throw new Error('The demo has no panel or canvas on screen.');
+  const canvas = await visibleCanvas(page);
+  if (!canvas) {
+    throw new Error('The demo has no canvas on screen.');
   }
-  expect(
-    panel.y + panel.height,
-    'The whole panel is on the first screen',
-  ).toBeLessThanOrEqual(screen.height);
 
-  const stubs = blastDemo(page).locator(
-    '.vue-flow__node[data-bracket-node="stub"]',
-  );
-  const expectedStubs = (['left', 'right'] as const).reduce(
-    (total, side) =>
-      total + dependencyStubCounts(graph, moduleName, side, depth[side]).length,
-    0,
-  );
-  await expect(stubs).toHaveCount(expectedStubs);
-
-  const cards: { what: string; card: Locator }[] = [
+  const cards = [
     { what: moduleName, card: center(page) },
     ...(['left', 'right'] as const).flatMap((side) =>
-      dependencyLevels(graph, moduleName, side)
-        .slice(0, depth[side])
-        .flat()
-        .map((name) => ({
-          what: `${name} (${side})`,
-          card: bracketModule(page, side, name),
-        })),
+      (dependencyLevels(graph, moduleName, side)[0] ?? []).map((name) => ({
+        what: `${name} (${side})`,
+        card: bracketModule(page, side, name),
+      })),
     ),
-    ...Array.from({ length: expectedStubs }, (_, index) => ({
-      what: `stub ${index + 1}`,
-      card: stubs.nth(index),
-    })),
   ];
   for (const { what, card } of cards) {
+    await expect(card, `${what} is drawn`).toBeAttached();
     const box = await card.boundingBox();
-    expect(box, `${what} is drawn`).not.toBeNull();
-    if (!box) {
-      continue;
-    }
-    expect(isInside(box, canvas), `${what} is inside the canvas`).toBe(true);
-    expect(isInside(box, panel), `${what} is inside the panel`).toBe(true);
     expect(
-      isInside(box, { x: 0, y: 0, width: screen.width, height: screen.height }),
-      `${what} is on the first screen`,
+      box !== null && isInside(box, canvas),
+      `${what} is wholly inside the canvas`,
     ).toBe(true);
+    expect(
+      await drawnNameSize(card),
+      `${what}'s name is drawn at a size to read`,
+    ).toBeGreaterThanOrEqual(READABLE_PX);
   }
-
-  await expect(blastDemo(page).locator('[data-chip]')).toHaveCount(0);
-  await expect(
-    blastDemo(page).locator(
-      '.module-bracket-module--cut, .module-bracket-stub--cut',
-    ),
-  ).toHaveCount(0);
-
-  const smallestName = await blastDemo(page)
-    .locator('.module-bracket-module__name')
-    .evaluateAll((names) =>
-      Math.min(
-        ...names.map((name) => {
-          const card = name.closest('.vue-flow__node');
-          const zoom =
-            card instanceof HTMLElement && card.offsetWidth > 0
-              ? card.getBoundingClientRect().width / card.offsetWidth
-              : 0;
-          return Number.parseFloat(getComputedStyle(name).fontSize) * zoom;
-        }),
-      ),
-    );
-  expect(
-    smallestName,
-    'Every module name is drawn at a size to read',
-  ).toBeGreaterThanOrEqual(WHOLE_READABLE_PX);
 }
 
 /** Text anywhere on the page that offers Bright Line, or a control named for it. */
@@ -248,7 +241,39 @@ async function expectNoBrightLine(page: Page): Promise<void> {
   await expect(page.getByRole('switch', { name: BRIGHT_LINE })).toHaveCount(0);
 }
 
-test('the landing page opens on the blast effect of its module: both sides as the graph has them, and how far a change reaches', async ({
+test("the hero is the demo's whole graph, as it has always been: its modules drawn, and no bracket", async ({
+  page,
+  state,
+  graph,
+}) => {
+  await page.goto(state.siteBaseUrl);
+  await expectGraphLayoutsReady(page);
+
+  const top = hero(page);
+  await expect(top.locator('.graph-viewer')).toHaveCount(1);
+  await expect(top.locator('.module-bracket')).toHaveCount(0);
+  await expect(top.getByRole('region', { name: 'Blast effect' })).toHaveCount(
+    0,
+  );
+
+  // The root, the demo's module, and the root's first imports.
+  const modules = [
+    graph.root,
+    LANDING_MODULE,
+    ...(dependencyLevels(graph, graph.root, 'left')[0] ?? []).slice(0, 3),
+  ];
+  for (const moduleName of new Set(modules)) {
+    await expect(
+      top.locator(
+        `.vue-flow__node[data-id=${JSON.stringify(`module-${moduleName}`)}]`,
+      ),
+      `${moduleName} is drawn in the hero's graph`,
+    ).toBeVisible();
+  }
+  await expectNoBrightLine(page);
+});
+
+test("the blast effect's section opens on its module: both sides as the graph has them, and how far a change reaches", async ({
   page,
   state,
   graph,
@@ -264,6 +289,9 @@ test('the landing page opens on the blast effect of its module: both sides as th
 
   await openLanding(page, state);
   await expectNoBrightLine(page);
+  await expect(pageSection(page, BLAST_SECTION)).toContainText(
+    'Blast effect: pick a module and see everything that depends on it — the modules a change would hit.',
+  );
   await expect(blastDemo(page)).toContainText(
     describeReach(graph, LANDING_MODULE),
   );
@@ -488,53 +516,64 @@ test('"Open this module in the viewer" opens its page, with no Bright Line, and 
 test.describe('on a 1440×900 desktop', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('the demo opens on its whole bracket, on the first screen, and stays whole through every change', async ({
+  test("the sections take turns: the blast effect's picture left of its words, in a column of its own, and the next one's on the right", async ({
+    page,
+    state,
+  }) => {
+    await openLanding(page, state);
+
+    // After the hero, the sections in the page's order.
+    const titles = (
+      await page.getByRole('heading', { level: 2 }).allTextContents()
+    ).map((title) => title.trim());
+    expect(titles.slice(0, SECTIONS.length)).toEqual([...SECTIONS]);
+
+    // Each picture beside its words, the first on the left, then turn about.
+    for (const [index, title] of SECTIONS.entries()) {
+      const { words, picture } = sectionParts(pageSection(page, title));
+      const wordsBox = await words.boundingBox();
+      const pictureBox = await picture.boundingBox();
+      if (!wordsBox || !pictureBox) {
+        throw new Error(`The section "${title}" has no words or picture.`);
+      }
+      if (index % 2 === 0) {
+        expect(
+          pictureBox.x + pictureBox.width,
+          `"${title}": the picture is on the left of the words`,
+        ).toBeLessThanOrEqual(wordsBox.x);
+      } else {
+        expect(
+          wordsBox.x + wordsBox.width,
+          `"${title}": the picture is on the right of the words`,
+        ).toBeLessThanOrEqual(pictureBox.x);
+      }
+    }
+
+    // The blast effect's panel keeps to its column: half its section or less.
+    const container = await sectionContainer(
+      pageSection(page, BLAST_SECTION),
+    ).boundingBox();
+    const panel = await blastDemo(page)
+      .locator('.blast-demo__panel')
+      .boundingBox();
+    if (!container || !panel) {
+      throw new Error('The blast effect has no section or panel.');
+    }
+    expect(panel.width).toBeLessThanOrEqual(container.width / 2);
+  });
+
+  test('the demo opens on its module in its column, the first level of each side beside it, and a step frames it the same way', async ({
     page,
     state,
     graph,
   }) => {
-    const opening: Depths = { left: DEFAULT_DEPTH, right: DEFAULT_DEPTH };
-    const deeper: Depths = { left: DEFAULT_DEPTH, right: DEFAULT_DEPTH + 1 };
-
     await openLanding(page, state);
-    await expectWholeBracket(page, graph, LANDING_MODULE, opening);
+    await blastDemo(page).scrollIntoViewIfNeeded();
+    await expectOpenOnModule(page, graph, LANDING_MODULE);
 
     await stepper(page, 'right', 'more').click();
     await expectDepth(page, 'right', DEFAULT_DEPTH + 1);
-    await expectWholeBracket(page, graph, LANDING_MODULE, deeper);
-
-    await stepper(page, 'right', 'fewer').click();
-    await expectDepth(page, 'right', DEFAULT_DEPTH);
-    await expectWholeBracket(page, graph, LANDING_MODULE, opening);
-
-    // The "+N more" stub is on screen with the rest, and shows the next level.
-    await blastDemo(page)
-      .locator('.vue-flow__node[data-bracket-node="stub"][data-side="right"]')
-      .first()
-      .getByRole('button')
-      .click();
-    await expectDepth(page, 'right', DEFAULT_DEPTH + 1);
-    await expectWholeBracket(page, graph, LANDING_MODULE, deeper);
-
-    // Another module in the middle — of those drawn, the one whose bracket is
-    // shortest, so it too reads whole — keeps the depths, and is whole too.
-    const [target] = dependencyLevels(graph, LANDING_MODULE, 'right')
-      .slice(0, deeper.right)
-      .flat()
-      .sort(
-        (first, second) =>
-          tallestColumn(graph, first, deeper) -
-            tallestColumn(graph, second, deeper) ||
-          (first < second ? -1 : first > second ? 1 : 0),
-      );
-    if (!target) {
-      throw new Error(`No module depends on ${LANDING_MODULE}.`);
-    }
-    await bracketModule(page, 'right', target).getByRole('button').click();
-    await expectWholeBracket(page, graph, target, deeper);
-
-    await resetButton(page).click();
-    await expectWholeBracket(page, graph, LANDING_MODULE, opening);
+    await expectOpenOnModule(page, graph, LANDING_MODULE);
     await expect(page).toHaveURL(state.siteBaseUrl);
   });
 });
@@ -542,19 +581,39 @@ test.describe('on a 1440×900 desktop', () => {
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('the demo fits the screen: the module and both first levels, its controls in reach', async ({
+  test('the blast effect fits the phone: its picture before its words, inside the gutter, the module and both first levels, its controls in reach', async ({
     page,
     state,
     graph,
   }) => {
     await openLanding(page, state);
 
-    const overflow = await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
+    const scroll = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      window: window.innerWidth,
+    }));
+    expect(scroll.width, 'The page scrolls sideways').toBe(scroll.window);
+
+    // Stacked as its neighbours stack: the picture, then its words.
+    const section = pageSection(page, BLAST_SECTION);
+    const { words } = sectionParts(section);
+    const panelBox = await blastDemo(page)
+      .locator('.blast-demo__panel')
+      .boundingBox();
+    const wordsBox = await words.boundingBox();
+    const gutter = await sectionContainer(section).evaluate((node) =>
+      Number.parseFloat(getComputedStyle(node).paddingLeft),
     );
-    expect(overflow, 'The page scrolls sideways').toBeLessThanOrEqual(0);
+    if (!panelBox || !wordsBox) {
+      throw new Error('The blast effect has no panel or words.');
+    }
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(wordsBox.y);
+    expect(panelBox.x, 'The panel keeps to the gutter').toBeGreaterThanOrEqual(
+      gutter - 1,
+    );
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(
+      scroll.window - gutter + 1,
+    );
 
     await blastDemo(page).scrollIntoViewIfNeeded();
     await expect(center(page)).toBeInViewport();

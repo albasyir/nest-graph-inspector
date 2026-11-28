@@ -652,7 +652,7 @@ test('a module on a cycle draws every level of both sides, quickly, and says it 
   );
 });
 
-test("the landing page's full graph opens a module's page on the example, and Back returns to the landing page", async ({
+test("the landing page's graph opens a module's page on the example, and Back returns to the landing page", async ({
   page,
   state,
   graph,
@@ -663,8 +663,7 @@ test("the landing page's full graph opens a module's page on the example, and Ba
 
   await page.goto(state.siteBaseUrl);
   await expectGraphLayoutsReady(page);
-  // The full-graph preview, below the hero's bracket, is the first graph
-  // viewer on the page: the bracket names its cards by side, not `module-`.
+  // The hero preview is the first graph on the page.
   await graphNode(page, `module-${moduleName}`)
     .first()
     .locator('.module-subgraph__label')
