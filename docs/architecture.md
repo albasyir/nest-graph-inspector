@@ -1175,30 +1175,51 @@ preview does the same through `/view`: its link is
 as it does for "Open full-screen demo", then replaces itself with the module's
 page, so Back returns to the landing page.
 
-The landing page's hero is a module's bracket itself, kept in place:
-`RuntimeGraphBlastEffectPreview.vue` draws `ModuleDependencyBracket.vue` with
+The landing page's hero is the demo's whole graph, `:runtime-graph-complete-preview`
+beside the title, with Load Example and a click into any module as above. The
+sections after it each set a picture beside their words, the pictures
+alternating sides (`reverse` on every other `u-page-section` in
+`site/content/index.md`), and the second, "See the Blast Effect of a
+Change", in the slot Bright Line's section had, sets its picture on the left:
+a module's bracket itself, kept in place. `RuntimeGraphBlastEffectPreview.vue`
+draws `ModuleDependencyBracket.vue` with
 `navigation: { kind: 'in-place', framing: 'whole' }` on the previews' graph,
 opening on `CustomerModule` (`BLAST_DEMO_MODULE` in
 `app/utils/landing-blast-demo.ts`), the demo module a change to which reaches
-furthest — nine modules, five levels deep — as the line beside it says
-(`measureBlastRadius`, the bracket's own right-side walk). Framed `whole`, it
-opens on all of it — every card and stub of the depths shown, centred below
-the pinned headings, nothing past an edge, so no chip — wherever that reads:
+furthest — nine modules, five levels deep — as the line under it says
+(`measureBlastRadius`, the bracket's own right-side walk). It reads as the
+neighbouring previews do: the bracket in a bordered, rounded frame filling the
+section's column (GraphViewer's own corners and `--mg-subgraph-border`), as
+tall as their pictures (`clamp(18rem, 58vh, 34rem)`), then a caption row — how
+far a change reaches, and the ways out, quiet `sm` neutral buttons — with the
+section's description saying what a blast effect is. Framed `whole`, it would
+open on all of it — every card and stub of the depths shown, centred below
+the pinned headings, nothing past an edge — wherever that reads:
 `pickWholeFrameBracket` takes the regular bracket when it fits whole at its
 `READABLE_ZOOM`, else the compact one at its own (names at 11px or more),
 fitting `drawnBounds`, the bracket without the heading band the canvas pins
-instead, up to `WHOLE_FRAME_MAX_ZOOM`. Where neither fits — a phone, a narrow
-tablet, a module whose bracket is too tall — it opens in focus, as a module's
-page does. Every change frames it afresh the same way, and a module's page,
-whose navigation is `pages`, can never ask for it. Its cards are culled as a
-module page's are, and laid out again at the other size once the canvas is
-measured, they are drawn where they now stand, for the same reason; a canvas
-resized picks between the two layouts again rather than laying either out
-afresh. On
-a desktop the panel takes what the first screen has left below the hero
-(`calc(100svh - 28.5rem)`, between 27rem and 32rem), so at 1440×900 it is all
-on the first screen. There a stepper or a stub changes a depth and a module
-card re-centres the demo with `recenter`, all in the component's state
+instead, up to `WHOLE_FRAME_MAX_ZOOM`. A section's column is narrower than
+that (the compact bracket's 734px would need a canvas of about 737px), so it
+opens in focus, as a module's page on a phone does: compact — the column's
+canvas, 634px at most (a 668px column less the bracket's 16px margins), is
+under the 640px compact width — on the module and the first level of each
+side, names at 11.5px, the rest a chip or a step away. Measured on the static
+build: at 1440×900 a 668×522 panel, 1280×800 588×464, 1024×768 460×445, and
+390×844 358×490, the module and both first levels wholly inside the canvas at
+each. A compact bracket folds its key behind a toggle — a phone's, or a
+column's this narrow — so its rows never take the canvas's height; on a phone
+the frame already stands in the page's 16px gutter, so the demo sets
+`--module-bracket-inset` to 0 and the canvas runs to the frame, the width
+(356px) the module and both its first levels need at 0.96. Every change frames
+it afresh the same way, and a module's page, whose navigation is `pages`, can
+never ask for `whole`. Its cards are culled as a module page's are, and laid
+out again at the other size once the canvas is measured, they are drawn where
+they now stand, for the same reason; a canvas resized picks between the two
+layouts again rather than laying either out afresh. On a phone the section
+stacks as its neighbours do, the picture first (`order-last` on the words, as
+`reverse` sets it), inside the page's gutter, with no sideways scroll. There a
+stepper or a stub changes a depth and a module card re-centres the demo with
+`recenter`, all in the component's state
 (`useState`, for the document): the address stays `/`, so none of it is a
 step of Back, and Reset returns to the opening module. A move made from the
 keyboard keeps focus in the demo: where the control it was made from is gone
@@ -2062,14 +2083,20 @@ Facts a code change can invalidate, and the file to check:
   `RuntimeGraphBlastEffectPreview.vue` — as the module page's browser tests
   wait on the bracket root's `data-framed` (`oweFrame` there, and
   `drawnCardIds` in `demo/test/browser/module-bracket.ts`)
-- How the landing demo frames its whole bracket — the sizes tried and the
-  floor they must read at (`READABLE_ZOOM`; the browser suite's
-  `WHOLE_READABLE_PX`, 11, checks it), `WHOLE_FRAME_PADDING` (16) and
+- Where the landing page's blast effect stands and how it frames itself — the
+  hero as main has it and the blast effect as the second section, its
+  picture on the left (`reverse`), in `site/content/index.md` (the browser
+  suite's `SECTIONS` and `BLAST_SECTION` in `landing.browser-spec.ts` mirror
+  them); the sizes tried and the floor they must read at (`READABLE_ZOOM`; the
+  suite's `READABLE_PX`, 11, checks it), `WHOLE_FRAME_PADDING` (16) and
   `WHOLE_FRAME_MAX_ZOOM` (1 regular, 1.2 compact) in
-  `app/utils/module-bracket-viewport.ts`, and the panel height that keeps it on
-  a 1440×900 first screen, `calc(100svh - 28.5rem)` between 27rem and 32rem,
-  in `RuntimeGraphBlastEffectPreview.vue`, with the hero's spacing in
-  `site/content/index.md`; that a chip never names a level past the depth
+  `app/utils/module-bracket-viewport.ts`; the panel height its neighbours
+  share, `clamp(18rem, 58vh, 34rem)`, and the phone-only
+  `--module-bracket-inset: 0` in `RuntimeGraphBlastEffectPreview.vue`; that a
+  desktop column's canvas stays under the 640px compact width only with the
+  bracket's own 16px margins (`.module-bracket__canvas` in
+  `ModuleDependencyBracket.vue`), and that a compact bracket folds its key
+  (`isCompact` on the key's toggle there); that a chip never names a level past the depth
   shown — `getBracketOffscreen` there; that Vue Flow culls by a node's
   `computedPosition` and `dimensions` and sets them only while it draws the
   node, which is why the bracket sets every card's itself each time it hands
