@@ -1289,7 +1289,7 @@ const isLegendOpen = ref(false)
       aria-label="Legend"
     >
       <button
-        v-if="isPhone"
+        v-if="isCompact"
         type="button"
         class="module-bracket__legend-toggle"
         :aria-expanded="isLegendOpen"
@@ -1309,7 +1309,7 @@ const isLegendOpen = ref(false)
         />
       </button>
       <ul
-        v-show="!isPhone || isLegendOpen"
+        v-show="!isCompact || isLegendOpen"
         :id="`${flowId}-legend`"
         class="module-bracket__legend-items"
       >
@@ -1533,13 +1533,16 @@ const isLegendOpen = ref(false)
 /*
  * The canvas keeps the page's 16px margin, so a card cut off at its edge — and
  * its name — never runs into the window's edge, and the canvas shares one left
- * and one right edge with the toolbar above it and the legend below.
+ * and one right edge with the toolbar above it and the legend below. A host
+ * that frames the bracket itself inside the page's own margin — the landing
+ * page's bordered panel, on a phone — sets --module-bracket-inset to 0: its
+ * frame is that edge, and the canvas keeps the width the first levels need.
  */
 .module-bracket__canvas {
   position: relative;
   min-height: 0;
   flex: 1 1 auto;
-  margin: 0 16px;
+  margin: 0 var(--module-bracket-inset, 16px);
   overflow: hidden;
 }
 
@@ -2144,17 +2147,18 @@ const isLegendOpen = ref(false)
   font-weight: 600;
 }
 
-/* On a phone the key folds behind a toggle, the switch beside it. */
-@media (max-width: 639.98px) {
-  .module-bracket__legend {
-    padding: 4px 16px;
-  }
+/*
+ * Compact — on a phone, or in a column as narrow — the key folds behind a
+ * toggle, the switch beside it, so its rows never take the canvas's height.
+ */
+.module-bracket--compact .module-bracket__legend {
+  padding: 4px 16px;
+}
 
-  .module-bracket__legend-items {
-    order: 3;
-    flex-basis: 100%;
-    padding-bottom: 6px;
-  }
+.module-bracket--compact .module-bracket__legend-items {
+  order: 3;
+  flex-basis: 100%;
+  padding-bottom: 6px;
 }
 
 /*
