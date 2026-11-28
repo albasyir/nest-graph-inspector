@@ -1208,8 +1208,8 @@ section's column is narrower, and so is a tablet's panel at 768×1024, so there
 it opens in focus, as a module's page on a phone does: on the module and the
 first level of each side, the rest a chip or a step away — and compact,
 whatever the canvas's width, for framed whole a bracket that reads whole at
-neither size is the compact one (`bracket` in `ModuleDependencyBracket.vue`):
-a regular bracket's first levels span 1112px, wider than any canvas the
+neither size is the compact one (`pickWholeFrameBracket`, which a canvas not
+yet measured fits at neither size either): a regular bracket's first levels span 1112px, wider than any canvas the
 landing page gives it, and the 686px canvas at 768×1024 would otherwise open
 regular with every first level cut. Framed whole, the bracket also names what
 is drawn over its canvas (`getFrameCanvas`): the foot of the chips along its
@@ -2124,15 +2124,21 @@ Facts a code change can invalidate, and the file to check:
   compact `min-height` in its stylesheet), the marks' overhang,
   `COMPACT_MARKS_OVERHANG` in `module-bracket-viewport.ts`
   (`.module-bracket--compact .module-bracket-module__marks`), and
-  `OVERLAY_GAP` there — and to what the steppers and the key take; that
+  `OVERLAY_GAP` there — to what the steppers and the key take, and to the
+  demo application's graph, whose `CustomerModule` opens with the root
+  `AppModule` atop its first level of what needs it (the imports in
+  `demo/src/app.module.ts` and the modules importing `CustomerModule`); that
   framed whole a bracket reading whole at neither size is the compact one
-  (`bracket` in `ModuleDependencyBracket.vue`), and that a compact bracket
-  folds its key (`isCompact` on the key's toggle there); that the frame
-  finds the zoom controls where the stylesheet stands them, by measuring
-  them (`measureControls`), and moves clear of them (`clearOfControls`) —
-  the suite's `OPENING_SCREENS` and `cardsCovered` in
-  `landing.browser-spec.ts` check it; that a chip never names a level past the depth
-  shown — `getBracketOffscreen` there; that Vue Flow culls by a node's
+  (`pickWholeFrameBracket` in `module-bracket-viewport.ts`), and that a
+  compact bracket folds its key (`isCompact` on the key's toggle in
+  `ModuleDependencyBracket.vue`); that the frame finds the zoom controls
+  where the stylesheet stands them, by their own class
+  (`module-bracket__controls`), measuring them (`measureControls`), and
+  moves clear of them (`clearOfControls`) — the suite's `OPENING_SCREENS`
+  and `cardsCovered` in `landing.browser-spec.ts` check it, and fail when
+  they find no controls or headings to check against; that a chip never
+  names a level past the depth shown — `getBracketOffscreen` in
+  `module-bracket-viewport.ts`; that Vue Flow culls by a node's
   `computedPosition` and `dimensions` and sets them only while it draws the
   node, which is why the bracket sets every card's itself each time it hands
   Vue Flow a layout; and that Vue Flow's `nodes` and `edges` prop watchers
