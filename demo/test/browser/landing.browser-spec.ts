@@ -232,6 +232,59 @@ async function expectOpenOnModule(
   }
 }
 
+/**
+ * What on the demo's canvas covers a card: every card it draws — with the
+ * marks and handles it draws past its own edges, and the module's Direct Run
+ * — against what is drawn over the canvas: its zoom controls, every chip it
+ * shows, and the column headings. Empty when nothing covers a card.
+ */
+async function cardsCovered(page: Page): Promise<string[]> {
+  return blastDemo(page).evaluate((demo) => {
+    type Edges = { left: number; top: number; right: number; bottom: number };
+    const drawn = (card: Element): Edges => {
+      const boxes = [card, ...card.querySelectorAll('*')]
+        .map((part) => part.getBoundingClientRect())
+        .filter((box) => box.width > 1 && box.height > 1);
+      return {
+        left: Math.min(...boxes.map((box) => box.left)),
+        top: Math.min(...boxes.map((box) => box.top)),
+        right: Math.max(...boxes.map((box) => box.right)),
+        bottom: Math.max(...boxes.map((box) => box.bottom)),
+      };
+    };
+    const covering = (overlay: Element): string =>
+      overlay.matches('[data-chip]')
+        ? `The chip "${overlay.textContent?.trim().replace(/\s+/g, ' ')}" covers`
+        : overlay.matches('.vue-flow__controls')
+          ? 'The zoom controls cover'
+          : 'The column headings cover';
+    const overlays = [
+      ...demo.querySelectorAll(
+        '.vue-flow__controls, [data-chip], .module-bracket__headings',
+      ),
+    ].map((overlay) => ({
+      covering: covering(overlay),
+      box: overlay.getBoundingClientRect(),
+    }));
+
+    return [...demo.querySelectorAll('.vue-flow__node')].flatMap((card) => {
+      const box = drawn(card);
+      return overlays
+        .filter(
+          (overlay) =>
+            box.left < overlay.box.right &&
+            box.right > overlay.box.left &&
+            box.top < overlay.box.bottom &&
+            box.bottom > overlay.box.top,
+        )
+        .map(
+          (overlay) =>
+            `${overlay.covering} ${card.getAttribute('data-id') ?? 'a card'}`,
+        );
+    });
+  });
+}
+
 /** Text anywhere on the page that offers Bright Line, or a control named for it. */
 async function expectNoBrightLine(page: Page): Promise<void> {
   await expect(page.getByText(BRIGHT_LINE)).toHaveCount(0);
@@ -577,6 +630,45 @@ test.describe('on a 1440×900 desktop', () => {
     await expect(page).toHaveURL(state.siteBaseUrl);
   });
 });
+
+/**
+ * The screens the demo opens on: in a column beside its words on a desktop,
+ * stacked above them on a tablet — by mouse, and by touch, where the zoom
+ * controls stand in a row along the canvas foot — and on a phone.
+ */
+const OPENING_SCREENS: ReadonlyArray<{
+  width: number;
+  height: number;
+  hasTouch?: boolean;
+}> = [
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 1024, height: 768 },
+  { width: 820, height: 1180 },
+  { width: 768, height: 1024 },
+  { width: 768, height: 1024, hasTouch: true },
+  { width: 390, height: 844, hasTouch: true },
+];
+
+for (const { width, height, hasTouch = false } of OPENING_SCREENS) {
+  test.describe(`on a ${width}×${height} screen${hasTouch ? ', by touch' : ''}`, () => {
+    test.use({ viewport: { width, height }, hasTouch });
+
+    test('the demo opens on its module and every module of both first levels, readable, and nothing drawn over the canvas covers a card', async ({
+      page,
+      state,
+      graph,
+    }) => {
+      await openLanding(page, state);
+      await blastDemo(page).scrollIntoViewIfNeeded();
+      await expectOpenOnModule(page, graph, LANDING_MODULE);
+      expect(
+        await cardsCovered(page),
+        'The zoom controls, the chips and the column headings stand clear of every card',
+      ).toEqual([]);
+    });
+  });
+}
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
