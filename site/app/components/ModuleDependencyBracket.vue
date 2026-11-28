@@ -181,7 +181,13 @@ const wholeBracket = computed(() => {
   return pickWholeFrameBracket(laidOut, canvas.value)
 })
 
-const bracket = computed(() => wholeBracket.value ?? widthBracket.value)
+// Framed whole and reading whole at neither size, the bracket is compact
+// whatever the canvas's width: a demo's canvas is a column or a panel of a
+// page, never as wide as a regular bracket's first levels, and a compact
+// one's fit across it at a size their names read at.
+const bracket = computed(() =>
+  wholeBracket.value ?? (framing.value === 'whole' ? compactBracket.value : widthBracket.value)
+)
 const isCompact = computed(() => bracket.value?.size === 'compact')
 
 const nodeById = computed(() =>
